@@ -130,27 +130,6 @@ def test_hidden_provider_suppressed_even_when_configured(
     # credential + resolution still work for existing selections
     assert store.get_api_key("pc") == "key"
     assert ams.is_model_available("pc:chat3")
-    assert ams.validate_character_models(llm_models=["pc:chat3"], voice_models=[]).unavailable_llm == []
-
-
-def test_validate_character_models_buckets(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    cat = _minimal_catalog(tmp_path)
-    monkeypatch.setattr("hirocli.domain.credential_store.get_model_catalog", lambda: cat)
-    secrets: dict[tuple[str, str], str] = {}
-    store = CredentialStore(tmp_path, "w1", _test_secrets=secrets)
-    store.set_api_key("pa", "k")
-    ams = AvailableModelsService(cat, store)
-    vr = ams.validate_character_models(
-        llm_models=["pa:chat1", "nope:x", "pa:tts1", "pb:chat2"],
-        voice_models=["pa:tts1", "pa:chat1", "ghost:y"],
-    )
-    assert "nope:x" in vr.unknown_llm
-    assert "pa:tts1" in vr.wrong_kind_llm
-    assert "pb:chat2" in vr.unavailable_llm
-    assert "ghost:y" in vr.unknown_voice
-    assert "pa:chat1" in vr.wrong_kind_voice
 
 
 def test_build_available_models_service_matches_explicit_service(
@@ -165,48 +144,3 @@ def test_build_available_models_service_matches_explicit_service(
     explicit = AvailableModelsService(cat, store)
     built = build_available_models_service(tmp_path, "w1", store=store)
     assert built.list_available_models() == explicit.list_available_models()
-
-
-def test_validate_deprecated_llm_not_also_wrong_kind_or_unavailable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    doc = {
-        "catalog_version": "1.0.0",
-        "providers": [
-            {
-                "id": "pa",
-                "display_name": "PA",
-                "hosting": "cloud",
-                "credential_env_keys": ["PA_KEY"],
-                "metadata_updated_at": "2026-01-01",
-            },
-        ],
-        "models": [
-            {
-                "id": "pa:new-tts",
-                "provider_id": "pa",
-                "display_name": "New",
-                "model_kind": "tts",
-            },
-            {
-                "id": "pa:old-tts",
-                "provider_id": "pa",
-                "display_name": "Old",
-                "model_kind": "tts",
-                "deprecated_since": "2026-02-01",
-                "replacement_id": "pa:new-tts",
-            },
-        ],
-    }
-    p = tmp_path / "c.yaml"
-    p.write_text(yaml.safe_dump(doc), encoding="utf-8")
-    cat = ModelCatalog.load_from_path(p)
-    monkeypatch.setattr("hirocli.domain.credential_store.get_model_catalog", lambda: cat)
-    secrets: dict[tuple[str, str], str] = {}
-    store = CredentialStore(tmp_path, "w1", _test_secrets=secrets)
-    store.set_api_key("pa", "k")
-    ams = AvailableModelsService(cat, store)
-    vr = ams.validate_character_models(llm_models=["pa:old-tts"], voice_models=[])
-    assert any(d.model_id == "pa:old-tts" for d in vr.deprecated_llm)
-    assert "pa:old-tts" not in vr.wrong_kind_llm
-    assert "pa:old-tts" not in vr.unavailable_llm

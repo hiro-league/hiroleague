@@ -130,9 +130,8 @@ class DescribeImageTool(Tool):
 
         if not service.is_available():
             raise RuntimeError(
-                "Vision service is not available for this workspace. "
-                "Configure the vision model's provider (see IMAGE_VISION_MODEL) via "
-                "`hiro provider add`."
+                "Reading pictures is off for this workspace. Pick an AI profile for it "
+                "(Preferences, llm.vision_profile) whose provider is set up (`hiro provider add`)."
             )
 
         description = service.describe_sync(source, prompt)

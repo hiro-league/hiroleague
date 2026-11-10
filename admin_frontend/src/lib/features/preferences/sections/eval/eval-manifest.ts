@@ -1,6 +1,6 @@
 /**
  * Declarative manifest for the Eval tab (manifest rollout). Replaces `EvalSection`'s hand-written
- * cards: the eval answer/judge models (model + profile pairs) and the answer-prompt library + judge
+ * cards: the eval answer/judge AI profiles (Phase 7b step 5) and the answer-prompt library + judge
  * prompt. The tab's field order derives from this manifest (`EVAL_FIELD_ORDER`).
  */
 import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
@@ -17,25 +17,16 @@ export const EVAL_MANIFEST: PrefTabManifest = {
       id: 'evalModels',
       title: 'Evaluation Models',
       description:
-        'Models + profiles the eval harness uses — the answer step (memory track) and the judge (both tracks). Eval-only; the knowledge track answers with the production pipeline, not the answer model here.',
+        'AI profiles the eval harness uses — the answer step (memory track) and the judge (both tracks). Eval-only; the knowledge track answers with the production pipeline, not the answer profile here.',
       bodyId: PREFERENCES_SECTION_BODY_IDS.evalModels,
       collapsible: true,
       body: [
         {
           kind: 'grid',
           fields: [
-            {
-              kind: 'modelProfile',
-              modelKind: 'chat',
-              modelPath: 'graph.eval.answer_model',
-              profilePath: 'graph.eval.answer_tuning_profile'
-            },
-            {
-              kind: 'modelProfile',
-              modelKind: 'chat',
-              modelPath: 'graph.eval.judge_model',
-              profilePath: 'graph.eval.judge_tuning_profile'
-            }
+            // Phase 7b step 5: one AI profile each (was a model + a tuning profile).
+            { kind: 'aiProfile', path: 'graph.eval.answer_profile' },
+            { kind: 'aiProfile', path: 'graph.eval.judge_profile' }
           ]
         }
       ]
@@ -81,19 +72,14 @@ export const EVAL_MANIFEST: PrefTabManifest = {
       id: 'graphEvalModels',
       title: 'Retrieval Agent Model & Prompt',
       description:
-        'Model, profile, and system prompt for the agentic memory-retrieval loop the memory eval runs (the Retrieval Agent caps below feed its placeholders). Eval-only; chat has its own under Agent ▸ Agent memory.',
+        'AI profile and system prompt for the agentic memory-retrieval loop the memory eval runs (the Retrieval Agent caps below feed its placeholders). Eval-only; chat has its own under Agent ▸ Agent memory.',
       bodyId: PREFERENCES_SECTION_BODY_IDS.graphEvalModels,
       collapsible: true,
       body: [
         {
           kind: 'grid',
           fields: [
-            {
-              kind: 'modelProfile',
-              modelKind: 'chat',
-              modelPath: 'graph.eval.retrieval_model',
-              profilePath: 'graph.eval.retrieval_tuning_profile'
-            },
+            { kind: 'aiProfile', path: 'graph.eval.retrieval_profile' },
             {
               kind: 'promptLibrary',
               dictPath: 'graph.eval.retrieval_agent_prompts',

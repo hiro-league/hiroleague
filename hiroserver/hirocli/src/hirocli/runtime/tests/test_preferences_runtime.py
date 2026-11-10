@@ -41,27 +41,41 @@ def test_runtime_update_many_is_atomic_for_valid_edits(tmp_path) -> None:
     assert persisted.media.output.voice is True
 
 
-def test_runtime_update_allows_top_level_tuning_profiles(tmp_path) -> None:
+def test_runtime_update_allows_whole_write_dict(tmp_path) -> None:
+    # (Was tuning_profiles, removed in Phase 7b step 5; answer_prompts is the remaining writeWhole dict.)
     runtime = WorkspacePreferencesRuntime(tmp_path)
-    profiles = runtime.current.tuning_profiles
-    profiles["balanced_chat"].max_tokens = 1234
+    prompts = runtime.current.graph.eval.answer_prompts
+    prompts["mine"] = prompts["default"].model_copy(update={"label": "Mine", "locked": False, "prompt": "x"})
 
-    updated = runtime.update("tuning_profiles", profiles)
+    updated = runtime.update("graph.eval.answer_prompts", prompts)
 
-    assert updated.tuning_profiles["balanced_chat"].max_tokens == 1234
-    assert load_preferences(tmp_path).tuning_profiles["balanced_chat"].max_tokens == 1234
+    assert updated.graph.eval.answer_prompts["mine"].prompt == "x"
+    assert load_preferences(tmp_path).graph.eval.answer_prompts["mine"].prompt == "x"
 
 
 def test_runtime_rejects_subfield_write_into_write_whole_dict(tmp_path) -> None:
-    """`tuning_profiles` is a whole-write dict: the schema walk descends by dict key but not into the
-    profile MODEL, so a per-leaf write (`...balanced_chat.temperature`) is rejected rather than
-    silently applied. This is the backend half of the `writeWhole` contract the admin save honors."""
+    """A whole-write dict: the schema walk descends by dict key but not into the profile MODEL, so a
+    per-leaf write is rejected rather than silently applied. This is the backend half of the
+    `writeWhole` contract the admin save honors."""
     runtime = WorkspacePreferencesRuntime(tmp_path)
 
     with pytest.raises(PreferencePathError):
-        runtime.update("tuning_profiles.balanced_chat.temperature", 0.5)
+        runtime.update("graph.eval.answer_prompts.default.prompt", "nope")
 
-    assert runtime.current.tuning_profiles["balanced_chat"].temperature != 0.5
+    assert runtime.current.graph.eval.answer_prompts["default"].prompt != "nope"
+
+
+def test_runtime_job_profile_round_trip(tmp_path) -> None:
+    # Phase 7b step 5: an AI profile written by path, a job pointed at it, and deleting it refused
+    # while the job still uses it.
+    runtime = WorkspacePreferencesRuntime(tmp_path)
+    updated = runtime.update_many(
+        {"ai.profiles.p1": {"label": "P1", "model": "openai:gpt-6-luna"}, "llm.chat_profile": "p1"}
+    )
+    assert updated.llm.chat_profile == "p1"
+    assert load_preferences(tmp_path).llm.chat_profile == "p1"
+    with pytest.raises(Exception, match="unknown AI profile"):
+        runtime.update("ai.profiles", {})
 
 
 def test_runtime_rejects_readonly_computed_path(tmp_path) -> None:
@@ -113,4 +127,4 @@ def test_runtime_update_migrates_saved_version_to_current_schema(tmp_path) -> No
 
     runtime.update("chat.max_messages", 7)
 
-    assert load_preferences(tmp_path).version == 3
+    assert load_preferences(tmp_path).version == 4

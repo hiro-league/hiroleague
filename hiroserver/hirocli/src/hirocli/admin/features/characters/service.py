@@ -8,16 +8,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from hirocli.domain.available_models import AvailableModelsService
 from hirocli.domain.character import character_dir, character_photo_media_type, load_character_from_disk
 from hirocli.domain.credential_store import CredentialStore
-from hirocli.domain.model_catalog import get_model_catalog
 from hirocli.domain.preferences import (
+    AiProfile,
+    VoiceProfile,
     WorkspacePreferences,
     load_preferences,
+    profile_model_available,
     resolve_character_llm,
     resolve_character_voice,
-    resolve_llm,
+    voice_profile_usable,
 )
 from hirocli.domain.workspace import resolve_workspace
 from hirocli.tools.character import (
@@ -33,128 +34,49 @@ from hirocli.admin.shared.result import Result
 
 _MAX_INLINE_PHOTO_BYTES = 2_000_000
 
-RowStatus = Literal["available", "unavailable", "unknown", "wrong_kind", "deprecated"]
-
-
-def _llm_row_status(cat: Any, ams: AvailableModelsService, model_id: str) -> RowStatus:
-    spec = cat.get_model(model_id)
-    if spec is None:
-        return "unknown"
-    if spec.deprecated_since:
-        return "deprecated"
-    if spec.model_kind != "chat":
-        return "wrong_kind"
-    if not ams.is_model_available(model_id):
-        return "unavailable"
-    return "available"
-
-
-def _voice_row_status(cat: Any, ams: AvailableModelsService, model_id: str) -> RowStatus:
-    """Classify a character ``voice_models`` entry (TTS and/or STT-capable catalog rows)."""
-    spec = cat.get_model(model_id)
-    if spec is None:
-        return "unknown"
-    if spec.deprecated_since:
-        return "deprecated"
-    if not (spec.supports_kind("tts") or spec.supports_kind("stt")):
-        return "wrong_kind"
-    if not ams.is_model_available(model_id):
-        return "unavailable"
-    return "available"
-
-
-def _preference_workspace_chat_row(
-    prefs: WorkspacePreferences,
-    cat: Any,
-    ams: AvailableModelsService,
-) -> dict[str, Any] | None:
-    """Single row describing ``llm.default_chat`` for admin resolution UX (alongside character list)."""
-    mid = str(prefs.llm.default_chat or "").strip()
-    if not mid:
-        return None
-    spec = cat.get_model(mid)
-    st = _llm_row_status(cat, ams, mid)
-    row: dict[str, Any] = {
-        "model_id": mid,
-        "status": st,
-        "display_name": spec.display_name if spec is not None else None,
-    }
-    if st == "deprecated" and spec is not None:
-        row["replacement_id"] = spec.replacement_id
-    return row
-
-
-def _preference_workspace_tts_row(
-    prefs: WorkspacePreferences,
-    cat: Any,
-    ams: AvailableModelsService,
-) -> dict[str, Any] | None:
-    """Single row describing ``llm.default_tts`` for admin resolution UX."""
-    mid = str(prefs.llm.default_tts or "").strip()
-    if not mid:
-        return None
-    spec = cat.get_model(mid)
-    st = _voice_row_status(cat, ams, mid)
-    row: dict[str, Any] = {
-        "model_id": mid,
-        "status": st,
-        "display_name": spec.display_name if spec is not None else None,
-    }
-    if st == "deprecated" and spec is not None:
-        row["replacement_id"] = spec.replacement_id
-    if spec is not None and not spec.supports_kind("tts"):
-        row["note"] = "Not a TTS model — pick a TTS catalog entry for voice replies."
-    return row
+# Phase 7b step 5: a character's rows are its AI / voice profiles (were catalog model ids).
+AiRowStatus = Literal["available", "unavailable", "plan", "missing"]
+VoiceRowStatus = Literal["available", "no_key", "missing"]
 
 
 def _dedupe_preserve_order(ids: list[str]) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for mid in ids:
-        if not mid or mid in seen:
-            continue
-        seen.add(mid)
-        out.append(mid)
-    return out
+    return list(dict.fromkeys(i for i in ids if i))
 
 
-def _first_available_chat_from_character_list(
-    ordered_model_ids: list[str],
-    cat: Any,
-    ams: AvailableModelsService,
-) -> tuple[str | None, int | None]:
-    """First chat model id the runtime would take from the character list; list index in original order."""
-    seen: set[str] = set()
-    for idx, mid in enumerate(ordered_model_ids):
-        if not mid or mid in seen:
-            continue
-        seen.add(mid)
-        spec = cat.get_model(mid)
-        if spec is None or spec.model_kind != "chat":
-            continue
-        if not ams.is_model_available(mid):
-            continue
-        return mid, idx
-    return None, None
+def _ai_row(prefs: WorkspacePreferences, store: CredentialStore, profile_id: str) -> dict[str, Any]:
+    """One AI profile as the resolution view shows it (status: can it answer now?)."""
+    profile: AiProfile | None = prefs.ai.profiles.get(profile_id)
+    if profile is None:
+        return {"profile_id": profile_id, "label": None, "model": None, "status": "missing"}
+    status: AiRowStatus
+    if profile.is_plan:
+        status = "plan"
+    elif profile_model_available(profile.model, store):
+        status = "available"
+    else:
+        status = "unavailable"
+    return {
+        "profile_id": profile_id,
+        "label": profile.label,
+        "model": profile.model,
+        "status": status,
+        "fallback": profile.fallback,
+    }
 
 
-def _first_available_tts_from_character_list(
-    ordered_model_ids: list[str],
-    cat: Any,
-    ams: AvailableModelsService,
-) -> tuple[str | None, int | None]:
-    seen: set[str] = set()
-    for idx, mid in enumerate(ordered_model_ids):
-        if not mid or mid in seen:
-            continue
-        seen.add(mid)
-        spec = cat.get_model(mid)
-        if spec is None or not spec.supports_kind("tts"):
-            continue
-        if not ams.is_model_available(mid):
-            continue
-        return mid, idx
-    return None, None
+def _voice_row(prefs: WorkspacePreferences, store: CredentialStore, profile_id: str) -> dict[str, Any]:
+    """One voice profile as the resolution view shows it (status: does its provider have a key?)."""
+    voice: VoiceProfile | None = prefs.voice.profiles.get(profile_id)
+    if voice is None:
+        return {"profile_id": profile_id, "label": None, "model": None, "voice": None, "status": "missing"}
+    status: VoiceRowStatus = "available" if voice_profile_usable(voice, store) else "no_key"
+    return {
+        "profile_id": profile_id,
+        "label": voice.label,
+        "model": voice.model,
+        "voice": voice.voice_label or voice.voice,
+        "status": status,
+    }
 
 
 @dataclass
@@ -163,6 +85,12 @@ class CharacterSavePayload:
 
     character: dict[str, Any]
     warnings: list[str]
+
+
+def _chain(prefs: WorkspacePreferences, profile_id: str) -> list[str]:
+    from hirocli.domain.preferences import ai_fallback_chain
+
+    return ai_fallback_chain(prefs.ai.profiles, profile_id)
 
 
 class CharacterService:
@@ -253,7 +181,8 @@ class CharacterService:
         workspace_id: str | None,
         character_id: str,
     ) -> Result[dict[str, Any]]:
-        """How the runtime would resolve chat/TTS for this character (Phase 7 admin UX)."""
+        """How the runtime would resolve chat/voice for this character (Phase 7 admin UX; Phase 7b
+        step 5: from its AI / voice profiles, then Hiro's chat profile / Hiro's own voice)."""
         if not workspace_id:
             return Result.failure("No workspace selected.")
         cid = character_id.strip()
@@ -268,140 +197,57 @@ class CharacterService:
         except Exception as exc:
             return Result.failure(str(exc))
         ch = dict(raw.character)
-        llm_models = ch.get("llm_models") if isinstance(ch.get("llm_models"), list) else []
-        voice_models = ch.get("voice_models") if isinstance(ch.get("voice_models"), list) else []
-        llm_models = [str(x) for x in llm_models]
-        voice_models = [str(x) for x in voice_models]
-        tuning_profile = str(ch.get("tuning_profile") or "").strip() or None
-        tts_instructions = str(ch.get("tts_instructions") or "")
-        vm_raw = ch.get("tts_voice_by_provider")
-        tts_voice_by_provider: dict[str, str] | None = None
-        if isinstance(vm_raw, dict):
-            tts_voice_by_provider = {
-                str(k): str(v) for k, v in vm_raw.items() if isinstance(k, str) and isinstance(v, str)
-            }
+        ai_ids = [str(x) for x in ch.get("ai_profiles") or [] if isinstance(x, str)]
+        voice_ids = [str(x) for x in ch.get("voice_profiles") or [] if isinstance(x, str)]
 
         prefs = load_preferences(wp)
-        cat = get_model_catalog()
         store = CredentialStore(wp, workspace_id)
-        ams = AvailableModelsService(cat, store)
 
-        llm_rows: list[dict[str, Any]] = []
-        for mid in _dedupe_preserve_order(llm_models):
-            spec = cat.get_model(mid)
-            st = _llm_row_status(cat, ams, mid)
-            row: dict[str, Any] = {
-                "model_id": mid,
-                "status": st,
-                "display_name": spec.display_name if spec is not None else None,
-            }
-            if st == "deprecated" and spec is not None:
-                row["replacement_id"] = spec.replacement_id
-            llm_rows.append(row)
-
-        llm_workspace_row = _preference_workspace_chat_row(prefs, cat, ams)
-
-        resolved_llm = resolve_character_llm(
-            llm_models,
-            prefs,
-            wp,
-            tuning_profile=tuning_profile,
-            workspace_id=workspace_id,
-            credential_store=store,
-        )
-        first_llm, _llm_idx = _first_available_chat_from_character_list(llm_models, cat, ams)
-        if not llm_models:
-            llm_source: Literal["character", "workspace_fallback"] = "workspace_fallback"
-        elif first_llm and resolved_llm is not None and first_llm == resolved_llm.model_id:
-            llm_source = "character"
-        else:
-            llm_source = "workspace_fallback"
-
-        llm_applied: dict[str, Any] | None
-        if resolved_llm is None:
-            llm_applied = None
-        else:
-            llm_applied = {
-                "source": llm_source,
+        ai_rows = [_ai_row(prefs, store, pid) for pid in _dedupe_preserve_order(ai_ids)]
+        chat_pid = prefs.llm.chat_profile
+        ai_workspace_row = _ai_row(prefs, store, chat_pid) if chat_pid else None
+        resolved_llm = resolve_character_llm(ai_ids, prefs, wp, workspace_id=workspace_id, credential_store=store)
+        ai_applied: dict[str, Any] | None = None
+        if resolved_llm is not None:
+            # "character" when the model came from one of the character's profiles (or their fallbacks).
+            from_character = any(
+                resolved_llm.profile_id in _chain(prefs, pid) for pid in ai_ids if pid in prefs.ai.profiles
+            )
+            ai_applied = {
+                "source": "character" if from_character else "workspace_fallback",
+                "profile_id": resolved_llm.profile_id or None,
+                "profile_label": resolved_llm.profile_name or None,
                 "model_id": resolved_llm.model_id,
                 "temperature": resolved_llm.temperature,
                 "max_tokens": resolved_llm.max_tokens,
                 "thinking": resolved_llm.thinking,
-                "tuning_profile": tuning_profile or prefs.llm.default_tuning_profile,
+                "num_ctx": resolved_llm.num_ctx,
             }
 
-        voice_rows: list[dict[str, Any]] = []
-        for mid in _dedupe_preserve_order(voice_models):
-            spec = cat.get_model(mid)
-            st = _voice_row_status(cat, ams, mid)
-            row = {
-                "model_id": mid,
-                "status": st,
-                "display_name": spec.display_name if spec is not None else None,
-            }
-            if st == "deprecated" and spec is not None:
-                row["replacement_id"] = spec.replacement_id
-            if spec is not None and spec.supports_kind("stt") and not spec.supports_kind("tts"):
-                row["note"] = (
-                    "Speech-to-text capable — not used for reply TTS; pick a TTS model for voice synthesis."
-                )
-            voice_rows.append(row)
-
-        voice_workspace_row = _preference_workspace_tts_row(prefs, cat, ams)
-
+        voice_rows = [_voice_row(prefs, store, pid) for pid in _dedupe_preserve_order(voice_ids)]
+        hiro_pid = prefs.voice.hiro_profile
+        voice_workspace_row = _voice_row(prefs, store, hiro_pid) if hiro_pid else None
         voice_disabled = not prefs.media.output.voice
         voice_applied: dict[str, Any] | None = None
         if not voice_disabled:
             resolved_voice = resolve_character_voice(
-                voice_models,
-                prefs,
-                wp,
-                workspace_id=workspace_id,
-                credential_store=store,
-                tts_instructions=tts_instructions,
-                tts_voice_by_provider=tts_voice_by_provider,
+                voice_ids, prefs, wp, workspace_id=workspace_id, credential_store=store
             )
-            first_tts, _v_idx = _first_available_tts_from_character_list(voice_models, cat, ams)
-            if not voice_models:
-                v_source: Literal["character", "workspace_fallback"] = "workspace_fallback"
-            elif (
-                first_tts
-                and resolved_voice is not None
-                and first_tts.split(":", 1)[-1] == resolved_voice.model
-            ):
-                v_source = "character"
-            else:
-                v_source = "workspace_fallback"
-
-            catalog_voice_id: str | None = None
-            if v_source == "character" and first_tts:
-                catalog_voice_id = first_tts
-            else:
-                tts_entry = resolve_llm(
-                    prefs,
-                    wp,
-                    "tts",
-                    workspace_id=workspace_id,
-                    credential_store=store,
-                )
-                catalog_voice_id = tts_entry.model_id if tts_entry is not None else None
-
-            if resolved_voice is not None and catalog_voice_id is not None:
+            if resolved_voice is not None:
                 voice_applied = {
-                    "source": v_source,
-                    "catalog_model_id": catalog_voice_id,
-                    "synthesis": {
-                        "model": resolved_voice.model,
-                        "voice": resolved_voice.voice,
-                        "instructions": resolved_voice.instructions,
-                    },
+                    "source": resolved_voice.source,
+                    "profile_id": resolved_voice.profile_id,
+                    "label": resolved_voice.profile.label,
+                    "model": resolved_voice.profile.model,
+                    "voice": resolved_voice.profile.voice,
+                    "style": resolved_voice.profile.style,
                 }
 
         payload: dict[str, Any] = {
             "character_id": ch.get("id", cid),
-            "llm_rows": llm_rows,
-            "llm_workspace_row": llm_workspace_row,
-            "llm_applied": llm_applied,
+            "ai_rows": ai_rows,
+            "ai_workspace_row": ai_workspace_row,
+            "ai_applied": ai_applied,
             "voice_rows": voice_rows,
             "voice_workspace_row": voice_workspace_row,
             "voice_applied": voice_applied,
@@ -418,11 +264,8 @@ class CharacterService:
         description: str = "",
         prompt: str | None = None,
         backstory: str = "",
-        llm_models_json: str = "",
-        tuning_profile: str = "",
-        voice_models_json: str = "",
-        tts_instructions: str = "",
-        tts_voice_by_provider_json: str = "",
+        ai_profiles_json: str = "",
+        voice_profiles_json: str = "",
         emotions_enabled: bool = False,
         extras_json: str = "",
     ) -> Result[CharacterSavePayload]:
@@ -436,11 +279,8 @@ class CharacterService:
                 description=description or None,
                 prompt=prompt,
                 backstory=backstory or None,
-                llm_models_json=llm_models_json or None,
-                tuning_profile=tuning_profile,
-                voice_models_json=voice_models_json or None,
-                tts_instructions=tts_instructions,
-                tts_voice_by_provider_json=tts_voice_by_provider_json or None,
+                ai_profiles_json=ai_profiles_json or None,
+                voice_profiles_json=voice_profiles_json or None,
                 emotions_enabled=emotions_enabled,
                 extras_json=extras_json or None,
             )
@@ -459,11 +299,8 @@ class CharacterService:
         description: str | None = None,
         prompt: str | None = None,
         backstory: str | None = None,
-        llm_models_json: str | None = None,
-        tuning_profile: str | None = None,
-        voice_models_json: str | None = None,
-        tts_instructions: str | None = None,
-        tts_voice_by_provider_json: str | None = None,
+        ai_profiles_json: str | None = None,
+        voice_profiles_json: str | None = None,
         emotions_enabled: bool | None = None,
         extras_json: str | None = None,
     ) -> Result[CharacterSavePayload]:
@@ -481,16 +318,10 @@ class CharacterService:
             kwargs["prompt"] = prompt
         if backstory is not None:
             kwargs["backstory"] = backstory
-        if llm_models_json is not None:
-            kwargs["llm_models_json"] = llm_models_json
-        if tuning_profile is not None:
-            kwargs["tuning_profile"] = tuning_profile
-        if voice_models_json is not None:
-            kwargs["voice_models_json"] = voice_models_json
-        if tts_instructions is not None:
-            kwargs["tts_instructions"] = tts_instructions
-        if tts_voice_by_provider_json is not None:
-            kwargs["tts_voice_by_provider_json"] = tts_voice_by_provider_json
+        if ai_profiles_json is not None:
+            kwargs["ai_profiles_json"] = ai_profiles_json
+        if voice_profiles_json is not None:
+            kwargs["voice_profiles_json"] = voice_profiles_json
         if emotions_enabled is not None:
             kwargs["emotions_enabled"] = emotions_enabled
         if extras_json is not None:

@@ -1,8 +1,8 @@
 /**
  * Declarative manifest for the General (models) tab (manifest rollout). Replaces `ModelsSection`'s
- * two cards: Default models (the workspace model picks + default tuning profile, with inline
- * embedder/reranker downloads) and Modalities (input/output toggle panels). The tab's field order
- * derives from this manifest (`MODELS_FIELD_ORDER`).
+ * two cards: Default models (Hiro's chat / reading-pictures AI profiles, Hiro's voice profile and the
+ * workspace model picks, with inline embedder/reranker downloads) and Modalities (input/output toggle
+ * panels). The tab's field order derives from this manifest (`MODELS_FIELD_ORDER`).
  */
 import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
 import {
@@ -16,7 +16,8 @@ export const MODELS_MANIFEST: PrefTabManifest = {
       kind: 'card',
       id: 'modelsDefault',
       title: 'Default models',
-      description: 'Fallback models used when a character has no available preferred model.',
+      description:
+        "What Hiro chats, reads pictures and speaks with when a character has no profile of its own that can answer, and the workspace's other models.",
       bodyId: PREFERENCES_SECTION_BODY_IDS.modelsChat,
       collapsible: true,
       // Each picker is its own titled cell so the 2-column grid packs (no half-empty rows).
@@ -24,10 +25,12 @@ export const MODELS_MANIFEST: PrefTabManifest = {
         {
           kind: 'grid',
           fields: [
-            { kind: 'model', modelKind: 'chat', path: 'llm.default_chat', labelled: true },
+            // Phase 7b step 5: Hiro's chat, reading pictures and Hiro's voice are profiles (Catalog →
+            // Profiles), replacing the default chat / TTS models and the default tuning profile.
+            { kind: 'aiProfile', path: 'llm.chat_profile' },
             { kind: 'model', modelKind: 'stt', path: 'llm.default_stt', labelled: true },
-            { kind: 'tuningProfile', path: 'llm.default_tuning_profile', scope: 'llm' },
-            { kind: 'model', modelKind: 'tts', path: 'llm.default_tts', labelled: true },
+            { kind: 'aiProfile', path: 'llm.vision_profile' },
+            { kind: 'voiceProfile', path: 'voice.hiro_profile' },
             {
               kind: 'model',
               modelKind: 'embedding',

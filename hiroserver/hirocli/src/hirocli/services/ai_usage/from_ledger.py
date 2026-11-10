@@ -31,6 +31,13 @@ from .store import HIRO_SOURCE, UsageCall, record
 # a WhatsApp number in the family list is matched now; app devices wait for Phase 10.
 usage_person: ContextVar[str] = ContextVar("usage_person", default="")
 
+# Phase 7b step 5: the AI profile a chat turn's model came from, ``(profile id, profile name)``, set by
+# the agent manager for the turn so the chat's own calls are filed under it in ai_calls (the profile's
+# daily count includes them; its limits never stop Hiro's jobs). Only the chat's own question rows
+# (use "chat") take it: memory, knowledge, graph and speech rows inside the turn run with their own
+# job's model and are left without a profile for now.
+usage_profile: ContextVar[tuple[str, str]] = ContextVar("usage_profile", default=("", ""))
+
 
 def _int(value: Any) -> int:
     try:
@@ -92,10 +99,13 @@ def usage_call_from_ledger_row(row: dict[str, Any]) -> UsageCall | None:
     failed = str(row.get("status") or "") == "error"
     billing = "local" if provider in DISCOVERABLE_LOCAL_PROVIDERS else "api"
     cost = _float(row.get("cost_usd"))
+    profile_id, profile_name = usage_profile.get() if (kind, use) == ("question", "chat") else ("", "")
     return UsageCall(
         kind=kind,
         source=HIRO_SOURCE,
         use=use,
+        profile_id=profile_id,
+        profile_name=profile_name,
         provider=provider,
         model=model,
         billing=billing,

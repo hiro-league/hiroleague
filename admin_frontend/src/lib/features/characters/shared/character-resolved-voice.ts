@@ -16,14 +16,15 @@ export function characterResolvedVoiceReplyControlHint(
   error: string | null,
   loading: boolean
 ): string {
-  if (loading) return 'Checking voice (TTS) configuration for this character…';
+  if (loading) return 'Checking the voice for this character…';
   if (error?.trim()) return error;
   if (!resolved) return 'Could not load character voice configuration.';
   if (resolved.voice_disabled) {
-    return 'Voice replies are disabled in workspace preferences — TTS is not used for agent replies.';
+    return 'Voice replies are disabled in workspace preferences — nothing is spoken for agent replies.';
   }
   if (!resolved.voice_applied) {
-    return 'No TTS model resolved. Set default TTS in workspace preferences and configure this character’s voice models (see Characters page).';
+    // Phase 7b step 5: a character's voice profiles, then Hiro's voice (Settings → General).
+    return "No voice resolved. Give this character a voice profile (Characters page) or pick Hiro's voice in Settings → General, and set the speech provider's key.";
   }
   return '';
 }

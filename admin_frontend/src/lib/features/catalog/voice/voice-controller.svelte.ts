@@ -4,9 +4,13 @@
  *
  * Profiles are saved through the preferences API (`voice.profiles.<id>`), like AI profiles; deleting one
  * writes the whole map and clears the uses that pointed at it.
+ *
+ * Phase 7b step 5: Hiro's own voice (`voice.hiro_profile`, read from the preferences payload) — the
+ * Uses tab's "Speaking" row picks it; deleting the profile it names clears it too (the server refuses a
+ * field naming a missing voice profile).
  */
 import { listPeople, type Person } from '$lib/api/people';
-import { patchPreferences } from '$lib/api/preferences';
+import { getPreferences, patchPreferences } from '$lib/api/preferences';
 import {
   getVoiceCatalog,
   listVoiceProfiles,
@@ -48,15 +52,20 @@ export class VoiceController {
   people = $state<Person[]>([]);
   loading = $state(false);
   error = $state<string | null>(null);
+  /** Phase 7b step 5: the voice profile Hiro speaks its replies with (null = none). */
+  hiroProfile = $state<string | null>(null);
 
   load = async () => {
     this.loading = true;
-    const [profiles, catalog, uses, people] = await Promise.all([
+    const [profiles, catalog, uses, people, prefs] = await Promise.all([
       listVoiceProfiles(),
       getVoiceCatalog(),
       listVoiceUses(),
-      listPeople()
+      listPeople(),
+      // Hiro's voice lives in preferences; a failed read leaves it as it was (not "none").
+      getPreferences().catch(() => null)
     ]);
+    if (prefs?.ok && prefs.data) this.hiroProfile = prefs.data.preferences.voice?.hiro_profile ?? null;
     this.loading = false;
     this.error = !profiles.ok ? (profiles.error ?? 'Voice profiles could not be read.') : null;
     if (profiles.ok && profiles.data) this.profiles = profiles.data.profiles;
@@ -80,9 +89,21 @@ export class VoiceController {
     const uses = Object.fromEntries(
       this.uses.extensions.flatMap((e) => e.uses.map((u) => [u.key, u.profile_id === id ? null : u.profile_id]))
     );
-    const res = await patchPreferences({ 'voice.profiles': rest, 'voice.uses': uses });
+    // Phase 7b step 5: Hiro's voice can't name a missing profile; it goes to none with it.
+    const hiro = this.hiroProfile === id ? { 'voice.hiro_profile': null } : {};
+    const res = await patchPreferences({ 'voice.profiles': rest, 'voice.uses': uses, ...hiro });
     if (!res.ok) return res.error ?? 'Not deleted.';
     await this.load();
+    return null;
+  };
+
+  /** Phase 7b step 5: Hiro's own voice (`voice.hiro_profile`); null = Hiro doesn't speak its replies.
+   *  The answer is the error, or null. */
+  setHiroProfile = async (profileId: string | null): Promise<string | null> => {
+    // patchPreferences answers { ok, error } rather than throwing: a refused save must not look saved.
+    const res = await patchPreferences({ 'voice.hiro_profile': profileId });
+    if (!res.ok) return res.error ?? 'Not saved.';
+    this.hiroProfile = profileId;
     return null;
   };
 

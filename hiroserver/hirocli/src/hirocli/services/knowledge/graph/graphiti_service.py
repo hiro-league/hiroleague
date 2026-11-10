@@ -971,8 +971,8 @@ class GraphitiMemoryService:
         Returns ``None`` (no error) when ``knowledge.graph.backend`` is ``off``
         (unless ``require_backend=False`` — explicit build-graph/ingest actions still
         run with the backend toggle off) or no extraction model is configured. Same
-        enable-gating shape as the prior mem0 service. Resolves both model tiers via
-        tuning profiles and the shared knowledge embedder (G8).
+        enable-gating shape as the prior mem0 service. Resolves both model tiers from
+        their AI profiles (Phase 7b step 5) and the shared knowledge embedder (G8).
         """
         if require_backend and prefs.graph.backend == "off":
             log.info("⬇️ graphiti — backend=off · service not created")
@@ -983,8 +983,8 @@ class GraphitiMemoryService:
         )
         if extraction is None:
             log.warning(
-                "⚠️ graphiti — no extraction model available (configure knowledge.graph "
-                "or knowledge.answering model) · service not created"
+                "⚠️ graphiti — no extraction model available (pick an AI profile for "
+                "graph.extraction_profile or llm.chat_profile) · service not created"
             )
             return None
         small = (

@@ -4,6 +4,10 @@ Split out of the old monolithic ``ConversationNodes`` (review §1.5).
 
 - ``tts_gate`` (router) — decide whether to synthesize speech for the reply
 - ``tts`` — synthesize and emit ``tts.completed``
+
+Phase 7b step 5: the voice is a voice profile (``prefs.voice``): the character's voice profiles in
+order (the first whose provider has a key), else ``voice.hiro_profile``; none → no voice reply. It is
+spoken by ``services/voice`` (PCM) and encoded MP3 for the app (iPhones can't play OGG/Opus).
 - ``finalize`` — emit the terminal ``graph.run.completed`` / ``graph.run.failed`` event
 
 Grouped together because ``finalize`` runs as the terminal node after either branch
@@ -13,6 +17,7 @@ contract: ``finalize`` is the single sink.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
@@ -43,50 +48,39 @@ class TTSNodes(NodeGroup):
     def tts_gate(self, state: GraphState) -> str:
         """Decide whether to enter the TTS branch after the reply completes.
 
-        Kept as an instance method (vs the other routers' ``@staticmethod`` style) because
-        ``services.tts.is_available()`` is a *runtime* check — preference reactors hot-swap
-        the TTS service in place, so this can flip across turns without a graph rebuild.
+        Kept as an instance method (vs the other routers' ``@staticmethod`` style) because whether a
+        voice resolves is a *runtime* check on the live preferences + keys (Phase 7b step 5: a voice
+        profile of the character's, else Hiro's own), so it can flip across turns without a rebuild.
         """
         if not state.get("reply_text"):
             return "finalize"
         if not state.get("request_voice_reply"):
             return "finalize"
-        if self.services.tts is None or not self.services.tts.is_available():
+        if self._voice_for(state.get("character_id", "")) is None:
             return "finalize"
         return "tts"
 
-    def _resolve_voice(self, state: GraphState, writer: StreamWriter):
-        """Load character + resolve TTS voice; return resolved voice or None after observe/emit."""
+    def _voice_for(self, character_id: str):
+        """The voice profile the character speaks with now, or None (no voice reply)."""
         from ....domain.character import load_character_from_disk
         from ....domain.preferences import resolve_character_voice
 
-        inbound_id = state.get("inbound_id", "")
-        try:
-            ch = load_character_from_disk(
-                self.services.workspace_path, state.get("character_id", "")
-            )
-        except FileNotFoundError as exc:
-            observe(
-                decision=("skipped_no_voice", "character_missing"),
-                skipped="character_missing",
-                output="audio: skipped character_missing",
-            )
-            emit(
-                writer,
-                GRAPH_ERROR,
-                {"inbound_id": inbound_id, "node": "tts", "error": str(exc)},
-            )
-            return None
-
         prefs = self.prefs.current
-        resolved = resolve_character_voice(
-            ch.voice_models,
+        try:
+            voice_ids = load_character_from_disk(self.services.workspace_path, character_id).voice_profiles
+        except FileNotFoundError:
+            voice_ids = []  # the character's gone: Hiro's own voice still speaks
+        return resolve_character_voice(
+            voice_ids,
             prefs,
             self.services.workspace_path,
             credential_store=self.services.credentials,
-            tts_instructions=ch.tts_instructions,
-            tts_voice_by_provider=dict(ch.tts_voice_by_provider),
         )
+
+    def _resolve_voice(self, state: GraphState, writer: StreamWriter):
+        """Resolve the reply's voice profile; return it, or None after observe/emit."""
+        inbound_id = state.get("inbound_id", "")
+        resolved = self._voice_for(state.get("character_id", ""))
         if resolved is None:
             observe(
                 decision=("skipped_no_voice", "voice_unresolved"),
@@ -94,7 +88,7 @@ class TTSNodes(NodeGroup):
                 output="audio: skipped voice_unresolved",
             )
             log.warning(
-                "⚠️ tts — %s · no_voice_resolved (set character voice_models / llm.default_tts)",
+                "⚠️ tts — %s · no_voice_resolved (set a character voice profile or voice.hiro_profile)",
                 inbound_id,
             )
             emit(
@@ -128,17 +122,18 @@ class TTSNodes(NodeGroup):
         if resolved is None:
             return {}
 
+        from ....services.voice import audio, engine
+
+        profile = resolved.profile
         t0 = time.perf_counter()
         try:
-            result = await self.services.tts.synthesize(  # type: ignore[union-attr]
-                text,
-                model=resolved.model,
-                voice=resolved.voice,
-                instructions=resolved.instructions,
-            )
+            speech = await engine.synthesize(self.services.workspace_path, profile, text)
+            mp3 = await asyncio.to_thread(audio.to_mp3, speech.pcm, speech.rate)
         except Exception as exc:
             observe(fail={"code": "tts_failed", "message": str(exc)})
-            log.error("❌ tts — %s", inbound_id, error=str(exc), exc_info=True)
+            log.error(
+                "❌ tts — %s · %s · %s", inbound_id, profile.label, profile.model, error=str(exc), exc_info=True
+            )
             emit(
                 writer,
                 GRAPH_ERROR,
@@ -148,20 +143,23 @@ class TTSNodes(NodeGroup):
 
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
         log.info(
-            "✅ tts — %s · bytes=%d · model=%s",
+            "✅ tts — %s · %s · bytes=%d · model=%s",
             inbound_id,
-            len(result.audio_bytes),
-            result.model,
+            profile.label,
+            len(mp3),
+            profile.model,
             elapsed_ms=elapsed_ms,
+            voice_profile=resolved.profile_id,
         )
 
         built = build_tts_attachment_and_payload(
-            result,
-            resolved,
+            mp3,
+            speech,
+            profile,
             text,
             reply_id=state.get("reply_id") or "",
         )
-        provider = str(getattr(result, "provider", "") or "")
+        provider = profile.provider
         usage_counts = built.usage_counts
         emit_outcome(
             writer,
@@ -169,7 +167,7 @@ class TTSNodes(NodeGroup):
             NodeOutcome(
                 usage={
                     "provider": provider,
-                    "model": result.model,
+                    "model": profile.model_name,
                     "input_tokens": usage_counts["input_tokens"],
                     "tts_chars": len(text),
                     "tts_text_tokens": usage_counts["tts_text_tokens"],
@@ -178,8 +176,8 @@ class TTSNodes(NodeGroup):
                 },
                 decision=("voiced", provider),
                 output=(
-                    f"audio: {len(result.audio_bytes)} bytes · duration: {result.duration_ms}ms"
-                    f" · voice: {result.voice}"
+                    f"audio: {len(mp3)} bytes · duration: {built.payload['duration_ms']}ms"
+                    f" · voice: {profile.voice} ({resolved.profile_id})"
                 ),
                 event=(GRAPH_TTS_COMPLETED, built.payload),
                 event_identity_keys=IDENTITY_PEER_KEYS,

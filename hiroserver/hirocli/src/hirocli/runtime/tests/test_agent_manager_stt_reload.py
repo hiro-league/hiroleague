@@ -32,10 +32,6 @@ def _stt_double(tag: str):
     return SimpleNamespace(tag=tag, is_available=lambda: True)
 
 
-def _tts_double(tag: str):
-    return SimpleNamespace(tag=tag, is_available=lambda: True)
-
-
 def _memory_double(tag: str):
     return SimpleNamespace(tag=tag)
 
@@ -59,7 +55,6 @@ def _make_agent_manager(workspace_path: Path) -> AgentManager:
     mgr._comm = None
     mgr._tool_registry = None
     mgr._lc_agent_tools = None
-    mgr._tts = _tts_double("initial-tts")
     mgr._stt = _stt_double("initial")
     mgr._memory = None
     mgr._vision = None
@@ -72,7 +67,6 @@ def _make_agent_manager(workspace_path: Path) -> AgentManager:
         make_agent_services(
             workspace_path,
             stt=mgr._stt,
-            tts=mgr._tts,
             memory=mgr._memory,
             preferences=runtime,
         )
@@ -119,28 +113,23 @@ async def test_default_stt_change_swaps_stt_on_manager_and_graph(
 
 
 @pytest.mark.asyncio
-async def test_providers_changed_event_reloads_stt_tts_and_clears_compiled_cache(
+async def test_providers_changed_event_reloads_stt_and_clears_compiled_cache(
     tmp_path: Path,
 ) -> None:
-    """Domain ``PROVIDERS_CHANGED`` reloads STT and TTS bindings + cache bust."""
+    """Domain ``PROVIDERS_CHANGED`` reloads STT + memory bindings + cache bust (no TTS service since
+    Phase 7b step 5: voice replies resolve their voice profile per turn)."""
     secrets: dict[tuple[str, str], str] = {}
     mgr = _make_agent_manager(tmp_path)
     mgr._credentials = CredentialStore(tmp_path, "ws-test", _test_secrets=secrets)
     mgr._compiled_cache["dummy"] = object()
     new_stt = _stt_double("after-providers-stt")
-    new_tts = _tts_double("after-providers-tts")
     new_memory = _memory_double("after-providers-memory")
     stt_rebuilds: list[Path] = []
-    tts_rebuilds: list[Path] = []
     memory_rebuilds: list[Path] = []
 
     def fake_create_stt_service(workspace_path: Path, *, prefs=None):
         stt_rebuilds.append(workspace_path)
         return new_stt
-
-    def fake_create_tts_service(workspace_path: Path, *, prefs=None):
-        tts_rebuilds.append(workspace_path)
-        return new_tts
 
     def fake_create_memory_service(workspace_path: Path, prefs, *, credential_store=None):
         memory_rebuilds.append(workspace_path)
@@ -150,10 +139,6 @@ async def test_providers_changed_event_reloads_stt_tts_and_clears_compiled_cache
         patch(
             "hirocli.services.stt.create_stt_service",
             side_effect=fake_create_stt_service,
-        ),
-        patch(
-            "hirocli.services.tts.create_tts_service",
-            side_effect=fake_create_tts_service,
         ),
         patch(
             "hirocli.services.memory.create_memory_service",
@@ -176,52 +161,11 @@ async def test_providers_changed_event_reloads_stt_tts_and_clears_compiled_cache
 
     assert mgr._compiled_cache == {}
     assert stt_rebuilds == [tmp_path]
-    assert tts_rebuilds == [tmp_path]
     assert memory_rebuilds == [tmp_path]
     assert mgr._stt is new_stt
     assert mgr._graph.services.stt is new_stt
-    assert mgr._tts is new_tts
-    assert mgr._graph.services.tts is new_tts
     assert mgr._memory is new_memory
     assert mgr._graph.services.memory is new_memory
-
-
-@pytest.mark.asyncio
-async def test_default_tts_change_swaps_tts_on_manager_and_graph(
-    tmp_path: Path,
-) -> None:
-    mgr = _make_agent_manager(tmp_path)
-    reactor: PreferenceReactor = mgr._ctx.preference_reactor
-
-    new_tts = _tts_double("rebuilt-tts")
-    rebuilds: list[Path] = []
-
-    def fake_create_tts_service(workspace_path: Path, *, prefs=None):
-        rebuilds.append(workspace_path)
-        return new_tts
-
-    try:
-        reactor.on_change(
-            "llm.default_tts",
-            mgr._reload_tts_on_change,
-            key="agent.tts",
-            debounce_ms=10,
-        )
-
-        with patch(
-            "hirocli.services.tts.create_tts_service",
-            side_effect=fake_create_tts_service,
-        ):
-            mgr._ctx.preferences.update(
-                "llm.default_tts", "openai:gpt-4o-mini-tts",
-            )
-            await asyncio.sleep(0.1)
-
-        assert rebuilds == [tmp_path]
-        assert mgr._tts is new_tts
-        assert mgr._graph.services.tts is new_tts
-    finally:
-        reactor.close()
 
 
 @pytest.mark.asyncio
@@ -302,29 +246,67 @@ async def test_graph_engine_change_reloads_memory(
         reactor.close()
 
 
+_PROFILE = {"label": "Chat", "model": "openai:gpt-6-luna"}
+
+
 @pytest.mark.asyncio
-async def test_llm_tuning_profile_change_evicts_compiled_cache(
+async def test_chat_profile_change_evicts_compiled_cache(
     tmp_path: Path,
 ) -> None:
+    # Phase 7b step 5: the chat job's AI profile pick replaced llm.default_tuning_profile.
     mgr = _make_agent_manager(tmp_path)
     reactor: PreferenceReactor = mgr._ctx.preference_reactor
     mgr._compiled_cache["cached"] = object()
 
     try:
         reactor.on_change(
-            "llm.default_tuning_profile",
+            "llm.chat_profile",
             mgr._evict_compiled_cache_on_llm_tuning_change,
             key="agent.chat-cache",
             debounce_ms=10,
         )
 
-        mgr._ctx.preferences.update(
-            "llm.default_tuning_profile",
-            "memory_extraction",
-        )
+        mgr._ctx.preferences.update_many({"ai.profiles.p1": _PROFILE, "llm.chat_profile": "p1"})
         await asyncio.sleep(0.1)
 
         assert mgr._compiled_cache == {}
+    finally:
+        reactor.close()
+
+
+@pytest.mark.asyncio
+async def test_ai_profile_edit_rebuilds_memory_only_for_a_job_profile(
+    tmp_path: Path,
+) -> None:
+    # An edited AI profile must take effect like a tuning-profile edit did: chat graphs dropped, and
+    # the memory service rebuilt when one of Hiro's jobs uses the profile (not for an unused one).
+    mgr = _make_agent_manager(tmp_path)
+    reactor: PreferenceReactor = mgr._ctx.preference_reactor
+    mgr._ctx.preferences.update_many(
+        {"ai.profiles.job": _PROFILE, "ai.profiles.other": _PROFILE, "graph.extraction_profile": "job"}
+    )
+    rebuilds: list[Path] = []
+
+    def fake_create_memory_service(workspace_path: Path, prefs, *, credential_store=None):
+        rebuilds.append(workspace_path)
+        return _memory_double("rebuilt")
+
+    try:
+        reactor.on_change("ai.profiles", mgr._reload_ai_profiles_on_change, key="agent.ai-profiles", debounce_ms=10)
+        with (
+            patch("hirocli.services.memory.create_memory_service", side_effect=fake_create_memory_service),
+            patch.object(mgr, "_build_knowledge_subgraph", return_value=None),
+        ):
+            mgr._compiled_cache["cached"] = object()
+            # The admin writes a whole profile by path (ai.profiles.<id>).
+            mgr._ctx.preferences.update("ai.profiles.other", {**_PROFILE, "temperature": 0.1})
+            await asyncio.sleep(0.1)
+            assert rebuilds == []
+            assert mgr._compiled_cache == {}
+
+            mgr._ctx.preferences.update("ai.profiles.job", {**_PROFILE, "temperature": 0.1})
+            await asyncio.sleep(0.1)
+            assert rebuilds == [tmp_path]
     finally:
         reactor.close()
 
@@ -338,17 +320,12 @@ async def test_providers_changed_event_ignored_for_other_workspace(
     mgr._credentials = CredentialStore(tmp_path, "ws-test", _test_secrets=secrets)
     mgr._compiled_cache["keep"] = object()
     initial_stt = mgr._stt
-    initial_tts = mgr._tts
     initial_memory = mgr._memory
 
     with (
         patch(
             "hirocli.services.stt.create_stt_service",
             side_effect=lambda *a, **k: _stt_double("should-not-run"),
-        ),
-        patch(
-            "hirocli.services.tts.create_tts_service",
-            side_effect=lambda *a, **k: _tts_double("should-not-run"),
         ),
         patch(
             "hirocli.services.memory.create_memory_service",
@@ -373,31 +350,24 @@ async def test_providers_changed_event_ignored_for_other_workspace(
 
     assert "keep" in mgr._compiled_cache
     assert mgr._stt is initial_stt
-    assert mgr._tts is initial_tts
     assert mgr._memory is initial_memory
 
 
 @pytest.mark.asyncio
-async def test_unrelated_preference_change_does_not_reload_stt_or_tts(
+async def test_unrelated_preference_change_does_not_reload_stt_or_memory(
     tmp_path: Path,
 ) -> None:
     mgr = _make_agent_manager(tmp_path)
     reactor: PreferenceReactor = mgr._ctx.preference_reactor
     initial_stt = mgr._stt
-    initial_tts = mgr._tts
     initial_memory = mgr._memory
 
     stt_rebuilds: list[Path] = []
-    tts_rebuilds: list[Path] = []
     memory_rebuilds: list[Path] = []
 
     def fake_create_stt_service(workspace_path: Path, *, prefs=None):
         stt_rebuilds.append(workspace_path)
         return _stt_double("rebuilt")
-
-    def fake_create_tts_service(workspace_path: Path, *, prefs=None):
-        tts_rebuilds.append(workspace_path)
-        return _tts_double("rebuilt")
 
     def fake_create_memory_service(workspace_path: Path, prefs, *, credential_store=None):
         memory_rebuilds.append(workspace_path)
@@ -408,12 +378,6 @@ async def test_unrelated_preference_change_does_not_reload_stt_or_tts(
             "llm.default_stt",
             mgr._reload_stt_on_change,
             key="agent.stt",
-            debounce_ms=10,
-        )
-        reactor.on_change(
-            "llm.default_tts",
-            mgr._reload_tts_on_change,
-            key="agent.tts",
             debounce_ms=10,
         )
         reactor.on_change(
@@ -429,10 +393,6 @@ async def test_unrelated_preference_change_does_not_reload_stt_or_tts(
                 side_effect=fake_create_stt_service,
             ),
             patch(
-                "hirocli.services.tts.create_tts_service",
-                side_effect=fake_create_tts_service,
-            ),
-            patch(
                 "hirocli.services.memory.create_memory_service",
                 side_effect=fake_create_memory_service,
             ),
@@ -441,10 +401,8 @@ async def test_unrelated_preference_change_does_not_reload_stt_or_tts(
             await asyncio.sleep(0.05)
 
         assert stt_rebuilds == []
-        assert tts_rebuilds == []
         assert memory_rebuilds == []
         assert mgr._stt is initial_stt
-        assert mgr._tts is initial_tts
         assert mgr._memory is initial_memory
     finally:
         reactor.close()

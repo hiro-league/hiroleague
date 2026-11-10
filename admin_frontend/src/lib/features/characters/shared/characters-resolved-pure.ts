@@ -1,56 +1,65 @@
-import type { CharacterResolvedPayload, CharacterResolvedRow } from '$lib/api/characters';
+/**
+ * Pure helpers for the character resolution view (Phase 7b step 5: from the character's AI / voice
+ * profiles, then Hiro's chat profile / Hiro's voice — `GET /characters/:id/resolved`).
+ */
+import type {
+  CharacterResolvedAiRow,
+  CharacterResolvedPayload,
+  CharacterResolvedVoiceRow
+} from '$lib/api/characters';
 
-/** One-line summary for collapsed LLM header (effective catalog model id + optional display name). */
+export type ResolvedRowStatus = CharacterResolvedAiRow['status'] | CharacterResolvedVoiceRow['status'];
+
+/** One-line summary for the collapsed chat header: the profile that answers and its model. */
 export function llmCollapsedSummary(payload: CharacterResolvedPayload): string {
-  if (!payload.llm_applied) return 'No model resolved';
-  const applied = payload.llm_applied;
-  const row =
-    payload.llm_rows.find((r) => r.model_id === applied.model_id) ??
-    (payload.llm_workspace_row?.model_id === applied.model_id ? payload.llm_workspace_row : undefined);
-  const name = row?.display_name?.trim();
-  return name ? `${applied.model_id} · ${name}` : applied.model_id;
+  const applied = payload.ai_applied;
+  if (!applied) return 'No model resolved';
+  const label = applied.profile_label?.trim();
+  return label ? `${label} · ${applied.model_id}` : applied.model_id;
 }
 
-/** One-line summary for collapsed TTS header (catalog model + optional display + bundled voice id). */
+/** One-line summary for the collapsed voice header: the voice profile, its model and voice. */
 export function voiceCollapsedSummary(payload: CharacterResolvedPayload): string {
   if (payload.voice_disabled) return 'Voice replies disabled';
-  if (!payload.voice_applied) return 'No TTS model resolved';
   const applied = payload.voice_applied;
-  const vid = applied.catalog_model_id;
-  const row =
-    payload.voice_rows.find((r) => r.model_id === vid) ??
-    (payload.voice_workspace_row?.model_id === vid ? payload.voice_workspace_row : undefined);
-  const display = row?.display_name?.trim();
-  const voice = applied.synthesis.voice?.trim();
-  const base = display ? `${vid} · ${display}` : vid;
-  return voice ? `${base} · ${voice}` : base;
+  if (!applied) return 'No voice resolved';
+  return [applied.label, applied.model, applied.voice].filter((part) => part?.trim()).join(' · ');
 }
 
-export function resolvedRowTooltip(status: CharacterResolvedRow['status']): string {
+/** The tuning the chat applies, compact ("temp 0.3 · max tokens 2,048 · thinking low"). */
+export function appliedTuningLine(applied: NonNullable<CharacterResolvedPayload['ai_applied']>): string {
+  const parts = [`temp ${applied.temperature}`, `max tokens ${applied.max_tokens.toLocaleString('en-US')}`];
+  parts.push(applied.thinking ? `thinking ${applied.thinking}` : 'thinking: model default');
+  if (applied.num_ctx) parts.push(`context ${applied.num_ctx.toLocaleString('en-US')}`);
+  return parts.join(' · ');
+}
+
+export function resolvedRowTooltip(status: ResolvedRowStatus): string {
   switch (status) {
     case 'available':
-      return 'Online — model is usable with this workspace.';
+      return 'Ready — its model can answer with this workspace’s keys.';
     case 'unavailable':
-      return 'Offline — model is not usable with current workspace configuration.';
-    case 'unknown':
-      return 'Unknown — resolution could not determine usability.';
-    case 'wrong_kind':
-      return 'Offline — model kind does not match this slot.';
-    case 'deprecated':
-      return 'Deprecated — still listed but slated for removal.';
+      return 'Not ready — its model has no key or server set up in this workspace.';
+    case 'plan':
+      return 'Skipped — a plan tool’s model (Claude Code, Codex) can’t be the chat model.';
+    case 'no_key':
+      return 'Skipped — its speech provider has no key set.';
+    case 'missing':
+      return 'Missing — no profile with this id any more; it is skipped.';
     default:
       return '';
   }
 }
 
-export function resolvedRowDotClass(status: CharacterResolvedRow['status']): string {
+export function resolvedRowDotClass(status: ResolvedRowStatus): string {
   switch (status) {
     case 'available':
       return 'bg-emerald-500';
     case 'unavailable':
-    case 'wrong_kind':
+    case 'no_key':
+    case 'missing':
       return 'bg-red-500';
-    case 'deprecated':
+    case 'plan':
       return 'bg-amber-500';
     default:
       return 'bg-muted-foreground/50';

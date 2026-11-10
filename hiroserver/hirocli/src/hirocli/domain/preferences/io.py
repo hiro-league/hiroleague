@@ -48,7 +48,12 @@ def preferences_file(workspace_path: Path) -> Path:
 def load_preferences(workspace_path: Path) -> WorkspacePreferences:
     f = preferences_file(workspace_path)
     if f.exists():
-        return WorkspacePreferences.model_validate_json(f.read_text(encoding="utf-8"))
+        text = f.read_text(encoding="utf-8")
+        # Phase 7b step 5: a file older than v4 is converted once (AI profiles for Hiro's jobs);
+        # a v4 file validates exactly as before.
+        if '"version"' not in text or _raw_version(text) < 4:
+            return _load_converting_v3(workspace_path, text)
+        return WorkspacePreferences.model_validate_json(text)
     # Missing file: use structural defaults and persist so the workspace always has a real prefs file.
     prefs = WorkspacePreferences()
     save_preferences(workspace_path, prefs)
@@ -60,6 +65,56 @@ def load_preferences(workspace_path: Path) -> WorkspacePreferences:
         },
     )
     return prefs
+
+
+def _raw_version(text: str) -> int:
+    """The raw file's ``version`` (0 when unreadable; validation then reports the real problem)."""
+    try:
+        data = json.loads(text)
+        return int(data.get("version") or 0) if isinstance(data, dict) else 4
+    except (ValueError, TypeError, AttributeError):
+        return 4  # not JSON: let model_validate_json raise its usual error
+
+
+def _load_converting_v3(workspace_path: Path, text: str) -> WorkspacePreferences:
+    """The one-time v3 → v4 conversion (``convert_v4``): convert, validate, save as v4, log once."""
+    from .convert_v4 import convert_preferences_v3_to_v4, write_converted_characters
+
+    raw = json.loads(text)
+    try:
+        data, summary = convert_preferences_v3_to_v4(workspace_path, raw)
+        prefs = WorkspacePreferences.model_validate(data)
+    except Exception as exc:
+        logger.error(
+            "❌ Preferences conversion failed — workspace · v3 → v4 (preferences.json left as it was)",
+            extra={"error": str(exc), "workspace_path": str(workspace_path.resolve())},
+            exc_info=True,
+        )
+        raise
+    # Written straight to disk (no preferences.saved event: this is the load, nothing changed live).
+    _write_preferences_file(workspace_path, prefs)
+    write_converted_characters(summary)
+    logger.info(
+        "✅ Preferences converted — workspace · v3 → v4 (AI profiles for Hiro's jobs) · %s",
+        summary.line(),
+        extra={
+            "ai_profiles": summary.ai_profiles,
+            "voice_profiles": summary.voice_profiles,
+            "backup": summary.backup,
+            "workspace_path": str(workspace_path.resolve()),
+        },
+    )
+    return prefs
+
+
+def _write_preferences_file(workspace_path: Path, prefs: WorkspacePreferences) -> None:
+    """Dump ``prefs`` to preferences.json (prompts at their default pruned, see below)."""
+    workspace_path.mkdir(parents=True, exist_ok=True)
+    data = prefs.model_dump(mode="json")
+    _prune_default_prompts(data)
+    preferences_file(workspace_path).write_text(
+        json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8",
+    )
 
 
 def _prune_default_prompts(data: dict[str, Any]) -> None:
@@ -116,11 +171,7 @@ def save_preferences(
     # file and re-apply the code constant on every load — a true reset that auto-tracks future
     # default edits, instead of "Restore default" persisting a pinned copy (model_dump_json would
     # otherwise materialize every field). Only PROMPT_DEFAULTS paths are touched; all else dumps full.
-    data = prefs.model_dump(mode="json")
-    _prune_default_prompts(data)
-    preferences_file(workspace_path).write_text(
-        json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8",
-    )
+    _write_preferences_file(workspace_path, prefs)
     _notify_preferences_saved(
         workspace_path, prefs, effective_changes=effective_changes,
     )
@@ -188,8 +239,4 @@ def _validate_pre_save_transition(
         graph_inherits_default=not (prefs.graph.embedder_model or "").strip(),
     )
 
-
-# ---------------------------------------------------------------------------
-# Resolution — which canonical model id + tuning for a purpose?
-# ---------------------------------------------------------------------------
 

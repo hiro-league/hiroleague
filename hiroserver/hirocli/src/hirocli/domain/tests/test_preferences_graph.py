@@ -11,11 +11,9 @@ import pytest
 from pydantic import ValidationError
 
 from hirocli.domain.preferences import (
-    DEFAULT_GRAPHITI_EXTRACTION_TUNING_PROFILE_ID,
-    DEFAULT_GRAPHITI_SMALL_TUNING_PROFILE_ID,
+    JOB_PRESETS,
     GraphPreferences,
     WorkspacePreferences,
-    default_tuning_profiles,
     resolve_graph_reranker_model,
     resolve_graphiti_embedder_model,
     resolve_graphiti_extraction_model,
@@ -29,27 +27,19 @@ def test_default_prefs_have_graph_section_off() -> None:
     assert prefs.graph.backend == "off"
     assert prefs.graph.k_hop == 2
     assert prefs.graph.temporal_default == "all"
-    assert (
-        prefs.graph.extraction_tuning_profile
-        == DEFAULT_GRAPHITI_EXTRACTION_TUNING_PROFILE_ID
-    )
-    assert prefs.graph.small_tuning_profile == DEFAULT_GRAPHITI_SMALL_TUNING_PROFILE_ID
+    # Phase 7b step 5: each graph tier points at an AI profile (unset by default).
+    assert prefs.graph.extraction_profile is None
+    assert prefs.graph.small_profile is None
 
 
-def test_graphiti_tuning_profiles_present_and_locked() -> None:
-    profiles = default_tuning_profiles()
-    for pid in (
-        DEFAULT_GRAPHITI_EXTRACTION_TUNING_PROFILE_ID,
-        DEFAULT_GRAPHITI_SMALL_TUNING_PROFILE_ID,
-    ):
-        assert pid in profiles
-        assert profiles[pid].locked is True
-        assert profiles[pid].thinking == "off"
-    # Extraction tier gets the larger budget.
-    assert (
-        profiles[DEFAULT_GRAPHITI_EXTRACTION_TUNING_PROFILE_ID].max_tokens
-        > profiles[DEFAULT_GRAPHITI_SMALL_TUNING_PROFILE_ID].max_tokens
-    )
+def test_graph_job_presets_are_deterministic() -> None:
+    # The old graphiti_extraction / graphiti_small presets live on as the jobs' preset tuning.
+    for job in ("graph_extraction", "graph_small"):
+        assert JOB_PRESETS[job].thinking == "off"
+        assert JOB_PRESETS[job].temperature == 0.0
+    # Extraction tier gets the larger budget; small steps borrow its model when unset.
+    assert JOB_PRESETS["graph_extraction"].max_tokens > JOB_PRESETS["graph_small"].max_tokens
+    assert JOB_PRESETS["graph_small"].falls_back_to == "graph_extraction"
 
 
 def test_default_prefs_validate() -> None:
@@ -59,13 +49,12 @@ def test_default_prefs_validate() -> None:
     assert reparsed.graph.backend == "off"
 
 
-def test_unknown_graph_tuning_profile_rejected() -> None:
+def test_unknown_graph_ai_profile_rejected() -> None:
     prefs = WorkspacePreferences()
-    prefs.graph.extraction_tuning_profile = "does_not_exist"
-    # The validator now reports the offending dotted path (discovered via the tuning_profile_ref
-    # marker) rather than a generic "graph tuning profile" message.
+    prefs.graph.extraction_profile = "does_not_exist"
+    # The validator reports the offending dotted path (discovered via the ai_profile_ref marker).
     with pytest.raises(
-        ValidationError, match="Unknown tuning profile at graph.extraction_tuning_profile"
+        ValidationError, match="graph.extraction_profile points at an unknown AI profile"
     ):
         WorkspacePreferences.model_validate(prefs.model_dump())
 
@@ -117,10 +106,10 @@ def test_embedder_resolvers_fall_back_to_workspace_default() -> None:
 
 
 def test_extraction_resolver_none_when_no_model_configured(tmp_path) -> None:
-    # No knowledge.answering.model and no llm.default_chat → None before any
+    # No graph.extraction_profile and no llm.chat_profile → None before any
     # catalog/credential lookup (so this stays a pure unit test).
     prefs = WorkspacePreferences()
-    assert prefs.llm.default_chat is None
+    assert prefs.llm.chat_profile is None
     assert resolve_graphiti_extraction_model(prefs, tmp_path, workspace_id="w") is None
 
 

@@ -81,7 +81,7 @@
           <!-- items-start: a two-line hint in one cell must not stretch the other cells' controls. -->
           <div class="grid items-start gap-3 sm:grid-cols-3">
             <FormField label="Thinking">
-              <!-- '' = the model's default (stored as null), like the tuning-profile editor's "Model default". -->
+              <!-- '' = the model's default (stored as null). -->
               <select
                 value={d.thinking ?? ''}
                 disabled={!levels.length}
@@ -196,8 +196,7 @@
     <Dialog.Footer>
       <Button variant="outline" onclick={() => ai.closeEditor()}>Cancel</Button>
       <Button
-        disabled={ai.saving || !d.name.trim() || !d.model || !!ai.draftCheck.message || d.id.startsWith('job-')}
-        title={d.id.startsWith('job-') ? 'Mockup: not saved' : undefined}
+        disabled={ai.saving || !d.name.trim() || !d.model || !!ai.draftCheck.message}
         onclick={() => void ai.saveProfile()}
       >
         {ai.saving ? 'Saving…' : 'Save'}

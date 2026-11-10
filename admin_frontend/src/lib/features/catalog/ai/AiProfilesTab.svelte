@@ -2,8 +2,15 @@
   /**
    * AI profiles list: each recipe with its model, thinking, budget and today's use, and its fallback
    * chain. New / Edit / Duplicate / Delete go through the controller (preferences `ai.profiles`).
+   *
+   * Phase 7b step 5: the default profiles of Hiro's jobs (`preset` set) are rows of the same table:
+   * a "Default" badge, "Used by Hiro: <jobs>", and Restore default (confirmed first) instead of Delete.
+   * The source filter shows one source at a time: Hiro (profiles its jobs use), each extension (the
+   * profiles its uses ask with), Unused — a profile reached as a fallback counts for its source too.
    */
-  import { Copy, Pencil, Plus, Trash2 } from '@lucide/svelte';
+  import { Copy, Pencil, Plus, RotateCcw, Trash2 } from '@lucide/svelte';
+  import FieldHelp from '$lib/components/ui/field-help.svelte';
+  import SourceFilter, { type SourceOption } from '$lib/components/page/SourceFilter.svelte';
   import SectionCard from '$lib/components/page/SectionCard.svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
@@ -15,9 +22,6 @@
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
   import { ADMIN_SECTION_HEADING_LG } from '$lib/styling/admin-tokens';
   import AiProfileEditorDialog from './AiProfileEditorDialog.svelte';
-  import DefaultProfileRows from '$lib/mockups/DefaultProfileRows.svelte';
-  import { MOCK_DEFAULT_PROFILES, PHASE7B_MOCKUP } from '$lib/mockups/phase7b';
-  import SourceFilter, { type SourceOption } from '$lib/mockups/SourceFilter.svelte';
   import type { AiController } from './ai-controller.svelte';
   import {
     budgetLabel,
@@ -33,22 +37,25 @@
 
   const GRID = 'minmax(180px,1.1fr) minmax(200px,1.3fr) 90px minmax(210px,1.2fr) minmax(180px,1fr) 330px';
   const KIND_BADGE = { api: 'outline', local: 'secondary', plan: 'default' } as const;
-  // Phase 7b mockup: show the profiles of one source at a time — Hiro (its jobs' default profiles),
-  // each extension (the profiles its uses ask with, and their fallbacks), or the unused ones for cleanup.
+  // One source at a time: Hiro (its jobs), each extension (its uses), or the unused ones for cleanup.
   let source = $state('all');
-  /** The extensions whose uses ask with this profile, directly or as a fallback further down the chain. */
+  const HIRO = 'Hiro';
+  /** Who asks with this profile — "Hiro" for its jobs, an extension for its uses — directly or as a
+   *  fallback further down the chain. */
   function sourcesOf(id: string, seen = new Set<string>()): Set<string> {
     if (seen.has(id)) return new Set();
     seen.add(id);
     const out = new Set(ai.uses.filter((u) => u.profileId === id).map((u) => u.extension));
+    if (ai.jobsUsing(id).length) out.add(HIRO);
     for (const p of ai.profiles) if (p.fallbackId === id) for (const s of sourcesOf(p.id, seen)) out.add(s);
     return out;
   }
-  const extensions = $derived(ai.useGroups.map((g) => g.extension));
-  const unused = $derived(ai.profiles.filter((p) => !ai.usedBy(p.id).length));
+  const extensions = $derived(ai.useGroups.map((g) => g.extension).filter((e) => e !== HIRO));
+  const isUnused = (id: string) => !ai.usedBy(id).length && !ai.jobsUsing(id).length;
+  const unused = $derived(ai.profiles.filter((p) => isUnused(p.id)));
   const sourceOptions = $derived<SourceOption[]>([
-    { id: 'all', label: 'All', count: ai.profiles.length + MOCK_DEFAULT_PROFILES.length },
-    { id: 'Hiro', label: 'Hiro', count: MOCK_DEFAULT_PROFILES.length },
+    { id: 'all', label: 'All', count: ai.profiles.length },
+    { id: HIRO, label: 'Hiro', count: ai.profiles.filter((p) => sourcesOf(p.id).has(HIRO)).length },
     ...extensions.map((e) => ({ id: e, label: e, count: ai.profiles.filter((p) => sourcesOf(p.id).has(e)).length })),
     { id: 'unused', label: 'Unused', count: unused.length }
   ]);
@@ -56,6 +63,16 @@
     source === 'all' ? ai.profiles : source === 'unused' ? unused : ai.profiles.filter((p) => sourcesOf(p.id).has(source))
   );
   const deleting = $derived(ai.deletingId ? ai.profiles.find((p) => p.id === ai.deletingId) : undefined);
+  const restoringProfile = $derived(ai.restoringId ? ai.profiles.find((p) => p.id === ai.restoringId) : undefined);
+  const deleteMessage = $derived.by(() => {
+    if (!deleting) return '';
+    const used = ai.usedBy(deleting.id);
+    const jobs = ai.jobsUsing(deleting.id);
+    const parts: string[] = [];
+    if (used.length) parts.push(`Used by ${used.join(', ')}. Those uses are left without a profile and those fallbacks are cleared.`);
+    if (jobs.length) parts.push(`Hiro's ${jobs.join(', ')} will borrow the profile of the job they fall back to.`);
+    return parts.join(' ') || 'Nothing uses it.';
+  });
 </script>
 
 <SectionCard class="grid gap-4">
@@ -68,8 +85,8 @@
       </p>
     </div>
     <div class="flex flex-wrap items-center gap-2">
-      <!-- Phase 7b mockup: Hiro's profiles, each extension's, or the unused ones — never all mixed unless asked. -->
-      {#if PHASE7B_MOCKUP}<SourceFilter options={sourceOptions} value={source} onchange={(id) => (source = id)} />{/if}
+      <!-- Hiro's profiles, each extension's, or the unused ones — never all mixed unless asked. -->
+      <SourceFilter options={sourceOptions} value={source} onchange={(id) => (source = id)} />
       <Button onclick={() => ai.newProfile()}><Plus size={15} /> New profile</Button>
     </div>
   </div>
@@ -78,7 +95,7 @@
     <InlineLoading label="Loading AI profiles…" />
   {:else if ai.profilesError}
     <InlineDestructiveAlert title="Could not load AI profiles" message={ai.profilesError} />
-  {:else if ai.profiles.length === 0 && !PHASE7B_MOCKUP}
+  {:else if ai.profiles.length === 0}
     <InlineEmptyState message="No AI profiles yet." hint="Make one with New profile." />
   {:else}
     <AdminTableShell layout="grid" minWidth={1260} gridColumns={GRID}>
@@ -98,14 +115,25 @@
           {@const notReady = profile.server?.notReady ?? found.provider?.notReady}
           {@const share = usageShare(profile, kind)}
           {@const chain = chainLabel(ai.profiles, fallbackChain(ai.profiles, profile.id))}
+          {@const used = ai.usedBy(profile.id)}
+          {@const hiroJobs = ai.jobsUsing(profile.id)}
           <div class={ADMIN_TABLE_GRID_ROW} style:grid-template-columns={GRID}>
             <span class="grid content-start gap-1">
-              <span class="flex items-center gap-2">
+              <span class="flex flex-wrap items-center gap-1.5">
                 <span class="font-sans text-sm font-semibold">{profile.name}</span>
-                {#if !ai.usedBy(profile.id).length}<Badge variant="outline">Unused</Badge>{/if}
+                {#if profile.preset}
+                  <Badge variant="outline">Default</Badge>
+                  <FieldHelp
+                    text={`Hiro's default profile for ${ai.jobLabel(profile.preset) || profile.preset}. Edit it freely; Restore default brings back the job's first settings (thinking, temperature, max tokens). It can't be deleted.`}
+                  />
+                {/if}
+                {#if !used.length && !hiroJobs.length}<Badge variant="outline">Unused</Badge>{/if}
               </span>
-              {#if ai.usedBy(profile.id).length}
-                <span class="text-xs text-muted-foreground">Used by {ai.usedBy(profile.id).join(', ')}</span>
+              {#if hiroJobs.length}
+                <span class="text-xs text-muted-foreground">Used by Hiro: {hiroJobs.join(', ')}</span>
+              {/if}
+              {#if used.length}
+                <span class="text-xs text-muted-foreground">Used by {used.join(', ')}</span>
               {/if}
             </span>
             <span class="grid content-start gap-1">
@@ -139,14 +167,24 @@
               <Button size="sm" variant="outline" onclick={() => ai.duplicateProfile(profile.id)}>
                 <Copy size={13} /> Duplicate
               </Button>
-              <Button size="sm" variant="destructive-outline" onclick={() => ai.askDelete(profile.id)}>
-                <Trash2 size={13} /> Delete
-              </Button>
+              {#if profile.preset}
+                <!-- A job's default profile: never deleted; Restore default puts its job's tuning back. -->
+                <Button
+                  size="sm"
+                  variant="outline"
+                  title="Back to the settings it started with"
+                  onclick={() => ai.askRestore(profile.id)}
+                >
+                  <RotateCcw size={13} /> Restore default
+                </Button>
+              {:else}
+                <Button size="sm" variant="destructive-outline" onclick={() => ai.askDelete(profile.id)}>
+                  <Trash2 size={13} /> Delete
+                </Button>
+              {/if}
             </span>
           </div>
         {/each}
-        <!-- Phase 7b mockup: the default profiles of Hiro's jobs (under All and Hiro). -->
-        {#if PHASE7B_MOCKUP && (source === 'all' || source === 'Hiro')}<DefaultProfileRows grid={GRID} onedit={ai.previewProfile} />{/if}
       {/snippet}
     </AdminTableShell>
   {/if}
@@ -160,10 +198,21 @@
     if (!next) ai.cancelDelete();
   }}
   title={`Delete ${deleting?.name ?? 'profile'}?`}
-  message={deleting && ai.usedBy(deleting.id).length
-    ? `Used by ${ai.usedBy(deleting.id).join(', ')}. Those uses are left without a profile and those fallbacks are cleared.`
-    : 'Nothing uses it.'}
+  message={deleteMessage}
   confirmLabel={ai.deleting ? 'Deleting…' : 'Delete'}
   pending={ai.deleting}
   onConfirm={() => ai.confirmDelete()}
+/>
+
+<Dialog.ConfirmDialog
+  open={!!restoringProfile}
+  onOpenChange={(next) => {
+    if (!next) ai.cancelRestore();
+  }}
+  title={`Restore ${restoringProfile?.name ?? 'profile'}?`}
+  message={`Its thinking, temperature and max tokens go back to ${ai.jobLabel(restoringProfile?.preset ?? null) || 'its job'}'s defaults, and its context window and extra instructions are cleared. Its model, name, limits and fallback stay.`}
+  confirmLabel={ai.restoring ? 'Restoring…' : 'Restore default'}
+  destructive={false}
+  pending={ai.restoring}
+  onConfirm={() => ai.confirmRestore()}
 />

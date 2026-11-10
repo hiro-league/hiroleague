@@ -13,7 +13,6 @@ from pydantic import BaseModel, Field, model_validator
 from .defaults import (
     DEFAULT_KNOWLEDGE_ANSWERING_PROMPT,
     DEFAULT_KNOWLEDGE_REWRITE_PROMPT,
-    DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID,
     pref_field,
 )
 
@@ -109,8 +108,23 @@ class KnowledgeRetrievalPreferences(BaseModel):
 
 
 class KnowledgeAnsweringPreferences(BaseModel):
-    model: str | None = pref_field(
-        model_kind="chat", default=None, title="Knowledge answering model"
+    # Phase 7b step 5: the answering model + ``knowledge.default_tuning_profile`` became one AI
+    # profile (``jobs`` "knowledge"); the query rewrite (a constant tuning preset on the same model
+    # before) gets its own (``jobs`` "rewrite").
+    profile: str | None = pref_field(
+        ai_profile_ref=True,
+        default=None,
+        title="Knowledge answering",
+        description="The AI profile that answers from the knowledge base. Empty uses Hiro's chat model.",
+    )
+    rewrite_profile: str | None = pref_field(
+        ai_profile_ref=True,
+        default=None,
+        title="Knowledge query rewrite",
+        description=(
+            "The AI profile that rewrites a question into a search query (needs structured output; "
+            "keep thinking off). Empty uses the knowledge answering model."
+        ),
     )
     # Base answer-generation system prompt. Editable; blank falls back to the relaxed default
     # (partial answers allowed, no bare "I don't know" when any part is supported). The citation
@@ -124,7 +138,7 @@ class KnowledgeAnsweringPreferences(BaseModel):
 
 class KnowledgeRewritePreferences(BaseModel):
     # Optional LLM query rewrite for the Ask tab: normalize + extract literal keywords before
-    # retrieval. Reuses the resolved answering model. ``default_on`` seeds the Ask-tab toggle.
+    # retrieval. Uses knowledge.answering.rewrite_profile. ``default_on`` seeds the Ask-tab toggle.
     prompt: str = Field(default=DEFAULT_KNOWLEDGE_REWRITE_PROMPT, title="Query Rewrite Prompt")
     default_on: bool = Field(default=False, title="Enable Query Rewrite on Ask Tab")
 
@@ -140,11 +154,6 @@ class KnowledgePreferences(BaseModel):
         default=None,
         title="Knowledge embedder",
         description="Knowledge embedder. Empty inherits the workspace default (General → Models).",
-    )
-    default_tuning_profile: str = pref_field(
-        tuning_profile_ref=True,
-        default=DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID,
-        title="Knowledge answering model profile",
     )
     chunking: KnowledgeChunkingPreferences = Field(default_factory=KnowledgeChunkingPreferences)
     retrieval: KnowledgeRetrievalPreferences = Field(default_factory=KnowledgeRetrievalPreferences)

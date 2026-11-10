@@ -12,28 +12,27 @@ from hirocli.domain.model_catalog import ModelCatalog, clear_model_catalog_cache
 from hirocli.domain.preferences import (
     DEFAULT_ANSWER_PROMPT_ID,
     DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID,
-    DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID,
     DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT,
     DEFAULT_MEMORY_EVAL_ANSWER_PROMPT,
     DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT,
     DEFAULT_RETRIEVAL_AGENT_PROMPT_ID,
+    AiProfile,
     AnswerPromptProfile,
-    LLMPreferences,
     MediaPreferences,
     MemoryPreferences,
     ModalityFlags,
     PREFERENCE_SECTIONS,
     PROMPT_DEFAULTS,
     RetrievalAgentLimits,
-    TuningProfile,
     WorkspacePreferences,
-    knowledge_answering_model_source,
+    job_model_source,
     load_preferences,
     preferences_file,
     resolve_chat_retrieval_agent_prompt,
+    resolve_job_model,
     resolve_knowledge_answering_llm,
-    resolve_llm,
     resolve_retrieval_agent_prompt,
+    resolved_from_profile,
     save_preferences,
 )
 from hirocli.domain.server_info import (
@@ -82,6 +81,21 @@ def _patch_catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
                 "credential_env_keys": ["OPENAI_API_KEY"],
                 "metadata_updated_at": "2026-01-01",
             },
+            # Phase 7b step 5: a provider without a key and a local server, for the fallback chain.
+            {
+                "id": "deepseek",
+                "display_name": "DeepSeek",
+                "hosting": "cloud",
+                "credential_env_keys": ["DEEPSEEK_API_KEY"],
+                "metadata_updated_at": "2026-01-01",
+            },
+            {
+                "id": "ollama",
+                "display_name": "Ollama",
+                "hosting": "local",
+                "credential_env_keys": [],
+                "metadata_updated_at": "2026-01-01",
+            },
         ],
         "models": [
             {
@@ -96,6 +110,12 @@ def _patch_catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
                 "display_name": "G2",
                 "model_kind": "chat",
             },
+            {
+                "id": "deepseek:ds-test",
+                "provider_id": "deepseek",
+                "display_name": "DS",
+                "model_kind": "chat",
+            },
         ],
     }
     p = tmp_path / "cat.yaml"
@@ -105,11 +125,11 @@ def _patch_catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("hirocli.domain.credential_store.get_model_catalog", lambda: cat)
 
 
-def test_resolve_llm_none_without_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_job_model_none_without_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _fixture_workspace(tmp_path, monkeypatch)
     _patch_catalog(tmp_path, monkeypatch)
     prefs = WorkspacePreferences()
-    assert resolve_llm(prefs, tmp_path, "chat") is None
+    assert resolve_job_model(prefs, tmp_path, "chat") is None
 
 
 def test_workspace_preferences_media_defaults() -> None:
@@ -120,12 +140,10 @@ def test_workspace_preferences_media_defaults() -> None:
     assert prefs.media.output.file is False
     assert prefs.memory.enabled is True
     assert prefs.chat.max_messages == 6
-    assert prefs.llm.default_tuning_profile == "balanced_chat"
-    assert prefs.memory.default_tuning_profile == "memory_extraction"
-    assert prefs.knowledge.default_tuning_profile == DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID
-    assert prefs.tuning_profiles["balanced_chat"].locked is True
-    assert prefs.tuning_profiles["memory_extraction"].locked is True
-    assert prefs.tuning_profiles[DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID].locked is True
+    # Phase 7b step 5: no tuning profiles; every job's AI profile starts unset.
+    assert prefs.llm.chat_profile is None
+    assert prefs.voice.hiro_profile is None
+    assert prefs.ai.profiles == {}
 
 
 def test_memory_preferences_enabled_independent_of_legacy_models() -> None:
@@ -167,7 +185,7 @@ def test_load_preferences_missing_file_persists_defaults(tmp_path: Path) -> None
     assert not preferences_file(ws).exists()
     prefs = load_preferences(ws)
     assert preferences_file(ws).is_file()
-    assert prefs.version == 3
+    assert prefs.version == 4
     assert prefs.media.input.voice is True
     assert prefs.chat.max_messages == 6
 
@@ -183,7 +201,7 @@ def test_save_preferences_prunes_default_prompts(tmp_path: Path) -> None:
     assert "prompt" not in raw["knowledge"]["answering"]
     assert "judge_prompt" not in raw["graph"]["eval"]
     # The mem-eval answer prompt is now a named library (dict), always materialized like
-    # tuning_profiles — so it stays present, and its locked default profile reloads with the
+    # image_profiles — so it stays present, and its locked default profile reloads with the
     # built-in default text via resolve_answer_prompt.
     reloaded = load_preferences(ws)
     _, default_text = reloaded.graph.eval.resolve_answer_prompt(None)
@@ -191,7 +209,7 @@ def test_save_preferences_prunes_default_prompts(tmp_path: Path) -> None:
 
 
 def test_answer_prompt_library_roundtrips(tmp_path: Path) -> None:
-    # The answer-prompt library persists in full (a dict, like tuning_profiles); an added profile
+    # The answer-prompt library persists in full (a dict, like image_profiles); an added profile
     # round-trips and resolve_answer_prompt returns its text by id, with an unknown id falling
     # back to the locked default profile's text.
     import json as _json
@@ -325,9 +343,8 @@ def test_memory_retrieval_defaults() -> None:
     assert retrieval.limits.limit_default == 10
     assert retrieval.limits.limit_min == 5
     assert retrieval.limits.limit_max == 25
-    assert retrieval.tuning_profile == "memory_extraction"
     assert retrieval.active_prompt_id == DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID
-    assert retrieval.model is None
+    assert retrieval.profile is None
 
 
 def test_locked_default_prompts_reseed_from_code_on_load(tmp_path: Path) -> None:
@@ -363,83 +380,153 @@ def test_locked_default_prompts_reseed_from_code_on_load(tmp_path: Path) -> None
     assert reloaded.graph.eval.retrieval_agent_prompts["mine"].prompt == "my custom retrieval prompt"
 
 
-def test_resolve_llm_with_default_and_credentials(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
+WID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+
+def _with_profiles(profiles: dict[str, dict], **fields: str | None) -> WorkspacePreferences:
+    """Preferences holding ``profiles`` (AI profile fields) and job fields given as dotted paths
+    with ``__`` for dots (``llm__chat_profile="p"``)."""
+    data: dict = {"ai": {"profiles": profiles}}
+    for key, value in fields.items():
+        node = data
+        parts = key.split("__")
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        node[parts[-1]] = value
+    return WorkspacePreferences.model_validate(data)
+
+
+def _key(tmp_path: Path, provider: str = "openai") -> None:
+    CredentialStore(tmp_path, WID, _test_secrets={}).set_api_key(provider, "sk")
+
+
+def test_resolve_job_model_maps_profile_tuning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Phase 7b step 5: a job's model + tuning come from its ONE AI profile.
     _fixture_workspace(tmp_path, monkeypatch)
     _patch_catalog(tmp_path, monkeypatch)
-    secrets: dict[tuple[str, str], str] = {}
-    CredentialStore(tmp_path, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", _test_secrets=secrets).set_api_key(
-        "openai", "sk"
+    _key(tmp_path)
+    prefs = _with_profiles(
+        {"chat": {"label": "Chat", "model": "openai:gpt-test", "temperature": 0.5, "max_tokens": 512,
+                  "thinking": "low", "num_ctx": 4096, "instructions": "Be brief."}},
+        llm__chat_profile="chat",
     )
-    prefs = WorkspacePreferences(
-        llm=LLMPreferences(
-            default_chat="openai:gpt-test",
-        ),
-        tuning_profiles={
-            "balanced_chat": TuningProfile(
-                label="Balanced chat",
-                locked=True,
-                temperature=0.5,
-                max_tokens=512,
-                thinking="low",
-            ),
+    r = resolve_job_model(prefs, tmp_path, "chat")
+    assert r is not None
+    assert (r.model_id, r.temperature, r.max_tokens, r.thinking) == ("openai:gpt-test", 0.5, 512, "low")
+    assert r.num_ctx is None  # context window only for local models
+    assert (r.profile_id, r.profile_name, r.instructions) == ("chat", "Chat", "Be brief.")
+
+
+def test_resolve_job_model_profile_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Unset tuning means what ai_ask's ChatModelProvider uses: 0.7 / 8192.
+    _fixture_workspace(tmp_path, monkeypatch)
+    _patch_catalog(tmp_path, monkeypatch)
+    _key(tmp_path)
+    prefs = _with_profiles({"p": {"label": "P", "model": "openai:gpt-test"}}, llm__chat_profile="p")
+    r = resolve_job_model(prefs, tmp_path, "chat")
+    assert r is not None and (r.temperature, r.max_tokens, r.thinking) == (0.7, 8192, None)
+
+
+def test_resolved_from_profile_keeps_num_ctx_for_local_models(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_catalog(tmp_path, monkeypatch)
+    local = resolved_from_profile("l", AiProfile(label="L", model="ollama:gemma", num_ctx=4096))
+    assert local.num_ctx == 4096
+    cloud = resolved_from_profile("c", AiProfile(label="C", model="openai:gpt-test", num_ctx=4096))
+    assert cloud.num_ctx is None
+
+
+def test_resolve_job_model_walks_the_fallback_chain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # First profile in the chain whose model is available; a plan-tool model is skipped (not a
+    # LangChain model), as is a provider without a key.
+    _fixture_workspace(tmp_path, monkeypatch)
+    _patch_catalog(tmp_path, monkeypatch)
+    _key(tmp_path)
+    prefs = _with_profiles(
+        {
+            "a": {"label": "A", "model": "deepseek:ds-test", "fallback": "b"},
+            "b": {"label": "B", "model": "claude_code:sonnet", "fallback": "c"},
+            "c": {"label": "C", "model": "openai:gpt-other", "max_tokens": 77},
         },
+        llm__chat_profile="a",
     )
-    r = resolve_llm(prefs, tmp_path, "chat")
+    r = resolve_job_model(prefs, tmp_path, "chat")
     assert r is not None
-    assert r.model_id == "openai:gpt-test"
-    assert r.temperature == 0.5
-    assert r.max_tokens == 512
-    assert r.thinking == "low"
+    assert (r.model_id, r.profile_id, r.max_tokens) == ("openai:gpt-other", "c", 77)
 
 
-def test_resolve_knowledge_answering_llm_inherits_default_chat(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+def test_resolve_job_model_set_but_unavailable_stays_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A set field whose chain has nothing available does NOT borrow another job's model.
+    _fixture_workspace(tmp_path, monkeypatch)
+    _patch_catalog(tmp_path, monkeypatch)
+    _key(tmp_path)
+    prefs = _with_profiles(
+        {"chat": {"label": "Chat", "model": "openai:gpt-test"}, "ds": {"label": "DS", "model": "deepseek:ds-test"}},
+        llm__chat_profile="chat",
+        knowledge__answering__profile="ds",
+    )
+    assert resolve_job_model(prefs, tmp_path, "knowledge") is None
+
+
+def test_resolve_job_model_null_field_borrows_with_its_own_preset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _fixture_workspace(tmp_path, monkeypatch)
     _patch_catalog(tmp_path, monkeypatch)
-    wid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-    CredentialStore(tmp_path, wid, _test_secrets={}).set_api_key("openai", "sk")
-    prefs = WorkspacePreferences(
-        llm=LLMPreferences(default_chat="openai:gpt-test"),
-        tuning_profiles={
-            DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID: TuningProfile(
-                label="Knowledge answering",
-                locked=True,
-                temperature=0.15,
-                max_tokens=1200,
-                thinking=None,
-            ),
+    _key(tmp_path)
+    prefs = _with_profiles(
+        {
+            "chat": {"label": "Chat", "model": "openai:gpt-test", "temperature": 0.9},
+            "kb": {"label": "KB", "model": "openai:gpt-other"},
+            "ex": {"label": "Ex", "model": "openai:gpt-other"},
+            "ans": {"label": "Ans", "model": "openai:gpt-other"},
         },
+        llm__chat_profile="chat",
     )
-
-    r = resolve_knowledge_answering_llm(prefs, tmp_path)
-
+    # knowledge (null) → the chat job's model, with the knowledge preset tuning.
+    r = resolve_job_model(prefs, tmp_path, "knowledge")
     assert r is not None
-    assert r.model_id == "openai:gpt-test"
-    assert r.temperature == 0.15
-    assert r.max_tokens == 1200
-    assert knowledge_answering_model_source(prefs) == "llm.default_chat"
+    assert (r.model_id, r.temperature, r.max_tokens, r.profile_id) == ("openai:gpt-test", 0.2, 1600, "chat")
+    assert job_model_source(prefs, "knowledge") == "llm.chat_profile"
+    # rewrite (null) → knowledge (null) → chat, with the rewrite preset (thinking off).
+    r = resolve_job_model(prefs, tmp_path, "rewrite")
+    assert r is not None and (r.model_id, r.thinking, r.max_tokens) == ("openai:gpt-test", "off", 1024)
+    # vision falls back to nothing.
+    assert resolve_job_model(prefs, tmp_path, "vision") is None
+    assert job_model_source(prefs, "vision") is None
+
+    prefs = _with_profiles(
+        prefs.model_dump(mode="json")["ai"]["profiles"],
+        llm__chat_profile="chat",
+        knowledge__answering__profile="kb",
+        graph__extraction_profile="ex",
+        graph__eval__answer_profile="ans",
+    )
+    assert resolve_job_model(prefs, tmp_path, "rewrite").model_id == "openai:gpt-other"
+    assert job_model_source(prefs, "rewrite") == "knowledge.answering.profile"
+    small = resolve_job_model(prefs, tmp_path, "graph_small")
+    assert (small.model_id, small.profile_id, small.max_tokens) == ("openai:gpt-other", "ex", 2048)
+    assert resolve_job_model(prefs, tmp_path, "eval_retrieval").profile_id == "ans"
+    assert resolve_job_model(prefs, tmp_path, "eval_judge").profile_id == "chat"
 
 
-def test_resolve_knowledge_answering_llm_explicit_model(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _fixture_workspace(tmp_path, monkeypatch)
+def test_job_field_refuses_unknown_or_plan_profiles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from pydantic import ValidationError
+
     _patch_catalog(tmp_path, monkeypatch)
-    wid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-    CredentialStore(tmp_path, wid, _test_secrets={}).set_api_key("openai", "sk")
-    prefs = WorkspacePreferences(
-        llm=LLMPreferences(default_chat="openai:gpt-test"),
+    with pytest.raises(ValidationError, match="llm.chat_profile points at an unknown AI profile"):
+        _with_profiles({}, llm__chat_profile="ghost")
+    with pytest.raises(ValidationError, match="plan tool"):
+        _with_profiles({"plan": {"label": "Plan", "model": "claude_code:sonnet"}}, graph__extraction_profile="plan")
+    with pytest.raises(ValidationError, match="voice.hiro_profile points at an unknown voice profile"):
+        WorkspacePreferences.model_validate({"voice": {"hiro_profile": "ghost"}})
+    # A plan profile may still sit in a fallback chain.
+    _with_profiles(
+        {"api": {"label": "API", "model": "openai:gpt-test", "fallback": "plan"},
+         "plan": {"label": "Plan", "model": "claude_code:sonnet"}},
+        llm__chat_profile="api",
     )
-    prefs.knowledge.answering.model = "openai:gpt-other"
-
-    r = resolve_knowledge_answering_llm(prefs, tmp_path)
-
-    assert r is not None
-    assert r.model_id == "openai:gpt-other"
-    assert knowledge_answering_model_source(prefs) == "knowledge.answering.model"
 
 
 def test_resolve_knowledge_answering_llm_none_without_credentials(
@@ -447,10 +534,7 @@ def test_resolve_knowledge_answering_llm_none_without_credentials(
 ) -> None:
     _fixture_workspace(tmp_path, monkeypatch)
     _patch_catalog(tmp_path, monkeypatch)
-    prefs = WorkspacePreferences(
-        llm=LLMPreferences(default_chat="openai:gpt-test"),
-    )
-
+    prefs = _with_profiles({"chat": {"label": "Chat", "model": "openai:gpt-test"}}, llm__chat_profile="chat")
     assert resolve_knowledge_answering_llm(prefs, tmp_path) is None
 
 
@@ -459,109 +543,56 @@ def test_resolve_character_llm_prefers_character_list_order(
 ) -> None:
     _fixture_workspace(tmp_path, monkeypatch)
     _patch_catalog(tmp_path, monkeypatch)
-    wid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-    CredentialStore(tmp_path, wid, _test_secrets={}).set_api_key("openai", "sk")
-    prefs = WorkspacePreferences(
-        llm=LLMPreferences(
-            default_chat="openai:gpt-test",
-        ),
-        tuning_profiles={
-            "balanced_chat": TuningProfile(
-                label="Balanced chat",
-                locked=True,
-                temperature=0.2,
-                max_tokens=99,
-            ),
+    _key(tmp_path)
+    prefs = _with_profiles(
+        {
+            "chat": {"label": "Chat", "model": "openai:gpt-test"},
+            "other": {"label": "Other", "model": "openai:gpt-other", "temperature": 0.2, "max_tokens": 99},
         },
+        llm__chat_profile="chat",
     )
     from hirocli.domain.preferences import resolve_character_llm
 
-    r = resolve_character_llm(
-        ["openai:gpt-other", "openai:gpt-test"],
-        prefs,
-        tmp_path,
-    )
+    r = resolve_character_llm(["other", "chat"], prefs, tmp_path)
     assert r is not None
-    assert r.model_id == "openai:gpt-other"
-    assert r.temperature == 0.2
-    assert r.max_tokens == 99
-
-
-def test_resolve_character_llm_uses_character_tuning_profile(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _fixture_workspace(tmp_path, monkeypatch)
-    _patch_catalog(tmp_path, monkeypatch)
-    wid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-    CredentialStore(tmp_path, wid, _test_secrets={}).set_api_key("openai", "sk")
-    prefs = WorkspacePreferences(
-        llm=LLMPreferences(default_chat="openai:gpt-test"),
-        tuning_profiles={
-            "balanced_chat": TuningProfile(label="Balanced chat", locked=True, max_tokens=512),
-            "deep": TuningProfile(
-                label="Deep",
-                locked=False,
-                temperature=0.2,
-                max_tokens=4096,
-                thinking="medium",
-            ),
-        },
-    )
-    from hirocli.domain.preferences import resolve_character_llm
-
-    r = resolve_character_llm([], prefs, tmp_path, tuning_profile="deep")
-
-    assert r is not None
-    assert r.model_id == "openai:gpt-test"
-    assert r.temperature == 0.2
-    assert r.max_tokens == 4096
-    assert r.thinking == "medium"
+    assert (r.model_id, r.temperature, r.max_tokens, r.profile_id) == ("openai:gpt-other", 0.2, 99, "other")
 
 
 def test_resolve_character_llm_falls_back_when_list_unusable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Missing ids and profiles with no available model are skipped → the chat job's profile.
     _fixture_workspace(tmp_path, monkeypatch)
     _patch_catalog(tmp_path, monkeypatch)
-    wid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-    CredentialStore(tmp_path, wid, _test_secrets={}).set_api_key("openai", "sk")
-    prefs = WorkspacePreferences(
-        llm=LLMPreferences(
-            default_chat="openai:gpt-test",
-        ),
+    _key(tmp_path)
+    prefs = _with_profiles(
+        {"chat": {"label": "Chat", "model": "openai:gpt-test"}, "ds": {"label": "DS", "model": "deepseek:ds-test"}},
+        llm__chat_profile="chat",
     )
     from hirocli.domain.preferences import resolve_character_llm
 
-    r = resolve_character_llm(["openai:unknown", "bad"], prefs, tmp_path)
-    assert r is not None
-    assert r.model_id == "openai:gpt-test"
+    r = resolve_character_llm(["ghost", "ds"], prefs, tmp_path)
+    assert r is not None and (r.model_id, r.profile_id) == ("openai:gpt-test", "chat")
+    no_chat = _with_profiles({"ds": {"label": "DS", "model": "deepseek:ds-test"}})
+    assert resolve_character_llm(["ds"], no_chat, tmp_path) is None
 
 
-def test_resolve_character_voice_applies_character_tts_fields(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Character-level voice preset / instructions attach to the resolved TTS provider."""
-    _fixture_workspace(tmp_path, monkeypatch)
+def _voice_catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from hirocli.domain import model_catalog as mc
 
     doc = {
         "catalog_version": "1.0.0",
         "providers": [
-            {
-                "id": "openai",
-                "display_name": "OpenAI",
-                "hosting": "cloud",
-                "credential_env_keys": ["OPENAI_API_KEY"],
-                "metadata_updated_at": "2026-01-01",
-            },
+            {"id": "openai", "display_name": "OpenAI", "hosting": "cloud",
+             "credential_env_keys": ["OPENAI_API_KEY"], "metadata_updated_at": "2026-01-01"},
+            {"id": "google", "display_name": "Google", "hosting": "cloud",
+             "credential_env_keys": ["GOOGLE_API_KEY"], "metadata_updated_at": "2026-01-01"},
         ],
         "models": [
-            {
-                "id": "openai:tts-one",
-                "provider_id": "openai",
-                "display_name": "TTS One",
-                "model_kind": "tts",
-            },
+            {"id": "openai:gpt-test", "provider_id": "openai", "display_name": "G", "model_kind": "chat"},
+            {"id": "openai:stt-one", "provider_id": "openai", "display_name": "STT", "model_kind": "stt"},
+            {"id": "openai:tts-one", "provider_id": "openai", "display_name": "TTS One", "model_kind": "tts"},
+            {"id": "google:tts-g", "provider_id": "google", "display_name": "TTS G", "model_kind": "tts"},
         ],
     }
     p = tmp_path / "cat.yaml"
@@ -570,31 +601,34 @@ def test_resolve_character_voice_applies_character_tts_fields(
     monkeypatch.setattr(mc, "get_model_catalog", lambda: cat)
     monkeypatch.setattr("hirocli.domain.credential_store.get_model_catalog", lambda: cat)
 
-    wid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-    CredentialStore(tmp_path, wid, _test_secrets={}).set_api_key("openai", "sk")
-    prefs = WorkspacePreferences(llm=LLMPreferences(default_tts="openai:tts-one"))
+
+def test_resolve_character_voice_first_profile_with_a_key_then_hiro(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Phase 7b step 5: the character's voice profiles (first whose provider has a key), else Hiro's."""
+    _fixture_workspace(tmp_path, monkeypatch)
+    _voice_catalog(tmp_path, monkeypatch)
+    _key(tmp_path, "openai")
+    prefs = WorkspacePreferences.model_validate(
+        {
+            "voice": {
+                "profiles": {
+                    "g": {"label": "G", "model": "google:tts-g", "voice": "kore"},
+                    "o": {"label": "O", "model": "openai:tts-one", "voice": "sage", "style": "calm"},
+                    "hiro-voice": {"label": "Hiro's voice", "model": "openai:tts-one", "voice": "ash"},
+                },
+                "hiro_profile": "hiro-voice",
+            }
+        }
+    )
     from hirocli.domain.preferences import resolve_character_voice
 
-    r = resolve_character_voice(
-        [],
-        prefs,
-        tmp_path,
-        tts_instructions=" Speak calmly. ",
-        tts_voice_by_provider={"openai": "orchid"},
-    )
-    assert r is not None
-    assert r.model == "tts-one"
-    assert r.voice == "orchid"
-    assert r.instructions == "Speak calmly."
-
-    r2 = resolve_character_voice(
-        ["openai:tts-one"],
-        prefs,
-        tmp_path,
-        tts_instructions="Hi.",
-        tts_voice_by_provider={"openai": "ash"},
-    )
-    assert r2 is not None and r2.model == "tts-one" and r2.voice == "ash" and r2.instructions == "Hi."
+    r = resolve_character_voice(["ghost", "g", "o"], prefs, tmp_path)
+    assert r is not None and (r.profile_id, r.source, r.profile.style) == ("o", "character", "calm")
+    r = resolve_character_voice(["g"], prefs, tmp_path)
+    assert r is not None and (r.profile_id, r.source) == ("hiro-voice", "hiro")
+    prefs.voice.hiro_profile = None
+    assert resolve_character_voice([], prefs, tmp_path) is None
 
 
 def test_build_policy_snapshot_and_channel_list_voice_capabilities(
@@ -647,25 +681,19 @@ def test_build_policy_snapshot_and_channel_list_voice_capabilities(
     wid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
     CredentialStore(tmp_path, wid, _test_secrets={}).set_api_key("openai", "sk")
 
-    save_preferences(
-        tmp_path,
-        WorkspacePreferences(
-            llm=LLMPreferences(
-                default_chat="openai:gpt-test",
-                default_stt="openai:stt-one",
-                default_tts="openai:tts-one",
-            ),
-            media=MediaPreferences(
-                input=ModalityFlags(voice=True),
-                output=ModalityFlags(voice=True),
-            ),
-        ),
+    prefs = WorkspacePreferences.model_validate(
+        {
+            "llm": {"default_stt": "openai:stt-one"},
+            "voice": {"profiles": {"v1": {"label": "V1", "model": "openai:tts-one", "voice": "sage"}}},
+        }
     )
+    prefs.media = MediaPreferences(input=ModalityFlags(voice=True), output=ModalityFlags(voice=True))
+    save_preferences(tmp_path, prefs)
     create_character(
         tmp_path,
         "voice-bot",
         "Voice Bot",
-        voice_models=["openai:tts-one"],
+        voice_profiles=["v1"],
     )
     create_channel(
         tmp_path,

@@ -1,11 +1,11 @@
 """VisionService — image understanding via a LangChain multimodal vision model.
 
-Default model: ``openai:gpt-4o-mini`` (override with ``IMAGE_VISION_MODEL`` env var).
-Default prompt: generic description (override with ``IMAGE_ANALYSIS_PROMPT`` env var).
+Model: the "Reading pictures" job's AI profile (``llm.vision_profile``, Phase 7b step 5 — it replaced
+the ``IMAGE_VISION_MODEL`` env var and the hard-coded 0.7 / 4096 tuning). No profile → vision is off
+(logged once). Default prompt: generic description (override with ``IMAGE_ANALYSIS_PROMPT`` env var).
 
-With ``workspace_path``, the vision model is built via ``create_chat_model()`` and
-availability follows the workspace credential store. Without a workspace (legacy
-callers), availability falls back to ``OPENAI_API_KEY`` in the environment.
+The model is built via ``create_chat_model()`` from the resolved profile (its fallback chain walked,
+first available model wins); it is rebuilt when the resolved profile changes.
 
 Two interfaces:
   - async describe(source, prompt?)  — for the adapter pipeline and async callers
@@ -18,12 +18,11 @@ import asyncio
 import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 
 from hiro_commons.log import Logger
 
 log = Logger.get("SVC.VISION")
-
-_DEFAULT_MODEL = "openai:gpt-4o-mini"
 
 _DEFAULT_PROMPT = (
     "Describe this image concisely. Focus on the main subject, key details, "
@@ -40,12 +39,15 @@ class VisionService:
     def __init__(self, workspace_path: Path | None = None) -> None:
         self._workspace_path = workspace_path
         self._model = None
+        self._model_key: tuple[Any, ...] | None = None
         self._credential_store = None  # Lazily built when workspace_path is set (avoids repeated disk reads).
+        self._off_logged = False
 
     def invalidate_workspace_credentials(self) -> None:
         """Drop cached credential store and vision model after ``providers.json`` / keyring changes."""
         self._credential_store = None
         self._model = None
+        self._model_key = None
 
     def _workspace_credential_store(self):
         """Return ``(store, workspace_id)`` or None if workspace is not registry-backed."""
@@ -61,21 +63,29 @@ class VisionService:
             self._credential_store = CredentialStore(self._workspace_path, wid)
         return self._credential_store, wid
 
-    def is_available(self) -> bool:
-        """Return True when the configured vision model can run in this context."""
-        model_id = os.environ.get("IMAGE_VISION_MODEL", _DEFAULT_MODEL)
-        if self._workspace_path is not None:
-            from ..domain.model_catalog import get_model_catalog
+    def _resolved(self):
+        """The vision job's resolved model (``resolve_job_model(..., "vision")``), or None = off."""
+        if self._workspace_path is None:
+            return None
+        pair = self._workspace_credential_store()
+        if pair is None:
+            return None
+        from ..domain.preferences import resolve_job_model
+        from ..runtime.preferences_runtime import preferences_runtime_for
 
-            spec = get_model_catalog().get_model(model_id)
-            if spec is None or spec.model_kind != "chat":
-                return False
-            pair = self._workspace_credential_store()
-            if pair is None:
-                return False
-            store, _wid = pair
-            return store.is_configured(spec.provider_id)
-        return bool(os.environ.get("OPENAI_API_KEY"))
+        store, wid = pair
+        prefs = preferences_runtime_for(self._workspace_path).current
+        resolved = resolve_job_model(prefs, self._workspace_path, "vision", workspace_id=wid, credential_store=store)
+        if resolved is None and not self._off_logged:
+            self._off_logged = True
+            log.info("Reading pictures is off — no AI profile for it (llm.vision_profile) or its model isn't available")
+        elif resolved is not None:
+            self._off_logged = False
+        return resolved
+
+    def is_available(self) -> bool:
+        """Return True when the vision job's AI profile resolves to a model that can run now."""
+        return self._resolved() is not None
 
     async def describe(self, source: str, prompt: str | None = None) -> str:
         """Describe the image and return a text description.
@@ -121,32 +131,35 @@ class VisionService:
             return future.result()
 
     def _get_model(self):
-        if self._model is None:
-            model_id = os.environ.get("IMAGE_VISION_MODEL", _DEFAULT_MODEL)
-            if self._workspace_path is not None:
-                from ..domain.model_factory import create_chat_model
+        resolved = self._resolved()
+        if resolved is None:
+            raise RuntimeError(
+                "Reading pictures is off: pick an AI profile for it (Preferences, llm.vision_profile) "
+                "whose provider is set up."
+            )
+        key = (resolved.profile_id, resolved.model_id, resolved.temperature, resolved.max_tokens,
+               resolved.thinking, resolved.num_ctx)
+        if self._model is None or key != self._model_key:
+            from ..domain.model_factory import create_chat_model
 
-                try:
-                    self._model = create_chat_model(
-                        model_id,
-                        workspace_path=self._workspace_path,
-                        temperature=0.7,
-                        max_tokens=4096,
-                    )
-                except ValueError as exc:
-                    raise RuntimeError(
-                        f"Vision model {model_id!r} cannot be built for this workspace "
-                        f"(check IMAGE_VISION_MODEL and provider credentials): {exc}"
-                    ) from exc
-            else:
-                from langchain.chat_models import init_chat_model
-
-                try:
-                    self._model = init_chat_model(model_id)
-                except ValueError as exc:
-                    raise RuntimeError(
-                        f"Vision model {model_id!r} is invalid for env-based init: {exc}"
-                    ) from exc
+            store, wid = self._workspace_credential_store()  # type: ignore[misc]  # _resolved checked it
+            try:
+                self._model = create_chat_model(
+                    resolved.model_id,
+                    workspace_path=self._workspace_path,  # type: ignore[arg-type]
+                    workspace_id=wid,
+                    temperature=resolved.temperature,
+                    max_tokens=resolved.max_tokens,
+                    thinking=resolved.thinking,
+                    num_ctx=resolved.num_ctx,
+                    credential_store=store,
+                )
+            except ValueError as exc:
+                raise RuntimeError(
+                    f"Vision model {resolved.model_id!r} (AI profile {resolved.profile_id!r}) cannot be "
+                    f"built for this workspace: {exc}"
+                ) from exc
+            self._model_key = key
         return self._model
 
 

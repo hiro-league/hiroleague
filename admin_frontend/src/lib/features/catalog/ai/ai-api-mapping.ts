@@ -2,9 +2,9 @@
  * Mapping between the AI API shapes (`$lib/api/ai`, preferences `ai.profiles`) and what the AI pages
  * edit (`ai-types.ts`). Pure: no Svelte, no I/O.
  */
-import type { AiLocalModel, AiProfileRow, AiTryPayload, AiUsesExtension, PlanToolStatus } from '$lib/api/ai';
+import type { AiJobRow, AiLocalModel, AiProfileRow, AiTryPayload, AiUsesExtension, PlanToolStatus } from '$lib/api/ai';
 import type { AiProfile as AiProfilePrefs } from '$lib/api/generated/preferences.generated';
-import type { AiCatalogModelRow, AiProfile, AiThinking, AiTryResult, AiUse, AiUsesGroup } from './ai-types';
+import type { AiCatalogModelRow, AiJob, AiProfile, AiThinking, AiTryResult, AiUse, AiUsesGroup } from './ai-types';
 
 /** A row of `GET /ai/profiles` → the profile the list and editor work with. */
 export function profileFromRow(row: AiProfileRow): AiProfile {
@@ -24,7 +24,22 @@ export function profileFromRow(row: AiProfileRow): AiProfile {
     },
     fallbackId: row.fallback,
     usage: { todayAsks: row.today.asks, todayCost: row.today.cost, thisHour: row.today.this_hour },
-    server: { kind: row.kind, providerLabel: row.provider_label, notReady: row.not_ready }
+    server: { kind: row.kind, providerLabel: row.provider_label, notReady: row.not_ready },
+    preset: row.preset ?? null,
+    jobs: row.jobs ?? []
+  };
+}
+
+/** A job of `GET /ai/profiles` (Phase 7b step 5) → the Uses tab's Hiro row. */
+export function jobFromRow(row: AiJobRow): AiJob {
+  return {
+    id: row.id,
+    label: row.label,
+    path: row.path,
+    profileId: row.profile_id,
+    defaultProfileId: row.default_profile_id,
+    fallsBackTo: row.falls_back_to,
+    model: row.model
   };
 }
 
@@ -48,7 +63,9 @@ export function profileToPrefs(profile: AiProfile): AiProfilePrefs {
     max_cost_day: positiveOrNull(profile.budget.costPerDay),
     max_per_hour: positiveOrNull(profile.budget.perHour) === null ? null : Math.round(profile.budget.perHour ?? 0),
     at_once: Math.min(4, Math.max(1, Math.round(profile.budget.atOnce || 1))),
-    fallback: profile.fallbackId || null
+    fallback: profile.fallbackId || null,
+    // Phase 7b step 5: a job's default profile stays one when edited (its Restore default needs it).
+    preset: profile.preset ?? null
   };
 }
 

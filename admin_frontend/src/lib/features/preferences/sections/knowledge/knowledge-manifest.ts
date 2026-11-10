@@ -1,7 +1,7 @@
 /**
  * Declarative manifest for the Knowledge tab (manifest rollout). Replaces the three hand-written
  * cards: Indexing Options (embedder + chunking + graph backend), Retrieval defaults (hybrid/score
- * knobs + the gated reranker), and Knowledge Answering (rewrite + model/profile + answer behavior).
+ * knobs + the gated reranker), and Knowledge Answering (rewrite + its AI profile, the answering AI profile + answer behavior).
  * The tab's field order derives from this manifest (`KNOWLEDGE_FIELD_ORDER`).
  *
  * `knowledge.retrieval.reranker.device` and `.batch_size` are editable knowledge-tab fields the UI
@@ -137,9 +137,16 @@ export const KNOWLEDGE_MANIFEST: PrefTabManifest = {
           kind: 'grid',
           fields: [
             {
-              kind: 'toggle',
-              path: 'knowledge.rewrite.default_on',
-              hint: 'Optional LLM step that rewrites a question before retrieval — normalizes wording and extracts literal keywords. Reuses the answering model; toggled per query on the Ask tab.'
+              kind: 'column',
+              fields: [
+                {
+                  kind: 'toggle',
+                  path: 'knowledge.rewrite.default_on',
+                  hint: 'Optional LLM step that rewrites a question before retrieval — normalizes wording and extracts literal keywords. Asks with the rewrite profile below; toggled per query on the Ask tab.'
+                },
+                // Phase 7b step 5: the rewrite's own AI profile (was the answering model + the rewrite preset).
+                { kind: 'aiProfile', path: 'knowledge.answering.rewrite_profile' }
+              ]
             },
             {
               kind: 'prompt',
@@ -153,14 +160,8 @@ export const KNOWLEDGE_MANIFEST: PrefTabManifest = {
         {
           kind: 'grid',
           fields: [
-            {
-              kind: 'modelProfile',
-              modelKind: 'chat',
-              modelPath: 'knowledge.answering.model',
-              profilePath: 'knowledge.default_tuning_profile',
-              scope: 'knowledge',
-              heading: 'Knowledge Answering Model'
-            },
+            // Phase 7b step 5: one AI profile (was the answering model + the knowledge tuning profile).
+            { kind: 'aiProfile', path: 'knowledge.answering.profile' },
             {
               kind: 'column',
               fields: [

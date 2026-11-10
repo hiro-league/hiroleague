@@ -29,16 +29,15 @@ function makePrefs(overrides?: Partial<WorkspacePreferences>): WorkspacePreferen
   const base: WorkspacePreferences = {
     version: 1,
     llm: {
-      default_chat: null,
+      chat_profile: null,
+      vision_profile: null,
       default_stt: null,
-      default_tts: null,
       default_reranker: null,
       default_embedder: null,
       http_keepalive_s: 300,
       request_timeout_s: 180,
       max_retries: 2,
       default_image_gen: null,
-      default_tuning_profile: 'balanced_chat',
       default_image_profile: 'image_playground'
     },
     media: {
@@ -47,7 +46,6 @@ function makePrefs(overrides?: Partial<WorkspacePreferences>): WorkspacePreferen
     },
     memory: {
       enabled: true,
-      default_tuning_profile: 'memory_extraction',
       user_name: '',
       search: { ...DEFAULT_MEMORY_SEARCH },
       extraction: { ...DEFAULT_MEMORY_EXTRACTION },
@@ -61,8 +59,7 @@ function makePrefs(overrides?: Partial<WorkspacePreferences>): WorkspacePreferen
           limit_max: 40,
           hops_max: 3
         },
-        model: null,
-        tuning_profile: 'knowledge_answering',
+        profile: null,
         render: {
           show_event_time: true,
           show_expired_at: false,
@@ -77,20 +74,29 @@ function makePrefs(overrides?: Partial<WorkspacePreferences>): WorkspacePreferen
     knowledge: { ...DEFAULT_KNOWLEDGE },
     graph: { ...DEFAULT_GRAPH },
     chat: { ...DEFAULT_CHAT },
-    tuning_profiles: {
-      balanced_chat: {
-        label: 'Balanced chat',
-        locked: true,
-        temperature: 0.7,
-        max_tokens: 2048,
-        thinking: null,
-        num_ctx: null
-      }
-    },
     image_profiles: {},
     // Phase 7a: AI profiles + uses (edited by the Catalog's AI tabs, never by the Preferences page).
-    ai: { profiles: {}, uses: {}, local_servers: {} },
-    voice: { profiles: {}, uses: {}, clip_cache_mb: 200 }
+    ai: {
+      profiles: {
+        'hiro-chat': {
+          label: "Hiro's chat",
+          model: 'openai:gpt-4',
+          thinking: null,
+          temperature: 0.3,
+          max_tokens: 2048,
+          num_ctx: null,
+          instructions: '',
+          max_cost_day: null,
+          max_per_hour: null,
+          at_once: 1,
+          fallback: null,
+          preset: 'chat'
+        }
+      },
+      uses: {},
+      local_servers: {}
+    },
+    voice: { profiles: {}, uses: {}, hiro_profile: null, clip_cache_mb: 200 }
   };
   return normalizeWorkspacePreferences({ ...base, ...overrides });
 }
@@ -111,10 +117,35 @@ describe('editsForSave', () => {
 
   it('coerces cleared model ids to null', () => {
     const baseline = makePrefs();
-    baseline.llm.default_chat = 'openai:gpt-4';
+    baseline.llm.default_stt = 'openai:whisper-1';
     const draft = cloneWorkspacePreferences(baseline);
-    draft.llm.default_chat = '';
-    expect(diffEdits(baseline, draft)).toEqual({ 'llm.default_chat': null });
+    draft.llm.default_stt = '';
+    expect(diffEdits(baseline, draft)).toEqual({ 'llm.default_stt': null });
+  });
+
+  // Phase 7b step 5: a job's AI-profile field is a plain nullable leaf — picking and clearing it
+  // PATCH just that path, and the AI profiles themselves (save-skipped `ai`) never ride along.
+  it("sends a job's AI-profile pick as one leaf path, never the profiles", () => {
+    const baseline = makePrefs();
+    const draft = cloneWorkspacePreferences(baseline);
+    draft.llm.chat_profile = 'hiro-chat';
+    draft.graph.eval.judge_profile = 'hiro-chat';
+    expect(diffEdits(baseline, draft)).toEqual({
+      'llm.chat_profile': 'hiro-chat',
+      'graph.eval.judge_profile': 'hiro-chat'
+    });
+    const cleared = cloneWorkspacePreferences(draft);
+    cleared.llm.chat_profile = null;
+    expect(diffEdits(draft, cleared)).toEqual({ 'llm.chat_profile': null });
+    cleared.ai.profiles['hiro-chat'].temperature = 0.9;
+    expect(Object.keys(diffEdits(draft, cleared))).toEqual(['llm.chat_profile']);
+  });
+
+  it("sends Hiro's voice pick as one leaf path", () => {
+    const baseline = makePrefs();
+    const draft = cloneWorkspacePreferences(baseline);
+    draft.voice.hiro_profile = 'hiro-voice';
+    expect(diffEdits(baseline, draft)).toEqual({ 'voice.hiro_profile': 'hiro-voice' });
   });
 
   it('coerces cleared reranker device to null', () => {
@@ -123,22 +154,6 @@ describe('editsForSave', () => {
     const draft = cloneWorkspacePreferences(baseline);
     draft.graph.reranker.device = '';
     expect(diffEdits(baseline, draft)).toEqual({ 'graph.reranker.device': null });
-  });
-
-  it('sends tuning_profiles as one whole-object path', () => {
-    const baseline = makePrefs();
-    const draft = cloneWorkspacePreferences(baseline);
-    draft.tuning_profiles.custom_1 = {
-      label: 'Custom 1',
-      locked: false,
-      temperature: 0.5,
-      max_tokens: 1024,
-      thinking: null,
-      num_ctx: null
-    };
-    const payload = diffEdits(baseline, draft);
-    expect(Object.keys(payload)).toEqual(['tuning_profiles']);
-    expect(payload.tuning_profiles).toEqual(draft.tuning_profiles);
   });
 
   it('sends graph.eval.answer_prompts as one whole-object path', () => {
@@ -269,10 +284,10 @@ describe('editsForSave', () => {
 
   it('coerces a removed nullable model key to null', () => {
     const baseline = makePrefs();
-    baseline.llm.default_chat = 'openai:gpt-4';
+    baseline.llm.default_stt = 'openai:whisper-1';
     const draft = cloneWorkspacePreferences(baseline);
-    delete (draft.llm as unknown as Record<string, unknown>).default_chat;
-    expect(diffEdits(baseline, draft)).toEqual({ 'llm.default_chat': null });
+    delete (draft.llm as unknown as Record<string, unknown>).default_stt;
+    expect(diffEdits(baseline, draft)).toEqual({ 'llm.default_stt': null });
     expect(isDirty(baseline, draft)).toBe(true);
   });
 

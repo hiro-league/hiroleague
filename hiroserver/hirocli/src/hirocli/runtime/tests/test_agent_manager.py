@@ -58,7 +58,7 @@ def test_resolve_thread_character_uses_chat_channel_metadata(tmp_path) -> None:
     )
 
     ctx = SimpleNamespace(workspace_path=tmp_path)
-    mgr = AgentManager(ctx, SimpleNamespace(), tts_service=None)
+    mgr = AgentManager(ctx, SimpleNamespace())
 
     assert mgr._resolve_thread_character(inbound) == (
         str(channel.id),

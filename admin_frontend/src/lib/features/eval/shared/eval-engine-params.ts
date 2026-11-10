@@ -11,10 +11,11 @@
  */
 import type { WorkspacePreferences } from '$lib/api/preferences';
 import type { EvalTrackConfig } from '$lib/features/eval/shared/eval-tracks';
+import { resolveJobProfile, type HiroJobId } from '$lib/catalog/hiro-jobs';
 
 export type Param = { label: string; value: string };
 
-/** Model line (id + tuning-profile params), tagged by which Settings column it belongs to:
+/** Model line (id + the AI profile's tuning), tagged by which Settings column it belongs to:
  *  ingestion models build the graph (extraction/small/embedder); the answer model drives recall. */
 export type ModelLine = {
   label: string;
@@ -31,67 +32,47 @@ const TEMPORAL_LENS_LABEL: Record<'current' | 'all', string> = {
 const dash = (v: string | null | undefined): string => (v && String(v).trim() ? String(v) : '—');
 const onOff = (b: boolean): string => (b ? 'on' : 'off');
 
-/** One model's tuning-profile params, compact (e.g. "temp 0.2 · max 1600 · think low"). Empty
- *  string when the model has no tuning profile (embedders) or the profile id isn't found. */
-export function tuningChips(prefs: WorkspacePreferences, profileId: string | undefined): string {
-  const p = profileId ? prefs.tuning_profiles?.[profileId] : undefined;
-  if (!p) return '';
-  const bits = [`temp ${p.temperature}`, `max ${p.max_tokens}`];
+/** One job's AI profile, compact (Phase 7b step 5; was its tuning profile): "Hiro's chat · temp 0.2 ·
+ *  max 1600 · think low", "· from Eval: answer" when the job borrows another job's profile. Empty
+ *  when no profile applies (or the id names a missing profile). */
+export function profileChips(prefs: WorkspacePreferences, job: HiroJobId): string {
+  const resolved = resolveJobProfile(prefs, job);
+  const p = resolved?.profile;
+  if (!resolved || !p) return '';
+  const bits = [p.label];
+  if (p.temperature != null) bits.push(`temp ${p.temperature}`);
+  if (p.max_tokens != null) bits.push(`max ${p.max_tokens}`);
   if (p.thinking) bits.push(`think ${p.thinking}`);
+  if (resolved.from.id !== job) bits.push(`from ${resolved.from.label}`);
   return bits.join(' · ');
 }
 
+/** The model a job runs with (its AI profile's, or the profile of the job it falls back to). */
+function jobModel(prefs: WorkspacePreferences, job: HiroJobId): string {
+  return dash(resolveJobProfile(prefs, job)?.profile?.model);
+}
+
+const line = (
+  prefs: WorkspacePreferences,
+  label: string,
+  job: HiroJobId,
+  group: ModelLine['group']
+): ModelLine => ({ label, model: jobModel(prefs, job), tuning: profileChips(prefs, job), group });
+
 /** Model lines for the Settings columns. Memory adds the Small model; knowledge answers with the
- *  production answering pipeline (so its Answer line shows that). The judge model grades both. */
+ *  production answering pipeline (so its Answer line shows that job). The judge model grades both.
+ *  Each line is one of Hiro's jobs and its AI profile (Phase 7b step 5), resolved on `prefs` the way
+ *  the server does (its own field, else the job it falls back to). */
 export function modelLines(prefs: WorkspacePreferences, cfg: EvalTrackConfig): ModelLine[] {
-  const g = prefs.graph;
-  const a = prefs.knowledge.answering;
-  const out: ModelLine[] = [
-    {
-      label: 'Extraction',
-      model: dash(g.extraction_model),
-      tuning: tuningChips(prefs, g.extraction_tuning_profile),
-      group: 'ingest'
-    }
-  ];
-  if (cfg.track === 'memory')
-    out.push({
-      label: 'Small',
-      model: dash(g.small_model),
-      tuning: tuningChips(prefs, g.small_tuning_profile),
-      group: 'ingest'
-    });
-  out.push({ label: 'Embedder', model: dash(g.embedder_model), tuning: '', group: 'ingest' });
-  // Answer + judge use SEPARATE eval models/tuning (graph.eval.answer_* / judge_*), each falling
-  // back to the knowledge answering model when unset.
-  const answering = a.model_resolved ?? a.model;
-  const ev = g.eval;
+  const out: ModelLine[] = [line(prefs, 'Extraction', 'graph_extraction', 'ingest')];
+  if (cfg.track === 'memory') out.push(line(prefs, 'Small', 'graph_small', 'ingest'));
+  out.push({ label: 'Embedder', model: dash(prefs.graph.embedder_model), tuning: '', group: 'ingest' });
   // Memory recall is fully agentic (runner_memory._recall_via_agent → run_retrieval), so surface the
-  // RETRIEVAL AGENT's model FIRST — before the answer/judge models. Its model falls back to the eval
-  // answer model, then the knowledge answering model (resolve_eval_retrieval_llm). Memory-only: the
-  // knowledge track answers with the production pipeline and has no retrieval agent.
-  if (cfg.track === 'memory')
-    out.push({
-      label: 'Retrieval',
-      model: dash(ev.retrieval_model || ev.answer_model || answering),
-      tuning: tuningChips(prefs, ev.retrieval_tuning_profile),
-      group: 'recall'
-    });
-  out.push({
-    label: 'Answer',
-    model: dash(cfg.track === 'memory' ? ev.answer_model || answering : answering),
-    tuning: tuningChips(
-      prefs,
-      cfg.track === 'memory' ? ev.answer_tuning_profile : prefs.knowledge.default_tuning_profile
-    ),
-    group: 'recall'
-  });
-  out.push({
-    label: 'Judge',
-    model: dash(ev.judge_model || answering),
-    tuning: tuningChips(prefs, ev.judge_tuning_profile),
-    group: 'recall'
-  });
+  // RETRIEVAL AGENT's profile FIRST — before the answer/judge. Unset, it borrows the eval answer job's
+  // (then Hiro's chat). Memory-only: the knowledge track answers with the production pipeline.
+  if (cfg.track === 'memory') out.push(line(prefs, 'Retrieval', 'eval_retrieval', 'recall'));
+  out.push(line(prefs, 'Answer', cfg.track === 'memory' ? 'eval_answer' : 'knowledge', 'recall'));
+  out.push(line(prefs, 'Judge', 'eval_judge', 'recall'));
   return out;
 }
 
@@ -178,6 +159,6 @@ export function recallKnobs(prefs: WorkspacePreferences, cfg: EvalTrackConfig): 
 export function aiEngineLine(prefs: WorkspacePreferences | null): string {
   if (!prefs) return '';
   const g = prefs.graph;
-  const answer = prefs.knowledge.answering.model_resolved ?? prefs.knowledge.answering.model ?? '';
+  const answer = prefs.knowledge.answering.model_resolved ?? '';
   return `${g.backend} · recipe=${g.search_recipe} · hops=${g.k_hop}${answer ? ` · answer=${answer}` : ''}`;
 }

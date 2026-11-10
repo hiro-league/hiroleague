@@ -233,7 +233,7 @@ async def _recall_via_agent(
     if retrieval_model is None:
         # Direct-call tests pass retrieval_model=None and rely on the monkey-patched eval model
         # builder; production always threads a built model in, so this path is a fallback. The
-        # retrieval builder falls back to the answer model when graph.eval.retrieval_model is unset.
+        # retrieval builder falls back to the answer model when graph.eval.retrieval_profile is unset.
         from hirocli.services.eval.models import build_eval_retrieval_model
 
         # Capture the model id too (was discarded) so the recall LLM cost can be priced/ledgered.
@@ -330,7 +330,7 @@ async def _memory_question(
     judge_model: Any | None = None,
     judge_model_id: str = "",
     judge: bool = False,
-    # The agentic retrieval loop uses its OWN model (graph.eval.retrieval_model; falls back to the
+    # The agentic retrieval loop uses its OWN model (graph.eval.retrieval_profile; falls back to the
     # answer model when unset). None → _recall_via_agent builds it as a direct-call fallback.
     retrieval_model: Any | None = None,
     retrieval_model_id: str = "",

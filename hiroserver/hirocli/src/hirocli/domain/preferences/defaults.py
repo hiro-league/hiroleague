@@ -36,17 +36,17 @@ def pref_field(
     save_skip: bool = False,
     write_whole: bool = False,
     read_only: bool = False,
-    tuning_profile_ref: bool = False,
+    ai_profile_ref: bool = False,
+    voice_profile_ref: bool = False,
     **field_kwargs: Any,
 ) -> Any:
     """``Field(...)`` for a preference with the admin-UI ``json_schema_extra`` metadata named.
 
-    ``tuning_profile_ref=True`` marks a string field whose value is a ``tuning_profiles`` id. The
-    root validator finds these by the marker and checks the referenced profile exists (see
-    ``iter_tuning_profile_refs``), so a new profile-referencing field is validated automatically —
-    schema-driven, like the admin PATCH walk, with no hand-maintained list to update. The marker is
-    deliberately NOT copied into the flat admin field map (absent from
-    ``preferences_schema._META_KEYS``); it is backend validation metadata only.
+    Phase 7b step 5 (tuning profiles → AI profiles): ``ai_profile_ref=True`` marks a field whose value
+    is an ``ai.profiles`` id (one of Hiro's jobs, see ``jobs.JOB_PRESETS``) and ``voice_profile_ref=True``
+    one whose value is a ``voice.profiles`` id. The root validator finds them by the marker
+    (``iter_profile_refs``) and checks the profile exists, and the markers ARE copied into the admin
+    field map (``preferences_schema._META_KEYS``) so the admin renders a profile picker for them.
     """
     extra: dict[str, Any] = {}
     if model_kind is not None:
@@ -61,23 +61,29 @@ def pref_field(
         extra["writeWhole"] = True
     if read_only:
         extra["readOnly"] = True
-    if tuning_profile_ref:
-        extra["tuning_profile_ref"] = True
+    if ai_profile_ref:
+        extra["ai_profile_ref"] = True
+    if voice_profile_ref:
+        extra["voice_profile_ref"] = True
     return Field(json_schema_extra=extra, **field_kwargs)
 
 
-def iter_tuning_profile_refs(model: BaseModel, prefix: str = "") -> Iterator[tuple[str, str]]:
-    """Yield ``(dotted_path, profile_id)`` for every field flagged ``tuning_profile_ref`` via
-    ``pref_field``, recursing into nested preference models. Dict fields (``tuning_profiles`` /
-    ``image_profiles``) are not traversed — only the scalar reference fields carry the marker."""
+ProfileRefMarker = Literal["ai_profile_ref", "voice_profile_ref"]
+
+
+def iter_profile_refs(
+    model: BaseModel, marker: ProfileRefMarker, prefix: str = ""
+) -> Iterator[tuple[str, str | None]]:
+    """Yield ``(dotted_path, profile_id)`` for every field flagged ``marker`` via ``pref_field``,
+    recursing into nested preference models (dict fields are not traversed)."""
     for name, field in type(model).model_fields.items():
         value = getattr(model, name)
         path = f"{prefix}.{name}" if prefix else name
         if isinstance(value, BaseModel):
-            yield from iter_tuning_profile_refs(value, path)
+            yield from iter_profile_refs(value, marker, path)
             continue
         extra = field.json_schema_extra
-        if isinstance(extra, dict) and extra.get("tuning_profile_ref"):
+        if isinstance(extra, dict) and extra.get(marker):
             yield path, value
 
 
@@ -93,7 +99,7 @@ PREFERENCE_SECTIONS: tuple[PreferenceSection, ...] = (
     PreferenceSection(
         key="llm",
         label="Models",
-        description="Workspace model defaults and tuning profile selection.",
+        description="Workspace model defaults and the AI profiles Hiro's own jobs use.",
     ),
     PreferenceSection(
         key="media",
@@ -127,7 +133,6 @@ PREFERENCE_SECTIONS: tuple[PreferenceSection, ...] = (
 # LLM selection (canonical catalog ids: ``openai:gpt-6.1-sol``)
 # ---------------------------------------------------------------------------
 
-LLMPurpose = Literal["chat", "stt", "tts"]
 ThinkingLevel = Literal["off", "minimal", "low", "medium", "high"]
 
 
@@ -145,111 +150,8 @@ class ModelTuning(BaseModel):
     num_ctx: int | None = Field(default=None, ge=1)
 
 
-class TuningProfile(ModelTuning):
-    """Named tuning preset shared by chat, memory, and knowledge answering."""
-
-    label: str = Field(default="", min_length=1)
-    locked: bool = False
-
-
-DEFAULT_CHAT_TUNING_PROFILE_ID = "balanced_chat"
-DEFAULT_MEMORY_TUNING_PROFILE_ID = "memory_extraction"
-DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID = "knowledge_answering"
-DEFAULT_KNOWLEDGE_REWRITE_TUNING_PROFILE_ID = "knowledge_rewrite"
-# L3 prototype — single structured-output call per chunk that emits typed entities
-# and relations. Deterministic by design (temp=0) so the same chunk produces the
-# same graph mutations; reasoning off because we want JSON, not chain-of-thought.
-DEFAULT_KNOWLEDGE_GRAPH_EXTRACTION_TUNING_PROFILE_ID = "knowledge_graph_extraction"
-DEFAULT_KNOWLEDGE_GRAPH_DISAMBIGUATION_TUNING_PROFILE_ID = "knowledge_graph_disambiguation"
-# Graphiti pivot — Graphiti uses two model tiers (ModelSize.medium / small). The
-# "extraction" tier is the structured-output extraction + edge model (Graphiti
-# fails on weak models per its README); the "small" tier handles cheaper sub-steps
-# (node dedupe, summaries, timestamp extraction). See
-# docs/knowledge-graphiti-pivot-design.md §5.1 / §10.
-DEFAULT_GRAPHITI_EXTRACTION_TUNING_PROFILE_ID = "graphiti_extraction"
-DEFAULT_GRAPHITI_SMALL_TUNING_PROFILE_ID = "graphiti_small"
-
-
-def default_tuning_profiles() -> dict[str, TuningProfile]:
-    return {
-        DEFAULT_CHAT_TUNING_PROFILE_ID: TuningProfile(
-            label="Balanced chat",
-            locked=True,
-            temperature=0.3,
-            max_tokens=2048,
-            thinking=None,
-        ),
-        # Doubles as the default profile for the chat retrieval agent (memory.retrieval.tuning_profile),
-        # hence the label — deterministic (temp 0), roomy budget, light reasoning.
-        DEFAULT_MEMORY_TUNING_PROFILE_ID: TuningProfile(
-            label="Retrieval Agent Profile",
-            locked=True,
-            temperature=0,
-            max_tokens=8192,
-            thinking="low",
-        ),
-        DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID: TuningProfile(
-            label="Knowledge answering",
-            locked=True,
-            temperature=0.2,
-            max_tokens=1600,
-            thinking=None,
-        ),
-        DEFAULT_KNOWLEDGE_REWRITE_TUNING_PROFILE_ID: TuningProfile(
-            label="Knowledge query rewrite",
-            locked=True,
-            # Deterministic normalization + keyword extraction. Reasoning is disabled on
-            # purpose: a reasoning model would spend the token budget thinking and never emit
-            # the structured JSON. max_tokens only needs to cover the small JSON envelope.
-            temperature=0.0,
-            max_tokens=1024,
-            thinking="off",
-        ),
-        DEFAULT_KNOWLEDGE_GRAPH_EXTRACTION_TUNING_PROFILE_ID: TuningProfile(
-            label="Knowledge graph extraction (L3)",
-            locked=True,
-            # Single structured-output call per chunk → typed entities + relations.
-            # Deterministic (temp=0) so re-ingest of the same chunk produces the same
-            # graph state. Reasoning off (we want JSON, not CoT). max_tokens generous
-            # because a 1200-token chunk can yield many small entity/relation rows.
-            temperature=0.0,
-            max_tokens=4096,
-            thinking="off",
-        ),
-        DEFAULT_KNOWLEDGE_GRAPH_DISAMBIGUATION_TUNING_PROFILE_ID: TuningProfile(
-            label="Knowledge graph entity disambiguation (L3)",
-            locked=True,
-            # Tiny structured-output decision: "does this mention match candidate X?"
-            # Bounded output keeps cost negligible per ambiguous mention.
-            temperature=0.0,
-            max_tokens=512,
-            thinking="off",
-        ),
-        DEFAULT_GRAPHITI_EXTRACTION_TUNING_PROFILE_ID: TuningProfile(
-            label="Graphiti extraction",
-            locked=True,
-            # Graphiti's main extraction + edge model (ModelSize.medium). MUST be a
-            # structured-output-capable model — the README warns weak models cause
-            # schema/ingestion failures. Deterministic; reasoning off (we want JSON);
-            # generous budget for multi-entity episodes.
-            temperature=0.0,
-            max_tokens=4096,
-            thinking="off",
-        ),
-        DEFAULT_GRAPHITI_SMALL_TUNING_PROFILE_ID: TuningProfile(
-            label="Graphiti small (sub-steps)",
-            locked=True,
-            # ModelSize.small: node dedupe, summaries, timestamp extraction. Cheaper
-            # than the main tier but bigger than a yes/no (summaries need room).
-            temperature=0.0,
-            max_tokens=2048,
-            thinking="off",
-        ),
-    }
-
-
 # ---------------------------------------------------------------------------
-# Image generation profiles (image-world analog of TuningProfile)
+# Image generation profiles
 # ---------------------------------------------------------------------------
 
 
@@ -257,8 +159,8 @@ class ImageProfile(BaseModel):
     """Named image-generation recipe: model + diffusion params + prompt scaffolding.
 
     The scaffolding fields (``style_prefix`` / ``style_suffix``) wrap the caller's prompt
-    so a profile is a reusable *recipe*, not just numbers — the image analog of
-    ``tts_instructions``. ``size`` is a hint; fixed-resolution providers (flux-1-schnell:
+    so a profile is a reusable *recipe*, not just numbers — the image analog of a voice
+    profile's style. ``size`` is a hint; fixed-resolution providers (flux-1-schnell:
     1024x1024) ignore it. Hard limits (max steps, prompt length) live in the catalog and
     are clamped by the provider implementation.
     """
@@ -373,7 +275,7 @@ DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT = load_prompt("memory_chat_retrieval_
 # (``graph.eval.answer_prompts``), so its built-in default text is carried by the locked
 # ``default`` profile (see ``default_answer_prompts``), which doubles as the UI's "Restore default"
 # source. Pruning by flat path no longer applies to it (a dict is always materialized, like
-# ``tuning_profiles`` / ``image_profiles``).
+# ``image_profiles``).
 PROMPT_DEFAULTS: dict[str, str] = {
     "knowledge.answering.prompt": DEFAULT_KNOWLEDGE_ANSWERING_PROMPT,
     "knowledge.rewrite.prompt": DEFAULT_KNOWLEDGE_REWRITE_PROMPT,
@@ -491,8 +393,7 @@ def seed_default_profiles(current: dict[str, _ProfileT], defaults: dict[str, _Pr
 
     A missing default is added outright; an existing one is re-marked locked (it's code-owned) and
     gets the default label only when its own is blank — user-tuned values on a stored copy are left
-    intact. Shared by the tuning- and image-profile validators (the seeding step, before the
-    reference checks)."""
+    intact. Used by the image-profile validator (the seeding step, before the reference check)."""
     for profile_id, default_profile in defaults.items():
         existing = current.get(profile_id)
         if existing is None:

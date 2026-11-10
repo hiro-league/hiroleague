@@ -5,6 +5,9 @@
  * - Profiles: listed by `GET /api/ai/profiles` (with today's use and readiness); created, changed
  *   and deleted through the preferences PATCH (`ai.profiles.<id>`), the way Image Lab edits
  *   `image_profiles`. The server validates the fallback chain too; the editor checks it first.
+ * - Hiro's jobs (Phase 7b step 5): the same list returns `jobs` (each job's field → one profile);
+ *   a job's pick is a preferences PATCH of its field. A job's default profile (`preset`) can't be
+ *   deleted; Restore default (`POST /api/ai/profiles/<id>/restore-default`) resets its tuning.
  * - Try it: `POST /api/ai/try` with the editor's draft (saved or not).
  * - Uses: `GET /api/ai/uses` per extension (new / removed marked by the server), set / forget /
  *   refresh through their routes.
@@ -26,6 +29,7 @@ import {
   planSignOut,
   planTest,
   refreshAiUses,
+  restoreAiProfileDefault,
   setAiUse,
   setLocalServer,
   tryAiProfile,
@@ -42,6 +46,7 @@ import type { AiProfile as AiProfilePrefs } from '$lib/api/generated/preferences
 import { patchPreferences } from '$lib/api/preferences';
 import type { Notify } from '$lib/ui/toast-types';
 import {
+  jobFromRow,
   localModelCatalogRows,
   planModelCatalogRows,
   profileFromRow,
@@ -60,7 +65,7 @@ import {
   temperatureNote,
   thinkingFor
 } from './ai-profile-rules';
-import type { AiCatalogModelRow, AiProfile, AiProviderKind, AiTryResult, AiUse, AiUsesGroup } from './ai-types';
+import type { AiCatalogModelRow, AiJob, AiProfile, AiProviderKind, AiTryResult, AiUse, AiUsesGroup } from './ai-types';
 
 export type AiController = ReturnType<typeof createAiController>;
 
@@ -97,7 +102,9 @@ function blankProfile(id: string): AiProfile {
     instructions: '',
     budget: { costPerDay: 1, perHour: null, atOnce: 1 },
     fallbackId: null,
-    usage: { todayAsks: 0, todayCost: 0, thisHour: 0 }
+    usage: { todayAsks: 0, todayCost: 0, thisHour: 0 },
+    preset: null,
+    jobs: []
   };
 }
 
@@ -117,6 +124,9 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
   let rawUses = $state<Record<string, string | null>>({});
   let profilesLoading = $state(true);
   let profilesError = $state<string | null>(null);
+  /** Phase 7b step 5: Hiro's own jobs, each pointing at one profile (from the profiles list). */
+  let jobs = $state<AiJob[]>([]);
+  let jobBusy = $state<Record<string, boolean>>({});
 
   // ── uses ──────────────────────────────────────────────────────────────
   let uses = $state<AiUse[]>([]);
@@ -227,6 +237,7 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
       const payload = await listAiProfiles();
       profiles = payload.data.profiles.map(profileFromRow);
       rawUses = payload.data.uses ?? {};
+      jobs = (payload.data.jobs ?? []).map(jobFromRow);
       profilesError = null;
     } catch (err) {
       profilesError = errorText(err, 'Could not load the AI profiles.');
@@ -297,6 +308,8 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
 
   let deletingId = $state<string | null>(null);
   let deleting = $state(false);
+  let restoringId = $state<string | null>(null);
+  let restoring = $state(false);
 
   // ── try it (inside the editor) ────────────────────────────────────────
   let tryPrompt = $state('Is anyone at the front door?');
@@ -313,7 +326,17 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     return findModel(providers, profile.model);
   }
 
-  /** What would break if this profile went away: uses pointing at it, profiles falling back to it. */
+  /** Hiro's jobs whose own field points at this profile, by name ("Hiro's chat, Eval: judge"). */
+  function jobsUsing(id: string): string[] {
+    return jobs.filter((j) => j.profileId === id).map((j) => j.label);
+  }
+
+  function jobLabel(id: string | null): string {
+    return (id && jobs.find((j) => j.id === id)?.label) || '';
+  }
+
+  /** What would break if this profile went away: uses pointing at it, profiles falling back to it
+   *  (Hiro's jobs are listed apart, by `jobsUsing`). */
   function usedBy(id: string): string[] {
     const useLabels = Object.entries(rawUses)
       .filter(([, pid]) => pid === id)
@@ -342,17 +365,20 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     if (found) openEditor(copy(found), false);
   }
 
-  /** Phase 7b mockup: open the editor on a made-up profile (a job's default); its Save is disabled. */
-  function previewProfile(p: AiProfile) {
-    openEditor(copy(p), false);
-  }
-
   function duplicateProfile(id: string) {
     const found = profiles.find((p) => p.id === id);
     if (!found) return;
     const name = `${found.name} (copy)`;
     openEditor(
-      { ...copy(found), id: profileIdFor(name, takenIds()), name, usage: { todayAsks: 0, todayCost: 0, thisHour: 0 } },
+      {
+        ...copy(found),
+        id: profileIdFor(name, takenIds()),
+        name,
+        usage: { todayAsks: 0, todayCost: 0, thisHour: 0 },
+        // Phase 7b step 5: a copy of a job's default is an ordinary profile (deletable, no Restore).
+        preset: null,
+        jobs: []
+      },
       true
     );
   }
@@ -412,7 +438,9 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     deletingId = id;
   }
 
-  /** Delete in one atomic PATCH: the profile, fallbacks pointing at it, and uses that asked it. */
+  /** Delete in one atomic PATCH: the profile, fallbacks pointing at it, uses that asked it, and Hiro's
+   *  jobs that pointed at it (they borrow their fallback job's profile; the server refuses a job field
+   *  naming a missing profile). A job's default profile has no Delete. */
   async function confirmDelete() {
     const id = deletingId;
     if (!id) return;
@@ -423,9 +451,10 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
       rest[p.id] = profileToPrefs(p.fallbackId === id ? { ...p, fallbackId: null } : p);
     }
     const nextUses = Object.fromEntries(Object.entries(rawUses).map(([key, pid]) => [key, pid === id ? null : pid]));
+    const jobEdits = Object.fromEntries(jobs.filter((j) => j.profileId === id).map((j) => [j.path, null]));
     deleting = true;
     try {
-      await patchPreferences({ 'ai.profiles': rest, 'ai.uses': nextUses });
+      await patchPreferences({ 'ai.profiles': rest, 'ai.uses': nextUses, ...jobEdits });
       notify('success', `Deleted ${name}.`);
       deletingId = null;
       await Promise.all([loadProfiles(), loadUses()]);
@@ -433,6 +462,54 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
       notify('error', errorText(err, 'Could not delete the profile.'));
     } finally {
       deleting = false;
+    }
+  }
+
+  // ── Hiro's jobs (Phase 7b step 5) ─────────────────────────────────────
+
+  function askRestore(id: string) {
+    restoringId = id;
+  }
+
+  /** Restore default: the job's preset tuning back on its default profile (model, limits, fallback kept). */
+  async function confirmRestore() {
+    const id = restoringId;
+    if (!id) return;
+    const name = profileName(id);
+    restoring = true;
+    try {
+      await restoreAiProfileDefault(id);
+      notify('success', `${name} is back to its default settings.`);
+      restoringId = null;
+      await loadProfiles();
+    } catch (err) {
+      notify('error', errorText(err, 'Could not restore the profile.'));
+    } finally {
+      restoring = false;
+    }
+  }
+
+  /** Point one of Hiro's jobs at a profile ('' = not set: it borrows its fallback job's profile). */
+  async function setJobProfile(jobId: string, profileId: string) {
+    const job = jobs.find((j) => j.id === jobId);
+    if (!job) return;
+    jobBusy = { ...jobBusy, [jobId]: true };
+    try {
+      await patchPreferences({ [job.path]: profileId || null });
+      const parent = jobLabel(job.fallsBackTo);
+      notify(
+        'success',
+        profileId
+          ? `${job.label} now asks ${profileName(profileId) || profileId}.`
+          : parent
+            ? `${job.label} now borrows ${parent}'s profile.`
+            : `${job.label} is off.`
+      );
+      await loadProfiles();
+    } catch (err) {
+      notify('error', errorText(err, 'Could not change the profile.'));
+    } finally {
+      jobBusy = { ...jobBusy, [jobId]: false };
     }
   }
 
@@ -746,6 +823,18 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     get profilesError() {
       return profilesError;
     },
+    get jobs() {
+      return jobs;
+    },
+    get jobBusy() {
+      return jobBusy;
+    },
+    get restoringId() {
+      return restoringId;
+    },
+    get restoring() {
+      return restoring;
+    },
     get uses() {
       return uses;
     },
@@ -880,9 +969,10 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     profileName,
     modelOf,
     usedBy,
+    jobsUsing,
+    jobLabel,
     newProfile,
     editProfile,
-    previewProfile,
     duplicateProfile,
     closeEditor,
     setDraftModel,
@@ -890,6 +980,10 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     askDelete,
     cancelDelete: () => (deletingId = null),
     confirmDelete,
+    askRestore,
+    cancelRestore: () => (restoringId = null),
+    confirmRestore,
+    setJobProfile,
     setUseProfile,
     refreshUses,
     forgetUse,

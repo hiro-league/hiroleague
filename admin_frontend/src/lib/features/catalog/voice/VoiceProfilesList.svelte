@@ -15,7 +15,7 @@
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
   import type { VoiceProfileRow } from '$lib/api/voice';
   import { ADMIN_SECTION_HEADING_LG } from '$lib/styling/admin-tokens';
-  import SourceFilter, { type SourceOption } from '$lib/mockups/SourceFilter.svelte';
+  import SourceFilter, { type SourceOption } from '$lib/components/page/SourceFilter.svelte';
   import { sourceOf } from './voice-format';
   import type { VoiceController } from './voice-controller.svelte';
 
@@ -32,22 +32,33 @@
   const GRID = 'minmax(180px,1.1fr) minmax(200px,1.1fr) minmax(220px,1.5fr) 300px';
   const VOICE_SOURCE = { studio: 'Studio voice', library: 'Voice library', mine: 'Designed voice' } as const;
   const title = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-  // Who a voice profile serves: the extensions of the uses that point at it ("home:speak" → Home).
-  const sourcesOf = (r: VoiceProfileRow) => new Set(r.used_by.map((k) => title(k.split(':')[0])));
-  const sources = $derived([...new Set(ctrl.profiles.flatMap((r) => [...sourcesOf(r)]))].sort());
+  // Who a voice profile serves: the extensions of the uses that point at it ("home:speak" → Home), and
+  // Hiro when it is Hiro's own voice (Phase 7b step 5: `voice.hiro_profile`).
+  const HIRO = 'Hiro';
+  const isHiroVoice = (r: VoiceProfileRow) => ctrl.hiroProfile === r.id;
+  const sourcesOf = (r: VoiceProfileRow) =>
+    new Set([...(isHiroVoice(r) ? [HIRO] : []), ...r.used_by.map((k) => title(k.split(':')[0]))]);
+  const isUnused = (r: VoiceProfileRow) => !r.used_by.length && !isHiroVoice(r);
+  const sources = $derived(
+    [...new Set(ctrl.profiles.flatMap((r) => [...sourcesOf(r)]))].sort((a, b) =>
+      a === HIRO ? -1 : b === HIRO ? 1 : a.localeCompare(b)
+    )
+  );
   const options: SourceOption[] = $derived([
     { id: 'all', label: 'All', count: ctrl.profiles.length },
     ...sources.map((s) => ({ id: s, label: s, count: ctrl.profiles.filter((r) => sourcesOf(r).has(s)).length })),
-    { id: 'unused', label: 'Unused', count: ctrl.profiles.filter((r) => !r.used_by.length).length }
+    { id: 'unused', label: 'Unused', count: ctrl.profiles.filter(isUnused).length }
   ]);
   let source = $state('all');
   const rows = $derived(
     source === 'all'
       ? ctrl.profiles
       : source === 'unused'
-        ? ctrl.profiles.filter((r) => !r.used_by.length)
+        ? ctrl.profiles.filter(isUnused)
         : ctrl.profiles.filter((r) => sourcesOf(r).has(source))
   );
+  const usedByLine = (r: VoiceProfileRow) =>
+    [...(isHiroVoice(r) ? ["Hiro's voice"] : []), ...r.used_by.map(ctrl.useLabel)].join(', ');
   let confirmDelete = $state<string | null>(null);
   let deleteError = $state<string | null>(null);
 
@@ -93,9 +104,9 @@
             <span class="grid content-start gap-1">
               <span class="flex items-center gap-2">
                 <span class="font-sans text-sm font-semibold">{r.label}</span>
-                {#if !r.used_by.length}<Badge variant="outline">Unused</Badge>{/if}
+                {#if isUnused(r)}<Badge variant="outline">Unused</Badge>{/if}
               </span>
-              {#if r.used_by.length}<span class="text-xs text-muted-foreground">Used by {r.used_by.map(ctrl.useLabel).join(', ')}</span>{/if}
+              {#if !isUnused(r)}<span class="text-xs text-muted-foreground">Used by {usedByLine(r)}</span>{/if}
             </span>
             <span class="grid content-start gap-1">
               <span class="truncate font-sans text-sm">{r.model.split(':')[1]}</span>
@@ -119,7 +130,9 @@
               </span>
               {#if confirmDelete === r.id}
                 <span class="flex flex-wrap items-center justify-end gap-2 text-xs">
-                  Delete "{r.label}"?{r.used_by.length ? ' Its uses will have no voice.' : ''}
+                  Delete "{r.label}"?{r.used_by.length ? ' Its uses will have no voice.' : ''}{isHiroVoice(r)
+                    ? " Hiro won't speak its replies until another voice is picked."
+                    : ''}
                   <Button size="sm" variant="destructive-outline" onclick={() => remove(r)}>Delete</Button>
                   <Button size="sm" variant="ghost" onclick={() => (confirmDelete = null)}>Cancel</Button>
                 </span>

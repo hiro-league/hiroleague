@@ -1,4 +1,4 @@
-"""Phase 2b helpers: CLI provisioning selection + character warning formatting."""
+"""Phase 2b helpers: CLI provisioning selection + STT construction."""
 
 from __future__ import annotations
 
@@ -11,12 +11,7 @@ from hirocli.commands.provider import (
     interactive_credential_provisioning,
     parse_index_selection,
 )
-from hirocli.domain.available_models import CharacterModelValidation
-from hirocli.domain.model_catalog import DeprecatedModelInfo
 from hirocli.domain.preferences import WorkspacePreferences
-from hirocli.services.tts import create_tts_service
-from hirocli.services.tts.openai_provider import OpenAITTSProvider
-from hirocli.tools.character import character_model_validation_warnings
 
 
 def test_parse_index_selection_all_none_indices() -> None:
@@ -36,42 +31,6 @@ def test_discovered_env_keys_rows_unique_provider_ids() -> None:
     rows = discovered_env_keys_rows()
     ids = [p.id for p, _e, _v in rows]
     assert len(ids) == len(set(ids))
-
-
-def test_character_model_validation_warnings_covers_buckets() -> None:
-    v = CharacterModelValidation(
-        unknown_llm=["u:1"],
-        unknown_voice=["u:2"],
-        deprecated_llm=[
-            DeprecatedModelInfo(
-                model_id="d:1",
-                deprecated_since="2026-01-01",
-                replacement_id="d:2",
-            ),
-        ],
-        deprecated_voice=[
-            DeprecatedModelInfo(
-                model_id="d:v",
-                deprecated_since="2026-01-02",
-                replacement_id=None,
-            ),
-        ],
-        wrong_kind_llm=["wk:l"],
-        wrong_kind_voice=["wk:v"],
-        unavailable_llm=["na:l"],
-        unavailable_voice=["na:v"],
-    )
-    lines = character_model_validation_warnings(v)
-    blob = " ".join(lines)
-    assert "u:1" in blob and "u:2" in blob
-    assert "d:1" in blob and "d:v" in blob
-    assert "wk:l" in blob and "wk:v" in blob
-    assert "na:l" in blob and "na:v" in blob
-
-
-def test_openai_tts_requires_injected_key() -> None:
-    assert not OpenAITTSProvider().is_available()
-    assert not OpenAITTSProvider(api_key=None).is_available()
 
 
 def test_interactive_credential_provisioning_imports_selected(tmp_path: Path) -> None:
@@ -103,45 +62,8 @@ def test_interactive_credential_provisioning_imports_selected(tmp_path: Path) ->
     store.set_api_key.assert_called_once_with("openai", "sk-secret")
 
 
-def test_create_tts_service_injects_credential_store_key(tmp_path: Path) -> None:
-    from hirocli.domain.preferences import LLMPreferences, ResolvedModel
-
-    mock_spec = MagicMock()
-    mock_spec.provider_id = "openai"
-    prefs = WorkspacePreferences(
-        llm=LLMPreferences(default_tts="openai:gpt-4o-mini-tts"),
-    )
-    resolved = ResolvedModel(
-        model_id="openai:gpt-4o-mini-tts",
-        temperature=0.7,
-        max_tokens=1024,
-    )
-    mock_store = MagicMock()
-    mock_store.get_api_key.return_value = "sk-from-store"
-    mock_store.is_configured.side_effect = lambda pid: pid == "openai"
-
-    mock_tts_row = MagicMock()
-    mock_tts_row.model_kind = "tts"
-
-    with (
-        patch("hirocli.domain.preferences.load_preferences", return_value=prefs),
-        patch("hirocli.domain.workspace.workspace_id_for_path", return_value="w1"),
-        patch("hirocli.domain.preferences.resolve_llm", return_value=resolved),
-        patch("hirocli.domain.model_catalog.get_model_catalog") as gmc,
-        patch("hirocli.domain.credential_store.CredentialStore", return_value=mock_store),
-    ):
-        cat = gmc.return_value
-        cat.get_model.return_value = mock_spec
-        cat.list_models.return_value = [mock_tts_row]
-        svc = create_tts_service(tmp_path)
-    assert svc is not None
-    mock_store.get_api_key.assert_called_once_with("openai")
-    assert svc.providers
-    assert getattr(svc.providers[0], "_api_key", None) == "sk-from-store"
-
-
 def test_create_stt_service_injects_credential_store_key(tmp_path: Path) -> None:
-    from hirocli.domain.preferences import LLMPreferences, ResolvedModel
+    from hirocli.domain.preferences import LLMPreferences
     from hirocli.services.stt import create_stt_service
 
     mock_spec = MagicMock()
@@ -149,17 +71,12 @@ def test_create_stt_service_injects_credential_store_key(tmp_path: Path) -> None
     prefs = WorkspacePreferences(
         llm=LLMPreferences(default_stt="openai:gpt-4o-transcribe"),
     )
-    resolved = ResolvedModel(
-        model_id="openai:gpt-4o-transcribe",
-        temperature=0.7,
-        max_tokens=1024,
-    )
     mock_store = MagicMock()
     mock_store.get_api_key.return_value = "sk-stt"
     with (
         patch("hirocli.domain.preferences.load_preferences", return_value=prefs),
         patch("hirocli.domain.workspace.workspace_id_for_path", return_value="w1"),
-        patch("hirocli.domain.preferences.resolve_llm", return_value=resolved),
+        patch("hirocli.domain.preferences.resolve_stt_model", return_value="openai:gpt-4o-transcribe"),
         patch("hirocli.domain.model_catalog.get_model_catalog") as gmc,
         patch("hirocli.domain.credential_store.CredentialStore", return_value=mock_store),
     ):

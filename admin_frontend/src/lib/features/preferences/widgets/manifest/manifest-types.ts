@@ -7,7 +7,7 @@
  * `manifestFieldPaths` / `manifestSections`), so the search index can't drift from what renders.
  *
  * Most fields are fully data-driven (number / text / toggle / textarea / select / model / embedder /
- * modelProfile + grid / column / panel / gated layout). To gate a card's WHOLE body, wrap its fields
+ * aiProfile / voiceProfile + grid / column / panel / gated layout). To gate a card's WHOLE body, wrap its fields
  * in a single `gated` field spec (banner + disabled fieldset — e.g. the reranker card only applies
  * when `search_recipe === 'cross_encoder'`); no separate card-level gating exists. A card CAN carry
  * `validate` — the one card-level thing field specs can't express: a cross-field error registered via
@@ -67,23 +67,16 @@ export type PrefFieldSpec =
       /** Render the inline local-model download affordance below the picker. */
       download?: 'embedder' | 'reranker';
     }
-  /** Standalone tuning-profile picker (not paired with a model — e.g. the default chat profile). */
-  | { kind: 'tuningProfile'; path: PreferencePath; scope?: 'llm' | 'memory' | 'knowledge' }
   /** Embedding model picker with a "locked while indexed" badge + inline download (embedders are
    * dimension-bound). `lockedPath` is the backend-computed `*_locked` flag; the empty box inherits
    * `llm.default_embedder`. Used by the graph + knowledge embedders. */
   | { kind: 'embedder'; path: PrefModelIdPath; lockedPath: PreferencePath; heading: string }
-  | {
-      kind: 'modelProfile';
-      modelPath: PrefModelIdPath;
-      profilePath: PreferencePath;
-      modelKind: PrefModelKind;
-      scope?: 'llm' | 'memory' | 'knowledge';
-      heading?: string;
-      /** Path whose value is shown as the inherited fallback in the empty model box (e.g. an unset
-       *  override falling back to `llm.default_chat`). */
-      emptyFallback?: PreferencePath;
-    }
+  /** Phase 7b step 5: one of Hiro's jobs → ONE AI profile (an `ai_profile_ref` field; replaced the
+   *  model + tuning-profile pair). A select of `ai.profiles` (no plan-tool models), the picked profile
+   *  in one line (or what the job falls back to), and a link to Catalog → Profiles. */
+  | { kind: 'aiProfile'; path: PreferencePath }
+  /** Phase 7b step 5: Hiro's own voice → a voice profile (a `voice_profile_ref` field). */
+  | { kind: 'voiceProfile'; path: PreferencePath }
   /** Responsive field grid (the 2-col default; `cols: 3` for dense numeric rows). */
   | { kind: 'grid'; cols?: 2 | 3; fields: PrefFieldSpec[] }
   /** A single stacked column (`grid gap-3`) — one grid cell holding several children. */
@@ -166,11 +159,10 @@ export function fieldSpecPaths(spec: PrefFieldSpec): string[] {
     case 'textarea':
     case 'select':
     case 'model':
-    case 'tuningProfile':
     case 'embedder':
+    case 'aiProfile':
+    case 'voiceProfile':
       return [spec.path];
-    case 'modelProfile':
-      return [spec.modelPath, spec.profilePath];
     case 'prompt':
       return [spec.path];
     case 'promptLibrary':

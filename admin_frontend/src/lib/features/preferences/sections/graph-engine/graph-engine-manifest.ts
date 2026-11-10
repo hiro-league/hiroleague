@@ -92,25 +92,16 @@ export const GRAPH_ENGINE_MANIFEST: PrefTabManifest = {
       id: 'graphExtraction',
       title: 'Graph Extraction',
       description:
-        'Everything that builds the graph at ingest — the entity ontology, the heavy extraction model, the cheaper sub-step model, and the embedder. Changing any of these needs a re-ingest to rebuild the graph.',
+        'Everything that builds the graph at ingest — the entity ontology, the heavy extraction AI profile, the cheaper sub-step profile, and the embedder. Changing any of these needs a re-ingest to rebuild the graph.',
       bodyId: PREFERENCES_SECTION_BODY_IDS.graphExtraction,
       collapsible: true,
       body: [
         {
           kind: 'grid',
           fields: [
-            {
-              kind: 'modelProfile',
-              modelKind: 'chat',
-              modelPath: 'graph.extraction_model',
-              profilePath: 'graph.extraction_tuning_profile'
-            },
-            {
-              kind: 'modelProfile',
-              modelKind: 'chat',
-              modelPath: 'graph.small_model',
-              profilePath: 'graph.small_tuning_profile'
-            },
+            // Phase 7b step 5: one AI profile each (was a model + a tuning profile).
+            { kind: 'aiProfile', path: 'graph.extraction_profile' },
+            { kind: 'aiProfile', path: 'graph.small_profile' },
             // Embedder (lock badge + download) + ontology share one grid column so the column beside
             // the tall instructions textarea stays filled.
             {
@@ -202,20 +193,15 @@ export const GRAPH_ENGINE_MANIFEST: PrefTabManifest = {
       id: 'memoryRetrievalModels',
       title: 'Chat Retrieval Agent Model & Prompt',
       description:
-        'Model, profile, and system prompt for the CHAT agentic memory-retrieval loop (the Chat Retrieval Agent caps below feed its placeholders). Chat-only; the eval copy lives on the Eval tab.',
+        'AI profile and system prompt for the CHAT agentic memory-retrieval loop (the Chat Retrieval Agent caps below feed its placeholders). Chat-only; the eval copy lives on the Eval tab.',
       bodyId: PREFERENCES_SECTION_BODY_IDS.memoryRetrievalModels,
       collapsible: true,
       body: [
         {
           kind: 'grid',
           fields: [
-            {
-              kind: 'modelProfile',
-              modelKind: 'chat',
-              modelPath: 'memory.retrieval.model',
-              profilePath: 'memory.retrieval.tuning_profile',
-              emptyFallback: 'llm.default_chat'
-            },
+            // Phase 7b step 5: one AI profile (was a model + a tuning profile); unset borrows Hiro's chat.
+            { kind: 'aiProfile', path: 'memory.retrieval.profile' },
             {
               kind: 'promptLibrarySelect',
               dictPath: 'graph.eval.retrieval_agent_prompts',

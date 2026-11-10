@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { CharacterResolvedPayload, CharacterResolvedRow } from '$lib/api/characters';
+import type { CharacterResolvedPayload } from '$lib/api/characters';
 import {
+  appliedTuningLine,
   llmCollapsedSummary,
   resolvedRowDotClass,
   resolvedRowTooltip,
@@ -10,9 +11,9 @@ import {
 function basePayload(over: Partial<CharacterResolvedPayload> = {}): CharacterResolvedPayload {
   return {
     character_id: 'c1',
-    llm_rows: [],
-    llm_workspace_row: null,
-    llm_applied: null,
+    ai_rows: [],
+    ai_workspace_row: null,
+    ai_applied: null,
     voice_rows: [],
     voice_workspace_row: null,
     voice_applied: null,
@@ -21,94 +22,81 @@ function basePayload(over: Partial<CharacterResolvedPayload> = {}): CharacterRes
   };
 }
 
-function row(over: Partial<CharacterResolvedRow> = {}): CharacterResolvedRow {
-  return { model_id: 'm1', status: 'available', ...over };
-}
+const applied = (over: Partial<NonNullable<CharacterResolvedPayload['ai_applied']>> = {}) => ({
+  source: 'character' as const,
+  profile_id: 'hiro-chat',
+  profile_label: "Hiro's chat",
+  model_id: 'google:gemini-flash',
+  temperature: 0.3,
+  max_tokens: 2048,
+  thinking: null,
+  num_ctx: null,
+  ...over
+});
 
 describe('llmCollapsedSummary', () => {
   it('returns placeholder when nothing applied', () => {
     expect(llmCollapsedSummary(basePayload())).toBe('No model resolved');
   });
 
-  it('appends display name from the matching character row', () => {
-    const payload = basePayload({
-      llm_rows: [row({ model_id: 'gpt-x', display_name: 'GPT X' })],
-      llm_applied: { source: 'character', model_id: 'gpt-x', temperature: 0.5, max_tokens: 100 }
-    });
-    expect(llmCollapsedSummary(payload)).toBe('gpt-x · GPT X');
+  it('names the profile that answers and its model', () => {
+    expect(llmCollapsedSummary(basePayload({ ai_applied: applied() }))).toBe("Hiro's chat · google:gemini-flash");
   });
 
-  it('falls back to the workspace row for the display name', () => {
-    const payload = basePayload({
-      llm_workspace_row: row({ model_id: 'ws', display_name: 'Workspace Model' }),
-      llm_applied: { source: 'workspace_fallback', model_id: 'ws', temperature: 0.5, max_tokens: 100 }
-    });
-    expect(llmCollapsedSummary(payload)).toBe('ws · Workspace Model');
+  it('returns just the model when the profile has no name', () => {
+    expect(llmCollapsedSummary(basePayload({ ai_applied: applied({ profile_label: null }) }))).toBe(
+      'google:gemini-flash'
+    );
   });
+});
 
-  it('returns just the id when no display name is found', () => {
-    const payload = basePayload({
-      llm_applied: { source: 'character', model_id: 'bare', temperature: 0.5, max_tokens: 100 }
-    });
-    expect(llmCollapsedSummary(payload)).toBe('bare');
+describe('appliedTuningLine', () => {
+  it('lists temperature, max tokens and thinking (+ context when set)', () => {
+    expect(appliedTuningLine(applied())).toBe('temp 0.3 · max tokens 2,048 · thinking: model default');
+    expect(appliedTuningLine(applied({ thinking: 'low', num_ctx: 8192 }))).toBe(
+      'temp 0.3 · max tokens 2,048 · thinking low · context 8,192'
+    );
   });
 });
 
 describe('voiceCollapsedSummary', () => {
   it('reports disabled voice first, before checking applied', () => {
-    expect(voiceCollapsedSummary(basePayload({ voice_disabled: true }))).toBe(
-      'Voice replies disabled'
-    );
+    expect(voiceCollapsedSummary(basePayload({ voice_disabled: true }))).toBe('Voice replies disabled');
   });
 
-  it('returns placeholder when no TTS model applied', () => {
-    expect(voiceCollapsedSummary(basePayload())).toBe('No TTS model resolved');
+  it('returns placeholder when no voice applied', () => {
+    expect(voiceCollapsedSummary(basePayload())).toBe('No voice resolved');
   });
 
-  it('combines id, display name and voice', () => {
-    const payload = basePayload({
-      voice_rows: [row({ model_id: 'tts-1', display_name: 'Nice TTS' })],
-      voice_applied: {
-        source: 'character',
-        catalog_model_id: 'tts-1',
-        synthesis: { model: 'tts-1', voice: 'alloy', instructions: '' }
-      }
-    });
-    expect(voiceCollapsedSummary(payload)).toBe('tts-1 · Nice TTS · alloy');
-  });
-
-  it('omits the voice segment when no voice is set', () => {
+  it('combines the profile name, model and voice', () => {
     const payload = basePayload({
       voice_applied: {
-        source: 'workspace_fallback',
-        catalog_model_id: 'tts-2',
-        synthesis: { model: 'tts-2', voice: '', instructions: '' }
+        source: 'hiro',
+        profile_id: 'hiro-voice',
+        label: "Hiro's voice",
+        model: 'openai:gpt-4o-mini-tts',
+        voice: 'sage',
+        style: ''
       }
     });
-    expect(voiceCollapsedSummary(payload)).toBe('tts-2');
+    expect(voiceCollapsedSummary(payload)).toBe("Hiro's voice · openai:gpt-4o-mini-tts · sage");
   });
 });
 
 describe('resolvedRowTooltip', () => {
-  it('maps every status to a non-empty hint', () => {
-    for (const status of [
-      'available',
-      'unavailable',
-      'unknown',
-      'wrong_kind',
-      'deprecated'
-    ] as const) {
+  it('maps every AI and voice row status to a non-empty hint', () => {
+    for (const status of ['available', 'unavailable', 'plan', 'missing', 'no_key'] as const) {
       expect(resolvedRowTooltip(status).length).toBeGreaterThan(0);
     }
   });
 });
 
 describe('resolvedRowDotClass', () => {
-  it('colors usable, broken and deprecated states distinctly', () => {
+  it('colors usable, skipped and plan-tool rows distinctly', () => {
     expect(resolvedRowDotClass('available')).toBe('bg-emerald-500');
     expect(resolvedRowDotClass('unavailable')).toBe('bg-red-500');
-    expect(resolvedRowDotClass('wrong_kind')).toBe('bg-red-500');
-    expect(resolvedRowDotClass('deprecated')).toBe('bg-amber-500');
-    expect(resolvedRowDotClass('unknown')).toBe('bg-muted-foreground/50');
+    expect(resolvedRowDotClass('no_key')).toBe('bg-red-500');
+    expect(resolvedRowDotClass('missing')).toBe('bg-red-500');
+    expect(resolvedRowDotClass('plan')).toBe('bg-amber-500');
   });
 });

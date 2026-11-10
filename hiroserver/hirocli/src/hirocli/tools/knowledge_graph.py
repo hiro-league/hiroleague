@@ -246,9 +246,9 @@ async def _run_graph_ingest_for_documents(
     )
     if svc is None:
         raise RuntimeError(
-            "knowledge_graph_ingest: no extraction model configured. Set "
-            "knowledge.graph.extraction_model or knowledge.answering.model (or "
-            "llm.default_chat) and ensure the provider key is configured."
+            "knowledge_graph_ingest: no extraction model configured. Pick an AI profile for "
+            "graph.extraction_profile (or Hiro's chat, llm.chat_profile) and make sure its "
+            "provider key is configured."
         )
 
     # One ledger run per document (per ingest_chunks call) → each document's graph
@@ -342,9 +342,9 @@ def _open_graph_service_for_teardown(workspace_path: Path) -> GraphitiMemoryServ
     )
     if svc is None:
         raise RuntimeError(
-            "knowledge graph teardown: no extraction model configured. Set "
-            "knowledge.graph.extraction_model or knowledge.answering.model (or "
-            "llm.default_chat) and ensure the provider key is configured."
+            "knowledge graph teardown: no extraction model configured. Pick an AI profile for "
+            "graph.extraction_profile (or Hiro's chat, llm.chat_profile) and make sure its "
+            "provider key is configured."
         )
     return svc
 

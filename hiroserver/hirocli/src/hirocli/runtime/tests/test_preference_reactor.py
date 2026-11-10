@@ -58,19 +58,19 @@ def test_select_changes_exact_leaf_match() -> None:
 
 def test_select_changes_below_prefix() -> None:
     changes = {
-        "tuning_profiles.balanced_chat.temperature": (0.7, 0.4),
-        "llm.default_chat": ("a", "b"),
+        "ai.profiles.hiro-chat.temperature": (0.7, 0.4),
+        "llm.chat_profile": ("a", "b"),
     }
-    assert _select_changes_for_prefix(changes, "tuning_profiles") == {
-        "tuning_profiles.balanced_chat.temperature": (0.7, 0.4),
+    assert _select_changes_for_prefix(changes, "ai.profiles") == {
+        "ai.profiles.hiro-chat.temperature": (0.7, 0.4),
     }
 
 
 def test_select_changes_above_prefix() -> None:
-    """A whole-subtree replace at ``tuning_profiles`` matches a prefix below it."""
-    changes = {"tuning_profiles": ({}, {"balanced_chat": {"temperature": 0.4}})}
+    """A whole-subtree replace at ``ai.profiles`` matches a prefix below it."""
+    changes = {"ai.profiles": ({}, {"hiro-chat": {"temperature": 0.4}})}
     assert _select_changes_for_prefix(
-        changes, "tuning_profiles.balanced_chat.temperature",
+        changes, "ai.profiles.hiro-chat.temperature",
     ) == changes
 
 

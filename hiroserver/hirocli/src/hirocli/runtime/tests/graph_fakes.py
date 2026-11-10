@@ -35,7 +35,7 @@ from hirocli.domain.memory import MemoryAddResult
 from hirocli.runtime.agent_graph.ledger import LedgerSink
 from hirocli.services.knowledge.models import KnowledgeSearchHit
 from hirocli.services.stt.provider import TranscriptionResult
-from hirocli.services.tts.provider import TTSResult
+from hirocli.services.voice.kit import Speech
 
 # ---------------------------------------------------------------------------
 # Recording ledger sink — captures the row dicts each node flushes
@@ -228,25 +228,22 @@ class FakeVision:
         return self._description
 
 
-class FakeTTS:
-    def __init__(self, *, mode: str = "ok") -> None:
+class FakeVoiceEngine:
+    """Stands in for ``services.voice.engine.synthesize`` (Phase 7b step 5: voice replies speak with
+    voice profiles). Patch it in with ``monkeypatch.setattr(engine, "synthesize", fake.synthesize)``."""
+
+    def __init__(self, *, mode: str = "ok", seconds: float = 1.0) -> None:
         self._mode = mode
+        self._seconds = seconds
+        self.calls: list[tuple[Any, str]] = []
 
-    def is_available(self) -> bool:
-        return self._mode != "unavailable"
-
-    async def synthesize(self, text: str, *, model: str, voice: str, instructions: str | None = None) -> TTSResult:
+    async def synthesize(self, workspace_path: Any, profile: Any, text: str) -> Speech:
+        self.calls.append((profile, text))
         if self._mode == "fail":
             raise RuntimeError("tts boom")
-        return TTSResult(
-            audio_bytes=b"AAAA",
-            mime_type="audio/mpeg",
-            duration_ms=1200,
-            model=model or "fake:tts",
-            voice=voice or "alloy",
-            provider="fake",
-            usage_metadata={},
-        )
+        rate = 24000
+        pcm = b"\x00\x10" * int(rate * self._seconds)
+        return Speech(pcm, rate, self._seconds, 0.001, True, tokens_in=7, tokens_out=25)
 
 
 class FakeMemory:
@@ -436,7 +433,6 @@ def make_agent_services(
     preferences: Any = None,
     stt: Any = None,
     vision: Any = None,
-    tts: Any = None,
     memory: Any = None,
     credentials: Any = None,
     checkpointer: Any = None,
@@ -450,7 +446,6 @@ def make_agent_services(
         preferences=preferences,
         stt=stt,
         vision=vision,
-        tts=tts,
         memory=memory,
         credentials=credentials,
         checkpointer=checkpointer,

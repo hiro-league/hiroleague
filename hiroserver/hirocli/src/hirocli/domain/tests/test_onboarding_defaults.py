@@ -15,7 +15,7 @@ from hirocli.domain.onboarding_defaults import (
     apply_suggested_defaults,
     compute_suggested_defaults,
 )
-from hirocli.domain.preferences import LLMPreferences, WorkspacePreferences
+from hirocli.domain.preferences import WorkspacePreferences
 
 
 @pytest.fixture(autouse=True)
@@ -82,7 +82,7 @@ def test_compute_first_provider_wins_chat(
     store.set_api_key("a", "x")
     store.set_api_key("b", "y")
     ams = AvailableModelsService(cat, store)
-    prefs = LLMPreferences()
+    prefs = WorkspacePreferences()
     suggestions = compute_suggested_defaults(["a", "b"], cat, ams, prefs)
     assert len(suggestions) == 1
     assert suggestions[0].model_id == "a:chat1"
@@ -103,7 +103,8 @@ def test_compute_skips_filled_slot(
     )
     store.set_api_key("a", "x")
     ams = AvailableModelsService(cat, store)
-    prefs = LLMPreferences(default_chat="manual:chat")
+    prefs = WorkspacePreferences()
+    prefs.llm.chat_profile = "manual"  # Phase 7b step 5: the chat slot is Hiro's chat AI profile
     suggestions = compute_suggested_defaults(["a"], cat, ams, prefs)
     assert suggestions == []
 
@@ -116,6 +117,8 @@ def test_apply_sets_chat_default_only(
         "hirocli.domain.credential_store.get_model_catalog",
         lambda: cat,
     )
+    # The AI profile validator checks the model against the catalog.
+    monkeypatch.setattr("hirocli.domain.model_catalog.get_model_catalog", lambda: cat)
     store = CredentialStore(
         tmp_path / "ws",
         "wid",
@@ -124,10 +127,13 @@ def test_apply_sets_chat_default_only(
     store.set_api_key("a", "x")
     ams = AvailableModelsService(cat, store)
     prefs = WorkspacePreferences()
-    suggestions = compute_suggested_defaults(["a"], cat, ams, prefs.llm)
+    suggestions = compute_suggested_defaults(["a"], cat, ams, prefs)
     applied = apply_suggested_defaults(prefs, suggestions)
     assert len(applied) == 1
-    assert prefs.llm.default_chat == "a:chat1"
+    # Phase 7b step 5: a hiro-chat AI profile with the chat preset tuning, picked for Hiro's chat.
+    assert prefs.llm.chat_profile == "hiro-chat"
+    profile = prefs.ai.profiles["hiro-chat"]
+    assert (profile.model, profile.preset, profile.temperature, profile.max_tokens) == ("a:chat1", "chat", 0.3, 2048)
 
 
 def test_apply_onboarding_defaults_to_preferences_persists(
@@ -142,6 +148,7 @@ def test_apply_onboarding_defaults_to_preferences_persists(
         "hirocli.domain.onboarding_defaults.get_model_catalog",
         lambda: cat,
     )
+    monkeypatch.setattr("hirocli.domain.model_catalog.get_model_catalog", lambda: cat)
     ws = tmp_path / "ws"
     store = CredentialStore(
         ws,
@@ -155,4 +162,5 @@ def test_apply_onboarding_defaults_to_preferences_persists(
     from hirocli.domain.preferences import load_preferences
 
     prefs2 = load_preferences(ws)
-    assert prefs2.llm.default_chat == "a:chat1"
+    assert prefs2.llm.chat_profile == "hiro-chat"
+    assert prefs2.ai.profiles["hiro-chat"].model == "a:chat1"

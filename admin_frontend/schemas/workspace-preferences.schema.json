@@ -171,6 +171,18 @@
           ],
           "default": null,
           "title": "Fallback"
+        },
+        "preset": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Preset"
         }
       },
       "required": [
@@ -184,7 +196,8 @@
         "max_cost_day",
         "max_per_hour",
         "at_once",
-        "fallback"
+        "fallback",
+        "preset"
       ],
       "title": "AiProfile",
       "type": "object"
@@ -282,7 +295,8 @@
           "title": "Eval judge prompt",
           "type": "string"
         },
-        "answer_model": {
+        "answer_profile": {
+          "ai_profile_ref": true,
           "anyOf": [
             {
               "type": "string"
@@ -292,18 +306,11 @@
             }
           ],
           "default": null,
-          "description": "Model the memory-eval answer step uses to answer from recalled context. Null falls back to the knowledge answering model, then default chat. (Knowledge-track answers always use the production answering pipeline, not this.)",
-          "model_kind": "chat",
-          "title": "Eval answer model"
+          "description": "The AI profile the memory-eval answer step uses to answer from recalled context. Empty uses Hiro's chat model. (Knowledge-track answers always use the knowledge answering job.)",
+          "title": "Eval: answer"
         },
-        "answer_tuning_profile": {
-          "default": "knowledge_answering",
-          "description": "Tuning profile (temperature / max-tokens / thinking) for the eval answer model.",
-          "title": "Eval answer profile",
-          "tuning_profile_ref": true,
-          "type": "string"
-        },
-        "judge_model": {
+        "judge_profile": {
+          "ai_profile_ref": true,
           "anyOf": [
             {
               "type": "string"
@@ -313,18 +320,11 @@
             }
           ],
           "default": null,
-          "description": "Model the LLM judge uses to grade answers against the ideal (both tracks). Null falls back to the knowledge answering model, then default chat.",
-          "model_kind": "chat",
-          "title": "Eval judge model"
+          "description": "The AI profile the LLM judge uses to grade answers against the ideal (both tracks). Empty uses Hiro's chat model. Lower temperature = more repeatable grading.",
+          "title": "Eval: judge"
         },
-        "judge_tuning_profile": {
-          "default": "knowledge_answering",
-          "description": "Tuning profile for the judge model. Lower temperature = more repeatable grading.",
-          "title": "Eval judge profile",
-          "tuning_profile_ref": true,
-          "type": "string"
-        },
-        "retrieval_model": {
+        "retrieval_profile": {
+          "ai_profile_ref": true,
           "anyOf": [
             {
               "type": "string"
@@ -334,16 +334,8 @@
             }
           ],
           "default": null,
-          "description": "Model the agentic retrieval loop uses to plan searches and call the search_memory tool (memory track). Null falls back to the eval answer model, then the knowledge answering model \u2192 default chat.",
-          "model_kind": "chat",
-          "title": "Retrieval agent model"
-        },
-        "retrieval_tuning_profile": {
-          "default": "knowledge_answering",
-          "description": "Tuning profile (temperature / max-tokens / thinking) for the retrieval-agent model.",
-          "title": "Retrieval agent profile",
-          "tuning_profile_ref": true,
-          "type": "string"
+          "description": "The AI profile the agentic retrieval loop (memory track) uses to plan searches and call the search_memory tool. Empty uses the eval answer model.",
+          "title": "Eval: retrieval"
         },
         "show_event_time": {
           "advanced": true,
@@ -423,12 +415,9 @@
         "answer_prompts",
         "active_answer_prompt_id",
         "judge_prompt",
-        "answer_model",
-        "answer_tuning_profile",
-        "judge_model",
-        "judge_tuning_profile",
-        "retrieval_model",
-        "retrieval_tuning_profile",
+        "answer_profile",
+        "judge_profile",
+        "retrieval_profile",
         "show_event_time",
         "show_expired_at",
         "show_superseded",
@@ -454,7 +443,8 @@
           "title": "Graph backend",
           "type": "string"
         },
-        "extraction_model": {
+        "extraction_profile": {
+          "ai_profile_ref": true,
           "anyOf": [
             {
               "type": "string"
@@ -464,18 +454,11 @@
             }
           ],
           "default": null,
-          "description": "The heavy LLM Graphiti uses to read each chunk/turn and pull out entities + facts. Must be structured-output-capable. Null falls back to the answering model, then default chat.",
-          "model_kind": "chat",
-          "title": "Extraction model"
+          "description": "The AI profile Graphiti uses to read each chunk/turn and pull out entities + facts. Must be structured-output-capable; keep it deterministic. Empty uses Hiro's chat model.",
+          "title": "Graph extraction"
         },
-        "extraction_tuning_profile": {
-          "default": "graphiti_extraction",
-          "description": "Tuning profile (temperature / max-tokens / thinking) for the extraction model. Ships deterministic so extraction stays repeatable across runs.",
-          "title": "Extraction profile",
-          "tuning_profile_ref": true,
-          "type": "string"
-        },
-        "small_model": {
+        "small_profile": {
+          "ai_profile_ref": true,
           "anyOf": [
             {
               "type": "string"
@@ -485,16 +468,8 @@
             }
           ],
           "default": null,
-          "description": "Cheaper model for Graphiti's sub-steps \u2014 node dedupe, entity summaries, timestamps. Null falls back to the extraction model.",
-          "model_kind": "chat",
-          "title": "Smaller extraction model"
-        },
-        "small_tuning_profile": {
-          "default": "graphiti_small",
-          "description": "Tuning profile for the cheaper sub-step model (dedupe / summaries / timestamps).",
-          "title": "Smaller extraction profile",
-          "tuning_profile_ref": true,
-          "type": "string"
+          "description": "A cheaper AI profile for Graphiti's sub-steps \u2014 node dedupe, entity summaries, timestamps. Empty uses the graph extraction model.",
+          "title": "Graph small steps"
         },
         "embedder_model": {
           "anyOf": [
@@ -613,10 +588,8 @@
       "type": "object",
       "required": [
         "backend",
-        "extraction_model",
-        "extraction_tuning_profile",
-        "small_model",
-        "small_tuning_profile",
+        "extraction_profile",
+        "small_profile",
         "embedder_model",
         "temporal_default",
         "k_hop",
@@ -652,7 +625,7 @@
       ]
     },
     "ImageProfile": {
-      "description": "Named image-generation recipe: model + diffusion params + prompt scaffolding.\n\nThe scaffolding fields (``style_prefix`` / ``style_suffix``) wrap the caller's prompt\nso a profile is a reusable *recipe*, not just numbers \u2014 the image analog of\n``tts_instructions``. ``size`` is a hint; fixed-resolution providers (flux-1-schnell:\n1024x1024) ignore it. Hard limits (max steps, prompt length) live in the catalog and\nare clamped by the provider implementation.",
+      "description": "Named image-generation recipe: model + diffusion params + prompt scaffolding.\n\nThe scaffolding fields (``style_prefix`` / ``style_suffix``) wrap the caller's prompt\nso a profile is a reusable *recipe*, not just numbers \u2014 the image analog of a voice\nprofile's style. ``size`` is a hint; fixed-resolution providers (flux-1-schnell:\n1024x1024) ignore it. Hard limits (max steps, prompt length) live in the catalog and\nare clamped by the provider implementation.",
       "properties": {
         "label": {
           "default": "",
@@ -734,7 +707,8 @@
     },
     "KnowledgeAnsweringPreferences": {
       "properties": {
-        "model": {
+        "profile": {
+          "ai_profile_ref": true,
           "anyOf": [
             {
               "type": "string"
@@ -744,8 +718,22 @@
             }
           ],
           "default": null,
-          "model_kind": "chat",
-          "title": "Knowledge answering model"
+          "description": "The AI profile that answers from the knowledge base. Empty uses Hiro's chat model.",
+          "title": "Knowledge answering"
+        },
+        "rewrite_profile": {
+          "ai_profile_ref": true,
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The AI profile that rewrites a question into a search query (needs structured output; keep thinking off). Empty uses the knowledge answering model.",
+          "title": "Knowledge query rewrite"
         },
         "prompt": {
           "default": "Use the provided knowledge context as your only source of facts; do not invent or assume anything that is not supported by it.\n\nAnswer every part of the question that the context supports. Partial answers are expected and welcome \u2014 never withhold a supported part just because another part is unsupported.\n\nIf a part of the question is not covered by the context, give the parts you can and briefly note what is missing. Do not reply with only 'I don't know' when any part of the question is supported by the context.",
@@ -771,7 +759,8 @@
       "title": "KnowledgeAnsweringPreferences",
       "type": "object",
       "required": [
-        "model",
+        "profile",
+        "rewrite_profile",
         "prompt",
         "cite_sources",
         "language_policy"
@@ -895,12 +884,6 @@
           "model_kind": "embedding",
           "title": "Knowledge embedder"
         },
-        "default_tuning_profile": {
-          "default": "knowledge_answering",
-          "title": "Knowledge answering model profile",
-          "tuning_profile_ref": true,
-          "type": "string"
-        },
         "chunking": {
           "$ref": "#/$defs/KnowledgeChunkingPreferences"
         },
@@ -918,7 +901,6 @@
       "type": "object",
       "required": [
         "default_embedding_model",
-        "default_tuning_profile",
         "chunking",
         "retrieval",
         "answering",
@@ -1052,9 +1034,10 @@
       ]
     },
     "LLMPreferences": {
-      "description": "Which catalog models to use when the workspace has credentials for them.",
+      "description": "Which catalog models to use when the workspace has credentials for them, and the AI profiles\nof Hiro's chat and reading pictures.\n\nPhase 7b step 5: ``default_chat`` + ``default_tuning_profile`` became ``chat_profile`` (one AI\nprofile), ``IMAGE_VISION_MODEL`` became ``vision_profile``, and ``default_tts`` moved to voice\nprofiles (``voice.hiro_profile``). No backward compatibility: v3 files are converted once\n(``convert_v4``).",
       "properties": {
-        "default_chat": {
+        "chat_profile": {
+          "ai_profile_ref": true,
           "anyOf": [
             {
               "type": "string"
@@ -1064,8 +1047,22 @@
             }
           ],
           "default": null,
-          "model_kind": "chat",
-          "title": "Default chat model"
+          "description": "The AI profile Hiro chats with (and the model the other jobs borrow when their own profile isn't set). A character's own AI profiles come first.",
+          "title": "Hiro's chat"
+        },
+        "vision_profile": {
+          "ai_profile_ref": true,
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The AI profile that describes pictures sent to Hiro. Empty = pictures aren't read.",
+          "title": "Reading pictures"
         },
         "default_stt": {
           "anyOf": [
@@ -1079,19 +1076,6 @@
           "default": null,
           "model_kind": "stt",
           "title": "Default speech-to-text model"
-        },
-        "default_tts": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "model_kind": "tts",
-          "title": "Default text-to-speech model"
         },
         "default_reranker": {
           "anyOf": [
@@ -1134,7 +1118,7 @@
         "request_timeout_s": {
           "advanced": true,
           "default": 180,
-          "description": "How long to wait for a cloud model provider to answer (or to send the next part of a streamed answer) before that attempt counts as failed. Applies to chat, speech-to-text and text-to-speech on every cloud provider. Takes effect on server restart.",
+          "description": "How long to wait for a cloud model provider to answer (or to send the next part of a streamed answer) before that attempt counts as failed. Applies to chat and speech-to-text on every cloud provider. Takes effect on server restart.",
           "maximum": 1800,
           "minimum": 10,
           "step": 10,
@@ -1165,12 +1149,6 @@
           "preferencesSaveSkip": true,
           "title": "Default Image Gen"
         },
-        "default_tuning_profile": {
-          "default": "balanced_chat",
-          "title": "Default chat model profile",
-          "tuning_profile_ref": true,
-          "type": "string"
-        },
         "default_image_profile": {
           "default": "image_playground",
           "preferencesSaveSkip": true,
@@ -1181,16 +1159,15 @@
       "title": "LLMPreferences",
       "type": "object",
       "required": [
-        "default_chat",
+        "chat_profile",
+        "vision_profile",
         "default_stt",
-        "default_tts",
         "default_reranker",
         "default_embedder",
         "http_keepalive_s",
         "request_timeout_s",
         "max_retries",
         "default_image_gen",
-        "default_tuning_profile",
         "default_image_profile"
       ]
     },
@@ -1314,12 +1291,6 @@
           "title": "Enable agent memory",
           "type": "boolean"
         },
-        "default_tuning_profile": {
-          "default": "memory_extraction",
-          "title": "Default Tuning Profile",
-          "tuning_profile_ref": true,
-          "type": "string"
-        },
         "user_name": {
           "default": "",
           "maxLength": 120,
@@ -1340,7 +1311,6 @@
       "type": "object",
       "required": [
         "enabled",
-        "default_tuning_profile",
         "user_name",
         "search",
         "extraction",
@@ -1359,7 +1329,8 @@
         "limits": {
           "$ref": "#/$defs/RetrievalAgentLimits"
         },
-        "model": {
+        "profile": {
+          "ai_profile_ref": true,
           "anyOf": [
             {
               "type": "string"
@@ -1369,16 +1340,8 @@
             }
           ],
           "default": null,
-          "description": "Model the CHAT agentic retrieval loop uses to plan searches and call the search_memory tool. Null falls back to the default chat model.",
-          "model_kind": "chat",
-          "title": "Retrieval agent model"
-        },
-        "tuning_profile": {
-          "default": "memory_extraction",
-          "description": "Tuning profile (temperature / max-tokens / thinking) for the chat retrieval-agent model.",
-          "title": "Retrieval agent profile",
-          "tuning_profile_ref": true,
-          "type": "string"
+          "description": "The AI profile the chat's memory-retrieval loop uses to plan searches and call the search_memory tool. Empty uses Hiro's chat model.",
+          "title": "Memory retrieval"
         },
         "render": {
           "$ref": "#/$defs/MemoryRetrievalRenderPreferences"
@@ -1389,8 +1352,7 @@
       "required": [
         "active_prompt_id",
         "limits",
-        "model",
-        "tuning_profile",
+        "profile",
         "render"
       ]
     },
@@ -1571,78 +1533,6 @@
         "hops_max"
       ]
     },
-    "TuningProfile": {
-      "description": "Named tuning preset shared by chat, memory, and knowledge answering.",
-      "properties": {
-        "temperature": {
-          "default": 0.7,
-          "maximum": 2.0,
-          "minimum": 0.0,
-          "step": 0.1,
-          "title": "Temperature",
-          "type": "number"
-        },
-        "max_tokens": {
-          "default": 1024,
-          "minimum": 1,
-          "title": "Max Tokens",
-          "type": "integer"
-        },
-        "thinking": {
-          "anyOf": [
-            {
-              "enum": [
-                "off",
-                "minimal",
-                "low",
-                "medium",
-                "high"
-              ],
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Thinking"
-        },
-        "num_ctx": {
-          "anyOf": [
-            {
-              "minimum": 1,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Num Ctx"
-        },
-        "label": {
-          "default": "",
-          "minLength": 1,
-          "title": "Label",
-          "type": "string"
-        },
-        "locked": {
-          "default": false,
-          "title": "Locked",
-          "type": "boolean"
-        }
-      },
-      "title": "TuningProfile",
-      "type": "object",
-      "required": [
-        "temperature",
-        "max_tokens",
-        "thinking",
-        "num_ctx",
-        "label",
-        "locked"
-      ]
-    },
     "VoicePreferences": {
       "description": "``prefs.voice``: the voice profiles, which profile each speech use speaks with, and the clip cache.",
       "properties": {
@@ -1669,6 +1559,20 @@
           "title": "Uses",
           "type": "object"
         },
+        "hiro_profile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The voice profile Hiro speaks its voice replies with when the character has no voice profile of its own with a key set. Empty = no voice replies.",
+          "title": "Hiro's voice",
+          "voice_profile_ref": true
+        },
         "clip_cache_mb": {
           "default": 200,
           "description": "Clips Hiro and the extensions had spoken, kept so the same words in the same voice are not paid for again. Once full, the oldest go first. 0 keeps none.",
@@ -1683,6 +1587,7 @@
       "required": [
         "profiles",
         "uses",
+        "hiro_profile",
         "clip_cache_mb"
       ]
     },
@@ -1740,7 +1645,7 @@
   "description": "Root preferences object persisted as preferences.json.",
   "properties": {
     "version": {
-      "default": 3,
+      "default": 4,
       "readOnly": true,
       "title": "Version",
       "type": "integer"
@@ -1762,14 +1667,6 @@
     },
     "chat": {
       "$ref": "#/$defs/ChatPreferences"
-    },
-    "tuning_profiles": {
-      "additionalProperties": {
-        "$ref": "#/$defs/TuningProfile"
-      },
-      "title": "Tuning Profiles",
-      "type": "object",
-      "writeWhole": true
     },
     "image_profiles": {
       "additionalProperties": {
@@ -1797,7 +1694,6 @@
     "knowledge",
     "graph",
     "chat",
-    "tuning_profiles",
     "image_profiles",
     "ai",
     "voice"

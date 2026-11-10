@@ -31,6 +31,10 @@ _META_KEYS = (
     "preferencesSaveSkip",
     "model_kind",
     "advanced",
+    # Phase 7b step 5: the field names an AI profile (one of Hiro's jobs) / a voice profile, so the
+    # admin renders a profile picker for it (see defaults.pref_field).
+    "ai_profile_ref",
+    "voice_profile_ref",
 )
 
 def _resolve_ref(node: dict[str, Any], root: dict[str, Any]) -> dict[str, Any]:

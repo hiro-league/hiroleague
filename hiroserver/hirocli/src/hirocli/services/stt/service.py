@@ -22,7 +22,7 @@ Usage
 
 Configuration
 -------------
-    The default STT model is resolved from preferences.json via resolve_llm().
+    The default STT model is resolved from preferences.json via resolve_stt_model().
     Callers that construct STTService pass default_model explicitly;
     the service itself does not read env vars or config files.
 

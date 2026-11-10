@@ -1,7 +1,7 @@
 """Workspace preferences — single source of truth for configurable choices.
 
-``preferences.json`` holds LLM default selections (canonical catalog ids), profile-based
-tuning, voice/audio, and memory settings. Provider secrets live in the credential
+``preferences.json`` holds model default selections (canonical catalog ids), the AI profiles Hiro's
+own jobs use (``jobs.JOB_PRESETS``), voice/audio, and memory settings. Provider secrets live in the credential
 store (``providers.json`` + OS keyring), not here.
 
 Storage: ``<workspace>/preferences.json`` — Pydantic model serialised to JSON.
@@ -17,13 +17,12 @@ from pydantic import BaseModel, Field, model_validator
 
 from .defaults import (
     ImageProfile,
-    TuningProfile,
     default_image_profiles,
-    default_tuning_profiles,
-    iter_tuning_profile_refs,
+    iter_profile_refs,
     pref_field,
     seed_default_profiles,
 )
+from .jobs import JOB_PRESETS, JobPreset
 from .models_ai import (
     AI_LOCAL_SERVER_KINDS,
     AI_MAX_FALLBACKS,
@@ -131,6 +130,9 @@ __all__ = [
     "LocalServerSettings",
     "ai_fallback_chain",
     "check_ai_model_id",
+    # Hiro's jobs (Phase 7b step 5)
+    "JOB_PRESETS",
+    "JobPreset",
     # Chat
     "DEFAULT_MAX_HISTORY_MESSAGES",
     "ChatPreferences",
@@ -147,7 +149,9 @@ __all__ = [
 class WorkspacePreferences(BaseModel):
     """Root preferences object persisted as preferences.json."""
 
-    version: int = pref_field(read_only=True, default=3)
+    # 4 = Phase 7b step 5 (AI profiles for Hiro's jobs); older files are converted once on load
+    # (``convert_v4``, called from ``io.load_preferences``).
+    version: int = pref_field(read_only=True, default=4)
     llm: LLMPreferences = Field(default_factory=LLMPreferences)
     media: MediaPreferences = Field(default_factory=MediaPreferences)
     memory: MemoryPreferences = Field(default_factory=MemoryPreferences)
@@ -157,10 +161,6 @@ class WorkspacePreferences(BaseModel):
     # reads as shared, not owned by knowledge. Qdrant knowledge prefs stay under ``knowledge``.
     graph: GraphPreferences = Field(default_factory=GraphPreferences)
     chat: ChatPreferences = Field(default_factory=ChatPreferences)
-    tuning_profiles: dict[str, TuningProfile] = pref_field(
-        write_whole=True,
-        default_factory=default_tuning_profiles,
-    )
     image_profiles: dict[str, ImageProfile] = pref_field(
         save_skip=True,
         default_factory=default_image_profiles,
@@ -176,14 +176,26 @@ class WorkspacePreferences(BaseModel):
     voice: VoicePreferences = Field(default_factory=VoicePreferences)
 
     @model_validator(mode="after")
-    def _validate_tuning_profiles(self) -> "WorkspacePreferences":
-        seed_default_profiles(self.tuning_profiles, default_tuning_profiles())
-        # Every field marked ``tuning_profile_ref`` (via ``pref_field``) must point at an existing
-        # profile. References are discovered by the marker (``iter_tuning_profile_refs``), so a new
-        # profile-referencing field is validated automatically — no hand-maintained list here.
-        for path, profile_id in iter_tuning_profile_refs(self):
-            if profile_id not in self.tuning_profiles:
-                raise ValueError(f"Unknown tuning profile at {path}: {profile_id!r}")
+    def _validate_job_profiles(self) -> "WorkspacePreferences":
+        # Phase 7b step 5 (replaces the tuning-profile reference check): every field marked
+        # ``ai_profile_ref`` (Hiro's jobs) must name an existing AI profile whose model can be built
+        # as a chat model — a plan tool (claude_code:* / codex:*) can't, so a job may not point
+        # straight at one (a fallback chain may hold one; it is skipped at build time). Every
+        # ``voice_profile_ref`` field must name an existing voice profile. Found by the marker.
+        for path, profile_id in iter_profile_refs(self, "ai_profile_ref"):
+            if profile_id is None:
+                continue
+            profile = self.ai.profiles.get(profile_id)
+            if profile is None:
+                raise ValueError(f"{path} points at an unknown AI profile {profile_id!r}")
+            if profile.is_plan:
+                raise ValueError(
+                    f"{path} can't use AI profile {profile_id!r}: {profile.model} is a plan tool, and "
+                    "Hiro's own jobs need an API or local model"
+                )
+        for path, profile_id in iter_profile_refs(self, "voice_profile_ref"):
+            if profile_id is not None and profile_id not in self.voice.profiles:
+                raise ValueError(f"{path} points at an unknown voice profile {profile_id!r}")
         return self
 
     @model_validator(mode="after")

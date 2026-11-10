@@ -15,7 +15,7 @@ from .preferences import (
     WorkspacePreferences,
     load_preferences,
     resolve_character_voice,
-    resolve_llm,
+    resolve_stt_model,
 )
 from .workspace import workspace_id_for_path
 
@@ -77,10 +77,9 @@ def resolve_modality_capability(
         if not prefs.media.input.voice:
             return False
         return (
-            resolve_llm(
+            resolve_stt_model(
                 prefs,
                 workspace_path,
-                "stt",
                 workspace_id=workspace_id,
                 credential_store=credential_store,
             )
@@ -90,15 +89,14 @@ def resolve_modality_capability(
     if direction == "output":
         if not prefs.media.output.voice or character is None:
             return False
+        # Phase 7b step 5: a voice profile of the character's, else Hiro's own (voice.hiro_profile).
         return (
             resolve_character_voice(
-                character.voice_models,
+                character.voice_profiles,
                 prefs,
                 workspace_path,
                 workspace_id=workspace_id,
                 credential_store=credential_store,
-                tts_instructions=character.tts_instructions,
-                tts_voice_by_provider=dict(character.tts_voice_by_provider),
             )
             is not None
         )

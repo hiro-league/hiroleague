@@ -3,17 +3,27 @@
     "path": "version",
     "nullable": false,
     "type": "integer",
-    "default": 3,
+    "default": 4,
     "title": "Version",
     "readOnly": true
   },
-  "llm.default_chat": {
-    "path": "llm.default_chat",
+  "llm.chat_profile": {
+    "path": "llm.chat_profile",
     "nullable": true,
     "type": "string",
     "default": null,
-    "title": "Default chat model",
-    "model_kind": "chat"
+    "title": "Hiro's chat",
+    "description": "The AI profile Hiro chats with (and the model the other jobs borrow when their own profile isn't set). A character's own AI profiles come first.",
+    "ai_profile_ref": true
+  },
+  "llm.vision_profile": {
+    "path": "llm.vision_profile",
+    "nullable": true,
+    "type": "string",
+    "default": null,
+    "title": "Reading pictures",
+    "description": "The AI profile that describes pictures sent to Hiro. Empty = pictures aren't read.",
+    "ai_profile_ref": true
   },
   "llm.default_stt": {
     "path": "llm.default_stt",
@@ -22,14 +32,6 @@
     "default": null,
     "title": "Default speech-to-text model",
     "model_kind": "stt"
-  },
-  "llm.default_tts": {
-    "path": "llm.default_tts",
-    "nullable": true,
-    "type": "string",
-    "default": null,
-    "title": "Default text-to-speech model",
-    "model_kind": "tts"
   },
   "llm.default_reranker": {
     "path": "llm.default_reranker",
@@ -68,7 +70,7 @@
     "default": 180,
     "step": 10,
     "title": "Provider response timeout (seconds)",
-    "description": "How long to wait for a cloud model provider to answer (or to send the next part of a streamed answer) before that attempt counts as failed. Applies to chat, speech-to-text and text-to-speech on every cloud provider. Takes effect on server restart.",
+    "description": "How long to wait for a cloud model provider to answer (or to send the next part of a streamed answer) before that attempt counts as failed. Applies to chat and speech-to-text on every cloud provider. Takes effect on server restart.",
     "advanced": true,
     "min": 10,
     "max": 1800
@@ -93,13 +95,6 @@
     "title": "Default Image Gen",
     "preferencesSaveSkip": true,
     "model_kind": "chat"
-  },
-  "llm.default_tuning_profile": {
-    "path": "llm.default_tuning_profile",
-    "nullable": false,
-    "type": "string",
-    "default": "balanced_chat",
-    "title": "Default chat model profile"
   },
   "llm.default_image_profile": {
     "path": "llm.default_image_profile",
@@ -171,13 +166,6 @@
     "type": "boolean",
     "default": true,
     "title": "Enable agent memory"
-  },
-  "memory.default_tuning_profile": {
-    "path": "memory.default_tuning_profile",
-    "nullable": false,
-    "type": "string",
-    "default": "memory_extraction",
-    "title": "Default Tuning Profile"
   },
   "memory.user_name": {
     "path": "memory.user_name",
@@ -320,22 +308,14 @@
     "min": 1,
     "max": 3
   },
-  "memory.retrieval.model": {
-    "path": "memory.retrieval.model",
+  "memory.retrieval.profile": {
+    "path": "memory.retrieval.profile",
     "nullable": true,
     "type": "string",
     "default": null,
-    "title": "Retrieval agent model",
-    "description": "Model the CHAT agentic retrieval loop uses to plan searches and call the search_memory tool. Null falls back to the default chat model.",
-    "model_kind": "chat"
-  },
-  "memory.retrieval.tuning_profile": {
-    "path": "memory.retrieval.tuning_profile",
-    "nullable": false,
-    "type": "string",
-    "default": "memory_extraction",
-    "title": "Retrieval agent profile",
-    "description": "Tuning profile (temperature / max-tokens / thinking) for the chat retrieval-agent model."
+    "title": "Memory retrieval",
+    "description": "The AI profile the chat's memory-retrieval loop uses to plan searches and call the search_memory tool. Empty uses Hiro's chat model.",
+    "ai_profile_ref": true
   },
   "memory.retrieval.render.show_event_time": {
     "path": "memory.retrieval.render.show_event_time",
@@ -410,13 +390,6 @@
     "title": "Knowledge embedder",
     "description": "Knowledge embedder. Empty inherits the workspace default (General \u2192 Models).",
     "model_kind": "embedding"
-  },
-  "knowledge.default_tuning_profile": {
-    "path": "knowledge.default_tuning_profile",
-    "nullable": false,
-    "type": "string",
-    "default": "knowledge_answering",
-    "title": "Knowledge answering model profile"
   },
   "knowledge.chunking.chunk_size": {
     "path": "knowledge.chunking.chunk_size",
@@ -535,13 +508,23 @@
     "min": 1,
     "max": 512
   },
-  "knowledge.answering.model": {
-    "path": "knowledge.answering.model",
+  "knowledge.answering.profile": {
+    "path": "knowledge.answering.profile",
     "nullable": true,
     "type": "string",
     "default": null,
-    "title": "Knowledge answering model",
-    "model_kind": "chat"
+    "title": "Knowledge answering",
+    "description": "The AI profile that answers from the knowledge base. Empty uses Hiro's chat model.",
+    "ai_profile_ref": true
+  },
+  "knowledge.answering.rewrite_profile": {
+    "path": "knowledge.answering.rewrite_profile",
+    "nullable": true,
+    "type": "string",
+    "default": null,
+    "title": "Knowledge query rewrite",
+    "description": "The AI profile that rewrites a question into a search query (needs structured output; keep thinking off). Empty uses the knowledge answering model.",
+    "ai_profile_ref": true
   },
   "knowledge.answering.prompt": {
     "path": "knowledge.answering.prompt",
@@ -595,39 +578,23 @@
     "title": "Graph backend",
     "description": "Master switch for knowledge retrieval. Off = today's flat Qdrant retrieval (graph untouched). Graphiti = answer from the graph's facts."
   },
-  "graph.extraction_model": {
-    "path": "graph.extraction_model",
+  "graph.extraction_profile": {
+    "path": "graph.extraction_profile",
     "nullable": true,
     "type": "string",
     "default": null,
-    "title": "Extraction model",
-    "description": "The heavy LLM Graphiti uses to read each chunk/turn and pull out entities + facts. Must be structured-output-capable. Null falls back to the answering model, then default chat.",
-    "model_kind": "chat"
+    "title": "Graph extraction",
+    "description": "The AI profile Graphiti uses to read each chunk/turn and pull out entities + facts. Must be structured-output-capable; keep it deterministic. Empty uses Hiro's chat model.",
+    "ai_profile_ref": true
   },
-  "graph.extraction_tuning_profile": {
-    "path": "graph.extraction_tuning_profile",
-    "nullable": false,
-    "type": "string",
-    "default": "graphiti_extraction",
-    "title": "Extraction profile",
-    "description": "Tuning profile (temperature / max-tokens / thinking) for the extraction model. Ships deterministic so extraction stays repeatable across runs."
-  },
-  "graph.small_model": {
-    "path": "graph.small_model",
+  "graph.small_profile": {
+    "path": "graph.small_profile",
     "nullable": true,
     "type": "string",
     "default": null,
-    "title": "Smaller extraction model",
-    "description": "Cheaper model for Graphiti's sub-steps \u2014 node dedupe, entity summaries, timestamps. Null falls back to the extraction model.",
-    "model_kind": "chat"
-  },
-  "graph.small_tuning_profile": {
-    "path": "graph.small_tuning_profile",
-    "nullable": false,
-    "type": "string",
-    "default": "graphiti_small",
-    "title": "Smaller extraction profile",
-    "description": "Tuning profile for the cheaper sub-step model (dedupe / summaries / timestamps)."
+    "title": "Graph small steps",
+    "description": "A cheaper AI profile for Graphiti's sub-steps \u2014 node dedupe, entity summaries, timestamps. Empty uses the graph extraction model.",
+    "ai_profile_ref": true
   },
   "graph.embedder_model": {
     "path": "graph.embedder_model",
@@ -795,56 +762,32 @@
     "default": "## Objective\nGrade a model's Answer to a question about past conversations against the Ideal Answer, and\nreport the result as a single JSON object (see Output Fields). When a Rubric is shown, use it as\nGUIDANCE on what a complete answer covers \u2014 not a checklist to fail on. Grade ONLY against the\nIdeal Answer and Rubric \u2014 never your own knowledge.\n\n## Verdicts\n- pass: the Answer conveys the same fact(s) as the Ideal. Judge meaning, not wording \u2014\n  paraphrases, extra detail, and answers MORE specific than the Ideal all pass. When a Rubric is\n  shown, an Answer that covers its MAIN elements passes \u2014 a missing minor element does NOT block\n  a pass.\n- partial: at least one correct item of a multi-part Ideal, or the right fact at lower precision\n  than the Ideal. When a Rubric is shown, partial = the Answer captures some core elements but\n  misses a substantial part of what was asked.\n- fail: contradicts the Ideal or answers something else. When a Rubric is shown, fail = no element\n  satisfied, the Answer misses the point, or it contradicts a rubric element.\n- abstain: the Answer declines \u2014 \"No information available.\" or any other refusal to answer.\n\n## Core Instructions\n- Rubric: when a Rubric section is shown, its lines describe what a complete answer would cover.\n  Treat them as a GUIDE, not a pass/fail checklist \u2014 the Ideal Answer and the Rubric describe the\n  same correct answer, so weigh whether the Answer captures the SUBSTANCE, not whether it states\n  every line. Don't downgrade an otherwise-correct Answer for omitting a minor element.\n- Dates: matching the Ideal's month and year passes; a correctly resolved relative date (\"next\n  month\" stated in an August conversation = September) passes; within ~2 weeks passes.\n- Negative Control = YES means declining is the correct outcome: an abstaining Answer is the\n  right result, and a confident Answer is fail.\n- The Recalled Memory Elements are what the answerer saw. They must NEVER change the verdict \u2014\n  use them only to fill evidence, recall_sufficient, and grounded.\n\n## Output Fields\nReply with one JSON object containing exactly these fields, in this order:\n- \"evidence\" (string): the exact line(s) copied VERBATIM from the Recalled Memory Elements that\n  contain the information needed to answer; \"\" if no such line exists.\n- \"recall_sufficient\" (boolean): true only if evidence quotes a real line that supplies the\n  answer; false otherwise.\n- \"grounded\" (boolean): whether the Answer is supported by the Recalled Memory Elements.\n- \"reason\" (string): one short sentence justifying the verdict.\n- \"verdict\" (string): one of \"pass\", \"partial\", \"fail\", \"abstain\".\n\n## Validation\n- evidence is checked by exact substring match against the shown elements \u2014 an inexact or\n  invented quote counts as no evidence and forces recall_sufficient to false.\n- If no Recalled Memory Elements section was shown, set evidence \"\" and recall_sufficient true.\n- The verdict depends only on Answer vs Ideal (and Rubric, when shown).",
     "title": "Eval judge prompt"
   },
-  "graph.eval.answer_model": {
-    "path": "graph.eval.answer_model",
+  "graph.eval.answer_profile": {
+    "path": "graph.eval.answer_profile",
     "nullable": true,
     "type": "string",
     "default": null,
-    "title": "Eval answer model",
-    "description": "Model the memory-eval answer step uses to answer from recalled context. Null falls back to the knowledge answering model, then default chat. (Knowledge-track answers always use the production answering pipeline, not this.)",
-    "model_kind": "chat"
+    "title": "Eval: answer",
+    "description": "The AI profile the memory-eval answer step uses to answer from recalled context. Empty uses Hiro's chat model. (Knowledge-track answers always use the knowledge answering job.)",
+    "ai_profile_ref": true
   },
-  "graph.eval.answer_tuning_profile": {
-    "path": "graph.eval.answer_tuning_profile",
-    "nullable": false,
-    "type": "string",
-    "default": "knowledge_answering",
-    "title": "Eval answer profile",
-    "description": "Tuning profile (temperature / max-tokens / thinking) for the eval answer model."
-  },
-  "graph.eval.judge_model": {
-    "path": "graph.eval.judge_model",
+  "graph.eval.judge_profile": {
+    "path": "graph.eval.judge_profile",
     "nullable": true,
     "type": "string",
     "default": null,
-    "title": "Eval judge model",
-    "description": "Model the LLM judge uses to grade answers against the ideal (both tracks). Null falls back to the knowledge answering model, then default chat.",
-    "model_kind": "chat"
+    "title": "Eval: judge",
+    "description": "The AI profile the LLM judge uses to grade answers against the ideal (both tracks). Empty uses Hiro's chat model. Lower temperature = more repeatable grading.",
+    "ai_profile_ref": true
   },
-  "graph.eval.judge_tuning_profile": {
-    "path": "graph.eval.judge_tuning_profile",
-    "nullable": false,
-    "type": "string",
-    "default": "knowledge_answering",
-    "title": "Eval judge profile",
-    "description": "Tuning profile for the judge model. Lower temperature = more repeatable grading."
-  },
-  "graph.eval.retrieval_model": {
-    "path": "graph.eval.retrieval_model",
+  "graph.eval.retrieval_profile": {
+    "path": "graph.eval.retrieval_profile",
     "nullable": true,
     "type": "string",
     "default": null,
-    "title": "Retrieval agent model",
-    "description": "Model the agentic retrieval loop uses to plan searches and call the search_memory tool (memory track). Null falls back to the eval answer model, then the knowledge answering model \u2192 default chat.",
-    "model_kind": "chat"
-  },
-  "graph.eval.retrieval_tuning_profile": {
-    "path": "graph.eval.retrieval_tuning_profile",
-    "nullable": false,
-    "type": "string",
-    "default": "knowledge_answering",
-    "title": "Retrieval agent profile",
-    "description": "Tuning profile (temperature / max-tokens / thinking) for the retrieval-agent model."
+    "title": "Eval: retrieval",
+    "description": "The AI profile the agentic retrieval loop (memory track) uses to plan searches and call the search_memory tool. Empty uses the eval answer model.",
+    "ai_profile_ref": true
   },
   "graph.eval.show_event_time": {
     "path": "graph.eval.show_event_time",
@@ -1039,13 +982,6 @@
     "default": "en",
     "title": "Preferred Answering Language"
   },
-  "tuning_profiles": {
-    "path": "tuning_profiles",
-    "nullable": false,
-    "type": "object",
-    "title": "Tuning Profiles",
-    "writeWhole": true
-  },
   "image_profiles": {
     "path": "image_profiles",
     "nullable": false,
@@ -1087,6 +1023,15 @@
     "type": "object",
     "title": "Uses",
     "preferencesSaveSkip": true
+  },
+  "voice.hiro_profile": {
+    "path": "voice.hiro_profile",
+    "nullable": true,
+    "type": "string",
+    "default": null,
+    "title": "Hiro's voice",
+    "description": "The voice profile Hiro speaks its voice replies with when the character has no voice profile of its own with a key set. Empty = no voice replies.",
+    "voice_profile_ref": true
   },
   "voice.clip_cache_mb": {
     "path": "voice.clip_cache_mb",

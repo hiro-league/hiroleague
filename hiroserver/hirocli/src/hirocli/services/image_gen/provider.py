@@ -1,6 +1,6 @@
 """Image-generation provider contract — ImageGenProvider ABC, ImageGenModelInfo, ImageGenResult.
 
-Mirrors the TTS provider contract (`services/tts/provider.py`):
+Mirrors the former TTS provider contract (removed in Phase 7b step 5):
   1. Providers declare their models via supported_models().
   2. Report usability via is_available() (credentials present).
   3. Generate images via generate().

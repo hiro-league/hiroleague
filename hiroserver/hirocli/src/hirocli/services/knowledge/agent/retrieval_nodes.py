@@ -116,8 +116,9 @@ class KnowledgeRetrievalNodes(NodeGroup):
         writer: StreamWriter | None = None,
     ) -> dict[str, Any]:
         # Opt-in LLM rewrite: normalize the query + extract literal keywords before retrieval.
-        # Reuses the answering model with the dedicated ``knowledge_rewrite`` tuning profile
-        # (temperature / max_tokens / thinking come from preferences, never hardcoded here).
+        # Uses the rewrite job's AI profile (``knowledge.answering.rewrite_profile``, else the
+        # knowledge answering model with the rewrite preset tuning — Phase 7b step 5); temperature /
+        # max_tokens / thinking come from preferences, never hardcoded here.
         # Every failure path is a logged, observable fallback to the raw query — retrieval must
         # never be blocked by the rewrite step.
         if not state.get("rewrite"):

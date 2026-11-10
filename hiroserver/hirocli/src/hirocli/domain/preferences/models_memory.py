@@ -16,7 +16,6 @@ from pydantic import BaseModel, Field
 from .defaults import (
     DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID,
     DEFAULT_MEMORY_EXTRACTION_INSTRUCTIONS,
-    DEFAULT_MEMORY_TUNING_PROFILE_ID,
     pref_field,
 )
 from .models_graph import RetrievalAgentLimits
@@ -168,21 +167,15 @@ class MemoryRetrievalPreferences(BaseModel):
     # Chat's OWN loop caps — leaner than eval (max_agent_turns=3, num-results 5/10/25). Split from
     # eval (its own factory) so chat is tuned independently; eval keeps the class defaults.
     limits: RetrievalAgentLimits = Field(default_factory=default_chat_retrieval_limits)
-    model: str | None = pref_field(
-        model_kind="chat",
+    # Phase 7b step 5: the model + tuning profile pair became one AI profile (``jobs`` "memory").
+    profile: str | None = pref_field(
+        ai_profile_ref=True,
         default=None,
-        title="Retrieval agent model",
+        title="Memory retrieval",
         description=(
-            "Model the CHAT agentic retrieval loop uses to plan searches and call the search_memory "
-            "tool. Null falls back to the default chat model."
+            "The AI profile the chat's memory-retrieval loop uses to plan searches and call the "
+            "search_memory tool. Empty uses Hiro's chat model."
         ),
-    )
-    tuning_profile: str = pref_field(
-        tuning_profile_ref=True,
-        # Defaults to the "Retrieval Agent Profile" (deterministic, roomy budget, light reasoning).
-        default=DEFAULT_MEMORY_TUNING_PROFILE_ID,
-        title="Retrieval agent profile",
-        description="Tuning profile (temperature / max-tokens / thinking) for the chat retrieval-agent model.",
     )
     render: MemoryRetrievalRenderPreferences = Field(
         default_factory=MemoryRetrievalRenderPreferences
@@ -198,9 +191,6 @@ class MemoryPreferences(BaseModel):
     gone (mem0 → Graphiti, Phase 5)."""
 
     enabled: bool = Field(default=True, title="Enable agent memory")
-    default_tuning_profile: str = pref_field(
-        tuning_profile_ref=True, default=DEFAULT_MEMORY_TUNING_PROFILE_ID
-    )
     # A1 fix: the human's name, used as the Graphiti *speaker label* when ingesting the user's
     # turns. Graphiti extracts the speaker (the token before the ":") as the anchor entity, so a
     # real name produces a clean `Misho` Person hub instead of a generic `User` node, and every

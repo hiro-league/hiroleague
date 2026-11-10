@@ -48,9 +48,11 @@ def _knowledge_answering_model_resolved(
 def _knowledge_answering_model_resolved_source(
     prefs: WorkspacePreferences, workspace_path: Path, workspace_id: str | None
 ) -> str | None:
-    from .resolvers import knowledge_answering_model_source
+    # Phase 7b step 5: the path of the AI-profile field supplying the model
+    # ("knowledge.answering.profile", else "llm.chat_profile"), was the model field's path.
+    from .resolvers import job_model_source
 
-    return knowledge_answering_model_source(prefs)
+    return job_model_source(prefs, "knowledge")
 
 
 def _knowledge_embedder_locked(

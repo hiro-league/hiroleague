@@ -1,34 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import type { CatalogProviderRow } from '$lib/api/catalog';
 import type { CharacterDetail } from '$lib/api/characters';
 import {
   characterSaveBody,
   emptyForm,
   formFromCharacter,
-  mergeVoiceProviderDefaults,
+  moveInList,
   prettyJson,
   validateCharacterForm,
   type CharacterForm
 } from '$lib/features/characters/shared/characters-pure';
-
-function provider(id: string, hasVoices: boolean): CatalogProviderRow {
-  return {
-    id,
-    display_name: id,
-    hosting: 'cloud',
-    tts_voices: hasVoices ? [{ id: `${id}-voice` }] : []
-  };
-}
 
 function form(over: Partial<CharacterForm> = {}): CharacterForm {
   return { ...emptyForm(), ...over };
 }
 
 describe('emptyForm', () => {
-  it('returns a blank, fully-defaulted form', () => {
+  it('returns a blank, fully-defaulted form (no profiles: Hiro’s own)', () => {
     const f = emptyForm();
-    expect(f.llm_models).toEqual([]);
-    expect(f.tts_voice_by_provider).toEqual({});
+    expect(f.ai_profiles).toEqual([]);
+    expect(f.voice_profiles).toEqual([]);
     expect(f.emotions_enabled).toBe(false);
   });
 });
@@ -44,18 +34,6 @@ describe('prettyJson', () => {
   });
 });
 
-describe('mergeVoiceProviderDefaults', () => {
-  it('seeds an empty entry for providers that have voices', () => {
-    const merged = mergeVoiceProviderDefaults({}, [provider('google', true), provider('x', false)]);
-    expect(merged).toEqual({ google: '' });
-  });
-
-  it('keeps an already-saved selection and does not overwrite it', () => {
-    const merged = mergeVoiceProviderDefaults({ google: 'aoede' }, [provider('google', true)]);
-    expect(merged.google).toBe('aoede');
-  });
-});
-
 describe('formFromCharacter', () => {
   it('maps a full character into form fields', () => {
     const detail: CharacterDetail = {
@@ -64,43 +42,39 @@ describe('formFromCharacter', () => {
       description: 'desc',
       prompt: 'p',
       backstory: 'b',
-      llm_models: ['m1'],
-      tuning_profile: 'balanced_chat',
-      voice_models: ['v1'],
-      tts_instructions: 'speak softly',
-      tts_voice_by_provider: { google: 'aoede' },
+      ai_profiles: ['hiro-chat', 'claude-backup'],
+      voice_profiles: ['hiro-voice'],
       emotions_enabled: true,
       extras: { theme: 'dark' }
     };
     const f = formFromCharacter(detail);
     expect(f.new_id).toBe('ada');
-    expect(f.llm_models).toEqual(['m1']);
-    expect(f.tts_voice_by_provider).toEqual({ google: 'aoede' });
+    expect(f.ai_profiles).toEqual(['hiro-chat', 'claude-backup']);
+    expect(f.voice_profiles).toEqual(['hiro-voice']);
     expect(f.extras_json).toBe('{\n  "theme": "dark"\n}');
     expect(f.emotions_enabled).toBe(true);
   });
 
-  it('coerces missing/invalid fields to safe defaults', () => {
+  it('coerces missing/invalid lists to safe defaults', () => {
     const detail = {
       id: 'x',
       name: 'X',
-      // tts_voice_by_provider intentionally an array → must be dropped to {}
-      tts_voice_by_provider: ['nope'] as unknown as Record<string, string>
+      // not an array → must be dropped to []
+      ai_profiles: 'nope' as unknown as string[]
     } as CharacterDetail;
     const f = formFromCharacter(detail);
-    expect(f.llm_models).toEqual([]);
-    expect(f.tuning_profile).toBe('');
-    expect(f.tts_voice_by_provider).toEqual({});
+    expect(f.ai_profiles).toEqual([]);
+    expect(f.voice_profiles).toEqual([]);
     expect(f.extras_json).toBe('');
   });
 
-  it('keeps only string-valued voice-by-provider entries', () => {
+  it('keeps only non-empty string ids, in order, without repeats', () => {
     const detail = {
       id: 'x',
       name: 'X',
-      tts_voice_by_provider: { google: 'aoede', bad: 3 } as unknown as Record<string, string>
+      ai_profiles: ['a', '', 3, 'b', 'a'] as unknown as string[]
     } as CharacterDetail;
-    expect(formFromCharacter(detail).tts_voice_by_provider).toEqual({ google: 'aoede' });
+    expect(formFromCharacter(detail).ai_profiles).toEqual(['a', 'b']);
   });
 });
 
@@ -130,18 +104,22 @@ describe('validateCharacterForm', () => {
 });
 
 describe('characterSaveBody', () => {
-  it('always serializes model arrays so a cleared bucket sends []', () => {
-    const body = characterSaveBody('ada', form({ llm_models: [], voice_models: ['v1'] }));
-    expect(body.llm_models_json).toBe('[]');
-    expect(body.voice_models_json).toBe('["v1"]');
+  it('always serializes the profile lists so a cleared list sends [] ("" would leave it unchanged)', () => {
+    const body = characterSaveBody('ada', form({ ai_profiles: [], voice_profiles: ['hiro-voice'] }));
+    expect(body.ai_profiles_json).toBe('[]');
+    expect(body.voice_profiles_json).toBe('["hiro-voice"]');
   });
 
-  it('drops empty voice-preset selections before serializing', () => {
-    const body = characterSaveBody(
-      'ada',
-      form({ tts_voice_by_provider: { google: 'aoede', openai: '', x: '  ' } })
-    );
-    expect(JSON.parse(body.tts_voice_by_provider_json)).toEqual({ google: 'aoede' });
+  it('keeps the list order (the first that can answer asks)', () => {
+    const body = characterSaveBody('ada', form({ ai_profiles: ['b', 'a'] }));
+    expect(JSON.parse(body.ai_profiles_json)).toEqual(['b', 'a']);
+  });
+
+  it('sends only the profile-list fields (no model lists, tuning or TTS settings)', () => {
+    const body = characterSaveBody('ada', form());
+    for (const gone of ['llm_models_json', 'tuning_profile', 'voice_models_json', 'tts_instructions']) {
+      expect(body, gone).not.toHaveProperty(gone);
+    }
   });
 
   it('sends a null id when new_id is blank', () => {
@@ -154,5 +132,19 @@ describe('characterSaveBody', () => {
 
   it('keeps the prompt for an existing character even when blank', () => {
     expect(characterSaveBody('ada', form({ prompt: '' })).prompt).toBe('');
+  });
+});
+
+describe('moveInList', () => {
+  it('moves an item up or down one place', () => {
+    expect(moveInList(['a', 'b', 'c'], 1, -1)).toEqual(['b', 'a', 'c']);
+    expect(moveInList(['a', 'b', 'c'], 1, 1)).toEqual(['a', 'c', 'b']);
+  });
+
+  it('leaves the list as it is at the ends (and returns a copy)', () => {
+    const items = ['a', 'b'];
+    expect(moveInList(items, 0, -1)).toEqual(['a', 'b']);
+    expect(moveInList(items, 1, 1)).toEqual(['a', 'b']);
+    expect(moveInList(items, 0, -1)).not.toBe(items);
   });
 });

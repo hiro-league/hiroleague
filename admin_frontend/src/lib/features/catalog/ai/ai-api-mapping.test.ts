@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { AiProfileRow, AiTryPayload } from '$lib/api/ai';
+import type { AiJobRow, AiProfileRow, AiTryPayload } from '$lib/api/ai';
 import {
+  jobFromRow,
   localModelCatalogRows,
   planModelCatalogRows,
   profileFromRow,
@@ -27,7 +28,9 @@ const row: AiProfileRow = {
   fallback: 'camera-on-codex',
   fallback_chain: ['camera-on-codex'],
   ready: true,
-  not_ready: null
+  not_ready: null,
+  preset: null,
+  jobs: []
 };
 
 describe('profile mapping', () => {
@@ -45,8 +48,17 @@ describe('profile mapping', () => {
       max_cost_day: 1,
       max_per_hour: null,
       at_once: 2,
-      fallback: 'camera-on-codex'
+      fallback: 'camera-on-codex',
+      preset: null
     });
+  });
+
+  // Phase 7b step 5: a job's default profile keeps its preset through an edit (else Save would turn it
+  // into an ordinary profile and lose Restore default), and the jobs using it come across.
+  it("keeps a default profile's preset and the jobs using it", () => {
+    const profile = profileFromRow({ ...row, id: 'hiro-chat', preset: 'chat', jobs: ['chat', 'eval_judge'] });
+    expect(profile).toMatchObject({ preset: 'chat', jobs: ['chat', 'eval_judge'] });
+    expect(profileToPrefs(profile).preset).toBe('chat');
   });
 
   it('turns empty or zero limits into no limit and trims instructions', () => {
@@ -121,5 +133,31 @@ describe('local models and try it', () => {
     expect(tryResultFrom(ok, 'api').result).toMatchObject({ seconds: 1.8, cost: 'about $0.0012' });
     const failed: AiTryPayload = { ok: false, answer: null, error: { code: 'budget', message: 'Over budget', notes: ['A: over'], tries: [] } };
     expect(tryResultFrom(failed, 'api').error).toBe('Over budget (A: over)');
+  });
+});
+
+describe('job mapping (Phase 7b step 5)', () => {
+  it("maps a job row to the Uses tab's Hiro row", () => {
+    const job: AiJobRow = {
+      id: 'graph_small',
+      label: 'Graph small steps',
+      path: 'graph.small_profile',
+      profile_id: null,
+      default_profile_id: 'hiro-graph-small',
+      falls_back_to: 'graph_extraction',
+      source: 'graph.extraction_profile',
+      model: 'openai:gpt-mini',
+      model_profile_id: 'hiro-graph-extraction',
+      preset: { temperature: 0, max_tokens: 2048, thinking: 'off' }
+    };
+    expect(jobFromRow(job)).toEqual({
+      id: 'graph_small',
+      label: 'Graph small steps',
+      path: 'graph.small_profile',
+      profileId: null,
+      defaultProfileId: 'hiro-graph-small',
+      fallsBackTo: 'graph_extraction',
+      model: 'openai:gpt-mini'
+    });
   });
 });

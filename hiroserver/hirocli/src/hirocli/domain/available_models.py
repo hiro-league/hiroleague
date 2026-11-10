@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 from .credential_store import CredentialStore
 from .model_catalog import (
-    DeprecatedModelInfo,
     ModelCatalog,
     ModelSpec,
     get_model_catalog,
@@ -26,18 +25,6 @@ class ConfiguredProviderSummary:
     has_embedding: bool
     has_rerank: bool
     has_image_gen: bool
-
-
-@dataclass
-class CharacterModelValidation:
-    unknown_llm: list[str]
-    unknown_voice: list[str]
-    deprecated_llm: list[DeprecatedModelInfo]
-    deprecated_voice: list[DeprecatedModelInfo]
-    wrong_kind_llm: list[str]
-    wrong_kind_voice: list[str]
-    unavailable_llm: list[str]
-    unavailable_voice: list[str]
 
 
 class AvailableModelsService:
@@ -97,80 +84,6 @@ class AvailableModelsService:
         if spec is None:
             return False
         return self._store.is_configured(spec.provider_id)
-
-    def validate_character_models(
-        self,
-        llm_models: list[str],
-        voice_models: list[str],
-    ) -> CharacterModelValidation:
-        unknown_llm: list[str] = []
-        unknown_voice: list[str] = []
-        deprecated_llm: list[DeprecatedModelInfo] = []
-        deprecated_voice: list[DeprecatedModelInfo] = []
-        wrong_kind_llm: list[str] = []
-        wrong_kind_voice: list[str] = []
-        unavailable_llm: list[str] = []
-        unavailable_voice: list[str] = []
-
-        seen_llm: set[str] = set()
-        for mid in llm_models:
-            if mid in seen_llm:
-                continue
-            seen_llm.add(mid)
-            spec = self._catalog.get_model(mid)
-            if spec is None:
-                unknown_llm.append(mid)
-                continue
-            if spec.deprecated_since:
-                deprecated_llm.append(
-                    DeprecatedModelInfo(
-                        model_id=mid,
-                        deprecated_since=spec.deprecated_since,
-                        replacement_id=spec.replacement_id,
-                    )
-                )
-                # Deprecated is the primary finding; skip wrong_kind/unavailable for the same id.
-                continue
-            if spec.model_kind != "chat":
-                wrong_kind_llm.append(mid)
-                continue
-            if not self._store.is_configured(spec.provider_id):
-                unavailable_llm.append(mid)
-
-        seen_v: set[str] = set()
-        for mid in voice_models:
-            if mid in seen_v:
-                continue
-            seen_v.add(mid)
-            spec = self._catalog.get_model(mid)
-            if spec is None:
-                unknown_voice.append(mid)
-                continue
-            if spec.deprecated_since:
-                deprecated_voice.append(
-                    DeprecatedModelInfo(
-                        model_id=mid,
-                        deprecated_since=spec.deprecated_since,
-                        replacement_id=spec.replacement_id,
-                    )
-                )
-                continue
-            if not (spec.supports_kind("tts") or spec.supports_kind("stt")):
-                wrong_kind_voice.append(mid)
-                continue
-            if not self._store.is_configured(spec.provider_id):
-                unavailable_voice.append(mid)
-
-        return CharacterModelValidation(
-            unknown_llm=sorted(unknown_llm),
-            unknown_voice=sorted(unknown_voice),
-            deprecated_llm=sorted(deprecated_llm, key=lambda d: d.model_id),
-            deprecated_voice=sorted(deprecated_voice, key=lambda d: d.model_id),
-            wrong_kind_llm=sorted(wrong_kind_llm),
-            wrong_kind_voice=sorted(wrong_kind_voice),
-            unavailable_llm=sorted(unavailable_llm),
-            unavailable_voice=sorted(unavailable_voice),
-        )
 
 
 def build_available_models_service(

@@ -10,6 +10,7 @@ the speech counterpart of an AI profile (``models_ai.py``).
 - ``uses``: ``"<extension name>:<use id>"`` → profile id, for the speech uses an extension declares
   (HomeHiro's ``home:speak``). A speak request names a use, or a profile directly (an alert's or a
   Speak node's own pick).
+- ``hiro_profile``: the voice Hiro's spoken replies use (Phase 7b step 5), after the character's own.
 - ``clip_cache_mb``: spoken clips are kept on disk (``<workspace>/data/voice-clips``) so the same
   words in the same voice aren't paid for twice; Preferences → General → Spoken clips. 0 keeps none.
 
@@ -100,6 +101,17 @@ class VoicePreferences(BaseModel):
     profiles: dict[str, VoiceProfile] = pref_field(save_skip=True, default_factory=dict)
     # "<extension name>:<use id>" → profile id; None = declared, no profile picked yet.
     uses: dict[str, str | None] = pref_field(save_skip=True, default_factory=dict)
+    # Phase 7b step 5: Hiro's own spoken replies use voice profiles (``llm.default_tts`` and the
+    # character's voice-per-provider map are gone). A character's own voice profiles come first.
+    hiro_profile: str | None = pref_field(
+        voice_profile_ref=True,
+        default=None,
+        title="Hiro's voice",
+        description=(
+            "The voice profile Hiro speaks its voice replies with when the character has no voice "
+            "profile of its own with a key set. Empty = no voice replies."
+        ),
+    )
     clip_cache_mb: int = pref_field(
         default=200,
         ge=0,

@@ -30,7 +30,9 @@ function profile(id: string, fallbackId: string | null = null): AiProfile {
     instructions: '',
     budget: { costPerDay: 1, perHour: null, atOnce: 1 },
     fallbackId,
-    usage: { todayAsks: 41, todayCost: 0.34, thisHour: 0 }
+    usage: { todayAsks: 41, todayCost: 0.34, thisHour: 0 },
+    preset: null,
+    jobs: []
   };
 }
 

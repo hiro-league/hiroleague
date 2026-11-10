@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from ...runtime.preferences_runtime import WorkspacePreferencesRuntime
     from ...services.memory.models import MemoryRetrievalModelCache
     from ...services.stt import STTService
-    from ...services.tts import TTSService
     from ...services.vision_service import VisionService
 
 
@@ -31,7 +30,8 @@ class AgentServices:
     checkpointer: Checkpointer | None = None
     stt: "STTService | None" = None
     vision: "VisionService | None" = None
-    tts: "TTSService | None" = None
+    # (Phase 7b step 5: no TTS service here any more — voice replies speak through services/voice
+    # with the voice profile resolved per turn.)
     memory: "MemoryService | None" = None
     credentials: "CredentialStore | None" = None
     knowledge_subgraph: CompiledStateGraph | None = None

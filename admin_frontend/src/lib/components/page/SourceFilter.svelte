@@ -4,9 +4,10 @@
 
 <script lang="ts">
   /**
-   * Phase 7b MOCKUP: who a profile serves — All, Hiro (the core's own jobs and characters), each
-   * extension, and Unused (for cleanup). A profile used by both Hiro and Home shows under both.
-   * Used on AI profiles and voice profiles, so the core's and the extensions' profiles don't mix.
+   * Pills that show one source at a time, each with its count (Phase 7b): who a profile serves — All,
+   * Hiro (the core's own jobs and voice), each extension, Unused (for cleanup) — on Catalog → Profiles'
+   * AI profiles and voice profiles, and whose uses to show on Uses. A profile used by both Hiro and an
+   * extension shows under both.
    */
   import { cn } from '$lib/utils';
 

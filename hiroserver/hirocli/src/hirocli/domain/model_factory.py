@@ -51,6 +51,27 @@ def _api_model_id(canonical_id: str) -> str:
     return parts[1]
 
 
+def _local_server_spec(cat: ModelCatalog, workspace_path: Path, model_id: str) -> ModelSpec | None:
+    """A local server's model with no catalog row, as the server last reported it (else a bare row).
+
+    Phase 7b step 5: Hiro's jobs build their model from an AI profile, which may name any model a
+    local server (LM Studio / Ollama) reports — as ``services/ai_ask/targets.resolve_target`` does.
+    """
+    from .discovered_models import DiscoveredModel, discovered_model_spec, get_discovered_model
+
+    provider_id, _, name = model_id.partition(":")
+    prov = cat.get_provider(provider_id)
+    if prov is None or prov.hosting != "local" or not name:
+        return None
+    seen = get_discovered_model(workspace_path, model_id)
+    return discovered_model_spec(
+        seen
+        or DiscoveredModel(
+            provider_id=provider_id, name=name, display_name=name, vision=True, reasoning=False, loaded=False
+        )
+    )
+
+
 def create_chat_model(
     model_id: str,
     *,
@@ -99,7 +120,7 @@ def build_chat_model_from_tuning(
     (Phase 7a, ``discovered_models.discovered_model_spec``) is built from its synthetic row.
     """
     cat = get_model_catalog()
-    spec = spec or cat.get_model(model_id)
+    spec = spec or cat.get_model(model_id) or _local_server_spec(cat, workspace_path, model_id)
     if spec is None:
         raise ValueError(f"Unknown model id: {model_id}")
     if spec.model_kind != "chat":

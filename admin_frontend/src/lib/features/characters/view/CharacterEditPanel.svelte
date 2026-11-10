@@ -1,9 +1,7 @@
 <script lang="ts">
   import CharacterEditToolbar from '$lib/features/characters/view/CharacterEditToolbar.svelte';
   import CharacterProfileSection from '$lib/features/characters/sections/CharacterProfileSection.svelte';
-  import CharacterPreferredModelsSection from '$lib/features/characters/sections/CharacterPreferredModelsSection.svelte';
-  import CharacterTtsSettingsSection from '$lib/features/characters/sections/CharacterTtsSettingsSection.svelte';
-  import { PHASE7B_MOCKUP } from '$lib/mockups/phase7b';
+  import CharacterProfilesSection from '$lib/features/characters/sections/CharacterProfilesSection.svelte';
   import CharacterPromptsSection from '$lib/features/characters/sections/CharacterPromptsSection.svelte';
   import CharacterExtrasSection from '$lib/features/characters/sections/CharacterExtrasSection.svelte';
   import type { createCharactersPageController } from '$lib/features/characters/state/characters-controller.svelte';
@@ -22,6 +20,15 @@
     characterId: string | null;
     notify: (kind: 'success' | 'error' | 'info' | 'warning', message: string) => void;
   } = $props();
+
+  async function reloadProfiles() {
+    try {
+      await ctrl.reloadProfileOptions();
+      notify('success', 'Profiles reloaded.');
+    } catch (err) {
+      notify('error', err instanceof Error ? err.message : 'Could not read the profiles.');
+    }
+  }
 
   const editToolbarTitle = $derived(characterId ? 'Edit character' : 'New character');
 
@@ -60,58 +67,32 @@
           onPickPhoto={(e) => void ctrl.photoCrop.pickPhoto(e)}
         />
 
-        <CharacterPreferredModelsSection
-          variant="llm"
+        <!-- Phase 7b step 5: ordered AI / voice profiles (were model pickers, a tuning profile and TTS settings). -->
+        <CharacterProfilesSection
+          variant="ai"
           form={formApi.form}
           {characterId}
-          catalogModels={ctrl.llmOptions}
-          catalogAllProviders={ctrl.catalogAllProviders}
-          workspaceResolved={ctrl.workspaceActiveProvidersResolved}
-          workspaceActiveIds={ctrl.workspaceChatActiveIds}
+          options={ctrl.aiProfileOptions}
           busy={ctrl.busy}
-          catalogReloadBusy={ctrl.catalogReloadBusy}
-          modelPickerResetNonce={formApi.modelPickerResetNonce}
           resolved={ctrl.resolved}
           resolvedError={ctrl.resolvedError}
-          tuningProfiles={ctrl.tuningProfiles}
-          workspaceDefaultTuningProfile={ctrl.workspaceDefaultTuningProfile}
           dirty={formApi.dirty}
-          onReloadCatalog={() => void ctrl.reloadBundledCatalogInEditor()}
-          onDuplicateAttempt={() => notify('warning', 'That model is already in the list.')}
+          onReloadProfiles={() => void reloadProfiles()}
           markDirty={formApi.markDirty}
         />
 
-        <CharacterPreferredModelsSection
+        <CharacterProfilesSection
           variant="voice"
           form={formApi.form}
           {characterId}
-          catalogModels={ctrl.voiceOptions}
-          catalogAllProviders={ctrl.catalogAllProviders}
-          workspaceResolved={ctrl.workspaceActiveProvidersResolved}
-          workspaceActiveIds={ctrl.workspaceTtsActiveIds}
+          options={ctrl.voiceProfileOptions}
           busy={ctrl.busy}
-          catalogReloadBusy={ctrl.catalogReloadBusy}
-          modelPickerResetNonce={formApi.modelPickerResetNonce}
           resolved={ctrl.resolved}
           resolvedError={ctrl.resolvedError}
           dirty={formApi.dirty}
-          onReloadCatalog={() => void ctrl.reloadBundledCatalogInEditor()}
-          onDuplicateAttempt={() => notify('warning', 'That model is already in the list.')}
+          onReloadProfiles={() => void reloadProfiles()}
           markDirty={formApi.markDirty}
         />
-
-        <!-- Phase 7b mockup: voice and style now live in the voice recipes listed above. -->
-        {#if !PHASE7B_MOCKUP}
-        <CharacterTtsSettingsSection
-          form={formApi.form}
-          catalogTtsProviders={ctrl.catalogTtsProviders}
-          google={ctrl.ttsPresetGoogle}
-          openai={ctrl.ttsPresetOpenai}
-          others={ctrl.ttsPresetOtherProviders}
-          onPickVoicePreset={(pid, vid) => ctrl.setTtsVoicePreset(pid, vid)}
-          markDirty={formApi.markDirty}
-        />
-        {/if}
 
         <CharacterPromptsSection form={formApi.form} markDirty={formApi.markDirty} />
 

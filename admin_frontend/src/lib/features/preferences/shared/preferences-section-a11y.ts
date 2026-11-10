@@ -33,7 +33,3 @@ export const PREFERENCES_SECTION_BODY_IDS = {
   evalMemAnswerPrompt: 'preferences-section-eval-mem-answer-prompt',
   evalJudgePrompt: 'preferences-section-eval-judge-prompt'
 } as const;
-
-export function tuningProfileSectionBodyId(profileId: string): string {
-  return `preferences-section-tuning-profile-${profileId}`;
-}

@@ -86,8 +86,8 @@ def register(character_app: typer.Typer, console: Console) -> None:
         console.print(f"  folder:      {ch['folder_path']}")
         console.print(f"  photo:       {ch.get('photo_filename') or '—'}")
         console.print(f"  description: {ch.get('description') or '—'}")
-        console.print(f"  llm_models:  {ch.get('llm_models')}")
-        console.print(f"  voice_models:{ch.get('voice_models')}")
+        console.print(f"  ai_profiles: {ch.get('ai_profiles')}")
+        console.print(f"  voice:       {ch.get('voice_profiles')}")
         console.print(f"  emotions:    {ch.get('emotions_enabled')}")
         console.print("[dim]prompt[/dim]")
         console.print(ch.get("prompt") or "—")
@@ -104,11 +104,11 @@ def register(character_app: typer.Typer, console: Console) -> None:
         description: Optional[str] = typer.Option(None, "--description", "-d"),
         prompt: Optional[str] = typer.Option(None, "--prompt", "-p", help="System prompt text."),
         backstory: Optional[str] = typer.Option(None, "--backstory", "-b"),
-        llm_models_json: Optional[str] = typer.Option(
-            None, "--llm-models-json", help='JSON array, e.g. ["openai:gpt-6.1-sol"]',
+        ai_profiles_json: Optional[str] = typer.Option(
+            None, "--ai-profiles-json", help='JSON array of AI profile ids in order, e.g. ["hiro-chat"]',
         ),
-        voice_models_json: Optional[str] = typer.Option(
-            None, "--voice-models-json", help="JSON array of voice ids.",
+        voice_profiles_json: Optional[str] = typer.Option(
+            None, "--voice-profiles-json", help="JSON array of voice profile ids in order.",
         ),
         emotions: Optional[bool] = typer.Option(
             None, "--emotions/--no-emotions", help="Set emotions_enabled (default: false).",
@@ -127,8 +127,8 @@ def register(character_app: typer.Typer, console: Console) -> None:
                 description=description,
                 prompt=prompt,
                 backstory=backstory,
-                llm_models_json=llm_models_json,
-                voice_models_json=voice_models_json,
+                ai_profiles_json=ai_profiles_json,
+                voice_profiles_json=voice_profiles_json,
                 emotions_enabled=emotions,
                 extras_json=extras_json,
             )
@@ -150,8 +150,12 @@ def register(character_app: typer.Typer, console: Console) -> None:
         description: Optional[str] = typer.Option(None, "--description", "-d"),
         prompt: Optional[str] = typer.Option(None, "--prompt", "-p"),
         backstory: Optional[str] = typer.Option(None, "--backstory", "-b"),
-        llm_models_json: Optional[str] = typer.Option(None, "--llm-models-json"),
-        voice_models_json: Optional[str] = typer.Option(None, "--voice-models-json"),
+        ai_profiles_json: Optional[str] = typer.Option(
+            None, "--ai-profiles-json", help="JSON array of AI profile ids ([] = Hiro's chat profile)."
+        ),
+        voice_profiles_json: Optional[str] = typer.Option(
+            None, "--voice-profiles-json", help="JSON array of voice profile ids ([] = Hiro's own voice)."
+        ),
         emotions: Optional[bool] = typer.Option(
             None, "--emotions/--no-emotions", help="Set emotions_enabled.",
         ),
@@ -167,8 +171,8 @@ def register(character_app: typer.Typer, console: Console) -> None:
                 description,
                 prompt,
                 backstory,
-                llm_models_json,
-                voice_models_json,
+                ai_profiles_json,
+                voice_profiles_json,
                 emotions,
                 extras_json,
             )
@@ -184,8 +188,8 @@ def register(character_app: typer.Typer, console: Console) -> None:
                 description=description,
                 prompt=prompt,
                 backstory=backstory,
-                llm_models_json=llm_models_json,
-                voice_models_json=voice_models_json,
+                ai_profiles_json=ai_profiles_json,
+                voice_profiles_json=voice_profiles_json,
                 emotions_enabled=emotions,
                 extras_json=extras_json,
             )

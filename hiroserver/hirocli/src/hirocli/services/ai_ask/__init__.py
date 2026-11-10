@@ -9,7 +9,7 @@ timeouts), ``providers`` (API and local models through ``model_factory``; the pl
 
 from __future__ import annotations
 
-from .catalog_view import budget_hint, extension_use_map, profile_rows, use_rows
+from .catalog_view import budget_hint, extension_use_map, job_rows, profile_rows, use_rows
 from .errors import ASK_ERROR_CODES, AskError, ProviderFailed
 from .providers import PlanCall, PlanTool, ProviderResult, register_plan_tool
 from .runner import DRAFT_PROFILE_ID, AskAnswer, AskRequest, AskRunner, get_ask_runner
@@ -28,6 +28,7 @@ __all__ = [
     "budget_hint",
     "extension_use_map",
     "get_ask_runner",
+    "job_rows",
     "profile_rows",
     "register_plan_tool",
     "use_rows",

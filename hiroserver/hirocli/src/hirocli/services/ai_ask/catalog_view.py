@@ -5,7 +5,9 @@
 - ``use_rows`` — each paired extension's declared uses with the profile picked for each, marked
   ``new`` (not in its previous list) or ``removed`` (still in ``ai.uses`` but no longer declared)
   (``ai_uses_list``);
-- ``extension_use_map`` — one extension's use id → profile id (``ai.profiles``).
+- ``extension_use_map`` — one extension's use id → profile id (``ai.profiles``);
+- ``job_rows`` (Phase 7b step 5) — Hiro's own jobs: which profile each field holds, its default
+  profile id, what it borrows when empty, and the model it runs with now.
 """
 
 from __future__ import annotations
@@ -15,7 +17,15 @@ from typing import Any
 
 from ...domain.credential_store import CredentialStore
 from ...domain.extensions import PairedExtension, list_paired_extensions
-from ...domain.preferences import AiProfile, WorkspacePreferences, ai_fallback_chain
+from ...domain.preferences import (
+    JOB_PRESETS,
+    AiProfile,
+    WorkspacePreferences,
+    ai_fallback_chain,
+    job_model_source,
+    resolve_job_model,
+)
+from ...domain.preferences.jobs import job_profile_ref
 from .targets import resolve_target
 from ..ai_usage.store import ProfileUsage, profile_usage
 
@@ -40,6 +50,12 @@ def profile_rows(
     store: CredentialStore | None,
 ) -> list[dict[str, Any]]:
     profiles = prefs.ai.profiles
+    # Phase 7b step 5: which of Hiro's jobs point straight at each profile (the admin's "Used by").
+    used_by: dict[str, list[str]] = {}
+    for job in JOB_PRESETS:
+        ref = job_profile_ref(prefs, job)
+        if ref is not None:
+            used_by.setdefault(ref, []).append(job)
     rows: list[dict[str, Any]] = []
     for pid, profile in sorted(profiles.items(), key=lambda kv: kv[1].label.lower()):
         try:
@@ -76,6 +92,40 @@ def profile_rows(
                 "fallback_chain": ai_fallback_chain(profiles, pid)[1:],
                 "ready": not_ready is None,
                 "not_ready": not_ready,
+                # Phase 7b step 5: the job this profile is the default of (Restore default), and
+                # the jobs using it.
+                "preset": profile.preset,
+                "jobs": used_by.get(pid, []),
+            }
+        )
+    return rows
+
+
+def job_rows(
+    workspace_path: Path,
+    prefs: WorkspacePreferences,
+    store: CredentialStore | None,
+) -> list[dict[str, Any]]:
+    """Hiro's own jobs (``JOB_PRESETS``): field, profile picked, default profile, model now."""
+    rows: list[dict[str, Any]] = []
+    for job, preset in JOB_PRESETS.items():
+        resolved = resolve_job_model(prefs, workspace_path, job, credential_store=store)
+        rows.append(
+            {
+                "id": job,
+                "label": preset.label,
+                "path": preset.path,
+                "profile_id": job_profile_ref(prefs, job),
+                "default_profile_id": preset.profile_id,
+                "falls_back_to": preset.falls_back_to,
+                "source": job_model_source(prefs, job),
+                "model": resolved.model_id if resolved is not None else None,
+                "model_profile_id": resolved.profile_id if resolved is not None else None,
+                "preset": {
+                    "temperature": preset.temperature,
+                    "max_tokens": preset.max_tokens,
+                    "thinking": preset.thinking,
+                },
             }
         )
     return rows

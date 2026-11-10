@@ -65,17 +65,20 @@ def test_literal_enum_surfaces_on_leaf() -> None:
 
 def test_schema_payload_includes_version_and_fields() -> None:
     payload = workspace_preferences_schema_payload()
-    assert payload["preferences_version"] == 3
+    assert payload["preferences_version"] == 4
     assert "knowledge.chunking.chunk_size" in payload["fields"]
 
 
 def test_field_map_tags_for_save_policy() -> None:
     fields = workspace_preferences_field_map()
     assert fields["version"]["readOnly"] is True
-    assert fields["tuning_profiles"]["writeWhole"] is True
     assert fields["graph.eval.answer_prompts"]["writeWhole"] is True
-    assert fields["llm.default_chat"]["model_kind"] == "chat"
-    assert fields["llm.default_chat"]["nullable"] is True
+    # Phase 7b step 5: job fields carry the AI-profile marker (the admin renders a profile picker).
+    assert fields["llm.chat_profile"]["ai_profile_ref"] is True
+    assert fields["llm.chat_profile"]["nullable"] is True
+    assert fields["graph.eval.retrieval_profile"]["ai_profile_ref"] is True
+    assert fields["voice.hiro_profile"]["voice_profile_ref"] is True
+    assert "tuning_profiles" not in fields and "llm.default_chat" not in fields
     assert fields["graph.reranker.device"]["nullable"] is True
     assert fields["image_profiles"]["preferencesSaveSkip"] is True
     assert fields["knowledge.default_embedding_model_locked"]["readOnly"] is True
@@ -93,8 +96,7 @@ def test_json_schema_marks_nested_properties_required() -> None:
 def test_pref_field_metadata_keys_are_all_surfaced() -> None:
     """Drift guard: every admin-facing key ``pref_field`` can emit must be copied into the flat field
     map (``_META_KEYS``). Otherwise a newly added knob (e.g. a future save-policy flag) would live on
-    the model but silently never reach the admin UI. The one backend-only marker
-    (``tuning_profile_ref``) is intentionally excluded — see the ``pref_field`` docstring."""
+    the model but silently never reach the admin UI (the AI / voice profile markers included)."""
     field = pref_field(
         model_kind="chat",
         advanced=True,
@@ -102,12 +104,12 @@ def test_pref_field_metadata_keys_are_all_surfaced() -> None:
         save_skip=True,
         write_whole=True,
         read_only=True,
-        tuning_profile_ref=True,
+        ai_profile_ref=True,
+        voice_profile_ref=True,
         default=None,
     )
     emitted = set(field.json_schema_extra.keys())
-    backend_only = {"tuning_profile_ref"}
-    missing = (emitted - backend_only) - set(_META_KEYS)
+    missing = emitted - set(_META_KEYS)
     assert missing == set(), f"pref_field emits metadata keys absent from _META_KEYS: {missing}"
 
 

@@ -7,9 +7,8 @@ each test needs, keeping the per-test surface narrow.
 
 from __future__ import annotations
 
+import base64
 from pathlib import Path
-
-from types import SimpleNamespace
 
 import pytest
 from langchain_core.messages import AIMessage
@@ -25,7 +24,7 @@ from hirocli.runtime.agent_graph.nodes.tts import TTSNodes
 from hirocli.runtime.preferences_runtime import WorkspacePreferencesRuntime
 from hirocli.runtime.tests.graph_fakes import (
     FakeMemory,
-    FakeTTS,
+    FakeVoiceEngine,
     RecordingLedgerSink,
     ScriptedChatModel,
     ai_text,
@@ -80,10 +79,17 @@ def _memory(
 def _tts(
     tmp_path: Path,
     *,
-    tts=None,
     prefs: WorkspacePreferencesRuntime | None = None,
 ) -> TTSNodes:
-    return TTSNodes(make_agent_services(tmp_path, tts=tts, preferences=prefs))
+    return TTSNodes(make_agent_services(tmp_path, preferences=prefs))
+
+
+def _voice(profile_id: str = "hiro-voice"):
+    """A resolved voice (Phase 7b step 5: voice replies speak with voice profiles)."""
+    from hirocli.domain.preferences import ResolvedVoice, VoiceProfile
+
+    profile = VoiceProfile(label="Hiro's voice", model="google:gemini-3.8-flash-tts", voice="kore", style="warm")
+    return ResolvedVoice(profile_id=profile_id, profile=profile, source="hiro")
 
 
 @pytest.mark.asyncio
@@ -194,27 +200,34 @@ async def test_memory_recall_with_fake_memory(tmp_path: Path, monkeypatch: pytes
 
 
 @pytest.mark.asyncio
-async def test_tts_gate_routing(tmp_path: Path) -> None:
-    tts = _tts(tmp_path, tts=FakeTTS())
+async def test_tts_gate_routing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("hirocli.domain.preferences.resolve_character_voice", lambda *a, **k: _voice())
+    tts = _tts(tmp_path)
     assert tts.tts_gate({"reply_text": "hi", "request_voice_reply": True}) == "tts"
     assert tts.tts_gate({"reply_text": "hi", "request_voice_reply": False}) == "finalize"
     assert tts.tts_gate({"reply_text": None}) == "finalize"
 
 
 @pytest.mark.asyncio
-async def test_tts_node_emits_completed_with_fake_tts(
+async def test_tts_gate_no_voice_profile_means_no_voice_reply(tmp_path: Path) -> None:
+    # No character voice profile and no voice.hiro_profile → no voice reply.
+    tts = _tts(tmp_path)
+    assert tts.tts_gate({"reply_text": "hi", "request_voice_reply": True, "character_id": "hiro"}) == "finalize"
+
+
+@pytest.mark.asyncio
+async def test_tts_node_speaks_mp3_with_the_voice_profile(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from hirocli.services.voice import engine
+
     ensure_data_db(tmp_path)
     seed_default_characters(tmp_path)
     runtime = WorkspacePreferencesRuntime(tmp_path)
-    monkeypatch.setattr(
-        "hirocli.domain.preferences.resolve_character_voice",
-        lambda *a, **k: SimpleNamespace(
-            model="fake:tts", voice="alloy", instructions=None
-        ),
-    )
-    tts = _tts(tmp_path, tts=FakeTTS(), prefs=runtime)
+    monkeypatch.setattr("hirocli.domain.preferences.resolve_character_voice", lambda *a, **k: _voice())
+    fake = FakeVoiceEngine(seconds=1.0)
+    monkeypatch.setattr(engine, "synthesize", fake.synthesize)
+    tts = _tts(tmp_path, prefs=runtime)
     events: list[dict] = []
     result = await tts.tts_node(
         {
@@ -226,19 +239,70 @@ async def test_tts_node_emits_completed_with_fake_tts(
         },
         events.append,
     )
+    assert fake.calls and fake.calls[0][1] == "hello there"
     assert result["reply_audio"]["media_type"] == "audio/mpeg"
     tts_events = [e for e in events if e.get("event") == GRAPH_TTS_COMPLETED]
     assert len(tts_events) == 1
     payload = tts_events[0]["payload"]
     assert payload["reply_id"] == "reply-1"
-    assert payload["model"]
-    assert payload["voice"]
-    assert payload["audio_b64"]
+    assert payload["media_type"] == "audio/mpeg"
+    assert payload["provider"] == "google"
+    assert payload["model"] == "gemini-3.8-flash-tts"
+    assert payload["voice"] == "kore"
+    assert payload["duration_ms"] == 1000
+    mp3 = base64.b64decode(payload["audio_b64"])
+    # An MP3 stream: an ID3 tag or an MPEG frame sync (11 set bits).
+    assert mp3[:3] == b"ID3" or (mp3[0] == 0xFF and (mp3[1] & 0xE0) == 0xE0)
+    assert payload["size"] == len(mp3)
+
+
+@pytest.mark.asyncio
+async def test_tts_node_fills_usage_for_the_ledger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from hirocli.runtime.agent_graph.nodes.tts_support import build_tts_attachment_and_payload
+    from hirocli.services.voice.kit import Speech
+
+    speech = Speech(b"\x00\x00" * 24000, 24000, 2.0, 0.01, True, tokens_in=9, tokens_out=50)
+    built = build_tts_attachment_and_payload(b"mp3", speech, _voice().profile, "hello there", reply_id="r")
+    assert built.usage_counts["tts_text_tokens"] == 9
+    assert built.usage_counts["tts_audio_tokens"] == 50
+    assert built.usage_counts["tts_audio_seconds"] == 2.0
+    assert built.payload["input_characters"] == len("hello there")
+    assert built.payload["output_audio_tokens"] == 50
+
+
+@pytest.mark.asyncio
+async def test_tts_node_no_voice_profile_skips(tmp_path: Path) -> None:
+    ensure_data_db(tmp_path)
+    seed_default_characters(tmp_path)
+    tts = _tts(tmp_path, prefs=WorkspacePreferencesRuntime(tmp_path))
+    events: list[dict] = []
+    result = await tts.tts_node(
+        {"inbound_id": "in-novoice", "chat_channel_id": 3, "character_id": "hiro", "reply_text": "hello"},
+        events.append,
+    )
+    assert result == {}
+    assert not any(e.get("event") == GRAPH_TTS_COMPLETED for e in events)
+
+
+@pytest.mark.asyncio
+async def test_tts_node_engine_failure_degrades(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from hirocli.services.voice import engine
+
+    monkeypatch.setattr("hirocli.domain.preferences.resolve_character_voice", lambda *a, **k: _voice())
+    monkeypatch.setattr(engine, "synthesize", FakeVoiceEngine(mode="fail").synthesize)
+    tts = _tts(tmp_path)
+    events: list[dict] = []
+    result = await tts.tts_node(
+        {"inbound_id": "in-fail", "chat_channel_id": 3, "character_id": "hiro", "reply_text": "hello"},
+        events.append,
+    )
+    assert result == {}
+    assert not any(e.get("event") == GRAPH_TTS_COMPLETED for e in events)
 
 
 @pytest.mark.asyncio
 async def test_tts_node_skips_missing_character(tmp_path: Path) -> None:
-    tts = _tts(tmp_path, tts=FakeTTS())
+    tts = _tts(tmp_path)
     events: list[dict] = []
     result = await tts.tts_node(
         {

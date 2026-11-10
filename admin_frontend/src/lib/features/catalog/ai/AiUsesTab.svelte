@@ -1,6 +1,7 @@
 <script lang="ts">
   /**
-   * Uses: what each extension asks an AI for, grouped by extension, each pointed at a profile.
+   * Uses: what Hiro and each extension ask an AI for, one source at a time, each pointed at a profile.
+   * Hiro (first) is the core's own jobs and its voice (`HiroUsesTable`, Phase 7b step 5).
    * The note flags a profile whose model can't serve the use, else shows its fallback chain.
    * An extension can change its list without telling the core, so each group has Refresh ("Ask Home
    * for its uses") and an "as of" time; the server marks new uses ("New") and ones no longer offered
@@ -21,18 +22,19 @@
   import type { AiController } from './ai-controller.svelte';
   import { chainLabel, fallbackChain, needsMismatch } from './ai-profile-rules';
   import type { AiUse } from './ai-types';
-  import HiroUsesMock from '$lib/mockups/HiroUsesMock.svelte';
+  import SourceFilter from '$lib/components/page/SourceFilter.svelte';
   import VoiceUsesTable from '$lib/features/catalog/voice/VoiceUsesTable.svelte';
   import type { VoiceController } from '$lib/features/catalog/voice/voice-controller.svelte';
-  import SourceFilter from '$lib/mockups/SourceFilter.svelte';
-  import { MOCK_JOBS, PHASE7B_MOCKUP } from '$lib/mockups/phase7b';
+  import HiroUsesTable from './HiroUsesTable.svelte';
 
   let { ai, voice }: { ai: AiController; voice: VoiceController } = $props();
 
-  // A filter per source: each extension that declared uses (and, with the step 5 mockup on, Hiro's jobs first).
-  let source = $state(PHASE7B_MOCKUP ? 'Hiro' : '');
+  // A filter per source: Hiro's own jobs and voice first, then each extension that declared uses.
+  const HIRO = 'Hiro';
+  let source = $state(HIRO);
   const sourceTabs = $derived([
-    ...(PHASE7B_MOCKUP ? [{ id: 'Hiro', label: 'Hiro', count: MOCK_JOBS.length }] : []),
+    // Hiro's jobs plus its one speaking use (Hiro's voice).
+    { id: HIRO, label: 'Hiro', count: ai.jobs.length + 1 },
     ...ai.useGroups.map((g) => ({ id: g.extension, label: g.extension, count: ai.uses.filter((u) => u.extension === g.extension && u.status !== 'removed').length }))
   ]);
   const activeSource = $derived(sourceTabs.some((t) => t.id === source) ? source : (sourceTabs[0]?.id ?? ''));
@@ -61,13 +63,19 @@
         What Hiro and each extension ask an AI for, and what speaks. Pick the profile each one uses.
       </p>
     </div>
-    <!-- Phase 7b mockup: one source at a time — Hiro's own jobs, then each extension. The same pills as
-         the profile lists (Uses is itself a sub-tab of Profiles, so no second tab strip). -->
+    <!-- One source at a time — Hiro's own jobs, then each extension. The same pills as the profile lists
+         (Uses is itself a sub-tab of Profiles, so no second tab strip). -->
     <SourceFilter options={sourceTabs} value={activeSource} onchange={(id) => (source = id)} />
   </div>
 
-  {#if activeSource === 'Hiro'}
-    <HiroUsesMock source="Hiro" extraProfiles={ai.profiles.map((p) => ({ id: p.id, name: p.name }))} />
+  {#if activeSource === HIRO}
+    {#if ai.profilesLoading && ai.jobs.length === 0}
+      <InlineLoading label="Loading Hiro's jobs…" />
+    {:else if ai.profilesError}
+      <InlineDestructiveAlert title="Could not load Hiro's jobs" message={ai.profilesError} />
+    {:else}
+      <HiroUsesTable {ai} {voice} />
+    {/if}
   {:else}
 
   {#if ai.usesLoading && ai.useGroups.length === 0}

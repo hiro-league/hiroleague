@@ -30,11 +30,38 @@ export type AiProfileRow = {
   fallback_chain: string[];
   ready: boolean;
   not_ready: string | null;
+  /** Phase 7b step 5: the job this profile is the default of ("chat", "memory", …; null = the owner's
+   *  own profile) — the admin shows "Default", hides Delete and offers Restore default. */
+  preset: string | null;
+  /** Phase 7b step 5: ids of Hiro's jobs whose own field points at this profile. */
+  jobs: string[];
+};
+
+/** One of Hiro's own jobs (`services/ai_ask/catalog_view.job_rows`, Phase 7b step 5). */
+export type AiJobRow = {
+  id: string;
+  label: string;
+  /** The preference field holding the job's AI profile id (PATCH it to change the job's profile). */
+  path: string;
+  /** The profile the job's own field holds (null = not set: it borrows `falls_back_to`'s). */
+  profile_id: string | null;
+  /** The id of the profile made for the job by default. */
+  default_profile_id: string;
+  /** The job whose profile an unset field borrows; null = nothing (the job is off). */
+  falls_back_to: string | null;
+  /** The preference path whose profile supplies the model now; null when nothing is set. */
+  source: string | null;
+  /** The model the job runs with now (saved), and the profile it came from; null = none can run. */
+  model: string | null;
+  model_profile_id: string | null;
+  /** The job's preset tuning (what Restore default puts back). */
+  preset: { temperature: number; max_tokens: number; thinking: AiProfilePrefs['thinking'] };
 };
 
 export type AiProfilesPayload = {
   profiles: AiProfileRow[];
   uses: Record<string, string | null>;
+  jobs: AiJobRow[];
 };
 
 /** A model a local server last reported (`domain/discovered_models.DiscoveredModel`). */
@@ -106,6 +133,14 @@ export type AiUsesRefreshPayload = {
 
 export async function listAiProfiles(): Promise<ApiResponse<AiProfilesPayload>> {
   return apiRequest<AiProfilesPayload>('/ai/profiles');
+}
+
+/** Phase 7b step 5: a job's default profile back to its preset tuning (thinking, temperature, max
+ *  tokens; no context window, no instructions). Its model, name, limits and fallback stay. */
+export async function restoreAiProfileDefault(
+  profileId: string
+): Promise<ApiResponse<{ profile_id: string; preset: string; profile: AiProfilePrefs }>> {
+  return apiRequest(`/ai/profiles/${encodeURIComponent(profileId)}/restore-default`, { method: 'POST' });
 }
 
 export async function listAiLocalModels(): Promise<ApiResponse<{ models: AiLocalModel[] }>> {

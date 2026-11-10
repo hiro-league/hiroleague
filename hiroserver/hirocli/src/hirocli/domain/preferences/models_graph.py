@@ -12,9 +12,6 @@ from pydantic import BaseModel, Field, model_validator
 
 from .defaults import (
     DEFAULT_ANSWER_PROMPT_ID,
-    DEFAULT_GRAPHITI_EXTRACTION_TUNING_PROFILE_ID,
-    DEFAULT_GRAPHITI_SMALL_TUNING_PROFILE_ID,
-    DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID,
     DEFAULT_MEMORY_EVAL_ANSWER_PROMPT,
     DEFAULT_MEMORY_EVAL_JUDGE_PROMPT,
     DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT,
@@ -179,63 +176,36 @@ class GraphEvalPreferences(BaseModel):
     )
     active_answer_prompt_id: str = Field(default=DEFAULT_ANSWER_PROMPT_ID, title="Active prompt profile", description="Which mem-eval answer prompt the answer step uses.")
     judge_prompt: str = Field(default=DEFAULT_MEMORY_EVAL_JUDGE_PROMPT, title="Eval judge prompt")
-    # Answer + judge each get their OWN model + tuning profile (split from the single shared
-    # answering model the eval used before). ``*_model`` of ``None`` falls back through
-    # ``knowledge.answering.model`` → ``llm.default_chat`` (the prior behavior), so an unset
-    # workspace is unchanged. The defaults reuse the ``knowledge_answering`` tuning profile —
-    # set them apart to tune the answer step and the judge independently. The memory-eval answer
-    # step uses ``answer_*``; the LLM judge (both tracks) uses ``judge_*``.
-    answer_model: str | None = pref_field(
-        model_kind="chat",
+    # Phase 7b step 5: each eval step's model + tuning profile pair became one AI profile
+    # (``jobs`` "eval_answer" / "eval_judge" / "eval_retrieval"). The memory-eval answer step uses
+    # ``answer_profile``; the LLM judge (both tracks) ``judge_profile``; the agentic retrieval loop
+    # (memory track) ``retrieval_profile``, which borrows the answer step's model when empty.
+    answer_profile: str | None = pref_field(
+        ai_profile_ref=True,
         default=None,
-        title="Eval answer model",
+        title="Eval: answer",
         description=(
-            "Model the memory-eval answer step uses to answer from recalled context. Null "
-            "falls back to the knowledge answering model, then default chat. (Knowledge-track "
-            "answers always use the production answering pipeline, not this.)"
+            "The AI profile the memory-eval answer step uses to answer from recalled context. Empty "
+            "uses Hiro's chat model. (Knowledge-track answers always use the knowledge answering job.)"
         ),
     )
-    answer_tuning_profile: str = pref_field(
-        tuning_profile_ref=True,
-        default=DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID,
-        title="Eval answer profile",
-        description="Tuning profile (temperature / max-tokens / thinking) for the eval answer model.",
-    )
-    judge_model: str | None = pref_field(
-        model_kind="chat",
+    judge_profile: str | None = pref_field(
+        ai_profile_ref=True,
         default=None,
-        title="Eval judge model",
+        title="Eval: judge",
         description=(
-            "Model the LLM judge uses to grade answers against the ideal (both tracks). Null "
-            "falls back to the knowledge answering model, then default chat."
+            "The AI profile the LLM judge uses to grade answers against the ideal (both tracks). "
+            "Empty uses Hiro's chat model. Lower temperature = more repeatable grading."
         ),
     )
-    judge_tuning_profile: str = pref_field(
-        tuning_profile_ref=True,
-        default=DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID,
-        title="Eval judge profile",
-        description="Tuning profile for the judge model. Lower temperature = more repeatable grading.",
-    )
-    # The agentic retrieval loop (memory track) gets its OWN model + tuning profile. ``None`` falls
-    # back to the eval ANSWER model (the loop borrowed it before it had its own preference): the
-    # resolver chains retrieval_model → answer_model → knowledge.answering.model → llm.default_chat,
-    # so an unset workspace is unchanged. Lets the retrieval/tool-calling step use a different model
-    # (e.g. a cheaper or higher-reasoning one) than the final answer step.
-    retrieval_model: str | None = pref_field(
-        model_kind="chat",
+    retrieval_profile: str | None = pref_field(
+        ai_profile_ref=True,
         default=None,
-        title="Retrieval agent model",
+        title="Eval: retrieval",
         description=(
-            "Model the agentic retrieval loop uses to plan searches and call the search_memory "
-            "tool (memory track). Null falls back to the eval answer model, then the knowledge "
-            "answering model → default chat."
+            "The AI profile the agentic retrieval loop (memory track) uses to plan searches and call "
+            "the search_memory tool. Empty uses the eval answer model."
         ),
-    )
-    retrieval_tuning_profile: str = pref_field(
-        tuning_profile_ref=True,
-        default=DEFAULT_KNOWLEDGE_TUNING_PROFILE_ID,
-        title="Retrieval agent profile",
-        description="Tuning profile (temperature / max-tokens / thinking) for the retrieval-agent model.",
     )
     # Recalled-context render toggles (eval only): which temporal annotations each recalled FACT
     # line carries, and whether episodes keep their [date] prefix. ``show_event_time`` (valid_at,
@@ -338,40 +308,25 @@ class GraphPreferences(BaseModel):
     """
 
     backend: KnowledgeGraphBackend = Field(default="off", title="Graph backend", description="Master switch for knowledge retrieval. Off = today's flat Qdrant retrieval (graph untouched). Graphiti = answer from the graph's facts.")
-    # Model ids — ``None`` falls back through knowledge.answering.model → llm.default_chat.
-    extraction_model: str | None = pref_field(
-        model_kind="chat",
+    # Phase 7b step 5: each Graphiti model tier's model + tuning profile pair became one AI profile
+    # (``jobs`` "graph_extraction" / "graph_small").
+    extraction_profile: str | None = pref_field(
+        ai_profile_ref=True,
         default=None,
-        title="Extraction model",
+        title="Graph extraction",
         description=(
-            "The heavy LLM Graphiti uses to read each chunk/turn and pull out entities + facts. "
-            "Must be structured-output-capable. Null falls back to the answering model, then "
-            "default chat."
+            "The AI profile Graphiti uses to read each chunk/turn and pull out entities + facts. "
+            "Must be structured-output-capable; keep it deterministic. Empty uses Hiro's chat model."
         ),
     )
-    extraction_tuning_profile: str = pref_field(
-        tuning_profile_ref=True,
-        default=DEFAULT_GRAPHITI_EXTRACTION_TUNING_PROFILE_ID,
-        title="Extraction profile",
-        description=(
-            "Tuning profile (temperature / max-tokens / thinking) for the extraction model. "
-            "Ships deterministic so extraction stays repeatable across runs."
-        ),
-    )
-    small_model: str | None = pref_field(
-        model_kind="chat",
+    small_profile: str | None = pref_field(
+        ai_profile_ref=True,
         default=None,
-        title="Smaller extraction model",
+        title="Graph small steps",
         description=(
-            "Cheaper model for Graphiti's sub-steps — node dedupe, entity summaries, timestamps. "
-            "Null falls back to the extraction model."
+            "A cheaper AI profile for Graphiti's sub-steps — node dedupe, entity summaries, "
+            "timestamps. Empty uses the graph extraction model."
         ),
-    )
-    small_tuning_profile: str = pref_field(
-        tuning_profile_ref=True,
-        default=DEFAULT_GRAPHITI_SMALL_TUNING_PROFILE_ID,
-        title="Smaller extraction profile",
-        description="Tuning profile for the cheaper sub-step model (dedupe / summaries / timestamps).",
     )
     # ``None`` → shares the knowledge dense embedder (decision G8).
     embedder_model: str | None = pref_field(

@@ -23,8 +23,7 @@
   import PrefTextareaField from '$lib/features/preferences/widgets/PrefTextareaField.svelte';
   import PrefSelectField from '$lib/features/preferences/widgets/PrefSelectField.svelte';
   import PrefModelPicker from '$lib/features/preferences/widgets/PrefModelPicker.svelte';
-  import ModelWithProfilePair from '$lib/features/preferences/widgets/ModelWithProfilePair.svelte';
-  import TuningProfileSelect from '$lib/features/preferences/widgets/TuningProfileSelect.svelte';
+  import PrefProfileField from '$lib/features/preferences/widgets/PrefProfileField.svelte';
   import PrefModelDownload from '$lib/features/preferences/widgets/PrefModelDownload.svelte';
   import PrefPanel from '$lib/features/preferences/widgets/PrefPanel.svelte';
   import PromptField from '$lib/features/preferences/widgets/prompts/PromptField.svelte';
@@ -32,9 +31,7 @@
   import FieldHelp from '$lib/components/ui/field-help.svelte';
   import PrefFieldRenderer from './PrefFieldRenderer.svelte';
   import GraphEvalContextToggles from '$lib/features/preferences/sections/graph-engine/GraphEvalContextToggles.svelte';
-  import AiProfileField from '$lib/mockups/AiProfileField.svelte';
   import SpokenClipsStats from '$lib/features/preferences/sections/SpokenClipsStats.svelte';
-  import { jobByModelPath, PHASE7B_MOCKUP } from '$lib/mockups/phase7b';
 
   let { ctrl, spec }: { ctrl: PreferencesController; spec: PrefFieldSpec } = $props();
 
@@ -51,17 +48,7 @@
   const draft = $derived(ctrl.draft as WorkspacePreferences);
 </script>
 
-<!-- Phase 7b mockup: a job's model + tuning preset become one AI profile; the default voice becomes a
-     voice recipe; the standalone tuning preset picker goes. -->
-{#if PHASE7B_MOCKUP && spec.kind === 'modelProfile' && jobByModelPath(spec.modelPath)}
-  <AiProfileField job={jobByModelPath(spec.modelPath)} heading={spec.heading} />
-{:else if PHASE7B_MOCKUP && spec.kind === 'model' && jobByModelPath(spec.path)}
-  <AiProfileField job={jobByModelPath(spec.path)} />
-{:else if PHASE7B_MOCKUP && spec.kind === 'model' && spec.path === 'llm.default_tts'}
-  <AiProfileField voice />
-{:else if PHASE7B_MOCKUP && spec.kind === 'tuningProfile'}
-  <!-- gone in 7b: the chat job's AI profile carries its settings -->
-{:else if spec.kind === 'number'}
+{#if spec.kind === 'number'}
   <PrefNumberField {ctrl} path={spec.path} disabled={spec.disabledWhen?.(draft) ?? false} />
 {:else if spec.kind === 'text'}
   <PrefTextField
@@ -144,20 +131,11 @@
       modelId={getPreferenceByPath(draft, spec.path) as string | null}
     />
   </div>
-{:else if spec.kind === 'tuningProfile'}
-  <TuningProfileSelect {ctrl} path={spec.path} scope={spec.scope} />
-{:else if spec.kind === 'modelProfile'}
-  <ModelWithProfilePair
-    {ctrl}
-    kind={spec.modelKind}
-    modelPath={spec.modelPath}
-    profilePath={spec.profilePath}
-    scope={spec.scope}
-    heading={spec.heading}
-    emptyFallbackId={spec.emptyFallback
-      ? (getPreferenceByPath(draft, spec.emptyFallback) as string | null)
-      : null}
-  />
+{:else if spec.kind === 'aiProfile'}
+  <!-- Phase 7b step 5: a job's AI profile (was a model picker + a tuning profile). -->
+  <PrefProfileField {ctrl} path={spec.path} kind="ai" />
+{:else if spec.kind === 'voiceProfile'}
+  <PrefProfileField {ctrl} path={spec.path} kind="voice" />
 {:else if spec.kind === 'grid'}
   <PrefFieldGrid cols={spec.cols}>
     {#each spec.fields as field, i (i)}

@@ -182,8 +182,8 @@ class EvalSummary:
 def _build_eval_model(workspace_path: Path, *, which: str) -> tuple[Any | None, str]:
     """Resolve + build an eval chat model. ``which`` picks the role — ``'answer'`` (the memory-eval
     answer step), ``'judge'`` (the LLM judge, both tracks), or ``'retrieval'`` (the agentic
-    retrieval loop) — each with its OWN model + tuning profile preference (``graph.eval.answer_*``
-    / ``graph.eval.judge_*`` / ``graph.eval.retrieval_*``). Returns ``(model, model_id)`` or
+    retrieval loop) — each with its OWN AI profile (``graph.eval.answer_profile`` /
+    ``judge_profile`` / ``retrieval_profile``, Phase 7b step 5). Returns ``(model, model_id)`` or
     ``(None, "")`` when unconfigured/unavailable so callers skip that step gracefully."""
     try:
         from hirocli.domain.model_factory import create_chat_model
@@ -210,6 +210,8 @@ def _build_eval_model(workspace_path: Path, *, which: str) -> tuple[Any | None, 
             temperature=spec.temperature,
             max_tokens=spec.max_tokens,
             thinking=spec.thinking,
+            # Phase 7b step 5: a local model's context window now reaches the eval models too.
+            num_ctx=spec.num_ctx,
         )
         return model, spec.model_id
     except Exception:
@@ -218,16 +220,16 @@ def _build_eval_model(workspace_path: Path, *, which: str) -> tuple[Any | None, 
 
 
 def build_eval_answer_model(workspace_path: Path) -> tuple[Any | None, str]:
-    """The memory-eval ANSWER model (``graph.eval.answer_model`` + tuning). See ``_build_eval_model``."""
+    """The memory-eval ANSWER model (``graph.eval.answer_profile``). See ``_build_eval_model``."""
     return _build_eval_model(workspace_path, which="answer")
 
 
 def build_eval_judge_model(workspace_path: Path) -> tuple[Any | None, str]:
-    """The eval JUDGE model (``graph.eval.judge_model`` + tuning). See ``_build_eval_model``."""
+    """The eval JUDGE model (``graph.eval.judge_profile``). See ``_build_eval_model``."""
     return _build_eval_model(workspace_path, which="judge")
 
 
 def build_eval_retrieval_model(workspace_path: Path) -> tuple[Any | None, str]:
-    """The agentic-retrieval model (``graph.eval.retrieval_model`` + tuning; falls back to the
-    answer model when unset). See ``_build_eval_model``."""
+    """The agentic-retrieval model (``graph.eval.retrieval_profile``; borrows the answer job's model
+    when unset). See ``_build_eval_model``."""
     return _build_eval_model(workspace_path, which="retrieval")

@@ -5,8 +5,8 @@ import {
   aiEngineLine,
   ingestKnobs,
   modelLines,
-  recallKnobs,
-  tuningChips
+  profileChips,
+  recallKnobs
 } from './eval-engine-params';
 
 // Minimal prefs shape covering only the fields these derivations read. Cast through unknown so
@@ -15,10 +15,9 @@ function prefs(overrides: Record<string, unknown> = {}): WorkspacePreferences {
   const base = {
     graph: {
       backend: 'kuzu',
-      extraction_model: 'x-model',
-      extraction_tuning_profile: 'tp_extract',
-      small_model: 's-model',
-      small_tuning_profile: 'tp_small',
+      // Phase 7b step 5: each job points at an AI profile (small steps unset → borrows extraction's).
+      extraction_profile: 'p-extract',
+      small_profile: null,
       embedder_model: 'e-model',
       entity_ontology: 'open',
       temporal_default: 'current',
@@ -29,13 +28,11 @@ function prefs(overrides: Record<string, unknown> = {}): WorkspacePreferences {
       observability: 'trace',
       reranker: { model_id: 'rr', min_relevance: 0.5 },
       eval: {
-        answer_model: 'ans-model',
-        answer_tuning_profile: 'tp_answer',
-        judge_model: 'judge-model',
-        judge_tuning_profile: 'tp_judge',
-        // Retrieval agent (memory recall is agentic) — model unset → falls back to the answer model.
-        retrieval_model: null,
-        retrieval_tuning_profile: 'tp_retrieval',
+        answer_profile: 'p-answer',
+        // Judge unset → borrows Hiro's chat profile.
+        judge_profile: null,
+        // Retrieval agent (memory recall is agentic) — unset → borrows the eval answer profile.
+        retrieval_profile: null,
         retrieval_agent: {
           max_agent_turns: 4,
           max_parallel_searches: 3,
@@ -54,8 +51,7 @@ function prefs(overrides: Record<string, unknown> = {}): WorkspacePreferences {
       }
     },
     knowledge: {
-      answering: { model: 'kb-answer', model_resolved: 'kb-answer-resolved' },
-      default_tuning_profile: 'knowledge_answering',
+      answering: { profile: 'p-kb', model_resolved: 'kb-answer-resolved' },
       chunking: { chunk_size: 512, chunk_overlap: 64, embed_structural_context: true },
       retrieval: {
         top_k: 8,
@@ -66,9 +62,14 @@ function prefs(overrides: Record<string, unknown> = {}): WorkspacePreferences {
       }
     },
     memory: { search: { enabled: true } },
-    tuning_profiles: {
-      tp_answer: { label: 'Answer', locked: false, temperature: 0.2, max_tokens: 1600, thinking: 'low' },
-      tp_extract: { label: 'Extract', locked: false, temperature: 0, max_tokens: 800 }
+    llm: { chat_profile: 'p-chat' },
+    ai: {
+      profiles: {
+        'p-chat': { label: 'Chat', model: 'google:chat-model', temperature: 0.3, max_tokens: 2048, thinking: null },
+        'p-answer': { label: 'Answer', model: 'openai:ans-model', temperature: 0.2, max_tokens: 1600, thinking: 'low' },
+        'p-extract': { label: 'Extract', model: 'openai:x-model', temperature: 0, max_tokens: 800, thinking: null },
+        'p-kb': { label: 'KB', model: 'anthropic:kb-model', temperature: 0.2, max_tokens: 1600, thinking: null }
+      }
     }
   };
   return { ...base, ...overrides } as unknown as WorkspacePreferences;
@@ -77,14 +78,21 @@ function prefs(overrides: Record<string, unknown> = {}): WorkspacePreferences {
 const MEMORY = trackConfig('memory');
 const KNOWLEDGE = trackConfig('knowledge');
 
-describe('tuningChips', () => {
-  it('formats temp/max and optional thinking', () => {
-    expect(tuningChips(prefs(), 'tp_answer')).toBe('temp 0.2 · max 1600 · think low');
-    expect(tuningChips(prefs(), 'tp_extract')).toBe('temp 0 · max 800');
+describe('profileChips', () => {
+  it("formats the job's own profile: name, temp/max and optional thinking", () => {
+    expect(profileChips(prefs(), 'eval_answer')).toBe('Answer · temp 0.2 · max 1600 · think low');
+    expect(profileChips(prefs(), 'graph_extraction')).toBe('Extract · temp 0 · max 800');
   });
-  it('returns empty for missing / unknown profiles', () => {
-    expect(tuningChips(prefs(), undefined)).toBe('');
-    expect(tuningChips(prefs(), 'nope')).toBe('');
+  it('names the job a borrowed profile comes from', () => {
+    expect(profileChips(prefs(), 'graph_small')).toBe('Extract · temp 0 · max 800 · from Graph extraction');
+    expect(profileChips(prefs(), 'eval_judge')).toBe("Chat · temp 0.3 · max 2048 · from Hiro's chat");
+  });
+  it('returns empty when nothing applies or the profile is missing', () => {
+    const p = prefs();
+    p.llm.chat_profile = null;
+    expect(profileChips(p, 'eval_judge')).toBe('');
+    p.graph.extraction_profile = 'nope';
+    expect(profileChips(p, 'graph_extraction')).toBe('');
   });
 });
 
@@ -99,14 +107,18 @@ describe('modelLines', () => {
       'Answer',
       'Judge'
     ]);
-    expect(lines.find((l) => l.label === 'Answer')?.model).toBe('ans-model');
-    // Retrieval model unset → falls back to the eval answer model.
-    expect(lines.find((l) => l.label === 'Retrieval')?.model).toBe('ans-model');
+    expect(lines.find((l) => l.label === 'Answer')?.model).toBe('openai:ans-model');
+    // Retrieval profile unset → borrows the eval answer profile; small → extraction's; judge → chat's.
+    expect(lines.find((l) => l.label === 'Retrieval')?.model).toBe('openai:ans-model');
+    expect(lines.find((l) => l.label === 'Small')?.model).toBe('openai:x-model');
+    expect(lines.find((l) => l.label === 'Judge')?.model).toBe('google:chat-model');
+    expect(lines.find((l) => l.label === 'Embedder')?.model).toBe('e-model');
   });
   it('knowledge omits Small and answers with the production pipeline', () => {
     const lines = modelLines(prefs(), KNOWLEDGE);
     expect(lines.map((l) => l.label)).toEqual(['Extraction', 'Embedder', 'Answer', 'Judge']);
-    expect(lines.find((l) => l.label === 'Answer')?.model).toBe('kb-answer-resolved');
+    // The knowledge track answers with the knowledge answering job's profile.
+    expect(lines.find((l) => l.label === 'Answer')?.model).toBe('anthropic:kb-model');
   });
 });
 

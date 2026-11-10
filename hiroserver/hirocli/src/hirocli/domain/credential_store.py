@@ -107,7 +107,7 @@ class CredentialStore:
         self._providers_mtime_ns = _providers_file_mtime_ns(self.providers_file())
         if _test_secrets is None:
             kr = keyring.get_keyring()
-            # DEBUG: CredentialStore is constructed frequently (resolve_llm, tools, STT);
+            # DEBUG: CredentialStore is constructed frequently (resolvers, tools, STT);
             # INFO here would flood operational logs.
             logger.debug(
                 "Credential store ready — HiroServer · keyring backend · %s",

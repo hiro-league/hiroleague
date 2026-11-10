@@ -188,7 +188,7 @@ def run_onboarding_defaults_flow(
     store = CredentialStore(workspace_path, workspace_id)
     ams = AvailableModelsService(cat, store)
     suggestions = compute_suggested_defaults(
-        provider_ids_ordered, cat, ams, prefs.llm,
+        provider_ids_ordered, cat, ams, prefs,
     )
     if not suggestions:
         return []
@@ -538,7 +538,7 @@ def register(provider_app: typer.Typer, console: Console) -> None:
         prefs = load_preferences(Path(entry.path))
         cat = get_model_catalog()
         ams = AvailableModelsService(cat, store)
-        preview = compute_suggested_defaults(ordered, cat, ams, prefs.llm)
+        preview = compute_suggested_defaults(ordered, cat, ams, prefs)
         if not preview:
             console.print(
                 "[dim]Nothing to suggest — empty slots already filled or "

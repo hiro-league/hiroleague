@@ -5,23 +5,38 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from .defaults import (
-    DEFAULT_CHAT_TUNING_PROFILE_ID,
     DEFAULT_IMAGE_PLAYGROUND_PROFILE_ID,
     pref_field,
 )
 
 
 class LLMPreferences(BaseModel):
-    """Which catalog models to use when the workspace has credentials for them."""
+    """Which catalog models to use when the workspace has credentials for them, and the AI profiles
+    of Hiro's chat and reading pictures.
 
-    default_chat: str | None = pref_field(
-        model_kind="chat", default=None, title="Default chat model"
+    Phase 7b step 5: ``default_chat`` + ``default_tuning_profile`` became ``chat_profile`` (one AI
+    profile), ``IMAGE_VISION_MODEL`` became ``vision_profile``, and ``default_tts`` moved to voice
+    profiles (``voice.hiro_profile``). No backward compatibility: v3 files are converted once
+    (``convert_v4``).
+    """
+
+    chat_profile: str | None = pref_field(
+        ai_profile_ref=True,
+        default=None,
+        title="Hiro's chat",
+        description=(
+            "The AI profile Hiro chats with (and the model the other jobs borrow when their own "
+            "profile isn't set). A character's own AI profiles come first."
+        ),
+    )
+    vision_profile: str | None = pref_field(
+        ai_profile_ref=True,
+        default=None,
+        title="Reading pictures",
+        description="The AI profile that describes pictures sent to Hiro. Empty = pictures aren't read.",
     )
     default_stt: str | None = pref_field(
         model_kind="stt", default=None, title="Default speech-to-text model"
-    )
-    default_tts: str | None = pref_field(
-        model_kind="tts", default=None, title="Default text-to-speech model"
     )
     # Workspace-wide default cross-encoder reranker. Both the knowledge retrieval reranker
     # (knowledge.retrieval.reranker.model_id) and the graph fact-search reranker
@@ -77,10 +92,11 @@ class LLMPreferences(BaseModel):
             "on server restart."
         ),
     )
-    # One timeout + retry policy for every cloud model call (chat, STT, TTS) on every provider.
+    # One timeout + retry policy for every cloud model call (chat, STT) on every provider. (Voice
+    # replies speak through services/voice since Phase 7b step 5, with its own timeout.)
     # Before this, each SDK used its own: Gemini had NO timeout and 6 attempts (plus 4 more in our
     # STT/TTS wrappers), so a Gemini 503 spell on 2026-11-06 left a chat turn waiting minutes.
-    # Applied in model_factory (chat) and the STT/TTS builders via model_http.ProviderCallPolicy.
+    # Applied in model_factory (chat) and the STT builders via model_http.ProviderCallPolicy.
     # Local endpoints (Ollama, LM Studio) are excluded: a slow local model is not an outage.
     request_timeout_s: int = pref_field(
         advanced=True,
@@ -91,9 +107,8 @@ class LLMPreferences(BaseModel):
         title="Provider response timeout (seconds)",
         description=(
             "How long to wait for a cloud model provider to answer (or to send the next part of a "
-            "streamed answer) before that attempt counts as failed. Applies to chat, "
-            "speech-to-text and text-to-speech on every cloud provider. Takes effect on server "
-            "restart."
+            "streamed answer) before that attempt counts as failed. Applies to chat and "
+            "speech-to-text on every cloud provider. Takes effect on server restart."
         ),
     )
     max_retries: int = pref_field(
@@ -113,11 +128,6 @@ class LLMPreferences(BaseModel):
         model_kind="chat",
         save_skip=True,
         default=None,
-    )
-    default_tuning_profile: str = pref_field(
-        tuning_profile_ref=True,
-        default=DEFAULT_CHAT_TUNING_PROFILE_ID,
-        title="Default chat model profile",
     )
     default_image_profile: str = pref_field(
         save_skip=True,

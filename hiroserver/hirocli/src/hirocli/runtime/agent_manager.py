@@ -42,7 +42,7 @@ from .agent_graph import (
 )
 from .agent_graph.ledger import RunAccumulator, current_run
 from ..domain.people import find_by_number
-from ..services.ai_usage.from_ledger import usage_person
+from ..services.ai_usage.from_ledger import usage_person, usage_profile
 from .agent_graph.tracing import langsmith_run_id
 from .comm_log import (
     LOG_IN,
@@ -58,7 +58,6 @@ if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
     from ..domain.memory import MemoryService
-    from ..services.tts import TTSService
     from ..tools.registry import ToolRegistry
     from .communication_manager import CommunicationManager
     from .server_context import ServerContext
@@ -128,13 +127,11 @@ class AgentManager:
         self,
         ctx: "ServerContext",
         comm_manager: "CommunicationManager",
-        tts_service: "TTSService | None" = None,
         *,
         tool_registry: "ToolRegistry | None" = None,
     ) -> None:
         self._ctx = ctx
         self._comm = comm_manager
-        self._tts = tts_service
         self._tool_registry = tool_registry
         # Lazily built from full ToolRegistry via langchain_adapter on first compile.
         self._lc_agent_tools: list[Any] | None = None
@@ -206,7 +203,6 @@ class AgentManager:
                 ledger_sink=LedgerSink(self._ctx.workspace_path),
                 stt=self._stt,
                 vision=self._vision,
-                tts=self._tts,
                 memory=self._memory,
                 credentials=self._credentials,
                 checkpointer=checkpointer,
@@ -216,33 +212,30 @@ class AgentManager:
                 memory_retrieval_models=MemoryRetrievalModelCache(),
             )
             self._graph = ChatAgentGraph(services)
-            # Hot-reload STT/TTS when workspace model defaults change. Nodes read
-            # ``self._stt`` / ``self._tts`` per call, so swapping attributes is enough
-            # (compiled graphs are for chat LLM only).
+            # Hot-reload STT when the workspace default changes. Nodes read ``self._stt`` per call,
+            # so swapping the attribute is enough (compiled graphs are for chat LLM only). Voice
+            # replies (Phase 7b step 5) resolve their voice profile per turn: no reactor needed.
             self._ctx.preference_reactor.on_change(
                 "llm.default_stt",
                 self._reload_stt_on_change,
                 key="agent.stt",
             )
             self._ctx.preference_reactor.on_change(
-                "llm.default_tts",
-                self._reload_tts_on_change,
-                key="agent.tts",
-            )
-            self._ctx.preference_reactor.on_change(
                 "memory",
                 self._reload_memory_on_change,
                 key="agent.memory",
             )
+            # Phase 7b step 5 (tuning profiles -> AI profiles): the chat job's profile pick, and edits
+            # to the AI profiles themselves (an edited profile must take effect like a tuning edit did).
             self._ctx.preference_reactor.on_change(
-                "llm.default_tuning_profile",
+                "llm.chat_profile",
                 self._evict_compiled_cache_on_llm_tuning_change,
                 key="agent.chat-cache",
             )
             self._ctx.preference_reactor.on_change(
-                "tuning_profiles",
-                self._reload_tuning_profiles_on_change,
-                key="agent.tuning-profiles",
+                "ai.profiles",
+                self._reload_ai_profiles_on_change,
+                key="agent.ai-profiles",
             )
             # Knowledge retrieval (hybrid/rewrite-model/top_k…) is read by the subgraph nodes;
             # rebuild the compiled subgraph and drop chat graphs so the new shape/settings apply.
@@ -386,7 +379,7 @@ class AgentManager:
         from ..domain.character import effective_character_system_prompt
         from ..domain.preferences import (
             resolve_character_llm,
-            resolve_llm,
+            resolve_stt_model,
         )
 
         peer = comm_peer_label(msg, self._ctx)
@@ -394,10 +387,9 @@ class AgentManager:
         prefs = self._current_preferences()
         voice_input_allowed = bool(
             prefs.media.input.voice
-            and resolve_llm(
+            and resolve_stt_model(
                 prefs,
                 self._ctx.workspace_path,
-                "stt",
                 credential_store=self._credentials,
             )
             is not None
@@ -414,11 +406,12 @@ class AgentManager:
 
         ch = self._load_character_for_channel(character_id)
         system_prompt = effective_character_system_prompt(ch)
+        # Phase 7b step 5: the character's AI profiles (in order, each with its fallbacks), else
+        # the chat job's profile (llm.chat_profile).
         llm_entry = resolve_character_llm(
-            ch.llm_models,
+            ch.ai_profiles,
             prefs,
             self._ctx.workspace_path,
-            tuning_profile=getattr(ch, "tuning_profile", None),
             credential_store=self._credentials,
         )
         if llm_entry is None:
@@ -526,6 +519,8 @@ class AgentManager:
         run_token = current_run.set(accumulator) if accumulator is not None else None
         # Phase 7b: AI usage files this turn's calls under the family member who wrote (WhatsApp number).
         person_token = usage_person.set(await _sender_person(self._ctx.workspace_path, routing_metadata))
+        # Phase 7b step 5: the turn's chat calls are filed under the AI profile its model came from.
+        profile_token = usage_profile.set((llm_entry.profile_id, llm_entry.profile_name))
         t0 = time.perf_counter()
         try:
             async for stream_mode, chunk in compiled.astream(
@@ -598,6 +593,7 @@ class AgentManager:
             if run_token is not None:
                 current_run.reset(run_token)
             usage_person.reset(person_token)
+            usage_profile.reset(profile_token)
             self._comm.graph_subscriber.end_run(msg.routing.id)
             elapsed_ms = int((time.perf_counter() - t0) * 1000)
             log.fineinfo(
@@ -613,12 +609,16 @@ class AgentManager:
     # ------------------------------------------------------------------
 
     def _compile_key(self, llm_entry, system_prompt: str) -> tuple[Any, ...]:
-        fp = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()
+        fp = hashlib.sha256(_with_profile_instructions(system_prompt, llm_entry).encode("utf-8")).hexdigest()
+        # Phase 7b step 5: the AI profile (and its context window) is part of the key, so an
+        # edited profile takes effect on the next turn without a restart.
         return (
+            getattr(llm_entry, "profile_id", ""),
             llm_entry.model_id,
             round(float(llm_entry.temperature), 6),
             int(llm_entry.max_tokens),
             getattr(llm_entry, "thinking", None),
+            getattr(llm_entry, "num_ctx", None),
             "chat-graph-v1",
             fp,
         )
@@ -679,7 +679,7 @@ class AgentManager:
                 # Live tools' older results reach the model as out of date (Tool.agent_live).
                 live_tool_names=reg.agent_live_tool_names() if reg is not None else frozenset(),
                 model_id=llm_entry.model_id,
-                system_prompt=system_prompt,
+                system_prompt=_with_profile_instructions(system_prompt, llm_entry),
                 temperature=llm_entry.temperature,
                 max_tokens=llm_entry.max_tokens,
                 thinking=getattr(llm_entry, "thinking", None),
@@ -745,10 +745,9 @@ class AgentManager:
         )
         ch = self._load_character_for_channel(character_id)
         llm_entry = resolve_character_llm(
-            ch.llm_models,
+            ch.ai_profiles,
             self._current_preferences(),
             self._ctx.workspace_path,
-            tuning_profile=getattr(ch, "tuning_profile", None),
             credential_store=self._credentials,
         )
         if llm_entry is None:
@@ -771,7 +770,7 @@ class AgentManager:
         Phase 5's notify with style "character": Hiro tells someone something in its
         own voice. The character is the one of ``chat_channel_id``'s conversation (the
         owner's General), or the default character for someone with no conversation.
-        Uses the character's own chat model and tuning, like its replies. Raises when
+        Uses the character's own AI profile, like its replies. Raises when
         there's no chat model or the model call fails; the caller reports it.
         """
         from langchain_core.messages import HumanMessage, SystemMessage
@@ -794,10 +793,9 @@ class AgentManager:
             )
         ch = self._load_character_for_channel(character_id)
         llm_entry = resolve_character_llm(
-            ch.llm_models,
+            ch.ai_profiles,
             self._current_preferences(),
             self._ctx.workspace_path,
-            tuning_profile=getattr(ch, "tuning_profile", None),
             credential_store=self._credentials,
         )
         if llm_entry is None:
@@ -814,7 +812,10 @@ class AgentManager:
         t0 = time.perf_counter()
         try:
             reply = await model.ainvoke(
-                [SystemMessage(content=effective_character_system_prompt(ch)), HumanMessage(content=instruction)]
+                [
+                    SystemMessage(content=_with_profile_instructions(effective_character_system_prompt(ch), llm_entry)),
+                    HumanMessage(content=instruction),
+                ]
             )
         except Exception as exc:
             log.error(
@@ -852,8 +853,8 @@ class AgentManager:
 
         reply = _build_reply_envelope(
             msg,
-            "The agent is not available — no chat LLM is configured. "
-            "Please register an LLM in preferences.json.",
+            "The agent is not available — no chat model is configured. "
+            "Pick an AI profile for Hiro's chat in the admin (Preferences).",
             reply_id="",
         )
         await self._comm.enqueue_outbound(reply)
@@ -875,17 +876,18 @@ class AgentManager:
 
     def _log_agent_config(self) -> None:
         try:
-            from ..domain.preferences import resolve_llm
+            from ..domain.preferences import resolve_job_model
 
             prefs = self._current_preferences()
-            llm = resolve_llm(
+            llm = resolve_job_model(
                 prefs, self._ctx.workspace_path, "chat",
                 credential_store=self._credentials,
             )
             if llm:
                 log.info(
-                    "✅ Workspace chat default — %s (characters may override)",
+                    "✅ Workspace chat default — %s · profile %s (characters may override)",
                     llm.model_id,
+                    llm.profile_id or "-",
                     temperature=llm.temperature, max_tokens=llm.max_tokens,
                 )
             else:
@@ -904,7 +906,7 @@ class AgentManager:
         return load_preferences(self._ctx.workspace_path)
 
     async def _handle_providers_changed(self, event: DomainEvent) -> None:
-        """Refresh credential metadata from disk, drop compiled graphs, rebuild STT/TTS/Vision.
+        """Refresh credential metadata from disk, drop compiled graphs, rebuild STT/Vision/memory.
 
         ``CredentialStore`` publishes ``PROVIDERS_CHANGED`` after every ``providers.json``
         write so admin/CLI mutations propagate without restarting HiroServer.
@@ -924,27 +926,23 @@ class AgentManager:
                 self._vision.invalidate_workspace_credentials()
 
             stt_ok = await self._attach_new_stt_service(context="providers change")
-            tts_ok = await self._attach_new_tts_service(context="providers change")
             memory_ok = await self._attach_new_memory_service(context="providers change")
-            if stt_ok and tts_ok and memory_ok:
+            if stt_ok and memory_ok:
                 log.info(
                     "Providers change applied - services rebound; vision cache cleared",
                     stt_ok=stt_ok,
-                    tts_ok=tts_ok,
                     memory_ok=memory_ok,
                 )
-            elif stt_ok or tts_ok or memory_ok:
+            elif stt_ok or memory_ok:
                 log.warning(
                     "Providers change partially applied - services rebound",
                     stt_ok=stt_ok,
-                    tts_ok=tts_ok,
                     memory_ok=memory_ok,
                 )
             else:
                 log.warning(
                     "Providers change - service rebound failed",
                     stt_ok=stt_ok,
-                    tts_ok=tts_ok,
                     memory_ok=memory_ok,
                 )
 
@@ -973,34 +971,6 @@ class AgentManager:
             "STT rebound — HiroServer",
             context=context,
             available=new_stt.is_available() if new_stt is not None else False,
-        )
-        return True
-
-    async def _attach_new_tts_service(self, *, context: str) -> bool:
-        """Build ``TTSService`` from current prefs + credentials; swap onto graph."""
-        from ..services.tts import create_tts_service
-
-        try:
-            new_tts = await asyncio.to_thread(
-                create_tts_service,
-                self._ctx.workspace_path,
-                prefs=self._current_preferences(),
-            )
-        except Exception as exc:
-            log.error(
-                f"❌ TTS rebuild failed — HiroServer · {context} · keeping previous instance",
-                error=str(exc),
-                exc_info=True,
-            )
-            return False
-
-        self._tts = new_tts
-        if self._graph is not None:
-            self._graph.services.tts = new_tts
-        log.fineinfo(
-            "TTS rebound — HiroServer",
-            context=context,
-            available=new_tts.is_available() if new_tts is not None else False,
         )
         return True
 
@@ -1069,22 +1039,6 @@ class AgentManager:
                 available=self._stt.is_available() if self._stt is not None else False,
             )
 
-    async def _reload_tts_on_change(
-        self,
-        workspace_path,
-        changes: dict[str, tuple[Any, Any]],
-    ) -> None:
-        """Rebuild ``TTSService`` after ``llm.default_tts`` changes."""
-        old_value, new_value = changes.get("llm.default_tts", (None, None))
-        ok = await self._attach_new_tts_service(context="preferences.default_tts")
-        if ok:
-            log.info(
-                "✅ TTS reloaded — preferences",
-                old=old_value,
-                new=new_value,
-                available=self._tts.is_available() if self._tts is not None else False,
-            )
-
     async def _reload_memory_on_change(
         self,
         workspace_path,
@@ -1113,24 +1067,35 @@ class AgentManager:
         workspace_path,
         changes: dict[str, tuple[Any, Any]],
     ) -> None:
-        """Drop compiled agent graphs after model tuning changes."""
+        """Drop compiled agent graphs after the chat job's AI profile pick changes."""
         self._compiled_cache.clear()
         log.info(
             "Chat graph cache evicted - preferences",
             paths=sorted(changes.keys()),
         )
 
-    async def _reload_tuning_profiles_on_change(
+    async def _reload_ai_profiles_on_change(
         self,
         workspace_path,
         changes: dict[str, tuple[Any, Any]],
     ) -> None:
-        """Apply tuning profile edits to chat cache and memory service."""
+        """Apply AI profile edits (Phase 7b step 5; replaces the tuning-profile reactor).
+
+        Chat graphs are dropped (their key holds the profile's values anyway). The memory service and
+        the knowledge subgraph build their graph models once, so they are rebuilt only when an edited
+        profile is one a job uses (directly or as a fallback) — an extension's profile edit costs nothing.
+        """
         self._compiled_cache.clear()
-        ok = await self._attach_new_memory_service(context="preferences.tuning_profiles")
+        touched = {path.split(".")[2] for path in changes if path.count(".") >= 2}
+        if not touched & _job_profile_ids(self._current_preferences()):
+            log.info("AI profiles changed - chat graph cache cleared", profiles=sorted(touched))
+            return
+        ok = await self._attach_new_memory_service(context="preferences.ai.profiles")
+        if self._graph is not None:
+            self._graph.services.knowledge_subgraph = self._build_knowledge_subgraph()
         log.info(
-            "Tuning profiles reloaded - preferences",
-            paths=sorted(changes.keys()),
+            "AI profiles reloaded - preferences · jobs rebuilt",
+            profiles=sorted(touched),
             memory_available=self._memory is not None,
             memory_reloaded=ok,
         )
@@ -1203,6 +1168,25 @@ class AgentManager:
 # Deliberate use to silence the unused-import lint while keeping a hook for
 # future contextlib-based scoping in ``handle``.
 _ = contextlib  # pragma: no cover
+
+
+def _with_profile_instructions(system_prompt: str, llm_entry: Any) -> str:
+    """The character's system prompt + the chat AI profile's extra instructions (Phase 7b step 5)."""
+    extra = str(getattr(llm_entry, "instructions", "") or "").strip()
+    return f"{system_prompt}\n\n{extra}" if extra else system_prompt
+
+
+def _job_profile_ids(prefs: Any) -> set[str]:
+    """Every AI profile one of Hiro's jobs uses now, its fallbacks included."""
+    from ..domain.preferences import JOB_PRESETS, ai_fallback_chain
+    from ..domain.preferences.jobs import job_profile_ref
+
+    ids: set[str] = set()
+    for job in JOB_PRESETS:
+        ref = job_profile_ref(prefs, job)
+        if ref is not None:
+            ids.update(ai_fallback_chain(prefs.ai.profiles, ref))
+    return ids
 
 
 async def _close_memory_service(service: "MemoryService | None") -> None:

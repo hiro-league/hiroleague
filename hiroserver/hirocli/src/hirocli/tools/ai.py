@@ -4,7 +4,9 @@ Profiles themselves are created, changed and deleted through the preferences API
 like ``image_profiles``); these tools read them, try one (Try it), and manage which profile each
 extension use asks (``ai.uses``):
 
-- ``ai_profiles_list`` — the profiles with kind, provider, limits, today's use, fallback chain;
+- ``ai_profiles_list`` — the profiles with kind, provider, limits, today's use, fallback chain, and
+  (Phase 7b step 5) Hiro's own jobs: which profile each uses and the model it runs with now;
+- ``ai_profile_restore_default`` (Phase 7b step 5) — a job's default profile back to its preset tuning;
 - ``ai_try`` — one ask on a saved profile or a draft one (prompt + optional picture), the same run
   as an extension's ``ai.ask`` (fallbacks, limits, counting — a draft is never counted);
 - ``ai_uses_list`` / ``ai_uses_set`` / ``ai_uses_forget`` — the declared uses and their picks;
@@ -84,6 +86,15 @@ def _write_prefs(workspace_path: Path, edits: dict[str, Any]) -> None:
 class AiProfilesListResult:
     profiles: list[dict[str, Any]] = field(default_factory=list)
     uses: dict[str, str | None] = field(default_factory=dict)
+    # Phase 7b step 5: Hiro's own jobs (services/ai_ask.job_rows).
+    jobs: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class AiProfileRestoreResult:
+    profile_id: str
+    preset: str
+    profile: dict[str, Any]  # the profile as saved (AI profile fields)
 
 
 @dataclass
@@ -186,12 +197,42 @@ class AiProfilesListTool(Tool):
     }
 
     def execute(self, workspace: str | None = None) -> AiProfilesListResult:
-        from ..services.ai_ask import profile_rows
+        from ..services.ai_ask import job_rows, profile_rows
 
         wid, path = _workspace(workspace)
         prefs = _prefs(path)
-        rows = profile_rows(path, prefs, CredentialStore(path, wid))
-        return AiProfilesListResult(profiles=rows, uses=dict(prefs.ai.uses))
+        store = CredentialStore(path, wid)
+        rows = profile_rows(path, prefs, store)
+        return AiProfilesListResult(profiles=rows, uses=dict(prefs.ai.uses), jobs=job_rows(path, prefs, store))
+
+
+class AiProfileRestoreDefaultTool(Tool):
+    """Phase 7b step 5: Restore default on a job's default AI profile (``AiProfile.preset``)."""
+
+    surfaces = frozenset({"cli", "http"})
+    name = "ai_profile_restore_default"
+    description = (
+        "Put one of Hiro's job profiles (e.g. hiro-chat) back to its job's preset tuning: thinking, "
+        "temperature, max tokens, no context window, no instructions. Its model, limits and fallback stay"
+    )
+    params = {
+        "profile_id": ToolParam(str, "The AI profile id (a job's default profile, e.g. hiro-chat)"),
+        "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
+    }
+
+    def execute(self, profile_id: str, workspace: str | None = None) -> AiProfileRestoreResult:
+        from ..domain.preferences.jobs import restore_preset_tuning
+
+        _wid, path = _workspace(workspace)
+        pid = profile_id.strip()
+        profile = _prefs(path).ai.profiles.get(pid)
+        if profile is None:
+            raise ValueError(f"No AI profile {pid!r}")
+        restored = restore_preset_tuning(profile)  # ValueError when it isn't a job's default
+        payload = restored.model_dump(mode="json")
+        _write_prefs(path, {f"ai.profiles.{pid}": payload})
+        log.info(f"✅ AI profile restored to its default tuning — {restored.label} · {restored.preset}", profile=pid)
+        return AiProfileRestoreResult(profile_id=pid, preset=str(restored.preset), profile=payload)
 
 
 class AiTryTool(Tool):

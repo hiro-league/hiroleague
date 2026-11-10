@@ -2,6 +2,11 @@
 
 First provider in ``provider_ids_ordered`` wins per kind (chat / tts / stt). Embedding and
 image_gen recommendations are ignored — no matching preference slots yet.
+
+Phase 7b step 5: the chat slot is Hiro's chat AI profile (``llm.chat_profile``: a ``hiro-chat``
+profile with the chat preset tuning is made for the model) and the speech slot is Hiro's voice
+(``voice.hiro_profile``: a ``hiro-voice`` voice profile with the provider's default voice). The
+speech-to-text slot is still the model field ``llm.default_stt``.
 """
 
 from __future__ import annotations
@@ -12,7 +17,11 @@ from pathlib import Path
 from .available_models import AvailableModelsService
 from .credential_store import CredentialStore
 from .model_catalog import ModelCatalog, get_model_catalog
-from .preferences import LLMPreferences, WorkspacePreferences, load_preferences, save_preferences
+from .preferences import VoiceProfile, WorkspacePreferences, load_preferences, save_preferences
+from .preferences.jobs import preset_profile, unique_profile_id
+
+# A provider's voice for Hiro's default voice profile (Gemini studio voice / OpenAI voice).
+DEFAULT_HIRO_VOICE = {"google": "kore", "openai": "sage"}
 
 
 @dataclass(frozen=True)
@@ -30,7 +39,7 @@ def compute_suggested_defaults(
     provider_ids_ordered: list[str],
     catalog: ModelCatalog,
     available: AvailableModelsService,
-    current_prefs: LLMPreferences,
+    current_prefs: WorkspacePreferences,
 ) -> list[DefaultSuggestion]:
     """Build suggestions from providers in order; first provider wins each kind.
 
@@ -55,9 +64,10 @@ def compute_suggested_defaults(
             if kind in claimed_kinds:
                 continue
 
-            attr = _kind_to_pref_attr(kind)
-            if getattr(current_prefs, attr) is not None:
+            if _slot_filled(current_prefs, kind):
                 continue
+            if kind == "tts" and pid not in DEFAULT_HIRO_VOICE:
+                continue  # the core speaks with google / openai voices only
             if not available.is_model_available(mid):
                 continue
             spec = catalog.get_model(mid)
@@ -78,21 +88,38 @@ def compute_suggested_defaults(
     return out
 
 
-def _kind_to_pref_attr(kind: str) -> str:
-    return {"chat": "default_chat", "tts": "default_tts", "stt": "default_stt"}[kind]
+def _slot_filled(prefs: WorkspacePreferences, kind: str) -> bool:
+    if kind == "chat":
+        return prefs.llm.chat_profile is not None
+    if kind == "tts":
+        return prefs.voice.hiro_profile is not None
+    return prefs.llm.default_stt is not None
 
 
 def apply_suggested_defaults(
     prefs: WorkspacePreferences,
     suggestions: list[DefaultSuggestion],
 ) -> list[DefaultSuggestion]:
-    """Write suggestions into empty LLM preference fields."""
+    """Write suggestions into empty slots (chat → a hiro-chat AI profile, tts → a hiro-voice voice
+    profile, stt → ``llm.default_stt``)."""
     applied: list[DefaultSuggestion] = []
     for s in suggestions:
-        attr = _kind_to_pref_attr(s.catalog_kind)
-        if getattr(prefs.llm, attr) is not None:
+        if _slot_filled(prefs, s.catalog_kind):
             continue
-        setattr(prefs.llm, attr, s.model_id)
+        if s.catalog_kind == "chat":
+            pid = unique_profile_id(prefs.ai.profiles, "hiro-chat")
+            prefs.ai.profiles[pid] = preset_profile("chat", s.model_id)
+            prefs.llm.chat_profile = pid
+        elif s.catalog_kind == "tts":
+            if s.provider_id not in DEFAULT_HIRO_VOICE:
+                continue  # a speech model the core can't speak with (google / openai only)
+            pid = unique_profile_id(prefs.voice.profiles, "hiro-voice")
+            prefs.voice.profiles[pid] = VoiceProfile(
+                label="Hiro's voice", model=s.model_id, voice=DEFAULT_HIRO_VOICE[s.provider_id]
+            )
+            prefs.voice.hiro_profile = pid
+        else:
+            prefs.llm.default_stt = s.model_id
         applied.append(s)
     return applied
 
@@ -108,7 +135,7 @@ def apply_onboarding_defaults_to_preferences(
     store = CredentialStore(workspace_path, workspace_id)
     ams = AvailableModelsService(cat, store)
     suggestions = compute_suggested_defaults(
-        provider_ids_ordered, cat, ams, prefs.llm,
+        provider_ids_ordered, cat, ams, prefs,
     )
     if not suggestions:
         return []

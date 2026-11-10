@@ -2,6 +2,10 @@
 
 CLI (commands/character.py), admin UI (Phase 3), agent, and POST /invoke call
 these tools; domain logic lives in domain/character.py.
+
+Phase 7b step 5: a character points at ordered AI profiles (``ai_profiles_json``) and voice profiles
+(``voice_profiles_json``) instead of model lists, a tuning profile and TTS settings. Ids that don't
+exist are refused; a profile whose model / voice can't be used right now (no key) is a warning.
 """
 
 from __future__ import annotations
@@ -12,7 +16,6 @@ from pathlib import Path
 from typing import Any
 
 from ..domain import character as character_domain
-from ..domain.available_models import CharacterModelValidation, build_available_models_service
 from ..domain.workspace import resolve_workspace, workspace_id_for_path
 from .base import Tool, ToolParam
 
@@ -34,39 +37,42 @@ def _parse_json_string_list(label: str, raw: str | None) -> list[str] | None:
     return data
 
 
-def character_model_validation_warnings(v: CharacterModelValidation) -> list[str]:
-    """Human-readable lines for tool/CLI/admin consumers (non-blocking)."""
+def _check_profile_ids(workspace_path: Path, ai_profiles: list[str] | None, voice_profiles: list[str] | None) -> None:
+    """Raise ValueError when the character would name an AI or voice profile that doesn't exist."""
+    if ai_profiles is None and voice_profiles is None:
+        return
+    from ..domain.preferences import load_preferences, unknown_character_profiles
+
+    missing = unknown_character_profiles(load_preferences(workspace_path), ai_profiles or [], voice_profiles or [])
+    if missing:
+        raise ValueError(" ".join(missing))
+
+
+def character_profile_warnings(workspace_path: Path, ai_profiles: object | None, voice_profiles: object | None) -> list[str]:
+    """Plain-words lines for the character's profiles that can't be used right now (non-blocking)."""
+    wid = workspace_id_for_path(workspace_path)
+    if wid is None:
+        return []
+    from ..domain.credential_store import CredentialStore
+    from ..domain.preferences import load_preferences, profile_model_available, voice_profile_usable
+
+    prefs = load_preferences(workspace_path)
+    store = CredentialStore(workspace_path, wid)
     lines: list[str] = []
-    for mid in v.unknown_llm:
-        lines.append(f'LLM model "{mid}" is not in the catalog.')
-    for mid in v.unknown_voice:
-        lines.append(f'Voice model "{mid}" is not in the catalog.')
-    for d in v.deprecated_llm:
-        hint = f' Consider "{d.replacement_id}".' if d.replacement_id else ""
-        lines.append(
-            f'LLM model "{d.model_id}" is deprecated (since {d.deprecated_since}).{hint}'
-        )
-    for d in v.deprecated_voice:
-        hint = f' Consider "{d.replacement_id}".' if d.replacement_id else ""
-        lines.append(
-            f'Voice model "{d.model_id}" is deprecated (since {d.deprecated_since}).{hint}'
-        )
-    for mid in v.wrong_kind_llm:
-        lines.append(
-            f'LLM model "{mid}" is not a chat model (wrong model_kind for llm_models).'
-        )
-    for mid in v.wrong_kind_voice:
-        lines.append(
-            f'Voice model "{mid}" is not a TTS/STT model (wrong model_kind for voice_models).'
-        )
-    for mid in v.unavailable_llm:
-        lines.append(
-            f'LLM model "{mid}" is in the catalog but its provider is not configured for this workspace.'
-        )
-    for mid in v.unavailable_voice:
-        lines.append(
-            f'Voice model "{mid}" is in the catalog but its provider is not configured for this workspace.'
-        )
+    for pid in _coerce_str_list(ai_profiles):
+        profile = prefs.ai.profiles.get(pid)
+        if profile is None:
+            lines.append(f'AI profile "{pid}" doesn\'t exist any more.')
+        elif profile.is_plan:
+            lines.append(f'AI profile "{pid}" uses a plan tool ({profile.model}); chat skips it.')
+        elif not profile_model_available(profile.model, store):
+            lines.append(f'AI profile "{pid}": {profile.model} can\'t be used now (its provider isn\'t set up).')
+    for pid in _coerce_str_list(voice_profiles):
+        voice = prefs.voice.profiles.get(pid)
+        if voice is None:
+            lines.append(f'Voice profile "{pid}" doesn\'t exist any more.')
+        elif not voice_profile_usable(voice, store):
+            lines.append(f'Voice profile "{pid}": {voice.provider} has no API key, so it won\'t speak.')
     return lines
 
 
@@ -79,19 +85,12 @@ def _coerce_str_list(value: object | None) -> list[str]:
     return []
 
 
-def _validate_character_model_warnings(
-    workspace_path: Path,
-    llm_models: object | None,
-    voice_models: object | None,
-) -> list[str]:
-    wid = workspace_id_for_path(workspace_path)
-    if wid is None:
-        return []
-    lm = _coerce_str_list(llm_models)
-    vm = _coerce_str_list(voice_models)
-    svc = build_available_models_service(workspace_path, wid)
-    v = svc.validate_character_models(lm, vm)
-    return character_model_validation_warnings(v)
+def _parse_json_list_or_clear(label: str, raw: str | None) -> list[str] | None:
+    """Update semantics: None or "" = leave as is (the admin form sends "" for untouched); "[]" clears
+    the list; else a JSON string array."""
+    if raw is None or not str(raw).strip():
+        return None
+    return _parse_json_string_list(label, raw) or []
 
 
 def _parse_json_object(label: str, raw: str | None) -> dict[str, Any] | None:
@@ -104,41 +103,6 @@ def _parse_json_object(label: str, raw: str | None) -> dict[str, Any] | None:
     if not isinstance(data, dict):
         raise ValueError(f"{label} must be a JSON object.")
     return data
-
-
-def _validate_tuning_profile_id(workspace_path: Path, value: str | None) -> str | None:
-    profile_id = str(value or "").strip()
-    if not profile_id:
-        return None
-    from ..domain.preferences import load_preferences
-
-    prefs = load_preferences(workspace_path)
-    if profile_id not in prefs.tuning_profiles:
-        raise ValueError(f"Unknown tuning profile: {profile_id}")
-    return profile_id
-
-
-def _parse_json_voice_provider_map_optional(label: str, raw: str | None) -> dict[str, str] | None:
-    """Parse optional JSON object mapping provider_id → voice preset id; None means omit."""
-    if raw is None:
-        return None
-    if not str(raw).strip():
-        return None
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid JSON for {label}: {exc}") from exc
-    if not isinstance(data, dict):
-        raise ValueError(f"{label} must be a JSON object.")
-    out: dict[str, str] = {}
-    for k, v in data.items():
-        if not isinstance(k, str) or not isinstance(v, str):
-            raise ValueError(f"{label} must map string keys to string values.")
-        kk = k.strip()
-        vv = v.strip()
-        if kk and vv:
-            out[kk] = vv
-    return out
 
 
 # ---------------------------------------------------------------------------
@@ -227,29 +191,14 @@ class CharacterCreateTool(Tool):
             required=False,
         ),
         "backstory": ToolParam(str, "Static backstory markdown", required=False),
-        "llm_models_json": ToolParam(
+        "ai_profiles_json": ToolParam(
             str,
-            'JSON array of preferred LLM ids, e.g. ["openai:gpt-6.1-sol"]',
+            'JSON array of AI profile ids in order, e.g. ["hiro-chat"]; empty = Hiro\'s chat profile',
             required=False,
         ),
-        "voice_models_json": ToolParam(
+        "voice_profiles_json": ToolParam(
             str,
-            'JSON array of preferred voice ids',
-            required=False,
-        ),
-        "tuning_profile": ToolParam(
-            str,
-            "Optional tuning profile id for this character; empty inherits workspace chat profile.",
-            required=False,
-        ),
-        "tts_instructions": ToolParam(
-            str,
-            "Optional global TTS style instruction (one string per character).",
-            required=False,
-        ),
-        "tts_voice_by_provider_json": ToolParam(
-            str,
-            'Optional JSON object mapping catalog provider id to one voice preset, e.g. {"openai":"sage"}',
+            "JSON array of voice profile ids in order; empty = Hiro's own voice",
             required=False,
         ),
         "emotions_enabled": ToolParam(bool, "Enable emotions flag (default false)", required=False),
@@ -264,22 +213,16 @@ class CharacterCreateTool(Tool):
         description: str | None = None,
         prompt: str | None = None,
         backstory: str | None = None,
-        llm_models_json: str | None = None,
-        voice_models_json: str | None = None,
-        tuning_profile: str | None = None,
-        tts_instructions: str | None = None,
-        tts_voice_by_provider_json: str | None = None,
+        ai_profiles_json: str | None = None,
+        voice_profiles_json: str | None = None,
         emotions_enabled: bool | None = None,
         extras_json: str | None = None,
     ) -> CharacterCreateResult:
         workspace_path = _resolve_path(workspace)
-        llm_models = _parse_json_string_list("llm_models_json", llm_models_json)
-        voice_models = _parse_json_string_list("voice_models_json", voice_models_json)
-        resolved_tuning_profile = _validate_tuning_profile_id(workspace_path, tuning_profile)
+        ai_profiles = _parse_json_string_list("ai_profiles_json", ai_profiles_json)
+        voice_profiles = _parse_json_string_list("voice_profiles_json", voice_profiles_json)
+        _check_profile_ids(workspace_path, ai_profiles, voice_profiles)
         extras = _parse_json_object("extras_json", extras_json)
-        tts_vp = _parse_json_voice_provider_map_optional(
-            "tts_voice_by_provider_json", tts_voice_by_provider_json
-        )
         detail = character_domain.create_character(
             workspace_path,
             character_id,
@@ -287,19 +230,12 @@ class CharacterCreateTool(Tool):
             description=description or "",
             prompt=prompt,
             backstory=backstory or "",
-            llm_models=llm_models,
-            tuning_profile=resolved_tuning_profile,
-            voice_models=voice_models,
-            tts_instructions=(tts_instructions or "").strip(),
-            tts_voice_by_provider=tts_vp if tts_vp is not None else {},
+            ai_profiles=ai_profiles,
+            voice_profiles=voice_profiles,
             emotions_enabled=bool(emotions_enabled) if emotions_enabled is not None else False,
             extras=extras,
         )
-        warn = _validate_character_model_warnings(
-            workspace_path,
-            detail.get("llm_models"),
-            detail.get("voice_models"),
-        )
+        warn = character_profile_warnings(workspace_path, detail.get("ai_profiles"), detail.get("voice_profiles"))
         return CharacterCreateResult(character=detail, warnings=warn)
 
 
@@ -314,22 +250,11 @@ class CharacterUpdateTool(Tool):
         "description": ToolParam(str, "Short profile description", required=False),
         "prompt": ToolParam(str, "System prompt (persona) markdown body", required=False),
         "backstory": ToolParam(str, "Static backstory markdown", required=False),
-        "llm_models_json": ToolParam(str, "JSON array of preferred LLM ids", required=False),
-        "voice_models_json": ToolParam(str, "JSON array of preferred voice ids", required=False),
-        "tuning_profile": ToolParam(
-            str,
-            "Optional tuning profile id for this character; empty inherits workspace chat profile.",
-            required=False,
+        "ai_profiles_json": ToolParam(
+            str, "JSON array of AI profile ids in order (replaces the list; [] = Hiro's chat profile)", required=False
         ),
-        "tts_instructions": ToolParam(
-            str,
-            "Optional global TTS style instruction for this character.",
-            required=False,
-        ),
-        "tts_voice_by_provider_json": ToolParam(
-            str,
-            'Optional JSON object: provider id → voice preset (replaces map when set)',
-            required=False,
+        "voice_profiles_json": ToolParam(
+            str, "JSON array of voice profile ids in order (replaces the list; [] = Hiro's own voice)", required=False
         ),
         "emotions_enabled": ToolParam(bool, "Emotions participation flag", required=False),
         "extras_json": ToolParam(str, "JSON object replacing extras when set", required=False),
@@ -343,28 +268,16 @@ class CharacterUpdateTool(Tool):
         description: str | None = None,
         prompt: str | None = None,
         backstory: str | None = None,
-        llm_models_json: str | None = None,
-        voice_models_json: str | None = None,
-        tuning_profile: str | None = None,
-        tts_instructions: str | None = None,
-        tts_voice_by_provider_json: str | None = None,
+        ai_profiles_json: str | None = None,
+        voice_profiles_json: str | None = None,
         emotions_enabled: bool | None = None,
         extras_json: str | None = None,
     ) -> CharacterUpdateResult:
         workspace_path = _resolve_path(workspace)
-        llm_models = _parse_json_string_list("llm_models_json", llm_models_json)
-        voice_models = _parse_json_string_list("voice_models_json", voice_models_json)
-        resolved_tuning_profile = (
-            _validate_tuning_profile_id(workspace_path, tuning_profile)
-            if tuning_profile is not None
-            else None
-        )
+        ai_profiles = _parse_json_list_or_clear("ai_profiles_json", ai_profiles_json)
+        voice_profiles = _parse_json_list_or_clear("voice_profiles_json", voice_profiles_json)
+        _check_profile_ids(workspace_path, ai_profiles, voice_profiles)
         extras = _parse_json_object("extras_json", extras_json)
-        tts_vp: dict[str, str] | None = None
-        if tts_voice_by_provider_json is not None:
-            tts_vp = _parse_json_voice_provider_map_optional(
-                "tts_voice_by_provider_json", tts_voice_by_provider_json
-            )
         detail = character_domain.update_character(
             workspace_path,
             character_id,
@@ -372,21 +285,12 @@ class CharacterUpdateTool(Tool):
             description=description,
             prompt=prompt,
             backstory=backstory,
-            llm_models=llm_models,
-            tuning_profile=(
-                (resolved_tuning_profile or "") if tuning_profile is not None else None
-            ),
-            voice_models=voice_models,
-            tts_instructions=tts_instructions.strip() if tts_instructions is not None else None,
-            tts_voice_by_provider=tts_vp,
+            ai_profiles=ai_profiles,
+            voice_profiles=voice_profiles,
             emotions_enabled=emotions_enabled,
             extras=extras,
         )
-        warn = _validate_character_model_warnings(
-            workspace_path,
-            detail.get("llm_models"),
-            detail.get("voice_models"),
-        )
+        warn = character_profile_warnings(workspace_path, detail.get("ai_profiles"), detail.get("voice_profiles"))
         return CharacterUpdateResult(character=detail, warnings=warn)
 
 

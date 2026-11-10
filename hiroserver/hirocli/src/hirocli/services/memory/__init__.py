@@ -123,7 +123,7 @@ def create_eval_memory_service(
     if graph_service is None:
         raise RuntimeError(
             "Memory eval: the Graphiti engine is unavailable — configure the graph extraction "
-            "model + embedder (graph.extraction_model or knowledge.answering.model + provider key)."
+            "model + embedder (an AI profile in graph.extraction_profile or llm.chat_profile + provider key)."
         )
 
     from hirocli.services.knowledge.graph.graph_events import graph_event_bus_sink

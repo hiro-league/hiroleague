@@ -3,7 +3,6 @@ import {
   normalizeWorkspacePreferences,
   patchPreferences,
   type PreferenceSection,
-  type TuningProfile,
   type WorkspacePreferences
 } from '$lib/api/preferences';
 import { getPreferencesSchema } from '$lib/api/preferences-schema';
@@ -13,7 +12,6 @@ import {
 } from '$lib/features/preferences/shared/preferences-model-picker';
 import { createLocalModelDownloads } from '$lib/features/preferences/state/local-model-downloads.svelte';
 import { createModelCatalog } from '$lib/features/preferences/state/model-catalog.svelte';
-import { createTuningProfiles } from '$lib/features/preferences/state/tuning-profiles.svelte';
 import {
   cloneWorkspacePreferences,
   editsForSave,
@@ -63,10 +61,6 @@ export function createPreferencesController(notify: Notify) {
   );
   const canSave = $derived(dirty && !busy && !loading && !hasSectionErrors);
 
-  // Tuning-profile CRUD over the draft (create / duplicate / delete / update / defaults). `markDirty`
-  // is a hoisted function declaration below.
-  const profiles = createTuningProfiles({ draft: () => draft, markDirty });
-
   const unsaved = createUnsavedGuard(
     () => dirty,
     () => true,
@@ -102,31 +96,6 @@ export function createPreferencesController(notify: Notify) {
   function setModelId(path: PrefModelIdPath, id: string | null) {
     if (!draft) return;
     if (applyModelIdToDraft(draft, path, id)) markDirty();
-  }
-
-  // Persist a SINGLE tuning profile to the backend immediately (the inline profile editor's
-  // "Update"), independent of the page-level Save. Editing a shared profile applies to every
-  // model referencing it. We diff just this profile's subtree so only its changed leaves PATCH,
-  // then commit the result into both baseline and draft — leaving any other pending draft edits
-  // untouched (so this never silently saves unrelated changes, and the page stays accurately dirty).
-  async function saveProfileNow(id: string, next: TuningProfile) {
-    if (!draft || !baseline || !draft.tuning_profiles[id]) return;
-    busy = true;
-    try {
-      const probe = cloneWorkspacePreferences(baseline);
-      probe.tuning_profiles[id] = next;
-      const edits = editsForSave(baseline, probe, effectiveFieldSchema);
-      if (Object.keys(edits).length === 0) return;
-      const payload = await patchPreferences(edits);
-      const saved = payload.data.preferences.tuning_profiles[id] ?? next;
-      baseline.tuning_profiles[id] = JSON.parse(JSON.stringify(saved)) as TuningProfile;
-      draft.tuning_profiles[id] = JSON.parse(JSON.stringify(saved)) as TuningProfile;
-      notify('success', 'Tuning profile saved.');
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Save failed.');
-    } finally {
-      busy = false;
-    }
   }
 
   // Persist one or more prompt paths to the backend IMMEDIATELY from a prompt-editor dialog,
@@ -244,9 +213,6 @@ export function createPreferencesController(notify: Notify) {
     get canSave() {
       return canSave;
     },
-    get profileEntries(): [string, TuningProfile][] {
-      return profiles.profileEntries;
-    },
     get chatOptions() {
       return catalog.chatOptions;
     },
@@ -304,13 +270,6 @@ export function createPreferencesController(notify: Notify) {
     cancelReranker: downloads.cancelReranker,
     downloadEmbedder: downloads.downloadEmbedder,
     cancelEmbedder: downloads.cancelEmbedder,
-    setDefaultTuningProfile: profiles.setDefaultTuningProfile,
-    updateProfile: profiles.updateProfile,
-    createProfile: profiles.createProfile,
-    duplicateProfile: profiles.duplicateProfile,
-    deleteProfile: profiles.deleteProfile,
-    resetLockedProfile: profiles.resetLockedProfile,
-    saveProfileNow,
     saveDialogEdits,
     loadAll,
     reloadCatalog: catalog.reload,

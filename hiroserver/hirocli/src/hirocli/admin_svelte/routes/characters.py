@@ -51,11 +51,8 @@ async def create_character(
             description=body.description,
             prompt=body.prompt,
             backstory=body.backstory,
-            llm_models_json=body.llm_models_json,
-            tuning_profile=body.tuning_profile,
-            voice_models_json=body.voice_models_json,
-            tts_instructions=body.tts_instructions,
-            tts_voice_by_provider_json=body.tts_voice_by_provider_json,
+            ai_profiles_json=body.ai_profiles_json,
+            voice_profiles_json=body.voice_profiles_json,
             emotions_enabled=body.emotions_enabled,
             extras_json=body.extras_json,
         )
@@ -93,7 +90,7 @@ async def get_character_resolved(
     character_id: str,
     workspace_id: SelectedWorkspaceIdDep,
 ) -> dict[str, Any]:
-    """Phase 7: runtime resolution preview (catalog + credentials vs character lists)."""
+    """Phase 7: runtime resolution preview (the character's AI / voice profiles vs keys; Phase 7b step 5)."""
     result = await run_in_threadpool(
         CharacterService().get_character_resolved_configuration,
         workspace_id,
@@ -117,11 +114,8 @@ async def update_character(
             description=body.description,
             prompt=body.prompt,
             backstory=body.backstory,
-            llm_models_json=body.llm_models_json,
-            tuning_profile=body.tuning_profile,
-            voice_models_json=body.voice_models_json,
-            tts_instructions=body.tts_instructions,
-            tts_voice_by_provider_json=body.tts_voice_by_provider_json,
+            ai_profiles_json=body.ai_profiles_json,
+            voice_profiles_json=body.voice_profiles_json,
             emotions_enabled=body.emotions_enabled,
             extras_json=body.extras_json,
         )

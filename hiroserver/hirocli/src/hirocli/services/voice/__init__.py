@@ -4,10 +4,10 @@ the spoken-clip cache, and counting speech in AI usage.
 - ``engine``: speak with a profile (cached), Try it (kept in memory), voice samples, the cache's stats;
 - ``gemini_speech`` / ``openai_speech``: the providers' APIs (Gemini's Interactions and Voices APIs);
 - ``profiles``: which profile speaks (a use or a named profile), a profile in a line, usage counting;
-- ``audio``: PCM → OGG/Opus (PyAV) and WhatsApp's waveform; ``kit``: voices, sound tags, limits, prices.
+- ``audio``: PCM → OGG/Opus (PyAV), PCM → MP3 (Hiro's voice replies) and WhatsApp's waveform; ``kit``: voices, sound tags, limits, prices.
 
-Keys are the core's providers' (Catalog → Providers). Hiro's own spoken replies still use
-``services/tts`` until they move to voice profiles (Phase 7b step 5).
+Keys are the core's providers' (Catalog → Providers). Hiro's own spoken replies use voice profiles
+too (Phase 7b step 5): the graph's tts node calls ``engine.synthesize`` and ``audio.to_mp3``.
 """
 
 from .engine import Clip, cache_stats, kept, sample, speak, try_it

@@ -1,5 +1,4 @@
 import type { CatalogModelRow } from '$lib/api/catalog';
-import type { ModelTuning } from '$lib/api/preferences';
 
 /** ISO date for sorting models newest-first (release date, then pricing refresh). */
 export function catalogModelSortDate(model: CatalogModelRow): string {
@@ -39,14 +38,4 @@ export function sortCatalogProvidersOnlineFirst<T extends CatalogPickerProvider>
     if (aOnline !== bOnline) return aOnline ? -1 : 1;
     return a.display_name.localeCompare(b.display_name);
   });
-}
-
-export function formatTuningProfileSummary(profile: ModelTuning): string {
-  const parts = [`temp ${profile.temperature}`, `max tokens ${profile.max_tokens.toLocaleString()}`];
-  if (profile.thinking) {
-    parts.push(`thinking ${profile.thinking}`);
-  } else {
-    parts.push('thinking: model default');
-  }
-  return parts.join(' · ');
 }

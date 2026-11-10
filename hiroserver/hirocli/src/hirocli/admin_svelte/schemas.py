@@ -105,11 +105,11 @@ class CharacterSaveRequest(BaseModel):
     description: str = ""
     prompt: str | None = None
     backstory: str = ""
-    llm_models_json: str = ""
-    tuning_profile: str = ""
-    voice_models_json: str = ""
-    tts_instructions: str = ""
-    tts_voice_by_provider_json: str = "{}"
+    # Phase 7b step 5: ordered AI / voice profile ids as JSON arrays ("" = unchanged on update,
+    # "[]" = none: Hiro's chat profile / Hiro's own voice). Replaced llm_models_json, tuning_profile,
+    # voice_models_json, tts_instructions and tts_voice_by_provider_json.
+    ai_profiles_json: str = ""
+    voice_profiles_json: str = ""
     emotions_enabled: bool = False
     extras_json: str = ""
 

@@ -13,7 +13,6 @@ import type {
   MemoryExtractionPreferences,
   MemorySearchPreferences,
   ModalityFlags,
-  TuningProfile,
   WorkspacePreferences as GeneratedWorkspacePreferences
 } from './generated/preferences.generated';
 
@@ -25,14 +24,13 @@ export type {
   KnowledgeRerankerPreferences,
   MemoryExtractionPreferences,
   MemorySearchPreferences,
-  ModalityFlags,
-  TuningProfile
+  ModalityFlags
 } from './generated/preferences.generated';
-
-export type ModelTuning = Pick<TuningProfile, 'temperature' | 'max_tokens' | 'thinking' | 'num_ctx'>;
 
 export type KnowledgeAnsweringPreferences = GeneratedKnowledgeAnsweringPreferences & {
   model_resolved?: string | null;
+  /** Phase 7b step 5: the AI-profile field supplying the model (`knowledge.answering.profile`, else
+   *  `llm.chat_profile`); null when neither is set. */
   model_resolved_source?: string | null;
 };
 

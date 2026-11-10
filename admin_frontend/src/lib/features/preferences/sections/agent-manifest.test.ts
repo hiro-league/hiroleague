@@ -14,7 +14,8 @@ const paths = manifestFieldPaths(AGENT_MANIFEST);
 
 // Editable agent-tab schema fields the UI intentionally does not render (kept here so a genuinely
 // missing field still fails the completeness check below).
-const UNEXPOSED = ['memory.default_tuning_profile', 'chat.preferred_answering_language'];
+// (Phase 7b step 5 removed memory.default_tuning_profile with the tuning profiles.)
+const UNEXPOSED = ['chat.preferred_answering_language'];
 
 describe('agent manifest', () => {
   it('covers exactly the editable agent-tab paths (manifest + intentionally-unexposed)', () => {

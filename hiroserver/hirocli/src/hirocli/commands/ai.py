@@ -214,6 +214,21 @@ def register(ai_app: typer.Typer, uses_app: typer.Typer, console: Console) -> No
                 table.add_row(u["key"], u["name"], takes or "words", u["profile_id"] or "—", u["status"])
             console.print(table)
 
+    @ai_app.command("restore-default")
+    def ai_restore_default(
+        profile_id: str = typer.Argument(..., help="A job's default AI profile (e.g. hiro-chat)."),
+        workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help=_WORKSPACE_HELP),
+    ) -> None:
+        """Put a job's default AI profile back to its preset tuning (its model stays)."""
+        from ..tools.ai import AiProfileRestoreDefaultTool
+
+        try:
+            result = AiProfileRestoreDefaultTool().execute(profile_id=profile_id, workspace=workspace)
+        except (WorkspaceError, ValueError) as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1)
+        console.print(f"[green]{result.profile_id}[/green] back to the {result.preset} job's default tuning")
+
     @uses_app.command("set")
     def uses_set(
         key: str = typer.Argument(..., help="The use, <extension>:<use id> (e.g. home:ask)."),

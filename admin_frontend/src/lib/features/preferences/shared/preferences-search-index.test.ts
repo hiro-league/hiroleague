@@ -21,7 +21,9 @@ describe('preferences search index', () => {
   it('builds entries from the real schema, excluding read-only / image-lab fields', () => {
     const index = buildPrefSearchIndex(PREFERENCES_FIELD_SCHEMA);
     const paths = new Set(index.map((e) => e.path));
-    expect(paths.has('llm.default_chat')).toBe(true);
+    expect(paths.has('llm.chat_profile')).toBe(true);
+    // Phase 7b step 5: Hiro's voice is a Settings field too (the rest of `voice.*` is the Catalog's).
+    expect(paths.has('voice.hiro_profile')).toBe(true);
     expect(paths.has('memory.search.enabled')).toBe(true);
     // read-only enrichment + image-lab-only fields are not searchable
     expect(paths.has('knowledge.answering.model_resolved')).toBe(false);
@@ -30,7 +32,9 @@ describe('preferences search index', () => {
     expect(index.every((e) => e.title.length > 0 && e.tabId && e.tabLabel.length > 0)).toBe(true);
     // sections resolve for the common cards
     const byPath = new Map(index.map((e) => [e.path, e]));
-    expect(byPath.get('llm.default_chat')?.section).toBe('Default models');
+    expect(byPath.get('llm.chat_profile')?.section).toBe('Default models');
+    expect(byPath.get('voice.hiro_profile')?.section).toBe('Default models');
+    expect(byPath.get('graph.eval.judge_profile')?.section).toBe('Evaluation Models');
     expect(byPath.get('knowledge.retrieval.top_k')?.section).toBe('Retrieval defaults');
     expect(byPath.get('graph.observability')?.section).toBe('Graph search & indexing');
     // every searchable field is assigned a section (so dropdown grouping + ordering are complete)
@@ -51,7 +55,7 @@ describe('preferences search index', () => {
     const matches = filterPrefSearch(index, 'model');
     expect(matches.length).toBeGreaterThan(0);
     // sorted by tab order: models(0) ≤ agent(1) ≤ graph-engine(2) ≤ knowledge(3) ≤ eval(4)
-    const order = ['models', 'agent', 'graph-engine', 'knowledge', 'eval', 'tuning-profiles'];
+    const order = ['models', 'agent', 'graph-engine', 'knowledge', 'eval'];
     const idxs = matches.map((m) => order.indexOf(m.tabId));
     expect(idxs).toEqual([...idxs].sort((a, b) => a - b));
     const counts = countPrefMatchesByTab(matches);
@@ -67,15 +71,12 @@ describe('preferences search index', () => {
 
   it('orders fields within a card by markup order, not schema order', () => {
     const index = buildPrefSearchIndex(PREFERENCES_FIELD_SCHEMA);
-    // "model" hits several "Default models" fields; the chat-model PROFILE renders 3rd (after stt),
-    // even though it is defined last in the schema — the field-order list must place it there.
-    const general = filterPrefSearch(index, 'model')
+    // "profile" hits the three profile fields of "Default models": Hiro's voice (`voice.*`, defined
+    // in another schema subtree) renders after reading pictures, in manifest order, not schema order.
+    const general = filterPrefSearch(index, 'profile')
       .filter((e) => e.section === 'Default models')
       .map((e) => e.path);
-    expect(general.indexOf('llm.default_tuning_profile')).toBeLessThan(
-      general.indexOf('llm.default_tts')
-    );
-    expect(general.indexOf('llm.default_chat')).toBe(0);
+    expect(general).toEqual(['llm.chat_profile', 'llm.vision_profile', 'voice.hiro_profile']);
   });
 
   it('returns nothing for a blank query', () => {

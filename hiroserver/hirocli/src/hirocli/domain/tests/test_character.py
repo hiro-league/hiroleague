@@ -54,14 +54,14 @@ def test_load_save_roundtrip(tmp_path) -> None:
     ch = load_character_from_disk(tmp_path, DEFAULT_CHARACTER_ID)
     ch.description = "Updated"
     ch.prompt = "Custom prompt body\n"
-    ch.tts_instructions = "Warm tone."
-    ch.tts_voice_by_provider = {"openai": "sage"}
+    ch.ai_profiles = ["hiro-chat", "fast"]
+    ch.voice_profiles = ["hiro-voice"]
     save_character_to_disk(tmp_path, ch)
     ch2 = load_character_from_disk(tmp_path, DEFAULT_CHARACTER_ID)
     assert ch2.description == "Updated"
     assert ch2.prompt == "Custom prompt body\n"
-    assert ch2.tts_instructions == "Warm tone."
-    assert ch2.tts_voice_by_provider == {"openai": "sage"}
+    assert ch2.ai_profiles == ["hiro-chat", "fast"]
+    assert ch2.voice_profiles == ["hiro-voice"]
     assert ch2.has_photo is True
     assert ch2.photo_filename == "photo.png"
 

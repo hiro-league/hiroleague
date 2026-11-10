@@ -1,8 +1,18 @@
 <script lang="ts">
+  /**
+   * How the runtime would pick this character's chat model and voice (Phase 7b step 5: from its AI /
+   * voice profiles in order, then Hiro's chat profile / Hiro's voice). `full` in the view panel; one
+   * collapsible column per edit section.
+   */
   import { ChevronRight, CircleCheck } from '@lucide/svelte';
-  import type { CharacterResolvedPayload, CharacterResolvedRow } from '$lib/api/characters';
+  import type {
+    CharacterResolvedAiRow,
+    CharacterResolvedPayload,
+    CharacterResolvedVoiceRow
+  } from '$lib/api/characters';
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
   import {
+    appliedTuningLine,
     llmCollapsedSummary,
     resolvedRowDotClass,
     resolvedRowTooltip,
@@ -28,23 +38,22 @@
   let expanded = $state(false);
 
   type AppliedPanelArgs = {
-    modelId: string;
-    source: 'character' | 'workspace_fallback';
-    workspaceBadgeTitle: string;
+    title: string;
+    fromCharacter: boolean;
+    hiroBadgeTitle: string;
     detailLines: string[];
     characterFooter: string;
-    workspaceFooter: string;
+    hiroFooter: string;
   };
 
-  /** Build the optional middle line(s) of the applied TTS panel, mirroring the saved synthesis. */
-  function voiceDetailLines(synthesis: { voice: string; instructions: string }): string[] {
-    const voice = synthesis.voice;
-    const instr = synthesis.instructions?.trim();
-    if (voice) {
-      return [instr ? `Voice “${voice}” · instructions “${instr}”` : `Voice “${voice}”`];
-    }
-    if (instr) return [`Instructions “${instr}”`];
-    return [];
+  /** A candidate row (AI or voice profile): its name (or id when missing), model and voice. */
+  type CandidateRow = (CharacterResolvedAiRow | CharacterResolvedVoiceRow) & { voice?: string | null };
+
+  /** The applied voice panel's middle lines: the voice and the style it speaks in. */
+  function voiceDetailLines(applied: { model: string; voice: string; style: string }): string[] {
+    const lines = [`${applied.model} · voice “${applied.voice}”`];
+    if (applied.style?.trim()) lines.push(`Style “${applied.style.trim()}”`);
+    return lines;
   }
 
   function toggleExpanded() {
@@ -54,11 +63,7 @@
 </script>
 
 <div class="grid gap-4 rounded-lg border border-dashed border-primary/25 bg-muted/15 p-4">
-  {#snippet resolvedCandidateRow(
-    row: CharacterResolvedRow,
-    highlight: boolean,
-    origin: 'character' | 'workspace'
-  )}
+  {#snippet resolvedCandidateRow(row: CandidateRow, highlight: boolean, origin: 'character' | 'hiro')}
     <li
       class={cn(
         'flex w-full flex-col gap-1.5 rounded-md border bg-background/60 px-3 py-2 text-sm',
@@ -75,32 +80,31 @@
             title={resolvedRowTooltip(row.status)}
             aria-label={resolvedRowTooltip(row.status)}
           ></span>
-          <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{row.model_id}</code>
+          <span class="font-sans text-sm font-semibold">{row.label ?? row.profile_id}</span>
         </span>
         {#if origin === 'character'}
           <span
             class="shrink-0 rounded-md border border-emerald-600/35 bg-emerald-500/[0.12] px-2 py-0.5 font-sans text-[10px] font-bold uppercase tracking-wide text-emerald-900 dark:text-emerald-100"
-            title="From this character’s preferred list (ordered)."
+            title="From this character’s list (ordered)."
           >
             Character
           </span>
         {:else}
           <span
             class="shrink-0 rounded-md border border-slate-500/40 bg-slate-500/[0.12] px-2 py-0.5 font-sans text-[10px] font-bold uppercase tracking-wide text-slate-800 dark:text-slate-100"
-            title="Workspace default from preferences — used when the character list has no usable model."
+            title="Hiro's own (Settings → General) — used when no profile of the character can."
           >
-            Workspace
+            Hiro
           </span>
         {/if}
       </div>
-      {#if row.display_name}
-        <span class="text-xs text-muted-foreground">{row.display_name}</span>
+      {#if row.model}
+        <code class="w-fit rounded bg-muted px-1.5 py-0.5 font-mono text-xs"
+          >{row.model}{row.voice ? ` · ${row.voice}` : ''}</code
+        >
       {/if}
-      {#if row.note}
-        <span class="text-xs text-amber-800 dark:text-amber-200">{row.note}</span>
-      {/if}
-      {#if row.replacement_id}
-        <span class="text-xs text-muted-foreground">Replacement: {row.replacement_id}</span>
+      {#if row.status !== 'available'}
+        <span class="text-xs text-amber-800 dark:text-amber-200">{resolvedRowTooltip(row.status)}</span>
       {/if}
     </li>
   {/snippet}
@@ -116,28 +120,28 @@
       <span class="sr-only">Selected</span>
       <div class="min-w-0 flex-1 space-y-1">
         <div class="flex flex-wrap items-center gap-2">
-          <code class="break-all font-mono text-sm font-semibold">{args.modelId}</code>
-          {#if args.source === 'character'}
+          <span class="break-all font-sans text-sm font-semibold">{args.title}</span>
+          {#if args.fromCharacter}
             <span
               class="rounded-md border border-emerald-600/35 bg-emerald-500/[0.15] px-2 py-0.5 font-sans text-[10px] font-bold uppercase tracking-wide text-emerald-900 dark:text-emerald-100"
-              title="Effective model comes from this character’s list."
+              title="Comes from this character’s list."
             >
               Character
             </span>
           {:else}
             <span
               class="rounded-md border border-slate-500/40 bg-slate-500/[0.12] px-2 py-0.5 font-sans text-[10px] font-bold uppercase tracking-wide text-slate-800 dark:text-slate-100"
-              title={args.workspaceBadgeTitle}
+              title={args.hiroBadgeTitle}
             >
-              Workspace
+              Hiro
             </span>
           {/if}
         </div>
-        {#each args.detailLines as line}
+        {#each args.detailLines as line (line)}
           <p class="text-xs text-muted-foreground">{line}</p>
         {/each}
         <p class="text-xs leading-snug text-muted-foreground">
-          {args.source === 'character' ? args.characterFooter : args.workspaceFooter}
+          {args.fromCharacter ? args.characterFooter : args.hiroFooter}
         </p>
       </div>
     </div>
@@ -149,54 +153,47 @@
       {#if label}
         <span class="font-sans text-xs font-semibold uppercase text-muted-foreground">{label}</span>
       {/if}
-      {#if payload.llm_rows.length === 0}
-        <p class="text-sm text-muted-foreground">No preferred ids — workspace default chat applies.</p>
+      {#if payload.ai_rows.length === 0}
+        <p class="text-sm text-muted-foreground">No AI profiles — Hiro's chat profile applies.</p>
       {:else}
         <span class="font-sans text-[10px] font-bold uppercase tracking-wide text-muted-foreground"
           >Character list</span
         >
         <ul class="space-y-2">
-          {#each payload.llm_rows as row (row.model_id)}
+          {#each payload.ai_rows as row (row.profile_id)}
             {@render resolvedCandidateRow(
               row,
-              payload.llm_applied?.source === 'character' &&
-                payload.llm_applied.model_id === row.model_id &&
-                row.status === 'available',
+              payload.ai_applied?.source === 'character' && payload.ai_applied.profile_id === row.profile_id,
               'character'
             )}
           {/each}
         </ul>
       {/if}
-      {#if payload.llm_workspace_row}
+      {#if payload.ai_workspace_row}
         <span class="mt-1 font-sans text-[10px] font-bold uppercase tracking-wide text-muted-foreground"
-          >Workspace default</span
+          >Hiro's chat profile</span
         >
         <ul class="space-y-2">
           {@render resolvedCandidateRow(
-            payload.llm_workspace_row,
-            payload.llm_applied?.source === 'workspace_fallback' &&
-              payload.llm_applied.model_id === payload.llm_workspace_row.model_id &&
-              payload.llm_workspace_row.status === 'available',
-            'workspace'
+            payload.ai_workspace_row,
+            payload.ai_applied?.source === 'workspace_fallback' &&
+              payload.ai_applied.profile_id === payload.ai_workspace_row.profile_id,
+            'hiro'
           )}
         </ul>
       {/if}
-      {#if payload.llm_applied}
+      {#if payload.ai_applied}
         {@render appliedPanel({
-          modelId: payload.llm_applied.model_id,
-          source: payload.llm_applied.source,
-          workspaceBadgeTitle:
-            'Workspace default chat — used when the character list has no usable model.',
-          detailLines: [
-            `temp ${payload.llm_applied.temperature}, max tokens ${payload.llm_applied.max_tokens}`
-          ],
-          characterFooter: 'Taken from this character’s list (first online).',
-          workspaceFooter:
-            'Workspace fallback — no usable id in the character list, or the list is empty.'
+          title: payload.ai_applied.profile_label || payload.ai_applied.model_id,
+          fromCharacter: payload.ai_applied.source === 'character',
+          hiroBadgeTitle: "Hiro's chat profile — used when no profile of the character can answer.",
+          detailLines: [payload.ai_applied.model_id, appliedTuningLine(payload.ai_applied)],
+          characterFooter: 'From this character’s list (the first that can answer, or its fallback).',
+          hiroFooter: "Hiro's chat profile — no profile in the character's list can answer, or the list is empty."
         })}
       {:else}
         <p class="text-sm text-destructive">
-          No chat model resolved. Check catalog, credentials, and default chat in settings.
+          No chat model resolved. Check the profiles' keys, and Hiro's chat profile in Settings → General.
         </p>
       {/if}
     </div>
@@ -210,21 +207,19 @@
       {/if}
       {#if payload.voice_disabled}
         <p class="text-sm text-muted-foreground">
-          Voice replies are disabled in workspace settings — TTS is not used for agent replies.
+          Voice replies are disabled in workspace settings — nothing is spoken for agent replies.
         </p>
       {:else if payload.voice_rows.length === 0}
-        <p class="text-sm text-muted-foreground">No preferred TTS ids — workspace default TTS applies.</p>
+        <p class="text-sm text-muted-foreground">No voice profiles — Hiro's voice applies.</p>
       {:else}
         <span class="font-sans text-[10px] font-bold uppercase tracking-wide text-muted-foreground"
           >Character list</span
         >
         <ul class="space-y-2">
-          {#each payload.voice_rows as row (row.model_id)}
+          {#each payload.voice_rows as row (row.profile_id)}
             {@render resolvedCandidateRow(
               row,
-              payload.voice_applied?.source === 'character' &&
-                payload.voice_applied.catalog_model_id === row.model_id &&
-                row.status === 'available',
+              payload.voice_applied?.source === 'character' && payload.voice_applied.profile_id === row.profile_id,
               'character'
             )}
           {/each}
@@ -232,33 +227,30 @@
       {/if}
       {#if payload.voice_workspace_row}
         <span class="mt-1 font-sans text-[10px] font-bold uppercase tracking-wide text-muted-foreground"
-          >Workspace default</span
+          >Hiro's voice</span
         >
         <ul class="space-y-2">
           {@render resolvedCandidateRow(
             payload.voice_workspace_row,
-            payload.voice_applied?.source === 'workspace_fallback' &&
-              payload.voice_applied.catalog_model_id === payload.voice_workspace_row.model_id &&
-              payload.voice_workspace_row.status === 'available',
-            'workspace'
+            payload.voice_applied?.source === 'hiro' &&
+              payload.voice_applied.profile_id === payload.voice_workspace_row.profile_id,
+            'hiro'
           )}
         </ul>
       {/if}
       {#if !payload.voice_disabled}
         {#if payload.voice_applied}
           {@render appliedPanel({
-            modelId: payload.voice_applied.catalog_model_id,
-            source: payload.voice_applied.source,
-            workspaceBadgeTitle:
-              'Workspace default TTS — used when the character list has no usable model.',
-            detailLines: voiceDetailLines(payload.voice_applied.synthesis),
-            characterFooter: 'Taken from this character’s list (first online for TTS).',
-            workspaceFooter:
-              'Workspace fallback — no usable TTS id in the character list, or the list is empty.'
+            title: payload.voice_applied.label,
+            fromCharacter: payload.voice_applied.source === 'character',
+            hiroBadgeTitle: "Hiro's voice — used when no voice profile of the character has a key.",
+            detailLines: voiceDetailLines(payload.voice_applied),
+            characterFooter: 'From this character’s list (the first whose provider has a key).',
+            hiroFooter: "Hiro's voice — no voice profile in the character's list has a key, or the list is empty."
           })}
         {:else}
           <p class="text-sm text-destructive">
-            No TTS model resolved. Set default TTS in settings and configure a TTS provider.
+            No voice resolved. Pick Hiro's voice in Settings → General, and set the speech provider's key.
           </p>
         {/if}
       {/if}
@@ -270,8 +262,8 @@
       <span class="font-sans text-xs font-extrabold uppercase text-primary">Runtime</span>
       <h4 class="mt-1 text-base font-semibold">Resolved configuration</h4>
       <p class="mt-1 text-sm text-muted-foreground">
-        Which chat and TTS models HiroServer would pick for this character, given the catalog and
-        credentials in this workspace. Order matches the character list; the first usable id wins.
+        Which AI profile and voice profile HiroServer would use for this character, given the keys in this
+        workspace. Order matches the character's lists; the first usable one wins, then Hiro's own.
       </p>
     </div>
   {:else}
@@ -293,9 +285,9 @@
       />
       <span class="shrink-0 font-sans text-xs font-semibold uppercase text-muted-foreground">
         {#if segment === 'llm'}
-          Chat LLM resolution (saved)
+          Chat resolution (saved)
         {:else}
-          TTS resolution (saved)
+          Voice resolution (saved)
         {/if}
       </span>
       <span
@@ -333,8 +325,8 @@
       <InlineLoading label="Loading resolved configuration…" />
     {:else}
       <div class="grid gap-5 md:grid-cols-2 md:items-start">
-        {@render llmColumn(resolved, 'Chat (LLM)')}
-        {@render voiceColumn(resolved, 'Voice (TTS)')}
+        {@render llmColumn(resolved, 'Chat (AI profile)')}
+        {@render voiceColumn(resolved, 'Voice (voice profile)')}
       </div>
     {/if}
   {:else}
@@ -346,9 +338,9 @@
     >
       <p class="text-xs text-muted-foreground">
         {#if segment === 'llm'}
-          Effective LLM model selected from the character's list and workspace defaults.
+          The AI profile chosen from the character's list, else Hiro's chat profile.
         {:else}
-          Effective TTS model selected from the character's list and workspace defaults.
+          The voice profile chosen from the character's list, else Hiro's voice.
         {/if}
       </p>
       {#if error}

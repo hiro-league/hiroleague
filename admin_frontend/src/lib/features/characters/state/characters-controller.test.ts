@@ -13,8 +13,7 @@ const h = vi.hoisted(() => ({
   deleteCharacter: vi.fn(),
   listCatalogModels: vi.fn(),
   listCatalogProviders: vi.fn(),
-  getPreferences: vi.fn(),
-  reloadCatalogAndRefetch: vi.fn()
+  getPreferences: vi.fn()
 }));
 
 vi.mock('$lib/api/characters', () => ({
@@ -33,20 +32,6 @@ vi.mock('$lib/api/catalog', () => ({
 
 vi.mock('$lib/api/preferences', () => ({
   getPreferences: (...a: unknown[]) => h.getPreferences(...a)
-}));
-
-vi.mock('$lib/catalog/catalog-reload', () => ({
-  reloadCatalogAndRefetch: (...a: unknown[]) => h.reloadCatalogAndRefetch(...a),
-  catalogReloadSuccessMessage: () => 'Catalog reloaded.'
-}));
-
-vi.mock('$lib/catalog/active-providers/active-providers-store.svelte', () => ({
-  createActiveProvidersStore: () => ({
-    load: vi.fn().mockResolvedValue(undefined),
-    resolved: true,
-    chatActiveProviderIds: new Set<string>(),
-    ttsActiveProviderIds: new Set<string>()
-  })
 }));
 
 vi.mock('$lib/features/characters/state/characters-photo-crop.svelte', () => ({
@@ -103,10 +88,25 @@ beforeEach(() => {
   h.deleteCharacter.mockResolvedValue({ data: {} });
   h.listCatalogModels.mockResolvedValue({ data: { models: [] } });
   h.listCatalogProviders.mockResolvedValue({ data: [] });
+  // Phase 7b step 5: the editor's lists pick from the workspace's AI and voice profiles.
   h.getPreferences.mockResolvedValue({
-    data: { preferences: { tuning_profiles: {}, llm: { default_tuning_profile: 'balanced_chat' } } }
+    data: {
+      preferences: {
+        ai: {
+          profiles: {
+            'hiro-chat': { label: "Hiro's chat", model: 'google:gemini-flash', temperature: 0.3, max_tokens: 2048, thinking: null },
+            'on-codex': { label: 'On Codex', model: 'codex:gpt-5', temperature: null, max_tokens: null, thinking: null },
+            'a-claude': { label: 'A Claude', model: 'anthropic:claude-sonnet', temperature: 0.2, max_tokens: 1600, thinking: 'low' }
+          }
+        },
+        voice: {
+          profiles: {
+            'hiro-voice': { label: "Hiro's voice", model: 'openai:gpt-4o-mini-tts', voice: 'sage', voice_label: '', style: '', speed: 1 }
+          }
+        }
+      }
+    }
   });
-  h.reloadCatalogAndRefetch.mockResolvedValue({ reload: {} });
 });
 
 describe('loadCharacters', () => {
@@ -130,12 +130,15 @@ describe('loadCharacters', () => {
 
 describe('openCharacterEdit', () => {
   it('loads detail, hydrates the form, and navigates to edit', async () => {
-    h.getCharacter.mockResolvedValueOnce({ data: { id: 'a', name: 'A', llm_models: ['m1'] } });
+    h.getCharacter.mockResolvedValueOnce({
+      data: { id: 'a', name: 'A', ai_profiles: ['a-claude'], voice_profiles: ['hiro-voice'] }
+    });
     const { ctrl, prefs, formApi } = setup();
     await ctrl.openCharacterEdit({ id: 'a', name: 'A' });
     expect(ctrl.selected?.id).toBe('a');
     expect(formApi.form.new_id).toBe('a');
-    expect(formApi.form.llm_models).toEqual(['m1']);
+    expect(formApi.form.ai_profiles).toEqual(['a-claude']);
+    expect(formApi.form.voice_profiles).toEqual(['hiro-voice']);
     expect(formApi.dirty).toBe(false);
     expect(prefs.setState).toHaveBeenCalledWith('detail', 'edit', 'a');
   });
@@ -213,19 +216,36 @@ describe('confirmDelete', () => {
   });
 });
 
-describe('reloadBundledCatalogInEditor', () => {
-  it('notifies success and clears the busy flag', async () => {
-    const { ctrl, notify } = setup();
-    await ctrl.reloadBundledCatalogInEditor();
-    expect(notify).toHaveBeenCalledWith('success', 'Catalog reloaded.');
-    expect(ctrl.catalogReloadBusy).toBe(false);
+describe('profile options (Phase 7b step 5)', () => {
+  it('lists the AI and voice profiles by name with a one-line summary, flagging plan-tool models', async () => {
+    const { ctrl } = setup();
+    await ctrl.openNewCharacter();
+    expect(ctrl.aiProfileOptions.map((o) => o.id)).toEqual(['a-claude', 'hiro-chat', 'on-codex']);
+    const chat = ctrl.aiProfileOptions.find((o) => o.id === 'hiro-chat');
+    expect(chat?.line).toBe('google · gemini-flash · temperature 0.3 · 2,048 tokens · thinking: model default');
+    expect(chat?.note).toBeNull();
+    expect(ctrl.aiProfileOptions.find((o) => o.id === 'on-codex')?.note).toMatch(/plan tool/);
+    expect(ctrl.voiceProfileOptions).toEqual([
+      { id: 'hiro-voice', label: "Hiro's voice", line: 'openai · gpt-4o-mini-tts · sage', note: null }
+    ]);
   });
 
-  it('notifies the error message when the reload fails', async () => {
-    h.reloadCatalogAndRefetch.mockRejectedValueOnce(new Error('reload boom'));
-    const { ctrl, notify } = setup();
-    await ctrl.reloadBundledCatalogInEditor();
-    expect(notify).toHaveBeenCalledWith('error', 'reload boom');
-    expect(ctrl.catalogReloadBusy).toBe(false);
+  it('reads the profiles again on reload (after an edit in Catalog → Profiles)', async () => {
+    const { ctrl } = setup();
+    await ctrl.openNewCharacter();
+    expect(h.getPreferences).toHaveBeenCalledTimes(1);
+    await ctrl.openNewCharacter();
+    expect(h.getPreferences).toHaveBeenCalledTimes(1); // cached
+    await ctrl.reloadProfileOptions();
+    expect(h.getPreferences).toHaveBeenCalledTimes(2);
+  });
+
+  it('saves the ordered lists as ai_profiles_json / voice_profiles_json', async () => {
+    const { ctrl, formApi } = setup({ activeTab: 'detail', detailMode: 'edit', characterId: 'ada' });
+    formApi.form = { ...formApi.form, name: 'Ada', ai_profiles: ['a-claude', 'hiro-chat'], voice_profiles: [] };
+    await ctrl.saveCharacter();
+    const body = h.updateCharacter.mock.calls[0][1];
+    expect(body.ai_profiles_json).toBe('["a-claude","hiro-chat"]');
+    expect(body.voice_profiles_json).toBe('[]');
   });
 });

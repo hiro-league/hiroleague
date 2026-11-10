@@ -117,10 +117,4 @@ export type EvalTabPreference = 'memory' | 'knowledge';
 export type EvalSubtabPreference = 'execute' | 'corpus' | 'answers' | 'report';
 export type GraphPanelSidePreference = 'auto' | 'left' | 'right';
 export type LogsPrimaryTabPreference = 'logs' | 'runs' | 'usage';
-export type PreferencesTabPreference =
-  | 'models'
-  | 'knowledge'
-  | 'graph-engine'
-  | 'eval'
-  | 'agent'
-  | 'tuning-profiles';
+export type PreferencesTabPreference = 'models' | 'knowledge' | 'graph-engine' | 'eval' | 'agent';

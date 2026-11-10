@@ -71,6 +71,7 @@ _LAZY_EXPORTS: dict[str, str] = {
     # extension
     # AI profiles and uses (Phase 7a)
     "AiProfilesListTool": ".ai",
+    "AiProfileRestoreDefaultTool": ".ai",
     "AiTryTool": ".ai",
     "AiUsageTool": ".ai",
     "AiUsageImportHomeHiroTool": ".ai",
@@ -206,6 +207,7 @@ def all_tools() -> list[Tool]:
     code path that pays the full transitive import cost.
     """
     from .ai import (
+        AiProfileRestoreDefaultTool,
         AiProfilesListTool,
         AiTryTool,
         AiUsageTool,
@@ -357,6 +359,7 @@ def all_tools() -> list[Tool]:
         ExtensionAddressTool(),
         ExtensionStateTool(),
         AiProfilesListTool(),
+        AiProfileRestoreDefaultTool(),
         AiTryTool(),
         AiUsageTool(),
         AiUsageImportHomeHiroTool(),

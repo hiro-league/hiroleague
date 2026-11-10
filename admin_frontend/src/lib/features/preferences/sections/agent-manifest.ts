@@ -4,8 +4,8 @@
  * enable toggle gating the recall/remember toggles + top-k). The tab's field order derives from this
  * manifest (`AGENT_FIELD_ORDER`).
  *
- * `memory.default_tuning_profile` and `chat.preferred_answering_language` are editable agent-tab
- * schema fields the UI intentionally doesn't surface (see the manifest test's UNEXPOSED set).
+ * `chat.preferred_answering_language` is an editable agent-tab schema field the UI intentionally
+ * doesn't surface (see the manifest test's UNEXPOSED set).
  */
 import { PREFERENCES_SECTION_BODY_IDS } from '$lib/features/preferences/shared/preferences-section-a11y';
 import type { WorkspacePreferences } from '$lib/api/preferences';

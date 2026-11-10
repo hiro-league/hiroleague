@@ -1,20 +1,22 @@
 import type { WorkspacePreferences } from '$lib/api/preferences';
 import type { LocalRerankerRow } from '$lib/api/knowledge';
 
+// Phase 7b step 5: `model_resolved_source` is the AI-profile field supplying the answering model
+// (its own profile, else Hiro's chat profile); it was the model field's path.
 const knowledgeModelSourceLabels: Record<string, string> = {
-  'knowledge.answering.model': 'knowledge answering model preference',
-  'llm.default_chat': 'workspace default chat model'
+  'knowledge.answering.profile': 'the knowledge answering profile',
+  'llm.chat_profile': "Hiro's chat profile"
 };
 
 export function knowledgeAnsweringModelHint(prefs: WorkspacePreferences): string {
   const resolved = prefs.knowledge.answering.model_resolved;
   const source = prefs.knowledge.answering.model_resolved_source;
-  const resolvedLabel = resolved ?? 'none (model unavailable or not configured)';
-  if (!prefs.knowledge.answering.model) {
-    const sourceLabel = source ? (knowledgeModelSourceLabels[source] ?? source) : 'default';
-    return `Null inherits ${sourceLabel}. Effective model: ${resolvedLabel}.`;
+  const resolvedLabel = resolved ?? 'none (no profile set, or its model is unavailable)';
+  if (!prefs.knowledge.answering.profile && source) {
+    const sourceLabel = knowledgeModelSourceLabels[source] ?? source;
+    return `Not set: uses ${sourceLabel}. Effective model (saved): ${resolvedLabel}.`;
   }
-  return `Effective model: ${resolvedLabel}.`;
+  return `Effective model (saved): ${resolvedLabel}.`;
 }
 
 /** Prefetch limit applies only when hybrid retrieval runs separate dense + BM25 branches. */

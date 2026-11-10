@@ -67,6 +67,24 @@ export type AiProfile = {
   usage: AiProfileUsage;
   /** From the server's profile list: where it runs and whether it can answer now (absent on a new draft). */
   server?: { kind: AiProviderKind; providerLabel: string; notReady: string | null };
+  /** Phase 7b step 5: the job this profile is the default of ("chat", …); null = the owner's own.
+   *  A default profile shows "Default", can't be deleted and has Restore default. Kept on save. */
+  preset: string | null;
+  /** Phase 7b step 5: ids of Hiro's jobs whose own field points at it (from the server's list). */
+  jobs: string[];
+};
+
+/** One of Hiro's own jobs on the Uses tab (Phase 7b step 5): its field points at one AI profile. */
+export type AiJob = {
+  id: string;
+  label: string;
+  /** The preference field to PATCH with the picked profile id (null = not set). */
+  path: string;
+  profileId: string | null;
+  defaultProfileId: string;
+  fallsBackTo: string | null;
+  /** The model the job runs with now (saved); null = nothing can run it. */
+  model: string | null;
 };
 
 export type AiUseNeeds = {

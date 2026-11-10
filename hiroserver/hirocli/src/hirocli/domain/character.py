@@ -75,12 +75,13 @@ class Character(BaseModel):
     id: str
     name: str
     description: str = ""
-    llm_models: list[str] = Field(default_factory=list)
-    tuning_profile: str | None = None
-    voice_models: list[str] = Field(default_factory=list)
-    # Optional TTS tuning: one preset per provider id (catalog), one global instruction string.
-    tts_instructions: str = ""
-    tts_voice_by_provider: dict[str, str] = Field(default_factory=dict)
+    # Phase 7b step 5: ordered AI profile ids (``prefs.ai.profiles``) — the first usable one (with its
+    # fallbacks) answers; empty = Hiro's chat profile. Replaces llm_models + tuning_profile.
+    ai_profiles: list[str] = Field(default_factory=list)
+    # Ordered voice profile ids (``prefs.voice.profiles``) — the first whose provider has a key speaks;
+    # empty = Hiro's own voice (voice.hiro_profile). Replaces voice_models + tts_instructions +
+    # tts_voice_by_provider (the voice and style live in the voice profile now).
+    voice_profiles: list[str] = Field(default_factory=list)
     emotions_enabled: bool = False
     extras: dict[str, Any] = Field(default_factory=dict)
     prompt: str = ""
@@ -94,11 +95,8 @@ class Character(BaseModel):
             "id": self.id,
             "name": self.name,
             "description": self.description,
-            "llm_models": self.llm_models,
-            "tuning_profile": self.tuning_profile,
-            "voice_models": self.voice_models,
-            "tts_instructions": self.tts_instructions,
-            "tts_voice_by_provider": dict(self.tts_voice_by_provider),
+            "ai_profiles": list(self.ai_profiles),
+            "voice_profiles": list(self.voice_profiles),
             "emotions_enabled": self.emotions_enabled,
             "extras": self.extras,
         }
@@ -137,22 +135,12 @@ def load_character_from_disk(workspace_path: Path, character_id: str) -> Charact
     prompt = prompt_path.read_text(encoding="utf-8") if prompt_path.is_file() else ""
     backstory = back_path.read_text(encoding="utf-8") if back_path.is_file() else ""
 
-    tts_map: dict[str, str] = {}
-    raw_voices = raw.get("tts_voice_by_provider")
-    if isinstance(raw_voices, dict):
-        for k, v in raw_voices.items():
-            if isinstance(k, str) and isinstance(v, str):
-                tts_map[k] = v
-
     return Character(
         id=str(raw.get("id", character_id)),
         name=str(raw.get("name", character_id)),
         description=str(raw.get("description", "")),
-        llm_models=list(raw.get("llm_models") or []),
-        tuning_profile=str(raw.get("tuning_profile") or "").strip() or None,
-        voice_models=list(raw.get("voice_models") or []),
-        tts_instructions=str(raw.get("tts_instructions") or ""),
-        tts_voice_by_provider=tts_map,
+        ai_profiles=_str_list(raw.get("ai_profiles")),
+        voice_profiles=_str_list(raw.get("voice_profiles")),
         emotions_enabled=bool(raw.get("emotions_enabled", False)),
         extras=dict(raw.get("extras") or {}),
         prompt=prompt,
@@ -160,6 +148,13 @@ def load_character_from_disk(workspace_path: Path, character_id: str) -> Charact
         has_photo=has_photo,
         photo_filename=photo_name,
     )
+
+
+def _str_list(value: Any) -> list[str]:
+    """A JSON list of ids as clean strings (anything else → empty, so a bad file can't break a turn)."""
+    if not isinstance(value, list):
+        return []
+    return [str(v).strip() for v in value if isinstance(v, str) and v.strip()]
 
 
 def save_character_to_disk(workspace_path: Path, character: Character) -> None:
@@ -230,11 +225,8 @@ def _write_inline_default_hiro_files(dest: Path) -> None:
                 "id": DEFAULT_CHARACTER_ID,
                 "name": "Hiro",
                 "description": "Your personal AI assistant running on Hiro League.",
-                "llm_models": [],
-                "tuning_profile": None,
-                "voice_models": [],
-                "tts_instructions": "",
-                "tts_voice_by_provider": {},
+                "ai_profiles": [],
+                "voice_profiles": [],
                 "emotions_enabled": False,
                 "extras": {},
             },
@@ -398,11 +390,8 @@ def get_character_detail(workspace_path: Path, character_id: str) -> dict[str, A
         "folder_path": row["folder_path"],
         "prompt": ch.prompt,
         "backstory": ch.backstory,
-        "llm_models": ch.llm_models,
-        "tuning_profile": ch.tuning_profile,
-        "voice_models": ch.voice_models,
-        "tts_instructions": ch.tts_instructions,
-        "tts_voice_by_provider": dict(ch.tts_voice_by_provider),
+        "ai_profiles": list(ch.ai_profiles),
+        "voice_profiles": list(ch.voice_profiles),
         "emotions_enabled": ch.emotions_enabled,
         "extras": ch.extras,
         "has_photo": ch.has_photo,
@@ -467,11 +456,8 @@ def create_character(
     description: str = "",
     prompt: str | None = None,
     backstory: str = "",
-    llm_models: list[str] | None = None,
-    tuning_profile: str | None = None,
-    voice_models: list[str] | None = None,
-    tts_instructions: str = "",
-    tts_voice_by_provider: dict[str, str] | None = None,
+    ai_profiles: list[str] | None = None,
+    voice_profiles: list[str] | None = None,
     emotions_enabled: bool = False,
     extras: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -487,11 +473,8 @@ def create_character(
         description=description,
         prompt=prompt_text,
         backstory=backstory,
-        llm_models=list(llm_models or []),
-        tuning_profile=(tuning_profile or "").strip() or None,
-        voice_models=list(voice_models or []),
-        tts_instructions=tts_instructions.strip(),
-        tts_voice_by_provider=dict(tts_voice_by_provider or {}),
+        ai_profiles=list(ai_profiles or []),
+        voice_profiles=list(voice_profiles or []),
         emotions_enabled=emotions_enabled,
         extras=dict(extras or {}),
     )
@@ -520,11 +503,8 @@ def update_character(
     description: str | None = None,
     prompt: str | None = None,
     backstory: str | None = None,
-    llm_models: list[str] | None = None,
-    tuning_profile: str | None = None,
-    voice_models: list[str] | None = None,
-    tts_instructions: str | None = None,
-    tts_voice_by_provider: dict[str, str] | None = None,
+    ai_profiles: list[str] | None = None,
+    voice_profiles: list[str] | None = None,
     emotions_enabled: bool | None = None,
     extras: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -540,16 +520,10 @@ def update_character(
         ch.prompt = prompt
     if backstory is not None:
         ch.backstory = backstory
-    if llm_models is not None:
-        ch.llm_models = list(llm_models)
-    if tuning_profile is not None:
-        ch.tuning_profile = tuning_profile.strip() or None
-    if voice_models is not None:
-        ch.voice_models = list(voice_models)
-    if tts_instructions is not None:
-        ch.tts_instructions = tts_instructions.strip()
-    if tts_voice_by_provider is not None:
-        ch.tts_voice_by_provider = dict(tts_voice_by_provider)
+    if ai_profiles is not None:
+        ch.ai_profiles = list(ai_profiles)
+    if voice_profiles is not None:
+        ch.voice_profiles = list(voice_profiles)
     if emotions_enabled is not None:
         ch.emotions_enabled = emotions_enabled
     if extras is not None:
@@ -602,10 +576,35 @@ def character_photo_media_type(filename: str) -> str:
     return "image/png"
 
 
+def _profile_models(workspace_path: Path) -> tuple[dict[str, str], dict[str, str]]:
+    """AI profile id → model id and voice profile id → model id (for the app's character lists)."""
+    from .preferences import load_preferences
+
+    try:
+        prefs = load_preferences(workspace_path)
+    except Exception as exc:  # a broken preferences file must not break the app's character list
+        logger.warning("Character list without models — preferences unreadable", extra={"error": str(exc)})
+        return {}, {}
+    return (
+        {pid: p.model for pid, p in prefs.ai.profiles.items()},
+        {pid: p.model for pid, p in prefs.voice.profiles.items()},
+    )
+
+
+def _models_of(profile_ids: list[str], models: dict[str, str]) -> list[str]:
+    return [models[pid] for pid in profile_ids if pid in models]
+
+
 def list_public_character_summaries(workspace_path: Path) -> list[dict[str, Any]]:
-    """Minimal index rows for GET /characters (Phase 6 — Flutter profile list)."""
+    """Minimal index rows for GET /characters (Phase 6 — Flutter profile list).
+
+    Phase 7b step 5: characters hold AI / voice profile ids now; the app's ``llm_models`` /
+    ``voice_models`` keys keep their shape (filled with those profiles' model ids) and
+    ``tuning_profile`` stays ``None``, so installed apps don't break.
+    """
     rows = list_characters_detailed(workspace_path)
     wp = workspace_path
+    ai_models, voice_models_by_id = _profile_models(wp)
     result: list[dict[str, Any]] = []
     for r in rows:
         llm_models: list[str] = []
@@ -613,8 +612,8 @@ def list_public_character_summaries(workspace_path: Path) -> list[dict[str, Any]
         if not r.get("error"):
             try:
                 ch = load_character_from_disk(wp, r["id"])
-                llm_models = list(ch.llm_models)
-                voice_models = list(ch.voice_models)
+                llm_models = _models_of(ch.ai_profiles, ai_models)
+                voice_models = _models_of(ch.voice_profiles, voice_models_by_id)
             except FileNotFoundError:
                 pass
         result.append(
@@ -634,15 +633,16 @@ def list_public_character_summaries(workspace_path: Path) -> list[dict[str, Any]
 def public_character_profile(workspace_path: Path, character_id: str) -> dict[str, Any]:
     """Subset of character detail for GET /characters/{{id}}/profile."""
     d = get_character_detail(workspace_path, character_id)
+    ai_models, voice_models_by_id = _profile_models(workspace_path)
     return {
         "id": d["id"],
         "name": d["name"],
         "description": d.get("description") or "",
         "has_photo": bool(d.get("has_photo")),
         "updated_at": d.get("updated_at") or "",
-        # Same preference lists the agent uses (Phase 5); helps clients align with runtime.
-        "llm_models": list(d.get("llm_models") or []),
-        "voice_models": list(d.get("voice_models") or []),
+        # The models of the character's profiles (Phase 7b step 5: same keys as before for the app).
+        "llm_models": _models_of(list(d.get("ai_profiles") or []), ai_models),
+        "voice_models": _models_of(list(d.get("voice_profiles") or []), voice_models_by_id),
     }
 
 

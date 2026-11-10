@@ -13,7 +13,6 @@
   } from '$lib/components/page/collapsible-section-registry.svelte';
   import type { AdminSubtabDescriptor } from '$lib/components/page/tab-types';
   import Button from '$lib/components/ui/button.svelte';
-  import TuningProfilesSection from '$lib/features/preferences/sections/TuningProfilesSection.svelte';
   import PrefManifestTab from '$lib/features/preferences/widgets/manifest/PrefManifestTab.svelte';
   import {
     PREFERENCE_TAB_IDS,
@@ -85,11 +84,10 @@
     }))
   );
 
-  // The active tab's registry descriptor, when it's manifest-driven (rendered via PrefManifestTab).
-  // The hand-rolled Model Profiles tab has no manifest and is dispatched separately below. Only the
-  // active tab mounts, so this resolves to at most one descriptor.
+  // The active tab's registry descriptor (every tab is manifest-driven, rendered via PrefManifestTab).
+  // Only the active tab mounts, so this resolves to at most one descriptor.
   const activeManifestTab = $derived(
-    PREFERENCE_TAB_REGISTRY.find((tab) => tab.id === tabPrefs.activeTab && tab.manifest)
+    PREFERENCE_TAB_REGISTRY.find((tab) => tab.id === tabPrefs.activeTab)
   );
 
   async function switchTab(tab: PreferenceTabId) {
@@ -177,7 +175,7 @@
     sectionRegistry.expandAll();
     await tick(); // let expanded sections + advanced fields paint before we look them up
     const el = document.querySelector(`[data-pref-path="${match.path}"]`);
-    if (!el) return; // dict/table controls (e.g. tuning_profiles) have no single anchor — tab switch is enough
+    if (!el) return; // a control without a single anchor — the tab switch is enough
     el.scrollIntoView({ block: 'center' });
     document
       .querySelectorAll('.pref-search-hit')
@@ -286,9 +284,7 @@
   {:else if ctrl.error}
     <InlineDestructiveAlert message={ctrl.error} class="p-4 text-sm" />
   {:else if ctrl.draft}
-    {#if tabPrefs.activeTab === 'tuning-profiles'}
-      <TuningProfilesSection {ctrl} />
-    {:else if activeManifestTab}
+    {#if activeManifestTab}
       <PrefManifestTab {ctrl} tab={activeManifestTab} />
     {/if}
   {/if}

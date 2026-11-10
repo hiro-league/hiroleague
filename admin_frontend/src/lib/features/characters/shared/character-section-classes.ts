@@ -2,7 +2,7 @@
  * Shared Tailwind class strings for Characters section cards.
  *
  * Used by `CharacterSectionCard` and any sibling section that builds its own snippet `header`
- * (e.g. `CharacterPreferredModelsSection`). Keeping the strings here means we don't bring back
+ * (e.g. `CharacterProfilesSection`). Keeping the strings here means we don't bring back
  * the old `.character-section-*` global utilities while still avoiding copy-paste drift.
  */
 export const characterSectionTitleClass =

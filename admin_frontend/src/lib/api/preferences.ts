@@ -14,8 +14,6 @@ export type {
   MemoryExtractionPreferences,
   MemorySearchPreferences,
   ModalityFlags,
-  ModelTuning,
-  TuningProfile,
   WorkspacePreferences
 } from './preferences-types';
 
@@ -64,9 +62,7 @@ export function normalizeWorkspacePreferences(prefs: WorkspacePreferences): Work
         }
       },
       answering: { ...defaults.knowledge.answering, ...prefs.knowledge?.answering },
-      rewrite: { ...defaults.knowledge.rewrite, ...prefs.knowledge?.rewrite },
-      default_tuning_profile:
-        prefs.knowledge?.default_tuning_profile ?? defaults.knowledge.default_tuning_profile
+      rewrite: { ...defaults.knowledge.rewrite, ...prefs.knowledge?.rewrite }
     },
     graph: {
       ...defaults.graph,
@@ -93,7 +89,6 @@ export function normalizeWorkspacePreferences(prefs: WorkspacePreferences): Work
       }
     },
     chat: { ...defaults.chat, ...prefs.chat },
-    tuning_profiles: prefs.tuning_profiles ?? defaults.tuning_profiles,
     image_profiles: prefs.image_profiles ?? defaults.image_profiles
   };
 }

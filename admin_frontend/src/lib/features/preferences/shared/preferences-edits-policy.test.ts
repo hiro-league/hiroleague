@@ -16,9 +16,9 @@ describe('preferences-edits-policy', () => {
   });
 
   it('detects whole-object writes', () => {
-    expect(shouldWriteWholePreferencePath({ path: 'tuning_profiles', writeWhole: true })).toBe(
-      true
-    );
+    expect(
+      shouldWriteWholePreferencePath({ path: 'graph.eval.answer_prompts', writeWhole: true })
+    ).toBe(true);
     expect(shouldWriteWholePreferencePath({ path: 'memory.user_name', type: 'string' })).toBe(
       false
     );
@@ -26,9 +26,9 @@ describe('preferences-edits-policy', () => {
 
   it('coerces nullable model and string leaves', () => {
     const modelMeta: PreferenceFieldMeta = {
-      path: 'llm.default_chat',
+      path: 'llm.default_stt',
       nullable: true,
-      model_kind: 'chat',
+      model_kind: 'stt',
       type: 'string'
     };
     expect(coercePreferenceLeafValue(modelMeta, '')).toBeNull();

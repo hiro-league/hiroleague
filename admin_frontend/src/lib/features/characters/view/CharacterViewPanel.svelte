@@ -84,13 +84,18 @@
           </div>
         </div>
         <div class="grid gap-3 md:grid-cols-2">
+          <!-- Phase 7b step 5: the character's AI / voice profiles, in order (were its model lists). -->
           <div>
-            <span class="font-sans text-xs font-semibold uppercase text-muted-foreground">LLM models</span>
-            <pre class="mt-1 overflow-auto rounded-md border bg-background/45 p-3 text-xs">{prettyJson(selected.llm_models) || '-'}</pre>
+            <span class="font-sans text-xs font-semibold uppercase text-muted-foreground">AI profiles</span>
+            <pre class="mt-1 overflow-auto rounded-md border bg-background/45 p-3 text-xs">{selected.ai_profiles?.length
+                ? prettyJson(selected.ai_profiles)
+                : "- (Hiro's chat profile)"}</pre>
           </div>
           <div>
-            <span class="font-sans text-xs font-semibold uppercase text-muted-foreground">Voice models</span>
-            <pre class="mt-1 overflow-auto rounded-md border bg-background/45 p-3 text-xs">{prettyJson(selected.voice_models) || '-'}</pre>
+            <span class="font-sans text-xs font-semibold uppercase text-muted-foreground">Voice profiles</span>
+            <pre class="mt-1 overflow-auto rounded-md border bg-background/45 p-3 text-xs">{selected.voice_profiles?.length
+                ? prettyJson(selected.voice_profiles)
+                : "- (Hiro's voice)"}</pre>
           </div>
         </div>
 

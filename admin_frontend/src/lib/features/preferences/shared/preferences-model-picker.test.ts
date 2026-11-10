@@ -6,16 +6,15 @@ function makeDraft(): WorkspacePreferences {
   return {
     version: 1,
     llm: {
-      default_chat: null,
+      chat_profile: null,
+      vision_profile: null,
       default_stt: null,
-      default_tts: null,
       default_reranker: null,
       default_embedder: null,
       http_keepalive_s: 300,
       request_timeout_s: 180,
       max_retries: 2,
       default_image_gen: null,
-      default_tuning_profile: 'balanced_chat',
       default_image_profile: 'image_playground'
     },
     media: {
@@ -24,7 +23,6 @@ function makeDraft(): WorkspacePreferences {
     },
     memory: {
       enabled: true,
-      default_tuning_profile: 'memory_extraction',
       user_name: '',
       search: { enabled: true },
       extraction: {
@@ -45,8 +43,7 @@ function makeDraft(): WorkspacePreferences {
           limit_max: 40,
           hops_max: 3
         },
-        model: null,
-        tuning_profile: 'knowledge_answering',
+        profile: null,
         render: {
           show_event_time: true,
           show_expired_at: false,
@@ -70,21 +67,20 @@ function makeDraft(): WorkspacePreferences {
       tools_enabled: true,
       preferred_answering_language: 'en'
     },
-    tuning_profiles: {},
     image_profiles: {},
     // Phase 7a: AI profiles + uses (edited by the Catalog's AI tabs, never by the Preferences page).
     ai: { profiles: {}, uses: {}, local_servers: {} },
-    voice: { profiles: {}, uses: {}, clip_cache_mb: 200 }
+    voice: { profiles: {}, uses: {}, hiro_profile: null, clip_cache_mb: 200 }
   };
 }
 
 describe('applyModelIdToDraft', () => {
   it('writes llm and graph paths', () => {
     const draft = makeDraft();
-    expect(applyModelIdToDraft(draft, 'llm.default_chat', 'openai:gpt-4')).toBe(true);
-    expect(draft.llm.default_chat).toBe('openai:gpt-4');
-    expect(applyModelIdToDraft(draft, 'graph.extraction_model', 'anthropic:claude')).toBe(true);
-    expect(draft.graph.extraction_model).toBe('anthropic:claude');
+    expect(applyModelIdToDraft(draft, 'llm.default_stt', 'openai:whisper-1')).toBe(true);
+    expect(draft.llm.default_stt).toBe('openai:whisper-1');
+    expect(applyModelIdToDraft(draft, 'graph.reranker.model_id', 'local:bge-reranker')).toBe(true);
+    expect(draft.graph.reranker.model_id).toBe('local:bge-reranker');
   });
 
   it('blocks embedding writes while locked', () => {

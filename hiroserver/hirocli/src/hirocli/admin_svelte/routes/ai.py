@@ -1,7 +1,8 @@
 """AI profile and use routes (Phase 7a) — the Catalog's AI tabs over the AI tools (tools/ai.py).
 
 Profiles are created, changed and deleted through the preferences API (``ai.profiles.<id>``, like
-``image_profiles``); these routes read them, Try one, manage ``ai.uses``, refresh the uses
+``image_profiles``); these routes read them (with Hiro's own jobs, Phase 7b step 5), restore a job's
+default profile to its preset tuning, Try one, manage ``ai.uses``, refresh the uses
 connected extensions declare (the running server's ExtensionManager) and check a local server's
 models. Part B adds the plan tools (``/ai/plans/...``: status, sign-in, sign-out, test, update) and the
 local servers' status and settings (``/ai/local-servers``).
@@ -25,6 +26,7 @@ from hirocli.domain.discovered_models import DISCOVERABLE_LOCAL_PROVIDERS, list_
 from hirocli.domain.workspace import WorkspaceError, resolve_workspace
 from hirocli.runtime.preferences_runtime import PreferencePathError
 from hirocli.tools.ai import (
+    AiProfileRestoreDefaultTool,
     AiProfilesListTool,
     AiTryTool,
     AiUsageTool,
@@ -85,6 +87,20 @@ async def ai_profiles(workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
     try:
         result = await run_in_threadpool(AiProfilesListTool().execute, workspace=workspace_id)
     except (WorkspaceError, ValueError, OSError) as exc:
+        return envelope_failure(str(exc))
+    return _ok(asdict(result))
+
+
+@ai_router.post("/ai/profiles/{profile_id}/restore-default")
+async def ai_profile_restore_default(profile_id: str, workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+    """Phase 7b step 5: a job's default AI profile back to its preset tuning (model kept)."""
+    if not workspace_id:
+        return envelope_failure("No workspace selected.")
+    try:
+        result = await run_in_threadpool(
+            AiProfileRestoreDefaultTool().execute, profile_id=profile_id, workspace=workspace_id
+        )
+    except (ValidationError, PreferencePathError, ValueError, WorkspaceError) as exc:
         return envelope_failure(str(exc))
     return _ok(asdict(result))
 

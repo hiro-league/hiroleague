@@ -460,7 +460,9 @@ class GraphEventSubscriber:
         payload_output_audio_tokens = _int_payload(payload, "output_audio_tokens")
         input_text_tokens = payload_input_text_tokens
         output_audio_tokens = payload_output_audio_tokens
-        if provider.lower() in {"gemini", "google"}:
+        # Phase 7b step 5: voice replies come from services/voice, which reports the tokens in the
+        # payload and sends no usage_metadata — re-read Gemini's metadata only when there is some.
+        if provider.lower() in {"gemini", "google"} and usage_metadata:
             input_text_tokens = modality_token_count(
                 usage_metadata,
                 detail_keys=("promptTokensDetails", "prompt_tokens_details"),

@@ -1,4 +1,3 @@
-import { PHASE7B_MOCKUP } from '$lib/mockups/phase7b';
 import { GRAPH_ENGINE_MANIFEST } from '$lib/features/preferences/sections/graph-engine/graph-engine-manifest';
 import { EVAL_MANIFEST } from '$lib/features/preferences/sections/eval/eval-manifest';
 import { AGENT_MANIFEST } from '$lib/features/preferences/sections/agent-manifest';
@@ -13,13 +12,7 @@ import {
 import { isFeatureActive, type FeatureId } from '$lib/shell/features';
 
 /** Page-level preference tabs (`?tab=` on `/preferences`). */
-export type PreferenceTabId =
-  | 'models'
-  | 'knowledge'
-  | 'graph-engine'
-  | 'eval'
-  | 'agent'
-  | 'tuning-profiles';
+export type PreferenceTabId = 'models' | 'knowledge' | 'graph-engine' | 'eval' | 'agent';
 
 export const DEFAULT_PREFERENCE_TAB: PreferenceTabId = 'models';
 
@@ -30,7 +23,7 @@ export type PrefTabIntro = { sectionKey: string } | { text: string };
 
 /**
  * One page-level preference tab. This registry is the SINGLE source for a tab's identity: its strip
- * label, its manifest (or hand-rolled marker), the intro paragraph, and any legacy `#hash` aliases.
+ * label, its manifest, the intro paragraph, and any legacy `#hash` aliases.
  * Every per-tab map below (`PREFERENCE_TABS`, the html/panel ids, the manifest + legacy maps) is
  * DERIVED from it — adding a tab means adding one entry here, not editing six parallel objects. The
  * `preferences-tab-map` test asserts `PREFERENCE_TAB_PATH_RULES` still routes every path to one tab.
@@ -38,16 +31,15 @@ export type PrefTabIntro = { sectionKey: string } | { text: string };
 export type PrefTabDescriptor = {
   id: PreferenceTabId;
   label: string;
-  /** Manifest-driven tabs render via `PrefManifestTab`; hand-rolled tabs (Model Profiles) omit it. */
-  manifest?: PrefTabManifest;
+  /** Every tab is manifest-driven and renders via `PrefManifestTab` (Phase 7b step 5 removed the
+   *  hand-rolled Model Profiles tab with the tuning profiles). */
+  manifest: PrefTabManifest;
   /** Optional intro paragraph above the cards. */
   intro?: PrefTabIntro;
   /** Interactive header affordance rendered beside the intro (string key → widget in PrefManifestTab). */
   headerAction?: 'knowledgeBrowse';
   /** Extra legacy `#hash` aliases beyond the canonical `preferences-<id>` (from merged/removed tabs). */
   legacyAliases?: readonly string[];
-  /** Field paths + section titles a hand-rolled (non-manifest) tab contributes, in render order. */
-  handRolled?: { fields: readonly string[]; sections: readonly string[] };
   /**
    * When set, this tab (its strip button + cards + Settings-search hits) is only shown while that
    * feature is active (see features.ts). This is metadata only — the derived constants below stay
@@ -106,12 +98,6 @@ export const PREFERENCE_TAB_REGISTRY: readonly PrefTabDescriptor[] = [
         "the memory-eval answer/judge prompt libraries. Eval-only; these don't affect production " +
         'chat, knowledge, or memory.'
     }
-  },
-  {
-    id: 'tuning-profiles',
-    label: 'Model Profiles',
-    // Hand-rolled table CRUD (no manifest) — registers its single field + section name explicitly.
-    handRolled: { fields: ['tuning_profiles'], sections: ['Model Profiles'] }
   }
 ];
 
@@ -137,7 +123,6 @@ const TAB_FEATURE = new Map<PreferenceTabId, FeatureId>(
 
 /** True when a preference tab should be shown (untagged tabs are always active). */
 export function isPreferenceTabActive(tabId: PreferenceTabId): boolean {
-  if (PHASE7B_MOCKUP && tabId === 'tuning-profiles') return false; // Phase 7b mockup: presets become AI profiles
   const feature = TAB_FEATURE.get(tabId);
   return !feature || isFeatureActive(feature);
 }
@@ -161,8 +146,10 @@ export const VISIBLE_PREFERENCE_TABS: { id: PreferenceTabId; label: string }[] =
 const PREFERENCE_TAB_PATH_RULES: { prefix: string; tab: PreferenceTabId }[] = [
   { prefix: 'llm', tab: 'models' },
   { prefix: 'media', tab: 'models' },
-  // Phase 7b: the spoken-clip cache size (General → Spoken clips); voice.profiles / voice.uses are the Catalog's.
+  // Phase 7b: the spoken-clip cache size (General → Spoken clips) and Hiro's own voice (General →
+  // Default models); voice.profiles / voice.uses are the Catalog's.
   { prefix: 'voice.clip_cache_mb', tab: 'models' },
+  { prefix: 'voice.hiro_profile', tab: 'models' },
   { prefix: 'memory', tab: 'agent' },
   // The chat retrieval-agent config is memory-engine-specific (not general chat), so it renders on
   // the shared Memory (graph-engine) tab, not the Agent tab — a longer-prefix override of `memory`.
@@ -174,17 +161,15 @@ const PREFERENCE_TAB_PATH_RULES: { prefix: string; tab: PreferenceTabId }[] = [
   // `graph.eval.*` is split: the answer + judge models/prompts live on the Eval tab; everything
   // else under it (the agentic retrieval loop, render caps, temporal flags) renders under the
   // shared graph engine on the Memory tab — caught by the broader `graph` rule below.
-  { prefix: 'graph.eval.answer_model', tab: 'eval' },
-  { prefix: 'graph.eval.answer_tuning_profile', tab: 'eval' },
+  // Phase 7b step 5: each eval job's AI profile (was a model + a tuning profile).
+  { prefix: 'graph.eval.answer_profile', tab: 'eval' },
   { prefix: 'graph.eval.answer_prompts', tab: 'eval' },
   { prefix: 'graph.eval.active_answer_prompt_id', tab: 'eval' },
-  { prefix: 'graph.eval.judge_model', tab: 'eval' },
-  { prefix: 'graph.eval.judge_tuning_profile', tab: 'eval' },
+  { prefix: 'graph.eval.judge_profile', tab: 'eval' },
   { prefix: 'graph.eval.judge_prompt', tab: 'eval' },
-  // The retrieval-agent section (model/profile, prompt library, loop caps) and the answerer/judge
+  // The retrieval-agent section (AI profile, prompt library, loop caps) and the answerer/judge
   // render caps are eval-only — moved to the Eval tab (were on the shared graph-engine tab).
-  { prefix: 'graph.eval.retrieval_model', tab: 'eval' },
-  { prefix: 'graph.eval.retrieval_tuning_profile', tab: 'eval' },
+  { prefix: 'graph.eval.retrieval_profile', tab: 'eval' },
   { prefix: 'graph.eval.retrieval_agent', tab: 'eval' },
   { prefix: 'graph.eval.retrieval_agent_prompts', tab: 'eval' },
   { prefix: 'graph.eval.active_retrieval_agent_prompt_id', tab: 'eval' },
@@ -192,8 +177,7 @@ const PREFERENCE_TAB_PATH_RULES: { prefix: string; tab: PreferenceTabId }[] = [
   { prefix: 'graph.eval.max_fact_chars', tab: 'eval' },
   { prefix: 'graph.eval.max_episode_chars', tab: 'eval' },
   { prefix: 'graph.eval.max_summary_chars', tab: 'eval' },
-  { prefix: 'graph', tab: 'graph-engine' },
-  { prefix: 'tuning_profiles', tab: 'tuning-profiles' }
+  { prefix: 'graph', tab: 'graph-engine' }
 ];
 
 // A rule matches a path when the path IS the prefix or sits under it on a dotted-segment boundary
@@ -224,16 +208,15 @@ export function tabForPreferencePath(path: string): PreferenceTabId | null {
 // Each manifest-driven tab owns its field ORDER, card/section titles, and path→section map. We
 // derive all of that straight from the manifests, so there is nothing to keep in sync with the
 // section components: adding/reordering a field or renaming a card in a manifest updates the search
-// index automatically. The hand-rolled `tuning-profiles` tab has no manifest, so it registers its
-// single field + section name explicitly. (`tabForPreferencePath` above stays a small prefix table —
+// index automatically. (`tabForPreferencePath` above stays a small prefix table —
 // the subtree-ownership map that lets the per-manifest tests catch a field someone forgot to add to
 // a manifest.)
 function tabFieldPaths(tab: PrefTabDescriptor): readonly string[] {
-  return tab.manifest ? manifestFieldPaths(tab.manifest) : (tab.handRolled?.fields ?? []);
+  return manifestFieldPaths(tab.manifest);
 }
 
 function tabSectionTitles(tab: PrefTabDescriptor): readonly string[] {
-  return tab.manifest ? manifestCardSections(tab.manifest) : (tab.handRolled?.sections ?? []);
+  return manifestCardSections(tab.manifest);
 }
 
 // Field render order across the page: tab order, then each tab's manifest field order. Orders search
@@ -245,15 +228,11 @@ export const PREFERENCE_FIELD_ORDER: readonly string[] = PREFERENCE_TAB_REGISTRY
 export const PREFERENCE_SECTION_ORDER: readonly string[] =
   PREFERENCE_TAB_REGISTRY.flatMap(tabSectionTitles);
 
-// path → section (card) title, merged across every manifest (+ each hand-rolled tab's section).
-// Each path lives in exactly one tab, so the merge can't collide.
+// path → section (card) title, merged across every manifest. Each path lives in exactly one tab, so
+// the merge can't collide.
 const PREFERENCE_SECTION_BY_PATH: Record<string, string> = {};
 for (const tab of PREFERENCE_TAB_REGISTRY) {
-  if (tab.manifest) {
-    Object.assign(PREFERENCE_SECTION_BY_PATH, manifestSections(tab.manifest));
-  } else if (tab.handRolled) {
-    for (const path of tab.handRolled.fields) PREFERENCE_SECTION_BY_PATH[path] = tab.handRolled.sections[0];
-  }
+  Object.assign(PREFERENCE_SECTION_BY_PATH, manifestSections(tab.manifest));
 }
 
 /**

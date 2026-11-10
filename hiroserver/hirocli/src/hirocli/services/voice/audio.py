@@ -61,3 +61,20 @@ def waveform(pcm: bytes) -> bytes:
         rms.append(math.sqrt(sum(v * v for v in chunk) / len(chunk)) if chunk else 0.0)
     peak = max(rms) or 1.0
     return bytes(min(100, int(v / peak * 100)) for v in rms)
+
+
+def to_mp3(pcm: bytes, rate: int = PCM_RATE) -> bytes:
+    """MP3 (mono, 128 kbps) for Hiro's voice replies to the app (Phase 7b step 5).
+
+    iPhones can't play OGG/Opus, so the app gets MP3 (the WhatsApp plugin turns it into a voice note
+    itself). Moved here from the old ``services/tts/gemini_provider.py``; lameenc bundles LAME, so no
+    ffmpeg binary is needed.
+    """
+    import lameenc
+
+    encoder = lameenc.Encoder()
+    encoder.set_channels(1)
+    encoder.set_in_sample_rate(rate)
+    encoder.set_bit_rate(128)
+    encoder.set_quality(2)
+    return encoder.encode(pcm[: len(pcm) - len(pcm) % 2]) + encoder.flush()

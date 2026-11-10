@@ -13,8 +13,8 @@
    * `&edit=<id>` opens that profile's editor: an extension's "Edit" (HomeHiro) links here, so a profile is
    * only ever edited in the core's admin.
    *
-   * Voice profiles and the extensions' voice uses are real. Hiro's own jobs on AI profiles (their default
-   * profiles, Hiro's voice) are still the mockup until step 5 moves them.
+   * Phase 7b step 5: Hiro's own jobs are on AI profiles too — their default profiles are rows of AI
+   * profiles, and Uses lists Hiro's jobs and voice first (its count includes them).
    */
   import { onMount } from 'svelte';
   import { page } from '$app/state';
@@ -24,8 +24,6 @@
   import AiProfilesTab from '$lib/features/catalog/ai/AiProfilesTab.svelte';
   import AiUsesTab from '$lib/features/catalog/ai/AiUsesTab.svelte';
   import type { AiController } from '$lib/features/catalog/ai/ai-controller.svelte';
-  import MockupNote from '$lib/mockups/MockupNote.svelte';
-  import { MOCK_DEFAULT_PROFILES, MOCK_JOBS, PHASE7B_MOCKUP, toAiProfile } from '$lib/mockups/phase7b';
   import VoiceProfileEditorDialog from './voice/VoiceProfileEditorDialog.svelte';
   import VoiceProfilesList from './voice/VoiceProfilesList.svelte';
   import { VoiceController } from './voice/voice-controller.svelte';
@@ -50,10 +48,12 @@
   onMount(() => void voice.load());
 
   const voiceUseCount = $derived(voice.uses.extensions.reduce((n, e) => n + e.uses.filter((u) => u.status !== 'removed').length, 0));
+  // Uses: Hiro's jobs + its voice (one speaking use), then the extensions' AI and voice uses.
+  const hiroUseCount = $derived(ai.jobs.length + 1);
   const subtabs = $derived([
-    { id: 'profiles' as const, label: 'AI profiles', count: ai.profiles.length + (PHASE7B_MOCKUP ? MOCK_DEFAULT_PROFILES.length : 0) },
+    { id: 'profiles' as const, label: 'AI profiles', count: ai.profiles.length },
     { id: 'voices' as const, label: 'Voice profiles', count: voice.profiles.length },
-    { id: 'uses' as const, label: 'Uses', count: (PHASE7B_MOCKUP ? MOCK_JOBS.length : 0) + ai.uses.length + voiceUseCount }
+    { id: 'uses' as const, label: 'Uses', count: hiroUseCount + ai.uses.length + voiceUseCount }
   ]);
 
   let voiceEditing = $state<VoiceProfileRow | null>(null);
@@ -85,11 +85,7 @@
         pendingEdit = null;
       } else if (!voice.loading && voice.profiles.length) pendingEdit = null;
     } else if (active === 'profiles') {
-      const mock = PHASE7B_MOCKUP ? MOCK_DEFAULT_PROFILES.find((p) => p.id === id) : undefined;
-      if (mock) {
-        ai.previewProfile(toAiProfile(mock));
-        pendingEdit = null;
-      } else if (ai.profiles.some((p) => p.id === id)) {
+      if (ai.profiles.some((p) => p.id === id)) {
         ai.editProfile(id);
         pendingEdit = null;
       } else if (!ai.profilesLoading) pendingEdit = null;
@@ -98,12 +94,6 @@
 </script>
 
 <div class="grid gap-4">
-  {#if PHASE7B_MOCKUP && active !== 'voices'}
-    <MockupNote
-      text="Mockup (Phase 7b, step 5): Hiro's own jobs on AI profiles (their default profiles and Hiro's voice) are made-up rows; nothing of theirs is saved. Extension uses and voice profiles are real."
-    />
-  {/if}
-
   <AdminSubtabStrip ariaLabel="Profiles sections" tabs={subtabs} {active} {onSelect} />
 
   {#if active === 'profiles'}

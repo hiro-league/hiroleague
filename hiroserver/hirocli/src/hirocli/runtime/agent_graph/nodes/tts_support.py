@@ -1,4 +1,10 @@
-"""Pure TTS metering helpers used by ``TTSNodes.tts_node``."""
+"""Pure TTS metering helpers used by ``TTSNodes.tts_node``.
+
+Phase 7b step 5: Hiro's voice replies speak with a voice profile through ``services/voice``, which
+returns PCM + its usage (``kit.Speech``); the node encodes MP3 and these helpers build the reply
+payload, the ``ReplyAudio`` attachment and the usage counters the ledger prices and counts (provider
+"google" / "openai", the model's own name, text/audio tokens, audio seconds, characters).
+"""
 
 from __future__ import annotations
 
@@ -6,10 +12,11 @@ import base64
 from dataclasses import dataclass
 from typing import Any
 
-from hiro_commons.llm_usage import gemini_usage_aggregate_fallback, modality_token_count
-
 from ..graph_kit import estimate_text_tokens
 from ..state import ReplyAudio
+
+# The app gets MP3: iPhones can't play OGG/Opus (the WhatsApp plugin transcodes MP3 → OGG itself).
+REPLY_AUDIO_MEDIA_TYPE = "audio/mpeg"
 
 
 def metered_text(
@@ -24,37 +31,14 @@ def metered_text(
     return text
 
 
-def build_tts_usage(
-    usage_metadata: dict[str, Any] | None,
-    *,
-    duration_ms: int | float | None,
-    text: str,
-) -> dict[str, Any]:
-    """Compute TTS usage counters from provider metadata and metered input text."""
-    if not isinstance(usage_metadata, dict):
-        usage_metadata = {}
-    tts_text_tokens = modality_token_count(
-        usage_metadata,
-        detail_keys=("promptTokensDetails", "prompt_tokens_details"),
-        modality="TEXT",
-    )
-    tts_audio_tokens = modality_token_count(
-        usage_metadata,
-        detail_keys=("candidatesTokensDetails", "candidates_tokens_details"),
-        modality="AUDIO",
-    )
-    tts_text_tokens, tts_audio_tokens = gemini_usage_aggregate_fallback(
-        usage_metadata,
-        input_text_tokens=tts_text_tokens,
-        output_audio_tokens=tts_audio_tokens,
-    )
+def build_tts_usage(speech: Any, *, provider: str, model: str, style: str, text: str) -> dict[str, Any]:
+    """Usage counters for a spoken reply from the provider's ``Speech`` (tokens as the provider
+    reported them — Gemini — or as ``services/voice`` estimated them — OpenAI)."""
     return {
-        "input_tokens": estimate_text_tokens(text),
-        "tts_text_tokens": tts_text_tokens or None,
-        "tts_audio_tokens": tts_audio_tokens or None,
-        "tts_audio_seconds": (
-            duration_ms / 1000 if isinstance(duration_ms, (int, float)) else 0.0
-        ),
+        "input_tokens": estimate_text_tokens(metered_text(provider, model, style, text)),
+        "tts_text_tokens": int(getattr(speech, "tokens_in", 0) or 0) or None,
+        "tts_audio_tokens": int(getattr(speech, "tokens_out", 0) or 0) or None,
+        "tts_audio_seconds": float(getattr(speech, "seconds", 0.0) or 0.0),
     }
 
 
@@ -66,42 +50,44 @@ class TtsAttachmentAndPayload:
 
 
 def build_tts_attachment_and_payload(
-    result: Any,
-    resolved: Any,
+    mp3: bytes,
+    speech: Any,
+    profile: Any,
     text: str,
     *,
     reply_id: str,
 ) -> TtsAttachmentAndPayload:
-    """Base64-encode audio and build the ``GRAPH_TTS_COMPLETED`` payload + ``ReplyAudio``."""
-    audio_b64 = base64.b64encode(result.audio_bytes).decode()
-    duration_ms = result.duration_ms
-    provider = str(getattr(result, "provider", "") or "")
-    usage_metadata = getattr(result, "usage_metadata", None)
-    if not isinstance(usage_metadata, dict):
-        usage_metadata = {}
-    metered = metered_text(provider, result.model, resolved.instructions, text)
-    usage_counts = build_tts_usage(
-        usage_metadata, duration_ms=duration_ms, text=metered
-    )
+    """Base64-encode the MP3 and build the ``GRAPH_TTS_COMPLETED`` payload + ``ReplyAudio``.
+
+    ``profile`` is the ``VoiceProfile`` that spoke (provider, model name, voice, style). The payload
+    keeps the ``message.voiced`` wire shape the app already reads.
+    """
+    provider = str(profile.provider)
+    model = str(profile.model_name)
+    audio_b64 = base64.b64encode(mp3).decode()
+    usage_counts = build_tts_usage(speech, provider=provider, model=model, style=profile.style, text=text)
+    duration_ms = int(round(usage_counts["tts_audio_seconds"] * 1000))
     payload = {
         "reply_id": reply_id,
         "blob_id": "",
-        "media_type": result.mime_type,
-        "size": len(result.audio_bytes),
+        "media_type": REPLY_AUDIO_MEDIA_TYPE,
+        "size": len(mp3),
         "duration_ms": duration_ms,
         "audio_b64": audio_b64,
         "provider": provider,
-        "model": result.model,
-        "voice": result.voice,
+        "model": model,
+        "voice": profile.voice,
         "input_characters": len(text),
-        "input_text_tokens": usage_counts["input_tokens"],
+        "input_text_tokens": usage_counts["tts_text_tokens"] or usage_counts["input_tokens"],
+        "output_audio_tokens": usage_counts["tts_audio_tokens"] or 0,
         "generated_audio_seconds": usage_counts["tts_audio_seconds"],
-        "usage_metadata": usage_metadata,
+        # The voice engine reports tokens directly (no provider usage_metadata to re-read).
+        "usage_metadata": {},
     }
     attachment: ReplyAudio = {
         "blob_id": "",
-        "media_type": result.mime_type,
-        "size": len(result.audio_bytes),
+        "media_type": REPLY_AUDIO_MEDIA_TYPE,
+        "size": len(mp3),
         "duration_ms": duration_ms,
         "media_path": "",
         "audio_b64": audio_b64,

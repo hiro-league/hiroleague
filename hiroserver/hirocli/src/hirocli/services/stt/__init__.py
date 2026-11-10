@@ -59,21 +59,21 @@ def create_stt_service(
     from hirocli.domain.credential_store import CredentialStore
     from hirocli.domain.model_catalog import get_model_catalog
     from hirocli.domain.model_http import ProviderCallPolicy
-    from hirocli.domain.preferences import load_preferences, resolve_llm
+    from hirocli.domain.preferences import load_preferences, resolve_stt_model
     from hirocli.domain.workspace import workspace_id_for_path
 
     prefs = prefs or load_preferences(workspace_path)
     wid = workspace_id_for_path(workspace_path)
     store = CredentialStore(workspace_path, wid) if wid is not None else None
-    stt_resolved = resolve_llm(prefs, workspace_path, "stt", credential_store=store)
+    stt_model_id = resolve_stt_model(prefs, workspace_path, credential_store=store)
 
     default_model: str | None = None
     providers: list[STTProvider] = []
 
-    if stt_resolved is not None:
-        spec = get_model_catalog().get_model(stt_resolved.model_id)
+    if stt_model_id is not None:
+        spec = get_model_catalog().get_model(stt_model_id)
         if spec is None:
-            _log.warning("STT model id not in catalog", model_id=stt_resolved.model_id)
+            _log.warning("STT model id not in catalog", model_id=stt_model_id)
         else:
             cls = _PROVIDER_MAP.get(spec.provider_id)
             if cls is None:
@@ -82,7 +82,7 @@ def create_stt_service(
                     provider_id=spec.provider_id,
                 )
             else:
-                default_model = stt_resolved.model_id.split(":", 1)[1]
+                default_model = stt_model_id.split(":", 1)[1]
                 key = store.get_api_key(spec.provider_id) if store else None
                 # Workspace timeout/retry policy (llm.request_timeout_s / max_retries).
                 providers = [cls(api_key=key, policy=ProviderCallPolicy.from_prefs(prefs))]

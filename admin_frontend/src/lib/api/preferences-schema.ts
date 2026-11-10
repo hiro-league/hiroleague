@@ -22,6 +22,10 @@ export type PreferenceFieldMeta = {
   model_kind?: string;
   /** Display-only: when true the admin UI hides this field behind the "show advanced" toggle. */
   advanced?: boolean;
+  /** Phase 7b step 5: the value is an `ai.profiles` id (one of Hiro's jobs) — an `aiProfile` field. */
+  ai_profile_ref?: boolean;
+  /** Phase 7b step 5: the value is a `voice.profiles` id (Hiro's voice) — a `voiceProfile` field. */
+  voice_profile_ref?: boolean;
 };
 
 export type PreferencesSchemaPayload = {

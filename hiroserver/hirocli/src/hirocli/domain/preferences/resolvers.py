@@ -1,31 +1,51 @@
-"""Preferences resolvers — turn stored preferences + credentials into resolved runtime models."""
+"""Preferences resolvers — turn stored preferences + credentials into resolved runtime models.
+
+Phase 7b step 5: each of Hiro's own jobs points at ONE AI profile (``jobs.JOB_PRESETS``), so every job
+model comes from :func:`resolve_job_model`:
+
+- the job's field names a profile → the first profile in its fallback chain whose model is available
+  (a catalog chat model whose provider has credentials, or a model on a configured local server);
+  plan-tool models (claude_code:* / codex:*) can't be LangChain chat models and are skipped;
+- the field is null → the job it falls back to (chat-like jobs → chat; graph small → graph extraction;
+  eval retrieval → eval answer; rewrite → knowledge) gives the model, with THIS job's preset tuning
+  (as before, when only the model fell back and each job kept its own tuning);
+- chat and reading pictures fall back to nothing (no model → off).
+
+A profile maps to a :class:`ResolvedModel` as ``services/ai_ask`` builds it: temperature None → 0.7,
+max_tokens None → 8192, num_ctx only for local models. Its limits never stop a job (count only).
+"""
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..credential_store import CredentialStore
 
 from .defaults import (
     DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID,
-    DEFAULT_KNOWLEDGE_GRAPH_DISAMBIGUATION_TUNING_PROFILE_ID,
-    DEFAULT_KNOWLEDGE_GRAPH_EXTRACTION_TUNING_PROFILE_ID,
-    DEFAULT_KNOWLEDGE_REWRITE_TUNING_PROFILE_ID,
     DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT,
-    LLMPurpose,
     ThinkingLevel,
-    TuningProfile,
 )
+from .jobs import job_preset, job_profile_ref
 from .models import WorkspacePreferences
+from .models_ai import AI_PLAN_PROVIDERS, AiProfile, ai_fallback_chain
+
+if TYPE_CHECKING:
+    from .models_voice import VoiceProfile
 
 logger = logging.getLogger(__name__)
+
+# What a profile's unset tuning means when built for a job (as ChatModelProvider._build in ai_ask).
+PROFILE_DEFAULT_TEMPERATURE = 0.7
+PROFILE_DEFAULT_MAX_TOKENS = 8192
 
 
 @dataclass(frozen=True)
 class ResolvedModel:
-    """Resolved chat/STT/TTS model from preferences + availability."""
+    """A resolved chat model + its tuning (from an AI profile, or a job preset when borrowed)."""
 
     model_id: str
     temperature: float
@@ -33,33 +53,20 @@ class ResolvedModel:
     thinking: ThinkingLevel | None = None
     # Local-provider context window (Ollama num_ctx); None = provider default. See ModelTuning.num_ctx.
     num_ctx: int | None = None
-
-
-@dataclass(frozen=True)
-class ResolvedVoiceForSynthesis:
-    """Voice selection for ``TTSService.synthesize`` (short catalog model name)."""
-
-    model: str
-    voice: str = ""
+    # Phase 7b step 5: the AI profile the model came from ("" = none), for usage and the admin.
+    profile_id: str = ""
+    profile_name: str = ""
+    # The profile's extra instructions (applied by the chat; other jobs keep their own prompts).
     instructions: str = ""
 
 
-def _profile_tuning(prefs: WorkspacePreferences, profile_id: str) -> TuningProfile:
-    profile = prefs.tuning_profiles.get(profile_id)
-    if profile is None:
-        raise ValueError(f"Unknown tuning profile: {profile_id}")
-    return profile
+@dataclass(frozen=True)
+class ResolvedVoice:
+    """The voice profile Hiro speaks a reply with (character's first usable, else voice.hiro_profile)."""
 
-
-def _resolved_from_tuning(model_id: str, tuning: TuningProfile) -> ResolvedModel:
-    """Build a ``ResolvedModel`` from a model id + tuning profile (the common tail of every resolver)."""
-    return ResolvedModel(
-        model_id=model_id,
-        temperature=tuning.temperature,
-        max_tokens=tuning.max_tokens,
-        thinking=tuning.thinking,
-        num_ctx=tuning.num_ctx,
-    )
+    profile_id: str
+    profile: "VoiceProfile"
+    source: str  # "character" | "hiro"
 
 
 def _resolve_credential_store(
@@ -84,70 +91,184 @@ def _resolve_credential_store(
     return CredentialStore(workspace_path, wid)
 
 
-def _resolve_available_model(
+def _is_local_provider(provider_id: str) -> bool:
+    from ..model_catalog import get_model_catalog
+
+    prov = get_model_catalog().get_provider(provider_id)
+    return prov is not None and prov.hosting == "local"
+
+
+def profile_model_available(model_id: str, store: CredentialStore) -> bool:
+    """Whether a job can build ``model_id`` now: a catalog chat model whose provider has credentials,
+    or a model on a local server whose address is set. Plan tools never (not LangChain models)."""
+    from ..model_catalog import get_model_catalog
+
+    provider_id = model_id.partition(":")[0]
+    if provider_id in AI_PLAN_PROVIDERS:
+        return False
+    cat = get_model_catalog()
+    prov = cat.get_provider(provider_id)
+    if prov is None:
+        return False
+    if prov.hosting == "local":
+        # Any model the server reports (catalog row or not); the call itself tells if it's gone.
+        return store.is_configured(provider_id)
+    spec = cat.get_model(model_id)
+    if spec is None or not spec.supports_kind("chat"):
+        return False
+    return store.is_configured(provider_id)
+
+
+def resolved_from_profile(profile_id: str, profile: AiProfile) -> ResolvedModel:
+    """Map an AI profile to a ``ResolvedModel`` (module notes for the defaults)."""
+    local = _is_local_provider(profile.model.partition(":")[0])
+    return ResolvedModel(
+        model_id=profile.model,
+        temperature=profile.temperature if profile.temperature is not None else PROFILE_DEFAULT_TEMPERATURE,
+        max_tokens=profile.max_tokens or PROFILE_DEFAULT_MAX_TOKENS,
+        thinking=profile.thinking,
+        num_ctx=profile.num_ctx if local else None,
+        profile_id=profile_id,
+        profile_name=profile.label,
+        instructions=profile.instructions,
+    )
+
+
+def resolve_profile_model(
+    prefs: WorkspacePreferences, profile_id: str, store: CredentialStore
+) -> ResolvedModel | None:
+    """The first profile in ``profile_id``'s fallback chain whose model is available, else None."""
+    profiles = prefs.ai.profiles
+    for pid in ai_fallback_chain(profiles, profile_id):
+        profile = profiles[pid]
+        if profile.is_plan:
+            logger.debug("AI profile skipped for a job — plan tool model", extra={"profile": pid})
+            continue
+        if profile_model_available(profile.model, store):
+            return resolved_from_profile(pid, profile)
+    return None
+
+
+def _resolve_job(
+    prefs: WorkspacePreferences, job: str, store: CredentialStore, seen: tuple[str, ...] = ()
+) -> ResolvedModel | None:
+    preset = job_preset(job)
+    profile_id = job_profile_ref(prefs, job)
+    if profile_id is not None:
+        # A set field that resolves to nothing stays off (no silent borrow from another job).
+        return resolve_profile_model(prefs, profile_id, store)
+    parent = preset.falls_back_to
+    if parent is None or parent in seen:
+        return None
+    borrowed = _resolve_job(prefs, parent, store, (*seen, job))
+    if borrowed is None:
+        return None
+    # The other job's model (and its local context window), with this job's own preset tuning.
+    return ResolvedModel(
+        model_id=borrowed.model_id,
+        temperature=preset.temperature,
+        max_tokens=preset.max_tokens,
+        thinking=preset.thinking,
+        num_ctx=borrowed.num_ctx,
+        profile_id=borrowed.profile_id,
+        profile_name=borrowed.profile_name,
+    )
+
+
+def resolve_job_model(
     prefs: WorkspacePreferences,
     workspace_path: Path,
-    model_id: str | None,
+    job: str,
     *,
-    expected_kind: str,
-    tuning_profile_id: str,
-    log_label: str,
     workspace_id: str | None = None,
     credential_store: CredentialStore | None = None,
 ) -> ResolvedModel | None:
-    """Shared tail of the chat/stt/tts resolvers: catalog lookup + kind check + provider-credential
-    availability + tuning. The differing part — how ``model_id`` is chosen — stays in each caller."""
-    if not model_id:
-        return None
-    from ..available_models import AvailableModelsService
-    from ..model_catalog import get_model_catalog
-
-    cat = get_model_catalog()
-    spec = cat.get_model(model_id)
-    if spec is None or not spec.supports_kind(expected_kind):
-        return None
-
+    """The model + tuning one of Hiro's jobs runs with now, or None (module notes)."""
+    if job_model_source(prefs, job) is None:  # ValueError for an unknown job
+        return None  # nothing set along the job's chain: no store lookup needed
     store = _resolve_credential_store(
         workspace_path,
         workspace_id=workspace_id,
         credential_store=credential_store,
-        log_label=log_label,
+        log_label=f"resolve_job_model[{job}]",
     )
     if store is None:
         return None
-
-    ams = AvailableModelsService(cat, store)
-    if not ams.is_model_available(model_id):
-        return None
-
-    return _resolved_from_tuning(model_id, _profile_tuning(prefs, tuning_profile_id))
+    return _resolve_job(prefs, job, store)
 
 
-def resolve_llm(
+def job_model_source(prefs: WorkspacePreferences, job: str) -> str | None:
+    """The preference path whose AI profile supplies the job's model (the admin's "from" hint):
+    the job's own field, else the field of the job it borrows from; None when nothing is set."""
+    seen: set[str] = set()
+    current: str | None = job
+    while current is not None and current not in seen:
+        seen.add(current)
+        if job_profile_ref(prefs, current) is not None:
+            return job_preset(current).path
+        current = job_preset(current).falls_back_to
+    return None
+
+
+class _JobResolver:
+    """A per-job ``resolve_*`` callable (the names the callers already use) over resolve_job_model."""
+
+    def __init__(self, job: str) -> None:
+        self.job = job
+        self.__doc__ = f"``resolve_job_model(..., {job!r})``."
+
+    def __call__(
+        self,
+        prefs: WorkspacePreferences,
+        workspace_path: Path,
+        *,
+        workspace_id: str | None = None,
+        credential_store: CredentialStore | None = None,
+    ) -> ResolvedModel | None:
+        return resolve_job_model(
+            prefs, workspace_path, self.job, workspace_id=workspace_id, credential_store=credential_store
+        )
+
+
+# Per-job names kept so the callers (and their test patches) don't churn; all go through
+# resolve_job_model. The two unused knowledge-graph (L3) resolvers were dropped with their presets.
+resolve_memory_retrieval_llm = _JobResolver("memory")
+resolve_knowledge_answering_llm = _JobResolver("knowledge")
+resolve_knowledge_rewrite_llm = _JobResolver("rewrite")
+resolve_graphiti_extraction_model = _JobResolver("graph_extraction")
+resolve_graphiti_small_model = _JobResolver("graph_small")
+resolve_eval_answer_llm = _JobResolver("eval_answer")
+resolve_eval_judge_llm = _JobResolver("eval_judge")
+resolve_eval_retrieval_llm = _JobResolver("eval_retrieval")
+
+
+def resolve_stt_model(
     prefs: WorkspacePreferences,
     workspace_path: Path,
-    purpose: LLMPurpose = "chat",
     *,
     workspace_id: str | None = None,
     credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """Return the default model for ``purpose`` if set, in catalog, and available.
+) -> str | None:
+    """``llm.default_stt`` when it is a catalog speech-to-text model whose provider has credentials.
 
-    Availability requires the model's provider to be configured in the credential store.
-    When ``credential_store`` is provided (e.g. AgentManager), it is reused to avoid
-    repeated keyring/doc loads.
+    (Was ``resolve_llm(..., "stt")``; chat and TTS no longer resolve from ``llm.*`` model fields.)
     """
-    model_id: str | None = getattr(prefs.llm, f"default_{purpose}", None)
-    return _resolve_available_model(
-        prefs,
-        workspace_path,
-        model_id,
-        expected_kind=purpose,
-        tuning_profile_id=prefs.llm.default_tuning_profile,
-        log_label="resolve_llm",
-        workspace_id=workspace_id,
-        credential_store=credential_store,
+    from ..available_models import AvailableModelsService
+    from ..model_catalog import get_model_catalog
+
+    model_id = (prefs.llm.default_stt or "").strip()
+    if not model_id:
+        return None
+    cat = get_model_catalog()
+    spec = cat.get_model(model_id)
+    if spec is None or not spec.supports_kind("stt"):
+        return None
+    store = _resolve_credential_store(
+        workspace_path, workspace_id=workspace_id, credential_store=credential_store, log_label="resolve_stt_model"
     )
+    if store is None:
+        return None
+    return model_id if AvailableModelsService(cat, store).is_model_available(model_id) else None
 
 
 @dataclass(frozen=True)
@@ -179,7 +300,7 @@ def resolve_image_gen(
     Resolution order (design doc): call overrides > named image profile >
     ``llm.default_image_gen`` > catalog/credential availability. Returns None when no
     image_gen model is selected or its provider has no credentials — same contract as
-    :func:`resolve_llm`.
+    :func:`resolve_job_model`.
     """
     from ..available_models import AvailableModelsService
     from ..model_catalog import get_model_catalog
@@ -228,168 +349,6 @@ def compose_image_prompt(resolved: ResolvedImageGen, prompt: str) -> str:
     return ", ".join(p for p in parts if p)
 
 
-def knowledge_answering_model_source(prefs: WorkspacePreferences) -> str | None:
-    """Preference path that supplies the answering model id (D16 tooltip)."""
-    if prefs.knowledge.answering.model:
-        return "knowledge.answering.model"
-    if prefs.llm.default_chat:
-        return "llm.default_chat"
-    return None
-
-
-def resolve_knowledge_answering_llm(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """Resolve the knowledge answering chat model with catalog, credentials, and tuning."""
-    return _resolve_chat_llm(
-        prefs,
-        workspace_path,
-        explicit_model=None,
-        tuning_profile_id=prefs.knowledge.default_tuning_profile,
-        workspace_id=workspace_id,
-        credential_store=credential_store,
-    )
-
-
-def resolve_knowledge_rewrite_llm(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """Resolve the model for the query-rewrite step: same model, ``knowledge_rewrite`` tuning."""
-    return _resolve_chat_llm(
-        prefs,
-        workspace_path,
-        explicit_model=None,
-        tuning_profile_id=DEFAULT_KNOWLEDGE_REWRITE_TUNING_PROFILE_ID,
-        workspace_id=workspace_id,
-        credential_store=credential_store,
-    )
-
-
-def resolve_knowledge_graph_extraction_llm(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """L3 — resolve the model for graph extraction (entities+relations per chunk).
-
-    Same answering-model resolution path; only the tuning profile differs
-    (``knowledge_graph_extraction`` — temp=0, generous max_tokens, no reasoning).
-    """
-    return _resolve_chat_llm(
-        prefs,
-        workspace_path,
-        explicit_model=None,
-        tuning_profile_id=DEFAULT_KNOWLEDGE_GRAPH_EXTRACTION_TUNING_PROFILE_ID,
-        workspace_id=workspace_id,
-        credential_store=credential_store,
-    )
-
-
-def resolve_knowledge_graph_disambiguation_llm(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """L3 — resolve the model for the LLM disambiguation step of the resolver.
-
-    Called only when the deterministic ladder (exact → fuzzy) cannot decide
-    confidently. Tiny output budget — see the tuning profile.
-    """
-    return _resolve_chat_llm(
-        prefs,
-        workspace_path,
-        explicit_model=None,
-        tuning_profile_id=DEFAULT_KNOWLEDGE_GRAPH_DISAMBIGUATION_TUNING_PROFILE_ID,
-        workspace_id=workspace_id,
-        credential_store=credential_store,
-    )
-
-
-def _resolve_chat_llm(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    explicit_model: str | None,
-    tuning_profile_id: str,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """Resolve a chat model tier (catalog + provider credentials + tuning) with the shared fallback.
-
-    Single fallback chain for every chat resolver: explicit override (``explicit_model`` — a graph
-    ``graph.*_model`` or eval override) → ``knowledge.answering.model`` → ``llm.default_chat``. The
-    knowledge answering/rewrite/graph tiers pass ``explicit_model=None`` (they have no per-tier
-    override, so they resolve from ``knowledge.answering.model`` down); the graphiti + eval tiers pass
-    their own override. Only the tuning profile differs per caller.
-    """
-    explicit = (explicit_model or "").strip() or None
-    answering = (prefs.knowledge.answering.model or "").strip() or None
-    model_id = explicit or answering or prefs.llm.default_chat
-    return _resolve_available_model(
-        prefs,
-        workspace_path,
-        model_id,
-        expected_kind="chat",
-        tuning_profile_id=tuning_profile_id,
-        log_label="_resolve_chat_llm",
-        workspace_id=workspace_id,
-        credential_store=credential_store,
-    )
-
-
-def resolve_graphiti_extraction_model(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """Graphiti pivot — the main extraction + edge tier (``ModelSize.medium``)."""
-    return _resolve_chat_llm(
-        prefs,
-        workspace_path,
-        explicit_model=prefs.graph.extraction_model,
-        tuning_profile_id=prefs.graph.extraction_tuning_profile,
-        workspace_id=workspace_id,
-        credential_store=credential_store,
-    )
-
-
-def resolve_graphiti_small_model(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """Graphiti pivot — the cheap sub-step tier (``ModelSize.small``).
-
-    Falls back to the extraction model id when ``small_model`` is unset, so a single
-    configured model still drives both tiers (with their separate tuning profiles).
-    """
-    explicit = prefs.graph.small_model or prefs.graph.extraction_model
-    return _resolve_chat_llm(
-        prefs,
-        workspace_path,
-        explicit_model=explicit,
-        tuning_profile_id=prefs.graph.small_tuning_profile,
-        workspace_id=workspace_id,
-        credential_store=credential_store,
-    )
-
-
 def resolve_retrieval_agent_prompt(prefs: WorkspacePreferences) -> tuple[str, str]:
     """Return ``(profile_id, prompt_text)`` for the agentic retrieval loop (eval active profile)."""
     return prefs.graph.eval.resolve_retrieval_agent_prompt()
@@ -403,92 +362,6 @@ def resolve_chat_retrieval_agent_prompt(prefs: WorkspacePreferences) -> tuple[st
     the locked ``chat`` profile, then the built-in chat prompt constant."""
     active = (prefs.memory.retrieval.active_prompt_id or "").strip() or DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID
     return prefs.graph.eval.resolve_prompt_from_library(active, DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT)
-
-
-def resolve_eval_answer_llm(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """Resolve the memory-eval ANSWER model — its own model override + tuning profile, separate
-    from the judge. Model chain: ``graph.eval.answer_model`` → ``knowledge.answering.model`` →
-    ``llm.default_chat`` (mirrors the graphiti tiers)."""
-    return _resolve_chat_llm(
-        prefs,
-        workspace_path,
-        explicit_model=prefs.graph.eval.answer_model,
-        tuning_profile_id=prefs.graph.eval.answer_tuning_profile,
-        workspace_id=workspace_id,
-        credential_store=credential_store,
-    )
-
-
-def resolve_eval_judge_llm(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """Resolve the eval JUDGE model (both tracks) — its own model override + tuning profile,
-    separate from the answer. Same fallback chain as :func:`resolve_eval_answer_llm`."""
-    return _resolve_chat_llm(
-        prefs,
-        workspace_path,
-        explicit_model=prefs.graph.eval.judge_model,
-        tuning_profile_id=prefs.graph.eval.judge_tuning_profile,
-        workspace_id=workspace_id,
-        credential_store=credential_store,
-    )
-
-
-def resolve_eval_retrieval_llm(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """Resolve the agentic-retrieval model (memory track) — its own model override + tuning
-    profile. Model chain: ``graph.eval.retrieval_model`` → ``graph.eval.answer_model`` →
-    ``knowledge.answering.model`` → ``llm.default_chat``. The answer-model tier preserves prior
-    behavior (the retrieval loop borrowed the answer model before it had a dedicated preference),
-    so an unset ``retrieval_model`` resolves to exactly the same model as the answer step."""
-    return _resolve_chat_llm(
-        prefs,
-        workspace_path,
-        explicit_model=prefs.graph.eval.retrieval_model or prefs.graph.eval.answer_model,
-        tuning_profile_id=prefs.graph.eval.retrieval_tuning_profile,
-        workspace_id=workspace_id,
-        credential_store=credential_store,
-    )
-
-
-def resolve_memory_retrieval_llm(
-    prefs: WorkspacePreferences,
-    workspace_path: Path,
-    *,
-    workspace_id: str | None = None,
-    credential_store: CredentialStore | None = None,
-) -> ResolvedModel | None:
-    """Resolve the CHAT agentic memory-retrieval model (Phase 2).
-
-    Chain: ``memory.retrieval.model`` → ``llm.default_chat``. Chat memory deliberately does NOT
-    borrow the knowledge-answering tier (unlike the eval retrieval resolver) — a simple, predictable
-    fallback the Agent-memory model picker surfaces via its empty-box hint."""
-    model_id = (prefs.memory.retrieval.model or "").strip() or prefs.llm.default_chat
-    return _resolve_available_model(
-        prefs,
-        workspace_path,
-        model_id,
-        expected_kind="chat",
-        tuning_profile_id=prefs.memory.retrieval.tuning_profile,
-        log_label="memory.retrieval",
-        workspace_id=workspace_id,
-        credential_store=credential_store,
-    )
 
 
 def _first_configured_id(*candidates: str | None) -> str | None:
@@ -546,22 +419,18 @@ def resolve_graph_reranker_model(prefs: WorkspacePreferences) -> str | None:
 
 
 def resolve_character_llm(
-    ordered_model_ids: list[str],
+    profile_ids: list[str],
     prefs: WorkspacePreferences,
     workspace_path: Path,
     *,
-    tuning_profile: str | None = None,
     workspace_id: str | None = None,
     credential_store: CredentialStore | None = None,
 ) -> ResolvedModel | None:
-    """Pick the first **available** chat model from a character's ``llm_models`` list.
+    """The character's first usable AI profile (each with its fallback chain), else Hiro's chat job.
 
-    Falls back to ``resolve_llm(..., "chat")`` when the list is empty or no id is usable.
-    Availability matches ``resolve_llm`` (catalog + credential store).
+    Phase 7b step 5: a character holds an ordered list of AI profile ids (``Character.ai_profiles``)
+    instead of model ids + a tuning profile. An id that no longer exists is skipped with a warning.
     """
-    from ..available_models import AvailableModelsService
-    from ..model_catalog import get_model_catalog
-
     store = _resolve_credential_store(
         workspace_path,
         workspace_id=workspace_id,
@@ -569,113 +438,91 @@ def resolve_character_llm(
         log_label="resolve_character_llm",
     )
     if store is None:
-        return resolve_llm(prefs, workspace_path, "chat", workspace_id=workspace_id)
-
-    cat = get_model_catalog()
-    ams = AvailableModelsService(cat, store)
-    requested_profile_id = (tuning_profile or "").strip()
-    if requested_profile_id and requested_profile_id not in prefs.tuning_profiles:
-        logger.warning(
-            "Character tuning profile missing; falling back to workspace chat profile",
-            extra={
-                "tuning_profile": requested_profile_id,
-                "fallback": prefs.llm.default_tuning_profile,
-            },
-        )
-    profile_id = (
-        requested_profile_id
-        if requested_profile_id in prefs.tuning_profiles
-        else prefs.llm.default_tuning_profile
-    )
-    seen: set[str] = set()
-    for mid in ordered_model_ids:
-        if not mid or mid in seen:
-            continue
-        seen.add(mid)
-        spec = cat.get_model(mid)
-        if spec is None or spec.model_kind != "chat":
-            continue
-        if not ams.is_model_available(mid):
-            continue
-        return _resolved_from_tuning(mid, _profile_tuning(prefs, profile_id))
-    fallback = resolve_llm(
-        prefs,
-        workspace_path,
-        "chat",
-        workspace_id=workspace_id,
-        credential_store=credential_store,
-    )
-    if fallback is None:
         return None
-    return _resolved_from_tuning(fallback.model_id, _profile_tuning(prefs, profile_id))
+    for pid in dict.fromkeys(p for p in profile_ids if p):
+        if pid not in prefs.ai.profiles:
+            logger.warning("⚠️ Character AI profile missing — skipped", extra={"profile": pid})
+            continue
+        resolved = resolve_profile_model(prefs, pid, store)
+        if resolved is not None:
+            return resolved
+    return _resolve_job(prefs, "chat", store)
+
+
+def voice_profile_usable(profile: "VoiceProfile", store: CredentialStore | None) -> bool:
+    """Whether the voice profile's provider has a key set (the engine reads it from the same store)."""
+    return store is not None and store.is_configured(profile.provider)
 
 
 def resolve_character_voice(
-    ordered_voice_model_ids: list[str],
+    profile_ids: list[str],
     prefs: WorkspacePreferences,
     workspace_path: Path,
     *,
     workspace_id: str | None = None,
     credential_store: CredentialStore | None = None,
-    tts_instructions: str = "",
-    tts_voice_by_provider: dict[str, str] | None = None,
-) -> ResolvedVoiceForSynthesis | None:
-    """Pick the first **available** TTS model from ``voice_models``; else workspace ``default_tts``.
-
-    Returns catalog short model id plus optional voice preset / instructions for ``TTSService``.
-    Character-level ``tts_voice_by_provider`` maps catalog ``provider_id`` to one preset id per provider;
-    ``tts_instructions`` is a single optional global style hint for synthesis.
-    """
-    from ..available_models import AvailableModelsService
-    from ..model_catalog import get_model_catalog
-
+) -> ResolvedVoice | None:
+    """The voice a reply is spoken with: the character's first voice profile whose provider has a key,
+    else ``voice.hiro_profile`` (when its provider has one), else None (no voice reply)."""
     store = _resolve_credential_store(
         workspace_path,
         workspace_id=workspace_id,
         credential_store=credential_store,
         log_label="resolve_character_voice",
     )
-    if store is None:
-        return None
-
-    cat = get_model_catalog()
-    ams = AvailableModelsService(cat, store)
-
-    voice_map = dict(tts_voice_by_provider or {})
-    instructions = (tts_instructions or "").strip()
-
-    def _voice_for_provider(provider_id: str) -> str:
-        raw = voice_map.get(provider_id, "")
-        return str(raw).strip()
-
-    seen: set[str] = set()
-    for mid in ordered_voice_model_ids:
-        if not mid or mid in seen:
+    profiles = prefs.voice.profiles
+    for pid in dict.fromkeys(p for p in profile_ids if p):
+        profile = profiles.get(pid)
+        if profile is None:
+            logger.warning("⚠️ Character voice profile missing — skipped", extra={"profile": pid})
             continue
-        seen.add(mid)
-        spec = cat.get_model(mid)
-        if spec is None or not spec.supports_kind("tts"):
-            continue
-        if not ams.is_model_available(mid):
-            continue
-        short = mid.split(":", 1)[1]
-        pid = spec.provider_id or ""
-        voice_preset = _voice_for_provider(pid)
-        return ResolvedVoiceForSynthesis(model=short, voice=voice_preset, instructions=instructions)
+        if voice_profile_usable(profile, store):
+            return ResolvedVoice(profile_id=pid, profile=profile, source="character")
+    hiro = prefs.voice.hiro_profile
+    if hiro and hiro in profiles and voice_profile_usable(profiles[hiro], store):
+        return ResolvedVoice(profile_id=hiro, profile=profiles[hiro], source="hiro")
+    return None
 
-    tts_entry = resolve_llm(
-        prefs,
-        workspace_path,
-        "tts",
-        workspace_id=workspace_id,
-        credential_store=credential_store,
-    )
-    if tts_entry is None:
-        return None
-    spec = cat.get_model(tts_entry.model_id)
-    if spec is None or not spec.supports_kind("tts"):
-        return None
-    short = tts_entry.model_id.split(":", 1)[1]
-    pid = spec.provider_id or ""
-    voice_preset = _voice_for_provider(pid)
-    return ResolvedVoiceForSynthesis(model=short, voice=voice_preset, instructions=instructions)
+
+def unknown_character_profiles(
+    prefs: WorkspacePreferences, ai_profiles: list[str], voice_profiles: list[str]
+) -> list[str]:
+    """Plain-words lines for profile ids a character names that don't exist (save-time check)."""
+    lines = [f'AI profile "{pid}" doesn\'t exist.' for pid in ai_profiles if pid not in prefs.ai.profiles]
+    lines += [f'Voice profile "{pid}" doesn\'t exist.' for pid in voice_profiles if pid not in prefs.voice.profiles]
+    return lines
+
+
+__all__ = [
+    "PROFILE_DEFAULT_MAX_TOKENS",
+    "PROFILE_DEFAULT_TEMPERATURE",
+    "ResolvedImageGen",
+    "ResolvedModel",
+    "ResolvedVoice",
+    "compose_image_prompt",
+    "job_model_source",
+    "profile_model_available",
+    "resolve_character_llm",
+    "resolve_character_voice",
+    "resolve_chat_retrieval_agent_prompt",
+    "resolve_eval_answer_llm",
+    "resolve_eval_judge_llm",
+    "resolve_eval_retrieval_llm",
+    "resolve_graph_reranker_model",
+    "resolve_graphiti_embedder_model",
+    "resolve_graphiti_extraction_model",
+    "resolve_graphiti_small_model",
+    "resolve_image_gen",
+    "resolve_job_model",
+    "resolve_knowledge_answering_llm",
+    "resolve_knowledge_embedder_model",
+    "resolve_knowledge_reranker_model",
+    "resolve_knowledge_rewrite_llm",
+    "resolve_memory_retrieval_llm",
+    "resolve_profile_model",
+    "resolve_retrieval_agent_prompt",
+    "resolve_stt_model",
+    "resolved_from_profile",
+    "unknown_character_profiles",
+    "voice_profile_usable",
+]

@@ -9,32 +9,26 @@ import {
   type CharacterResolvedPayload,
   type CharacterRow
 } from '$lib/api/characters';
-import {
-  listCatalogModels,
-  listCatalogProviders,
-  type CatalogModelRow,
-  type CatalogProviderRow
-} from '$lib/api/catalog';
-import {
-  catalogReloadSuccessMessage,
-  reloadCatalogAndRefetch
-} from '$lib/catalog/catalog-reload';
-import { createActiveProvidersStore } from '$lib/catalog/active-providers/active-providers-store.svelte';
-import { getPreferences, type TuningProfile } from '$lib/api/preferences';
+import { listCatalogModels, listCatalogProviders } from '$lib/api/catalog';
+import { getPreferences } from '$lib/api/preferences';
+import { aiProfileLine, isPlanModel, voiceProfileLine } from '$lib/catalog/hiro-jobs';
+import { catalogModelNamer } from '$lib/catalog/model-namer';
 import {
   characterSaveBody,
   emptyForm,
   formFromCharacter,
-  mergeVoiceProviderDefaults,
   validateCharacterForm
 } from '$lib/features/characters/shared/characters-pure';
+import type { ProfileOption } from '$lib/features/characters/shared/profile-option';
 import type { createCharactersPreferences } from '$lib/preferences/characters-preferences.svelte';
 import type { createCharactersFormModel } from '$lib/features/characters/state/characters-form.svelte';
 import { createCharactersPhotoCrop } from '$lib/features/characters/state/characters-photo-crop.svelte';
 
 type NotifyKind = 'success' | 'error' | 'info' | 'warning';
 
-/** Remote + catalog orchestration used by CharactersPage (delegates form UX to ``formApi``). */
+/** Remote orchestration used by CharactersPage (delegates form UX to ``formApi``). Phase 7b step 5: the
+ *  editor's lists pick from the workspace's AI and voice profiles (read from preferences, named with the
+ *  catalog), replacing the catalog model pickers, the tuning profile and the TTS voice presets. */
 export function createCharactersPageController(opts: {
   prefs: ReturnType<typeof createCharactersPreferences>;
   formApi: ReturnType<typeof createCharactersFormModel>;
@@ -42,7 +36,6 @@ export function createCharactersPageController(opts: {
   confirmDiscard: () => Promise<boolean>;
 }) {
   const { prefs, formApi, notify, confirmDiscard } = opts;
-  const activeProvidersStore = createActiveProvidersStore();
 
   let rows = $state<CharacterRow[]>([]);
   let selected = $state<CharacterDetail | null>(null);
@@ -51,14 +44,9 @@ export function createCharactersPageController(opts: {
   let busy = $state(false);
   let listError = $state<string | null>(null);
   let detailError = $state<string | null>(null);
-  let catalogReady = $state(false);
-  let bundledCatalogReloadBusy = $state(false);
-  let llmOptions = $state<CatalogModelRow[]>([]);
-  let catalogAllProviders = $state<CatalogProviderRow[]>([]);
-  let voiceOptions = $state<CatalogModelRow[]>([]);
-  let catalogTtsProviders = $state<CatalogProviderRow[]>([]);
-  let tuningProfiles = $state<Record<string, TuningProfile>>({});
-  let workspaceDefaultTuningProfile = $state('balanced_chat');
+  let profilesReady = $state(false);
+  let aiProfileOptions = $state<ProfileOption[]>([]);
+  let voiceProfileOptions = $state<ProfileOption[]>([]);
 
   let deleteOpen = $state(false);
   let resolved = $state<CharacterResolvedPayload | null>(null);
@@ -90,73 +78,44 @@ export function createCharactersPageController(opts: {
     }
   }
 
-  async function loadCatalogOptions(force = false) {
-    if (catalogReady && !force) return;
+  /** The workspace's AI and voice profiles for the editor's two lists, each with a one-line summary
+   *  (catalog names for the model and provider). A plan tool's profile is offered but flagged: chat
+   *  skips it (it isn't a chat model). */
+  async function loadProfileOptions(force = false) {
+    if (profilesReady && !force) return;
     const [chat, tts, providers, preferences] = await Promise.all([
       listCatalogModels({ model_kind: 'chat' }),
       listCatalogModels({ model_kind: 'tts' }),
       listCatalogProviders(),
       getPreferences()
     ]);
-    llmOptions = chat.data.models;
-    catalogAllProviders = providers.data;
-    voiceOptions = [...tts.data.models].sort((a, b) =>
-      a.display_name.localeCompare(b.display_name)
-    );
-    catalogTtsProviders = providers.data.filter((p) => (p.tts_voices?.length ?? 0) > 0);
-    tuningProfiles = preferences.data.preferences.tuning_profiles ?? {};
-    workspaceDefaultTuningProfile =
-      preferences.data.preferences.llm.default_tuning_profile || 'balanced_chat';
-    await activeProvidersStore.load({ silent: true });
-    if (!activeProvidersStore.resolved) {
-      console.warn(
-        '⚠️ Characters editor — workspace active providers unavailable · inactive-picker styling skipped'
-      );
-    }
-    catalogReady = true;
-  }
-
-  function setTtsVoicePreset(providerId: string, voiceId: string) {
-    formApi.form = {
-      ...formApi.form,
-      tts_voice_by_provider: { ...formApi.form.tts_voice_by_provider, [providerId]: voiceId }
-    };
-    formApi.markDirty();
-  }
-
-  async function reloadBundledCatalogInEditor() {
-    bundledCatalogReloadBusy = true;
-    try {
-      const result = await reloadCatalogAndRefetch(['chat', 'tts']);
-      catalogReady = false;
-      await loadCatalogOptions(true);
-      formApi.form.tts_voice_by_provider = mergeVoiceProviderDefaults(
-        formApi.form.tts_voice_by_provider,
-        catalogTtsProviders
-      );
-      notify('success', catalogReloadSuccessMessage(result.reload));
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Catalog reload failed.');
-    } finally {
-      bundledCatalogReloadBusy = false;
-    }
+    const namer = catalogModelNamer([...chat.data.models, ...tts.data.models], providers.data);
+    const saved = preferences.data.preferences;
+    const byLabel = (a: ProfileOption, b: ProfileOption) => a.label.localeCompare(b.label);
+    aiProfileOptions = Object.entries(saved.ai?.profiles ?? {})
+      .map(([id, p]) => ({
+        id,
+        label: p.label,
+        line: aiProfileLine(p, namer),
+        note: isPlanModel(p.model) ? "A plan tool's model: chat skips it." : null
+      }))
+      .sort(byLabel);
+    voiceProfileOptions = Object.entries(saved.voice?.profiles ?? {})
+      .map(([id, p]) => ({ id, label: p.label, line: voiceProfileLine(p, namer), note: null }))
+      .sort(byLabel);
+    profilesReady = true;
   }
 
   async function loadDetail(id: string, mode: 'view' | 'edit') {
     loadingDetail = true;
     detailError = null;
     try {
-      if (mode === 'edit') await loadCatalogOptions();
+      if (mode === 'edit') await loadProfileOptions();
       const payload = await getCharacter(id);
       selected = payload.data;
       if (mode === 'edit') {
         formApi.form = formFromCharacter(payload.data);
-        formApi.form.tts_voice_by_provider = mergeVoiceProviderDefaults(
-          formApi.form.tts_voice_by_provider,
-          catalogTtsProviders
-        );
         formApi.dirty = false;
-        formApi.resetOrderedModelPickersNonce();
       }
       await loadResolvedConfig(id);
     } catch (err) {
@@ -188,13 +147,11 @@ export function createCharactersPageController(opts: {
 
   async function openNewCharacter() {
     if (!(await confirmDiscard())) return;
-    await loadCatalogOptions();
+    await loadProfileOptions();
     selected = null;
     resolved = null;
     resolvedError = null;
     formApi.form = emptyForm();
-    formApi.form.tts_voice_by_provider = mergeVoiceProviderDefaults({}, catalogTtsProviders);
-    formApi.resetOrderedModelPickersNonce();
     formApi.dirty = false;
     await prefs.setState('detail', 'edit');
   }
@@ -280,14 +237,12 @@ export function createCharactersPageController(opts: {
       if (prefs.characterId) {
         await loadDetail(prefs.characterId, prefs.detailMode);
       } else if (prefs.detailMode === 'edit') {
-        await loadCatalogOptions();
+        await loadProfileOptions();
         selected = null;
         resolved = null;
         resolvedError = null;
         formApi.form = emptyForm();
-        formApi.form.tts_voice_by_provider = mergeVoiceProviderDefaults({}, catalogTtsProviders);
         formApi.dirty = false;
-        formApi.resetOrderedModelPickersNonce();
       }
     }
   }
@@ -335,33 +290,13 @@ export function createCharactersPageController(opts: {
     get detailError(): string | null {
       return detailError;
     },
-    get llmOptions(): CatalogModelRow[] {
-      return llmOptions;
+    /** The workspace's AI profiles (by name) for the character's AI list. */
+    get aiProfileOptions(): ProfileOption[] {
+      return aiProfileOptions;
     },
-    get catalogAllProviders(): CatalogProviderRow[] {
-      return catalogAllProviders;
-    },
-    get voiceOptions(): CatalogModelRow[] {
-      return voiceOptions;
-    },
-    get catalogTtsProviders(): CatalogProviderRow[] {
-      return catalogTtsProviders;
-    },
-    get workspaceActiveProvidersResolved(): boolean {
-      return activeProvidersStore.resolved;
-    },
-    /** Getters unwrap plain ``Set``/rows for picker props — raw ``$derived`` fields on POJO controllers confuse prop bridging and produced empty lookups (all offline). */
-    get workspaceChatActiveIds(): Set<string> {
-      return activeProvidersStore.chatActiveProviderIds;
-    },
-    get workspaceTtsActiveIds(): Set<string> {
-      return activeProvidersStore.ttsActiveProviderIds;
-    },
-    get tuningProfiles(): Record<string, TuningProfile> {
-      return tuningProfiles;
-    },
-    get workspaceDefaultTuningProfile(): string {
-      return workspaceDefaultTuningProfile;
+    /** The workspace's voice profiles (by name) for the character's voice list. */
+    get voiceProfileOptions(): ProfileOption[] {
+      return voiceProfileOptions;
     },
     get resolved(): CharacterResolvedPayload | null {
       return resolved;
@@ -369,20 +304,6 @@ export function createCharactersPageController(opts: {
     get resolvedError(): string | null {
       return resolvedError;
     },
-    get ttsPresetGoogle(): CatalogProviderRow | null {
-      return catalogTtsProviders.find((p) => p.id === 'google') ?? null;
-    },
-    get ttsPresetOpenai(): CatalogProviderRow | null {
-      return catalogTtsProviders.find((p) => p.id === 'openai') ?? null;
-    },
-    get ttsPresetOtherProviders(): CatalogProviderRow[] {
-      return catalogTtsProviders.filter((p) => p.id !== 'google' && p.id !== 'openai');
-    },
-
-    get catalogReloadBusy(): boolean {
-      return bundledCatalogReloadBusy;
-    },
-
     // modals/actions
     get deleteOpen(): boolean {
       return deleteOpen;
@@ -398,8 +319,8 @@ export function createCharactersPageController(opts: {
     cancelEdit,
     saveCharacter,
     confirmDelete,
-    reloadBundledCatalogInEditor,
-    setTtsVoicePreset,
+    /** Re-read the profiles (after editing them in Catalog → Profiles in another tab). */
+    reloadProfileOptions: () => loadProfileOptions(true),
 
     /** Photo-crop sub-controller (pickPhoto/submitPhoto/crop state) — consumed directly by the dialogs. */
     get photoCrop() {

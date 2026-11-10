@@ -52,7 +52,6 @@ from hirocli.runtime.resource_change_broadcaster import ResourceChangeBroadcaste
 from hirocli.runtime.resource_versioning import ResourceVersionStore
 from hirocli.runtime.server_context import ServerContext
 from hirocli.services.metrics import MetricsCollector
-from hirocli.services.tts import create_tts_service
 from hirocli.tools import all_tools
 from hirocli.tools.registry import RuntimeContext, ToolRegistry
 
@@ -87,7 +86,7 @@ def _wire_runtime(
     """Build handlers, ChannelManager, and CommunicationManager.
 
     The agent graph (formerly the adapter pipeline + post-adapt hooks) is
-    owned by ``AgentManager`` now; STT/vision/TTS services are constructed
+    owned by ``AgentManager`` now; STT/vision services are constructed
     inside ``AgentManager.serve()`` so this wiring shrinks accordingly.
     """
     event_handler = EventHandler()
@@ -212,7 +211,7 @@ async def _main(
     # on-demand construction or return a `not available` payload that the UI
     # surfaces via the readiness banner.
     # This shaves ~9 s off the "admin port bound" moment because the rest of
-    # _main below (TTS load, AgentManager, etc.) runs after this point.
+    # _main below (AgentManager, etc.) runs after this point.
     admin_task: asyncio.Task[None] | None = None
     if admin:
         from hirocli.admin.run import run_admin_ui_logged
@@ -261,12 +260,10 @@ async def _main(
     # --- Wire agent ---
     from hirocli.runtime.agent_manager import AgentManager
 
-    log.info("🕒 Loading Text-to-Speech services")
-    tts_service = create_tts_service(workspace_path, prefs=ctx.preferences.current)
+    # Phase 7b step 5: no TTS service to load — voice replies use voice profiles (services/voice).
     agent_manager = AgentManager(
         ctx,
         comm_manager,
-        tts_service=tts_service,
         tool_registry=tool_registry,
     )
     # Bind the runner so InboundPipeline can dispatch ``message`` payloads

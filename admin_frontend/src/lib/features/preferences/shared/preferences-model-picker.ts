@@ -6,23 +6,17 @@ import { setPreferenceByPath } from '$lib/features/preferences/state/preferences
 
 export type PrefModelKind = 'chat' | 'stt' | 'tts' | 'embedding' | 'rerank';
 
+// Phase 7b step 5: the chat-model fields of Hiro's jobs (default chat, knowledge answering, graph
+// extraction / small, eval answer / judge / retrieval, memory retrieval) and the default TTS model
+// became AI- / voice-profile fields (`aiProfile` / `voiceProfile` manifest kinds), so they're gone here.
 export type PrefModelIdPath =
-  | 'llm.default_chat'
   | 'llm.default_stt'
-  | 'llm.default_tts'
   | 'llm.default_reranker'
   | 'llm.default_embedder'
   | 'knowledge.default_embedding_model'
-  | 'knowledge.answering.model'
   | 'knowledge.retrieval.reranker.model_id'
-  | 'graph.extraction_model'
-  | 'graph.small_model'
   | 'graph.embedder_model'
-  | 'graph.reranker.model_id'
-  | 'graph.eval.answer_model'
-  | 'graph.eval.judge_model'
-  | 'graph.eval.retrieval_model'
-  | 'memory.retrieval.model';
+  | 'graph.reranker.model_id';
 
 // #6: every model-id path must be a real preference path. This alias fails to compile if the
 // hand-written PrefModelIdPath union ever drifts from the generated PreferencePath set.

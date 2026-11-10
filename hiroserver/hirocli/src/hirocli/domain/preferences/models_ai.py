@@ -43,7 +43,7 @@ class AiProfile(BaseModel):
     label: str = Field(min_length=1, max_length=80, title="Name")
     model: str = Field(min_length=3, title="Model", description="Catalog id, provider:model")
     thinking: ThinkingLevel | None = None
-    # None = the core's default tuning (ModelTuning) until 7b folds tuning profiles into AI profiles.
+    # None = the default (0.7 temperature, 8192 max tokens) when asked or built for one of Hiro's jobs.
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     max_tokens: int | None = Field(default=None, ge=1)
     num_ctx: int | None = Field(default=None, ge=256, description="Local models only")
@@ -52,6 +52,10 @@ class AiProfile(BaseModel):
     max_per_hour: int | None = Field(default=None, ge=1, description="Asks an hour (plan and local models)")
     at_once: int = Field(default=1, ge=1, le=4)
     fallback: str | None = None
+    # Phase 7b step 5: the job (``jobs.JOB_PRESETS`` id: "chat", "memory", …) this profile was made for
+    # as its default, so the admin shows "Default", hides Delete and offers Restore default (which
+    # resets the tuning to the job's preset). None = a profile the owner made.
+    preset: str | None = None
 
     @field_validator("model")
     @classmethod
@@ -64,6 +68,22 @@ class AiProfile(BaseModel):
     @classmethod
     def _blank_fallback_is_none(cls, value: str | None) -> str | None:
         return (value or "").strip() or None
+
+    @field_validator("preset")
+    @classmethod
+    def _preset_is_a_job(cls, value: str | None) -> str | None:
+        preset = (value or "").strip() or None
+        if preset is not None:
+            from .jobs import JOB_PRESETS
+
+            if preset not in JOB_PRESETS:
+                raise ValueError(f"preset {preset!r} isn't one of Hiro's jobs ({', '.join(JOB_PRESETS)})")
+        return preset
+
+    @property
+    def is_plan(self) -> bool:
+        """A plan tool's model (claude_code:* / codex:*): askable, but not a LangChain chat model."""
+        return self.model.partition(":")[0] in AI_PLAN_PROVIDERS
 
 
 def check_ai_model_id(model: str) -> None:

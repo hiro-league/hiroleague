@@ -227,6 +227,24 @@ def test_a_chat_turns_calls_carry_the_senders_person() -> None:
     assert usage_call_from_ledger_row(_ledger_row()).person_id == ""  # type: ignore[union-attr]
 
 
+def test_a_chat_turns_own_calls_carry_its_ai_profile_only() -> None:
+    """Phase 7b step 5: the chat turn's AI profile is filed on the chat's own rows; other jobs'
+    rows inside the turn (memory, knowledge, speech…) are left without a profile."""
+    from hirocli.services.ai_usage.from_ledger import usage_profile
+
+    token = usage_profile.set(("hiro-chat", "Hiro's chat"))
+    try:
+        chat = usage_call_from_ledger_row(_ledger_row())
+        memory = usage_call_from_ledger_row(_ledger_row(node="memory_recall"))
+        speech = usage_call_from_ledger_row(_ledger_row(node="tts", model="gemini-3.8-flash-tts", provider="google"))
+    finally:
+        usage_profile.reset(token)
+    assert chat is not None and (chat.use, chat.profile_id, chat.profile_name) == ("chat", "hiro-chat", "Hiro's chat")
+    assert memory is not None and memory.profile_id == ""
+    assert speech is not None and (speech.kind, speech.profile_id) == ("speech", "")
+    assert usage_call_from_ledger_row(_ledger_row()).profile_id == ""  # type: ignore[union-attr]
+
+
 def test_ledger_models_lose_the_provider_prefix_and_an_unpriced_api_call_is_marked() -> None:
     call = usage_call_from_ledger_row(_ledger_row(model="google:gemini-3.8-flash", cost_usd=""))
     assert call is not None and (call.provider, call.model, call.unpriced) == ("google", "gemini-3.8-flash", 1)
