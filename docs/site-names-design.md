@@ -43,6 +43,8 @@ card and the return after signing in follow). If it's taken or wrong, the settin
 
 - `caddy/Caddyfile` ends with `import sites/*.caddy`; compose mounts `./caddy/sites` at `/etc/caddy/sites`;
   `caddy/sites/` is out of git (the core owns it).
-- Caddy runs with `admin off`, so the reload command is `docker restart caddy` (a second's break for every name).
+- The reload command is `docker exec caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile`, through
+  Caddy's control port on the server only (`admin localhost:2019`): graceful, so the app's own Save, which travels
+  through Caddy, gets its answer. A `docker restart caddy` (the first try, 2026-11-10) took 10 s and cut that answer.
 - `home.hiro.local`'s hand-made avahi alias and Caddy block go; HomeHiro claims it. `homehiro.local` stays
   hand-written (Home Assistant's add-on reaches HomeHiro through it).

@@ -67,7 +67,8 @@ class Config(BaseModel):
     # Apps' LAN names (docs/site-names-design.md), set with `hiro extension names`. Empty ip = this machine isn't
     # set up for names: claims are kept, nothing is published. site_names_caddy_file is the file the core writes (Caddy
     # imports it); site_names_caddy_main the hand-written Caddyfile (its names are taken); site_names_caddy_reload the
-    # command that makes Caddy read the file again (e.g. ["docker", "restart", "caddy"]).
+    # command that makes Caddy read the file again, gracefully (e.g. ["docker", "exec", "caddy", "caddy", "reload", ...]):
+    # the claim's own answer travels through Caddy, and a restart cuts it.
     site_names_ip: str = ""
     site_names_caddy_file: str = ""
     site_names_caddy_main: str = ""
