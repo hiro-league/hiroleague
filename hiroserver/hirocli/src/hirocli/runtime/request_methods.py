@@ -34,6 +34,7 @@ from ..tools.files import FilesHeadTool
 from ..tools.policy import PolicyGetTool
 from .ai_for_extensions import AI_REQUEST_HANDLERS
 from .voice_for_extensions import VOICE_REQUEST_HANDLERS
+from .sign_in_for_extensions import SIGN_IN_REQUEST_HANDLERS
 from .uses_for_extensions import USES_REQUEST_HANDLERS
 from .envelope_factory import EnvelopeFactory
 from .notify import NOTIFY_REQUEST_HANDLERS
@@ -329,6 +330,7 @@ _REGISTERED_HANDLERS: Final[tuple[tuple[str, Any, frozenset[str]], ...]] = (
     *AI_REQUEST_HANDLERS,
     *VOICE_REQUEST_HANDLERS,  # Phase 7b: voice.speak / voice.profiles
     *USES_REQUEST_HANDLERS,  # Phase 7b: ai.uses.set / voice.uses.set (an extension picks its own uses' profiles)
+    *SIGN_IN_REQUEST_HANDLERS,  # Phase 8: auth.code (an extension redeems the one-time sign-in code)
 )
 
 REGISTERED_REQUEST_METHOD_NAMES: frozenset[str] = frozenset(

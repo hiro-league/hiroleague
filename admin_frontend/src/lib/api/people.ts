@@ -20,6 +20,8 @@ export type Role = {
   role_id: string;
   name: string;
   built_in: boolean;
+  /** Phase 8: people with this role can open HiroLeague's settings (Owner always). */
+  admin: boolean;
 };
 
 export type PeopleData = { people: Person[]; roles: Role[] };
@@ -56,4 +58,9 @@ export async function setSignIn(personId: string, signInName: string, password: 
 
 export async function removeSignIn(personId: string) {
   return apiRequest<{ person: Person }>(`/people/${encodeURIComponent(personId)}/sign-in`, { method: 'DELETE' });
+}
+
+/** Phase 8: whether a role can open HiroLeague's settings (not Owner, which always can). */
+export async function setRoleAdmin(roleId: string, admin: boolean) {
+  return apiRequest<{ role: Role }>(`/roles/${encodeURIComponent(roleId)}/admin`, { method: 'PUT', body: { admin } });
 }

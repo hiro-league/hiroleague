@@ -12,6 +12,7 @@
   import SignInDialog from './dialogs/SignInDialog.svelte';
   import { createPeopleController } from './state/people-controller.svelte';
   import PeopleListCard from './view/PeopleListCard.svelte';
+  import RolesCard from './view/RolesCard.svelte';
 
   const toasts = createToastNotifier();
   const ctrl = createPeopleController(toasts.notify);
@@ -29,14 +30,16 @@
   <section class="grid gap-4">
     <SectionCard class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
       <p class="font-sans text-sm text-muted-foreground">
-        Only people who use the admin get a sign-in, and they can do everything there. What each role may do
-        in Home is set in HomeHiro.
+        One sign-in for HiroLeague and its apps: a password given here, or Home Assistant's login while Home
+        is connected. Roles below say who can open HiroLeague's settings.
       </p>
       <Button disabled={ctrl.busy} onclick={() => ctrl.openAdd()}>
         <UserPlus size={15} /> Add person
       </Button>
     </SectionCard>
     <PeopleListCard {ctrl} />
+    <!-- Phase 8: one switch per role, "Can open HiroLeague's settings". -->
+    <RolesCard {ctrl} />
   </section>
 </AdminPageHeader>
 

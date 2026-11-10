@@ -183,6 +183,29 @@ VOICE_ERROR_NO_PROFILE: str = "no_profile"  # no profile given and none picked f
 VOICE_ERROR_INVALID: str = "invalid"        # the request itself is wrong (no text, too long, unknown person)
 VOICE_ERROR_FAILED: str = "failed"          # the provider failed (the message says why)
 
+# Phase 8: one sign-in (docs/phase8-one-sign-in-design.md in hiroleague). An extension's site sends a signed-out
+# browser to the core's sign-in page (<admin>/sign-in?for=<extension name>&next=<path>); the core sends it back to
+# the site the extension declared (offers.shows, kind "site") at <site>/api/auth/hiro?code=<one-time>&next=<path>.
+#   auth.code        extension → core, {code} → {person_id, name, role_id, role_name}. One use, 60 s, only by the
+#                    extension the code was made for. Error: invalid_code.
+#   sign_in.start    core → extension, {method, client_id, redirect_uri, state} → {url}: where to send the browser
+#                    to sign in (e.g. Home Assistant's login page). `method` is the id the extension offered.
+#   sign_in.finish   core → extension, {method, code, client_id, redirect_uri} → {person_id}: who signed in, as a
+#                    core person. Errors: not_linked (signed in, but not a person in the family list; the message
+#                    says why, for people), failed.
+# An extension offers a sign-in in offers.can_do: {"kind": "sign_in", "id": "home_assistant", "label": "Home
+# Assistant"}; and its site in offers.shows: {"kind": "site", "title": "Home", "icon": "house",
+# "url": "http://homehiro.local", "roles": []} (roles [] = every role).
+METHOD_AUTH_CODE: str = "auth.code"
+METHOD_SIGN_IN_START: str = "sign_in.start"
+METHOD_SIGN_IN_FINISH: str = "sign_in.finish"
+AUTH_ERROR_INVALID_CODE: str = "invalid_code"
+SIGN_IN_ERROR_NOT_LINKED: str = "not_linked"
+SIGN_IN_ERROR_FAILED: str = "failed"
+OFFER_KIND_SIGN_IN: str = "sign_in"
+OFFER_KIND_SITE: str = "site"
+AUTH_CODE_SECONDS: int = 60
+
 EXTENSION_AUTH_TIMEOUT_SECONDS: float = 10.0
 EXTENSION_REQUEST_TIMEOUT_SECONDS: float = 15.0
 # Largest frame on the extension socket, both ends. An AI ask (ai.ask, Phase 7a) carries up to 60

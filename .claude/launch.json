@@ -15,6 +15,20 @@
       "port": 18083
     },
     {
+      "name": "homehiro-api-mockup",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["--directory", "../homehiro/backend", "run", "uvicorn", "homehiro.main:app", "--host", "127.0.0.1", "--port", "8767"],
+      "env": { "AUTH": "off", "OUTPUTS": "off", "HA_AUTO_WRITES": "off" },
+      "port": 8767
+    },
+    {
+      "name": "homehiro-ui-phase8",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "../homehiro/frontend", "run", "dev", "--", "--port", "5176", "--strictPort"],
+      "env": { "HOMEHIRO_API": "http://127.0.0.1:8767" },
+      "port": 5176
+    },
+    {
       "name": "admin-frontend-preview",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "admin_frontend", "run", "dev", "--", "--port", "5191", "--strictPort"],

@@ -116,6 +116,7 @@ _LAZY_EXPORTS: dict[str, str] = {
     "PersonSignInTool": ".people",
     "PersonUpdateTool": ".people",
     "RoleAddTool": ".people",
+    "RoleAdminTool": ".people",
     "RoleRemoveTool": ".people",
     "RoleRenameTool": ".people",
     # files
@@ -273,6 +274,7 @@ def all_tools() -> list[Tool]:
         PersonSignInTool,
         PersonUpdateTool,
         RoleAddTool,
+        RoleAdminTool,
         RoleRemoveTool,
         RoleRenameTool,
     )
@@ -395,6 +397,7 @@ def all_tools() -> list[Tool]:
         PersonSignInTool(),
         PersonUpdateTool(),
         RoleAddTool(),
+        RoleAdminTool(),
         RoleRemoveTool(),
         RoleRenameTool(),
         FilesHeadTool(),
@@ -522,6 +525,7 @@ if TYPE_CHECKING:  # pragma: no cover
         PersonSignInTool,
         PersonUpdateTool,
         RoleAddTool,
+        RoleAdminTool,
         RoleRemoveTool,
         RoleRenameTool,
     )

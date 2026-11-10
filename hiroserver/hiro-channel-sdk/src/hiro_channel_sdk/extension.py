@@ -367,6 +367,14 @@ class ExtensionClient:
 
     # -- what the extension sets up ------------------------------------------
 
+    def update_info(self, info: ExtensionInfo) -> None:
+        """Change what the extension declares (Phase 8: its site's address, its offered sign-ins).
+
+        Sent at the next sign-in, and answered to the core's ``extension.info`` from now on; reconnect
+        for the core to see it at once.
+        """
+        self._info = info
+
     def register_request(self, method: str, handler: RequestHandlerFn) -> None:
         """Answer the core's ``method`` requests with ``handler(params) -> data``."""
         self._request_handlers[method] = handler
@@ -676,6 +684,11 @@ class ExtensionClient:
             )
         try:
             data = await handler(params)
+        except ExtensionRequestError as exc:
+            # Phase 8: a handler answers a contract's own error code (sign_in.finish: not_linked / failed), so the
+            # core can tell people why, instead of a generic internal_error.
+            log.warning(f"⚠️ Extension request refused — {method} · {exc.code}", error=exc.message)
+            return build_response(msg, sender_id=sender, direction="inbound", error=(exc.code, exc.message))
         except Exception as exc:
             log.error("❌ Extension request handler failed", method=method, error=str(exc), exc_info=True)
             return build_response(msg, sender_id=sender, direction="inbound", error=("internal_error", str(exc)))

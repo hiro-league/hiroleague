@@ -26,6 +26,7 @@ from ..domain.people import (
     remove_person,
     remove_role,
     rename_role,
+    set_role_admin,
     update_person,
 )
 from ..domain.workspace import resolve_workspace
@@ -263,6 +264,22 @@ class RoleRenameTool(Tool):
 
     def execute(self, role_id: str, name: str, workspace: str | None = None) -> RoleResult:
         return RoleResult(role=rename_role(_resolve_path(workspace), role_id, name).model_dump())
+
+
+class RoleAdminTool(Tool):
+    """Phase 8: whether a role can open HiroLeague's settings; people without it sign in only for the apps."""
+
+    surfaces = frozenset({"cli", "http"})
+    name = "role_admin"
+    description = "Switch whether a role can open HiroLeague's settings (not Owner, which always can)"
+    params = {
+        "role_id": ToolParam(str, "The role's id"),
+        "admin": ToolParam(bool, "True: people with this role can open HiroLeague's settings"),
+        "workspace": _WORKSPACE,
+    }
+
+    def execute(self, role_id: str, admin: bool, workspace: str | None = None) -> RoleResult:
+        return RoleResult(role=set_role_admin(_resolve_path(workspace), role_id, admin).model_dump())
 
 
 class RoleRemoveTool(Tool):

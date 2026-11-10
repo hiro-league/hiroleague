@@ -3,6 +3,7 @@ import {
   listPeople,
   removePerson,
   removeSignIn,
+  setRoleAdmin,
   setSignIn,
   updatePerson,
   type Person,
@@ -160,6 +161,20 @@ export function createPeopleController(notify: Notify) {
     }
   }
 
+  /** Phase 8: switch whether a role can open HiroLeague's settings. */
+  async function setRoleOpensSettings(role: Role, admin: boolean) {
+    busy = true;
+    try {
+      await setRoleAdmin(role.role_id, admin);
+      notify('success', admin ? `${role.name} can open HiroLeague's settings.` : `${role.name} now signs in for the apps only.`);
+      await load();
+    } catch (err) {
+      notify('error', err instanceof Error ? err.message : 'Switching the role failed.');
+    } finally {
+      busy = false;
+    }
+  }
+
   async function submitRemove() {
     if (!removeTarget) return;
     busy = true;
@@ -182,6 +197,7 @@ export function createPeopleController(notify: Notify) {
     get roles() {
       return roles;
     },
+    setRoleOpensSettings,
     get loading() {
       return loading;
     },

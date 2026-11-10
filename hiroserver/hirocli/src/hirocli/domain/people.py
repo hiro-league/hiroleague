@@ -52,6 +52,9 @@ class Role(BaseModel):
     role_id: str
     name: str
     built_in: bool = False
+    # Phase 8: whether people with this role can open HiroLeague's settings (the admin). Owner always can;
+    # the others sign in only for the apps (the dashboard's Apps card) until a role is switched on.
+    admin: bool = False
 
 
 class Person(BaseModel):
@@ -96,8 +99,11 @@ def _seed_roles(conn: sqlite3.Connection) -> None:
     if conn.execute("SELECT 1 FROM roles LIMIT 1").fetchone() is not None:
         return
     conn.executemany(
-        "INSERT INTO roles (role_id, name, built_in, position) VALUES (?, ?, ?, ?)",
-        [(rid, name, int(built_in), pos) for pos, (rid, name, built_in) in enumerate(DEFAULT_ROLES)],
+        "INSERT INTO roles (role_id, name, built_in, position, admin) VALUES (?, ?, ?, ?, ?)",
+        [
+            (rid, name, int(built_in), pos, int(rid == OWNER_ROLE))
+            for pos, (rid, name, built_in) in enumerate(DEFAULT_ROLES)
+        ],
     )
     conn.commit()
 
@@ -137,7 +143,9 @@ def _clean_sign_in(value: str) -> str:
 
 
 def _row_to_role(row: sqlite3.Row) -> Role:
-    return Role(role_id=row["role_id"], name=row["name"], built_in=bool(row["built_in"]))
+    # Owner always opens the settings, whatever the column says (Phase 8).
+    admin = row["role_id"] == OWNER_ROLE or bool(row["admin"])
+    return Role(role_id=row["role_id"], name=row["name"], built_in=bool(row["built_in"]), admin=admin)
 
 
 def _row_to_person(row: sqlite3.Row) -> Person:
@@ -212,6 +220,26 @@ def rename_role(workspace_path: Path, role_id: str, name: str) -> Role:
         conn.commit()
     _changed(workspace_path, "role_renamed", role_id=role_id)
     return role.model_copy(update={"name": name})
+
+
+def set_role_admin(workspace_path: Path, role_id: str, admin: bool) -> Role:
+    """Phase 8: switch whether a role can open HiroLeague's settings (not Owner's, which always can)."""
+    role = get_role(workspace_path, role_id)
+    if role is None:
+        raise PeopleError("That role doesn't exist.")
+    if role.role_id == OWNER_ROLE:
+        raise PeopleError("The owner always opens HiroLeague's settings.")
+    with _connect(workspace_path) as conn:
+        conn.execute("UPDATE roles SET admin = ? WHERE role_id = ?", (int(bool(admin)), role_id))
+        conn.commit()
+    _changed(workspace_path, "role_admin", role_id=role_id)
+    return role.model_copy(update={"admin": bool(admin)})
+
+
+def role_opens_settings(workspace_path: Path, role_id: str) -> bool:
+    """Whether people with this role can open HiroLeague's settings (Phase 8); an unknown role can't."""
+    role = get_role(workspace_path, role_id)
+    return role is not None and role.admin
 
 
 def remove_role(workspace_path: Path, role_id: str) -> None:

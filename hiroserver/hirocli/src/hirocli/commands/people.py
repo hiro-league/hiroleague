@@ -198,6 +198,18 @@ def register(people_app: typer.Typer, console: Console) -> None:
         _run(console, lambda: RoleRenameTool().execute(role_id=role_id, name=name, workspace=workspace))
         console.print("[green]Renamed.[/green]")
 
+    @people_app.command("role-admin")
+    def role_admin(
+        role_id: str = typer.Argument(..., help="The role's id."),
+        off: bool = typer.Option(False, "--off", help="Switch it off instead."),
+        workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help=_WORKSPACE_HELP),
+    ) -> None:
+        """Let a role open HiroLeague's settings (--off: only the apps). Owner always can."""
+        from ..tools.people import RoleAdminTool
+
+        _run(console, lambda: RoleAdminTool().execute(role_id=role_id, admin=not off, workspace=workspace))
+        console.print("[green]Switched off.[/green]" if off else "[green]Switched on.[/green]")
+
     @people_app.command("role-remove")
     def role_remove(
         role_id: str = typer.Argument(..., help="The role's id."),

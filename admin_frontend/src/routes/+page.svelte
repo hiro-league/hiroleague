@@ -3,6 +3,7 @@
   import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
   import DashboardPanel from '$lib/features/dashboard/DashboardPanel.svelte';
   import { createDashboardController } from '$lib/features/dashboard/state/dashboard-controller.svelte';
+  import AppsCard from '$lib/features/apps/AppsCard.svelte';
 
   const ctrl = createDashboardController();
 
@@ -29,5 +30,7 @@
     </div>
   {/snippet}
 
+  <!-- Phase 8: the Apps card opens each extension's own site in a new tab. -->
+  <div class="mb-5 empty:hidden"><AppsCard /></div>
   <DashboardPanel {ctrl} />
 </AdminPageHeader>

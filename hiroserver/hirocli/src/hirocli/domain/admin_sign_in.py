@@ -26,7 +26,7 @@ from .db import db_path, ensure_db
 from .people import PeopleError, Person, get_person, set_sign_in, sign_in_hash
 
 PASSWORD_MIN = 8
-SESSION_DAYS = 30
+SESSION_DAYS = 90  # Phase 8: HiroLeague and HomeHiro both keep a browser signed in 90 days (was 30)
 
 _SCRYPT_N, _SCRYPT_R, _SCRYPT_P = 2**14, 8, 1
 # A hash to check against when the name is unknown, so a wrong name takes as long as a wrong password.

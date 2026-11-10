@@ -47,7 +47,14 @@ def test_api_needs_a_sign_in_but_the_page_and_auth_dont(client: TestClient) -> N
     assert client.get("/api/secret").status_code == 401
     assert client.get("/").status_code == 200
     me = client.get("/api/auth/me").json()["data"]
-    assert me == {"signed_in": False, "person": None, "anyone_signs_in": True}
+    assert me == {
+        "signed_in": False,
+        "person": None,
+        "role_name": None,
+        "can_open_settings": False,
+        "anyone_signs_in": True,
+        "sign_in_offers": [],
+    }
 
 
 def test_signing_in_opens_the_api_and_signing_out_closes_it(client: TestClient) -> None:
@@ -57,7 +64,7 @@ def test_signing_in_opens_the_api_and_signing_out_closes_it(client: TestClient) 
     ok = client.post("/api/auth/sign-in", json={"sign_in": "Michel", "password": "correct horse"})
     assert ok.status_code == 200
     cookie = ok.headers["set-cookie"]
-    assert "hiro_admin_18083=" in cookie and "HttpOnly" in cookie and "SameSite=strict" in cookie
+    assert "hiro_admin_18083=" in cookie and "HttpOnly" in cookie and "SameSite=lax" in cookie  # Phase 8: Lax, so an extension's site can send the browser here
     assert "Secure" not in cookie  # plain http on this machine
     assert client.get("/api/secret").json()["data"] == "family"
     assert client.get("/api/auth/me").json()["data"]["person"]["name"] == "Michel"

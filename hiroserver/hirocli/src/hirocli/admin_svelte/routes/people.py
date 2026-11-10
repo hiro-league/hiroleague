@@ -27,6 +27,7 @@ from hirocli.tools.people import (
     PersonSignInTool,
     PersonUpdateTool,
     RoleAddTool,
+    RoleAdminTool,
     RoleRemoveTool,
     RoleRenameTool,
 )
@@ -57,6 +58,10 @@ class SignInBody(BaseModel):
 
 class RoleBody(BaseModel):
     name: str
+
+
+class RoleAdminBody(BaseModel):
+    admin: bool
 
 
 async def _call(what: str, run: Callable[[], Any]) -> dict[str, Any]:
@@ -132,6 +137,14 @@ async def add_role(body: RoleBody, workspace_id: SelectedWorkspaceIdDep) -> dict
 async def rename_role(role_id: str, body: RoleBody, workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
     return await _call(
         "rename the role", lambda: RoleRenameTool().execute(role_id=role_id, name=body.name, workspace=workspace_id)
+    )
+
+
+@people_router.put("/roles/{role_id}/admin")
+async def set_role_admin(role_id: str, body: RoleAdminBody, workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+    """Phase 8: whether the role can open HiroLeague's settings."""
+    return await _call(
+        "switch the role", lambda: RoleAdminTool().execute(role_id=role_id, admin=body.admin, workspace=workspace_id)
     )
 
 

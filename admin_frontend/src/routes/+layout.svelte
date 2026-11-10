@@ -6,6 +6,7 @@
   import { navItems } from '$lib/shell/nav';
   import { isFeatureActive } from '$lib/shell/features';
   import SignInPage from '$lib/features/sign-in/SignInPage.svelte';
+  import AppsOnlyView from '$lib/features/apps/AppsOnlyView.svelte';
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
   import { adminSession } from '$lib/runtime/admin-session.svelte';
   import '../styles/app.css';
@@ -49,6 +50,12 @@
   </div>
 {:else if adminSession.state === 'signed-out'}
   <SignInPage />
+{:else if activePath === 'sign-in'}
+  <!-- Phase 8: signed in already; /sign-in sends the browser back to the app that asked. -->
+  {@render children?.()}
+{:else if !adminSession.canOpenSettings}
+  <!-- Phase 8: a role that doesn't open HiroLeague's settings sees only its apps. -->
+  <AppsOnlyView />
 {:else}
   <AdminShell {activePath} {mainClass}>
     {#if blockedFeature}

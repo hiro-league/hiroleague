@@ -8,12 +8,22 @@ export type SignedInPerson = {
   role_id: string;
 };
 
+/** A way to sign in that a connected extension offers (Phase 8: HomeHiro offers Home Assistant's login). */
+export type SignInOffer = { id: string; label: string; extension: string };
+
 export type AuthMe = {
   signed_in: boolean;
   person: SignedInPerson | null;
+  role_name: string | null;
+  /** Phase 8: whether their role opens HiroLeague's settings (Owner always); else only the Apps card. */
+  can_open_settings: boolean;
   /** False until `hiro people owner` gave someone a sign-in. */
   anyone_signs_in: boolean;
+  sign_in_offers: SignInOffer[];
 };
+
+/** An extension's own site on the dashboard's Apps card (Phase 8). */
+export type AppSite = { extension: string; title: string; icon: string; url: string; online: boolean };
 
 export async function getAuthMe() {
   return apiRequest<AuthMe>('/auth/me');
@@ -28,4 +38,24 @@ export async function signIn(signInName: string, password: string) {
 
 export async function signOut() {
   return apiRequest<null>('/auth/sign-out', { method: 'POST' });
+}
+
+export async function listApps() {
+  return apiRequest<{ apps: AppSite[] }>('/apps');
+}
+
+/**
+ * Phase 8: where a signed-in browser goes to get back to an extension's site (the backend sends it on
+ * with a one-time code). `forApp` is the extension's name from ?for=.
+ */
+export function backToAppUrl(forApp: string, next: string | null): string {
+  const query = new URLSearchParams({ next: next || '/' });
+  return `/api/auth/for/${encodeURIComponent(forApp)}?${query}`;
+}
+
+/** Phase 8: start a sign-in a connected extension offers (off to Home Assistant's login page). */
+export function offeredSignInUrl(offerId: string, forApp: string | null, next: string | null): string {
+  const query = new URLSearchParams({ next: next || '/' });
+  if (forApp) query.set('for', forApp);
+  return `/api/auth/with/${encodeURIComponent(offerId)}?${query}`;
 }
