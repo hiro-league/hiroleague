@@ -22,11 +22,13 @@ from hiro_channel_sdk.constants import (
     METHOD_PEOPLE_LIST,
     METHOD_PEOPLE_UPDATE,
     METHOD_ROLES_ADD,
+    METHOD_ROLES_IMPORT_RIGHTS,
     METHOD_ROLES_REMOVE,
     METHOD_ROLES_RENAME,
 )
 from hiro_commons.log import Logger
 
+from ..domain.access import import_rights, roles_for_extension
 from ..domain.events import DomainEvent, DomainEventType, get_domain_event_bus
 from ..domain.people import (
     PeopleError,
@@ -34,11 +36,11 @@ from ..domain.people import (
     add_person,
     add_role,
     list_people,
-    list_roles,
     remove_role,
     rename_role,
     update_person,
 )
+from .ai_for_extensions import _caller_name
 from .request_handler import EXTENSIONS_ONLY, RequestContext, RequestRefused
 from .whatsapp_for_extensions import sender_label
 
@@ -71,9 +73,10 @@ async def handle_people_list(params: dict[str, Any], ctx: RequestContext) -> dic
     del params
     workspace_path = _workspace(ctx)
     people = await asyncio.to_thread(list_people, workspace_path)
-    roles = await asyncio.to_thread(list_roles, workspace_path)
+    # Phase 9a: each role carries its line and the rights it has in the calling extension (not the others').
+    roles = await asyncio.to_thread(roles_for_extension, workspace_path, await _caller_name(ctx))
     log.fineinfo(f"⬆️ People list served — {sender_label(ctx)}", count=len(people))
-    return {"people": [for_extension(p) for p in people], "roles": [r.model_dump() for r in roles]}
+    return {"people": [for_extension(p) for p in people], "roles": roles}
 
 
 def _str(params: dict[str, Any], key: str) -> str | None:
@@ -135,6 +138,16 @@ async def handle_roles_remove(params: dict[str, Any], ctx: RequestContext) -> di
     return {}
 
 
+async def handle_roles_import_rights(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
+    """Phase 9a: once, the extension's own grants from before; fills only roles with none there yet."""
+    roles = params.get("roles")
+    if not isinstance(roles, dict):
+        raise RequestRefused("invalid_params", "roles must be {role_id: {rights: [...], says?: str}}")
+    name = await _caller_name(ctx)
+    filled = await _change(ctx, f"rights imported for {name}", lambda: import_rights(_workspace(ctx), name, roles))
+    return {"imported": filled}
+
+
 # (method, handler, who may call it) — merged into request_methods' table.
 PEOPLE_REQUEST_HANDLERS: tuple[tuple[str, Any, frozenset[str]], ...] = (
     (METHOD_PEOPLE_LIST, handle_people_list, EXTENSIONS_ONLY),
@@ -143,6 +156,7 @@ PEOPLE_REQUEST_HANDLERS: tuple[tuple[str, Any, frozenset[str]], ...] = (
     (METHOD_ROLES_ADD, handle_roles_add, EXTENSIONS_ONLY),
     (METHOD_ROLES_RENAME, handle_roles_rename, EXTENSIONS_ONLY),
     (METHOD_ROLES_REMOVE, handle_roles_remove, EXTENSIONS_ONLY),
+    (METHOD_ROLES_IMPORT_RIGHTS, handle_roles_import_rights, EXTENSIONS_ONLY),
 )
 
 

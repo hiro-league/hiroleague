@@ -10,7 +10,7 @@ from collections.abc import Callable
 from dataclasses import asdict
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from hiro_commons.log import Logger
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
@@ -19,7 +19,10 @@ from hirocli.admin_svelte.deps import SelectedWorkspaceIdDep
 from hirocli.admin_svelte.result_payload import envelope_failure
 from hirocli.domain.people import PeopleError
 from hirocli.domain.workspace import WorkspaceError
+from hirocli.admin_svelte.routes.extensions import _live_manager
+from hirocli.admin.features.extensions.service import ExtensionService
 from hirocli.tools.people import (
+    AccessListTool,
     PeopleListTool,
     PersonAddTool,
     PersonRemoveTool,
@@ -30,6 +33,8 @@ from hirocli.tools.people import (
     RoleAdminTool,
     RoleRemoveTool,
     RoleRenameTool,
+    RoleRightsTool,
+    RoleSaysTool,
 )
 
 log = Logger.get("ADMIN.PEOPLE")
@@ -62,6 +67,14 @@ class RoleBody(BaseModel):
 
 class RoleAdminBody(BaseModel):
     admin: bool
+
+
+class RoleSaysBody(BaseModel):
+    says: str
+
+
+class RoleRightsBody(BaseModel):
+    rights: list[str]
 
 
 async def _call(what: str, run: Callable[[], Any]) -> dict[str, Any]:
@@ -151,3 +164,37 @@ async def set_role_admin(role_id: str, body: RoleAdminBody, workspace_id: Select
 @people_router.delete("/roles/{role_id}")
 async def remove_role(role_id: str, workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
     return await _call("remove the role", lambda: RoleRemoveTool().execute(role_id=role_id, workspace=workspace_id))
+
+
+# Phase 9a: what each role may do, per source (HiroLeague and each extension).
+
+
+@people_router.get("/people/access")
+async def list_access(request: Request, workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+    """Every source with its features and rights (each extension marked connected or not), and every role's rights."""
+    result = await _call("read what each role may do", lambda: AccessListTool().execute(workspace=workspace_id))
+    if not result["ok"]:
+        return result
+    workspace_path = await run_in_threadpool(ExtensionService().workspace_path, workspace_id)
+    manager = _live_manager(request, workspace_path)
+    live = manager.snapshot() if manager is not None else {}
+    for source in result["data"]["sources"]:
+        source["connected"] = source["kind"] == "core" or source["extension_id"] in live
+    return result
+
+
+@people_router.put("/roles/{role_id}/says")
+async def set_role_says(role_id: str, body: RoleSaysBody, workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+    return await _call(
+        "save what the role is for", lambda: RoleSaysTool().execute(role_id=role_id, says=body.says, workspace=workspace_id)
+    )
+
+
+@people_router.put("/roles/{role_id}/rights/{source}")
+async def set_role_rights(
+    role_id: str, source: str, body: RoleRightsBody, workspace_id: SelectedWorkspaceIdDep
+) -> dict[str, Any]:
+    return await _call(
+        "save the role's rights",
+        lambda: RoleRightsTool().execute(role_id=role_id, source=source, rights=body.rights, workspace=workspace_id),
+    )

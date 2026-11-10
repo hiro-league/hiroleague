@@ -64,6 +64,7 @@ from .constants import (
     RECONNECT_BACKOFF_MAX,
 )
 from .models import ContentItem, EventPayload, MessageRouting, UnifiedMessage
+from .access import ExtensionFeature, ExtensionRight
 
 log = Logger.get("EXTENSION")
 
@@ -134,6 +135,8 @@ class ExtensionInfo(BaseModel):
     # The git repo it is built from, by name ("homehiro": ~/homehiro.git on the server); "" = not said. The code reports
     # keep a report for each extension's repo (extensions.list).
     repo: str = ""
+    # Phase 9a: its features and the rights in each; the core's admin grants them per role (access.py).
+    features: list[ExtensionFeature] = Field(default_factory=list)
 
 
 class ExtensionRequestError(Exception):

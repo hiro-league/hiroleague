@@ -1,7 +1,11 @@
 <script lang="ts">
-  /** People (Phase 6): one family list in the core, read by extensions such as HomeHiro. */
+  /**
+   * People (Phase 6): one family list in the core, read by extensions such as HomeHiro.
+   * Phase 9a: two tabs — People (the list) and Roles (what each role may do in HiroLeague and each app).
+   */
   import { onMount } from 'svelte';
   import { UserPlus } from '@lucide/svelte';
+  import { page } from '$app/state';
   import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
   import SectionCard from '$lib/components/page/SectionCard.svelte';
   import Button from '$lib/components/ui/button.svelte';
@@ -12,13 +16,30 @@
   import SignInDialog from './dialogs/SignInDialog.svelte';
   import { createPeopleController } from './state/people-controller.svelte';
   import PeopleListCard from './view/PeopleListCard.svelte';
-  import RolesCard from './view/RolesCard.svelte';
+  import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
+  import NewRoleDialog from './dialogs/NewRoleDialog.svelte';
+  import { createRolesController } from './state/roles-controller.svelte';
+  import RolesTab from './view/RolesTab.svelte';
 
   const toasts = createToastNotifier();
   const ctrl = createPeopleController(toasts.notify);
+  // A role added, renamed or removed changes the People tab's role names too.
+  const roles = createRolesController(toasts.notify, () => ctrl.load());
+
+  // Phase 9a: an app's Edit link opens People → Roles at one role (?tab=roles&role=kid).
+  const asked = page.url.searchParams;
+  let tab = $state<'people' | 'roles'>(asked.get('tab') === 'roles' ? 'roles' : 'people');
+  const tabDescriptors = [
+    { id: 'people' as const, label: 'People' },
+    { id: 'roles' as const, label: 'Roles' }
+  ];
 
   onMount(() => {
     void ctrl.load();
+    void roles.load().then(() => {
+      const role = asked.get('role');
+      if (role && roles.roles.some((r) => r.role_id === role)) roles.tab = role;
+    });
   });
 </script>
 
@@ -27,23 +48,40 @@
   title="People"
   subtitle="The family: who they are, what Hiro calls them, how to reach them, their role. HomeHiro reads this list."
 >
+  {#snippet tabs()}
+    <AdminTabStrip ariaLabel="People sections" tabs={tabDescriptors} active={tab} onSelect={(id) => (tab = id)} />
+  {/snippet}
+  {#if tab === 'roles'}
+    <RolesTab ctrl={roles} people={ctrl.people} />
+  {:else}
   <section class="grid gap-4">
     <SectionCard class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
       <p class="font-sans text-sm text-muted-foreground">
         One sign-in for HiroLeague and its apps: a password given here, or Home Assistant's login while Home
-        is connected. Roles below say who can open HiroLeague's settings.
+        is connected. Roles says what each role may do here and in each app.
       </p>
       <Button disabled={ctrl.busy} onclick={() => ctrl.openAdd()}>
         <UserPlus size={15} /> Add person
       </Button>
     </SectionCard>
     <PeopleListCard {ctrl} />
-    <!-- Phase 8: one switch per role, "Can open HiroLeague's settings". -->
-    <RolesCard {ctrl} />
   </section>
+  {/if}
 </AdminPageHeader>
 
 <PersonDialog {ctrl} />
+<NewRoleDialog ctrl={roles} />
+<ConfirmDialog
+  open={roles.removeTarget !== null}
+  onOpenChange={(next) => {
+    if (!next) roles.removeTarget = null;
+  }}
+  title="Remove the role {roles.removeTarget?.name ?? ''}?"
+  message="It goes from HiroLeague and every app. Nobody has it, so nobody loses access."
+  confirmLabel="Remove"
+  pending={roles.busy}
+  onConfirm={() => void roles.submitRemove()}
+/>
 <SignInDialog {ctrl} />
 <ConfirmDialog
   open={ctrl.removeTarget !== null}

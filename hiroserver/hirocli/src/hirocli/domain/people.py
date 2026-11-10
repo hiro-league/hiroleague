@@ -7,6 +7,9 @@ extension stays with that extension. The core checks nothing per role in Phase 6
 whoever signs in to the admin can do everything there.
 
 - ``roles`` and ``people`` are durable rows in workspace.db.
+- Phase 9a: a role also has a line on what it is for (``says``) and, per extension, the rights it is given
+  there (``rights``: {extension name: [right keys]}); domain/access.py checks them against what each extension
+  declares and handles HiroLeague's own right (``admin``).
 - Owner, Adult and Kid are there from the start (the same ids HomeHiro uses);
   Owner is built in and can't be renamed or removed.
 - Passwords and sign-in sessions live in ``admin_sign_in.py``; this module only
@@ -18,6 +21,7 @@ All functions are synchronous (CLI and admin worker threads).
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 import uuid
@@ -25,6 +29,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from hiro_commons.log import Logger
 from hiro_commons.timestamps import utc_iso
 from pydantic import BaseModel
 
@@ -32,6 +37,8 @@ from .db import db_path, ensure_db
 from .events import DomainEvent, DomainEventType, get_domain_event_bus
 
 OWNER_ROLE = "owner"
+
+log = Logger.get("PEOPLE")
 
 # (role_id, name, built_in) — HomeHiro's role ids, so its rights per role keep their keys.
 DEFAULT_ROLES: tuple[tuple[str, str, bool], ...] = (
@@ -55,6 +62,9 @@ class Role(BaseModel):
     # Phase 8: whether people with this role can open HiroLeague's settings (the admin). Owner always can;
     # the others sign in only for the apps (the dashboard's Apps card) until a role is switched on.
     admin: bool = False
+    # Phase 9a: one line on what it is for, and the rights it has in each extension ({extension name: [keys]}).
+    says: str = ""
+    rights: dict[str, list[str]] = {}
 
 
 class Person(BaseModel):
@@ -145,7 +155,20 @@ def _clean_sign_in(value: str) -> str:
 def _row_to_role(row: sqlite3.Row) -> Role:
     # Owner always opens the settings, whatever the column says (Phase 8).
     admin = row["role_id"] == OWNER_ROLE or bool(row["admin"])
-    return Role(role_id=row["role_id"], name=row["name"], built_in=bool(row["built_in"]), admin=admin)
+    return Role(role_id=row["role_id"], name=row["name"], built_in=bool(row["built_in"]), admin=admin,
+                says=row["says"] or "", rights=_rights_from(row["rights"]))
+
+
+def _rights_from(raw: str | None) -> dict[str, list[str]]:
+    """The stored rights JSON; a broken value reads as none (logged), never as a crash on every role read."""
+    try:
+        data = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        log.warning("⚠️ A role's rights can't be read — treated as none", raw=(raw or "")[:120])
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(k): [str(x) for x in v] for k, v in data.items() if isinstance(v, list)}
 
 
 def _row_to_person(row: sqlite3.Row) -> Person:
@@ -234,6 +257,39 @@ def set_role_admin(workspace_path: Path, role_id: str, admin: bool) -> Role:
         conn.commit()
     _changed(workspace_path, "role_admin", role_id=role_id)
     return role.model_copy(update={"admin": bool(admin)})
+
+
+SAYS_MAX = 160
+
+
+def set_role_says(workspace_path: Path, role_id: str, says: str) -> Role:
+    """Phase 9a: the one line on what a role is for (shown when picking a role, here and in the apps)."""
+    says = " ".join((says or "").split())
+    if len(says) > SAYS_MAX:
+        raise PeopleError(f"Say what the role is for in up to {SAYS_MAX} characters.")
+    role = get_role(workspace_path, role_id)
+    if role is None:
+        raise PeopleError("That role doesn't exist.")
+    with _connect(workspace_path) as conn:
+        conn.execute("UPDATE roles SET says = ? WHERE role_id = ?", (says, role_id))
+        conn.commit()
+    _changed(workspace_path, "role_says", role_id=role_id)
+    return role.model_copy(update={"says": says})
+
+
+def set_role_rights(workspace_path: Path, role_id: str, extension: str, keys: list[str]) -> Role:
+    """Phase 9a: store the rights a role has in one extension, as given (domain/access.py checks them first)."""
+    role = get_role(workspace_path, role_id)
+    if role is None:
+        raise PeopleError("That role doesn't exist.")
+    if role.role_id == OWNER_ROLE:
+        raise PeopleError("The owner has every right and can't be changed.")
+    rights = {**role.rights, extension: list(keys)}
+    with _connect(workspace_path) as conn:
+        conn.execute("UPDATE roles SET rights = ? WHERE role_id = ?", (json.dumps(rights), role_id))
+        conn.commit()
+    _changed(workspace_path, "role_rights", role_id=role_id, extension=extension)
+    return role.model_copy(update={"rights": rights})
 
 
 def role_opens_settings(workspace_path: Path, role_id: str) -> bool:

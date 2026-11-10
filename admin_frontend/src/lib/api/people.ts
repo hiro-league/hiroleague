@@ -22,6 +22,8 @@ export type Role = {
   built_in: boolean;
   /** Phase 8: people with this role can open HiroLeague's settings (Owner always). */
   admin: boolean;
+  /** Phase 9a: one line on what the role is for. */
+  says: string;
 };
 
 export type PeopleData = { people: Person[]; roles: Role[] };
@@ -60,7 +62,48 @@ export async function removeSignIn(personId: string) {
   return apiRequest<{ person: Person }>(`/people/${encodeURIComponent(personId)}/sign-in`, { method: 'DELETE' });
 }
 
-/** Phase 8: whether a role can open HiroLeague's settings (not Owner, which always can). */
-export async function setRoleAdmin(roleId: string, admin: boolean) {
-  return apiRequest<{ role: Role }>(`/roles/${encodeURIComponent(roleId)}/admin`, { method: 'PUT', body: { admin } });
+// ---------------------------------------------------------------------------
+// Phase 9a: what each role may do, per source (HiroLeague and each extension).
+// ---------------------------------------------------------------------------
+
+export type AccessRight = { id: string; name: string; says: string };
+export type AccessFeature = { id: string; name: string; rights: AccessRight[]; not_for_owner: boolean };
+export type AccessSource = {
+  /** "hiroleague", or the extension's name (its rights are kept under it). */
+  id: string;
+  name: string;
+  kind: 'core' | 'extension';
+  extension_id: string;
+  connected: boolean;
+  features: AccessFeature[];
+};
+/** A role with its rights in every source: {source id: ["<feature>.<right>", ...]}. */
+export type RoleAccess = Role & { rights: Record<string, string[]> };
+export type AccessData = { sources: AccessSource[]; roles: RoleAccess[] };
+
+export async function listAccess() {
+  return apiRequest<AccessData>('/people/access');
+}
+
+export async function setRoleRights(roleId: string, source: string, rights: string[]) {
+  return apiRequest<{ role: Role }>(`/roles/${encodeURIComponent(roleId)}/rights/${encodeURIComponent(source)}`, {
+    method: 'PUT',
+    body: { rights }
+  });
+}
+
+export async function setRoleSays(roleId: string, says: string) {
+  return apiRequest<{ role: Role }>(`/roles/${encodeURIComponent(roleId)}/says`, { method: 'PUT', body: { says } });
+}
+
+export async function addRole(name: string) {
+  return apiRequest<{ role: Role }>('/roles', { method: 'POST', body: { name } });
+}
+
+export async function renameRole(roleId: string, name: string) {
+  return apiRequest<{ role: Role }>(`/roles/${encodeURIComponent(roleId)}`, { method: 'PUT', body: { name } });
+}
+
+export async function removeRole(roleId: string) {
+  return apiRequest<{ removed: string }>(`/roles/${encodeURIComponent(roleId)}`, { method: 'DELETE' });
 }

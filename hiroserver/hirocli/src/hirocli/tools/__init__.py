@@ -116,10 +116,13 @@ _LAZY_EXPORTS: dict[str, str] = {
     "PersonSignInRemoveTool": ".people",
     "PersonSignInTool": ".people",
     "PersonUpdateTool": ".people",
+    "AccessListTool": ".people",
     "RoleAddTool": ".people",
     "RoleAdminTool": ".people",
     "RoleRemoveTool": ".people",
     "RoleRenameTool": ".people",
+    "RoleRightsTool": ".people",
+    "RoleSaysTool": ".people",
     # files
     "FilesHeadTool": ".files",
     # gateway
@@ -280,10 +283,13 @@ def all_tools() -> list[Tool]:
         PersonSignInRemoveTool,
         PersonSignInTool,
         PersonUpdateTool,
+        AccessListTool,
         RoleAddTool,
         RoleAdminTool,
         RoleRemoveTool,
         RoleRenameTool,
+        RoleRightsTool,
+        RoleSaysTool,
     )
     from .files import FilesHeadTool
     from .gateway import (
@@ -404,10 +410,13 @@ def all_tools() -> list[Tool]:
         PersonSignInRemoveTool(),
         PersonSignInTool(),
         PersonUpdateTool(),
+        AccessListTool(),
         RoleAddTool(),
         RoleAdminTool(),
         RoleRemoveTool(),
         RoleRenameTool(),
+        RoleRightsTool(),
+        RoleSaysTool(),
         FilesHeadTool(),
         ChannelListTool(),
         ChannelInstallTool(),
@@ -533,10 +542,13 @@ if TYPE_CHECKING:  # pragma: no cover
         PersonSignInRemoveTool,
         PersonSignInTool,
         PersonUpdateTool,
+        AccessListTool,
         RoleAddTool,
         RoleAdminTool,
         RoleRemoveTool,
         RoleRenameTool,
+        RoleRightsTool,
+        RoleSaysTool,
     )
     from .files import FilesHeadTool  # noqa: F401
     from .gateway import (  # noqa: F401

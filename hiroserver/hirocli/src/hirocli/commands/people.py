@@ -221,6 +221,56 @@ def register(people_app: typer.Typer, console: Console) -> None:
         _run(console, lambda: RoleRemoveTool().execute(role_id=role_id, workspace=workspace))
         console.print("[green]Removed.[/green]")
 
+    # Phase 9a: what each role may do, per source (HiroLeague and each extension).
+
+    @people_app.command("access")
+    def access(
+        workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help=_WORKSPACE_HELP),
+    ) -> None:
+        """Show each role's rights in HiroLeague and in each extension."""
+        from ..tools.people import AccessListTool
+
+        result = _run(console, lambda: AccessListTool().execute(workspace=workspace))
+        for source in result.sources:
+            table = Table(title=f"{source['name']} ({source['id']})")
+            table.add_column("Right")
+            for role in result.roles:
+                table.add_column(role["name"])
+            for feature in source["features"]:
+                for right in feature["rights"]:
+                    key = f"{feature['id']}.{right['id']}"
+                    marks = ["yes" if key in role["rights"].get(source["id"], []) else "" for role in result.roles]
+                    table.add_row(f"{feature['name']}: {right['name']} ({key})", *marks)
+            console.print(table)
+
+    @people_app.command("role-rights")
+    def role_rights(
+        role_id: str = typer.Argument(..., help="The role's id."),
+        source: str = typer.Argument(..., help="hiroleague, or the extension's name."),
+        rights: list[str] = typer.Argument(None, help='Right keys "<feature>.<right>"; none = take every right away.'),
+        workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help=_WORKSPACE_HELP),
+    ) -> None:
+        """Give a role exactly these rights in HiroLeague or one extension (see `hiro people access`)."""
+        from ..tools.people import RoleRightsTool
+
+        result = _run(
+            console,
+            lambda: RoleRightsTool().execute(role_id=role_id, source=source, rights=list(rights or []), workspace=workspace),
+        )
+        console.print(f"[green]Saved.[/green] {result.role['name']} in {source}.")
+
+    @people_app.command("role-says")
+    def role_says(
+        role_id: str = typer.Argument(..., help="The role's id."),
+        says: str = typer.Argument(..., help="One line on what the role is for."),
+        workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help=_WORKSPACE_HELP),
+    ) -> None:
+        """Set the one line on what a role is for."""
+        from ..tools.people import RoleSaysTool
+
+        _run(console, lambda: RoleSaysTool().execute(role_id=role_id, says=says, workspace=workspace))
+        console.print("[green]Saved.[/green]")
+
 
 def set_owner_interactive(
     console: Console, *, workspace: str | None, name: str | None = None, sign_in: str | None = None

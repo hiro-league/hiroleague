@@ -125,15 +125,20 @@ NOTIFY_MAX_RECIPIENTS: int = 10
 
 # Phase 6: the family lives in the core.
 #   people.list      extension → core, {} → {"people": [{person_id, name, calls_them, whatsapp,
-#                    role_id}], "roles": [{role_id, name, built_in}]}. whatsapp = digits with the
-#                    country code ("" = none); calls_them "" = their name. What a role may do inside
-#                    an extension is the extension's own.
+#                    role_id}], "roles": [{role_id, name, built_in, says, rights}]}. whatsapp = digits with the
+#                    country code ("" = none); calls_them "" = their name.
 #   people.add       extension → core, {name, role_id, calls_them?, whatsapp?} → {"person": {...}}
 #   people.update    extension → core, {person_id, name?, role_id?, calls_them?, whatsapp?}
 #                    → {"person": {...}}; a field left out stays as it is.
 #   roles.add        extension → core, {name} → {"role": {...}}
 #   roles.rename     extension → core, {role_id, name} → {"role": {...}}
 #   roles.remove     extension → core, {role_id} → {} (refused while someone has it)
+#   Phase 9a: each role in people.list also carries ``says`` (one line on what it is for) and ``rights``: the
+#                    right keys ("<feature>.<right>") the core grants it in the calling extension, from the features
+#                    the extension declared (ExtensionInfo.features; hiro_channel_sdk.access checks them).
+#   roles.import_rights extension → core, {roles: {role_id: {rights: [...], says?: str}}} → {"imported": [role_id]}:
+#                    once, an extension's own grants from before Phase 9a; only fills roles the core has no rights
+#                    for in this extension yet (and an empty ``says``), never overwrites what the admin set.
 #   people.changed   core → every connected extension, an event with {}: read people.list again.
 #                    Events aren't queued: an extension also reads the list when it connects.
 #   A refused change answers error code "invalid_params" with the reason for people.
@@ -143,6 +148,7 @@ METHOD_PEOPLE_UPDATE: str = "people.update"
 METHOD_ROLES_ADD: str = "roles.add"
 METHOD_ROLES_RENAME: str = "roles.rename"
 METHOD_ROLES_REMOVE: str = "roles.remove"
+METHOD_ROLES_IMPORT_RIGHTS: str = "roles.import_rights"
 EVENT_PEOPLE_CHANGED: str = "people.changed"
 
 # core.info answers {name, version, workspace, admin_port, repo}: admin_port (Phase 7b) is the core's admin web port, so
