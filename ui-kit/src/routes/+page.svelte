@@ -5,6 +5,9 @@
 	import { toggleMode, mode } from 'mode-watcher';
 	import { Badge } from '$kit/components/ui/badge/index.js';
 	import { Button } from '$kit/components/ui/button/index.js';
+	import { Checkbox } from '$kit/components/ui/checkbox/index.js';
+	import * as Dialog from '$kit/components/ui/dialog/index.js';
+	import { Slider } from '$kit/components/ui/slider/index.js';
 	import * as Card from '$kit/components/ui/card/index.js';
 	import { Input } from '$kit/components/ui/input/index.js';
 	import { Label } from '$kit/components/ui/label/index.js';
@@ -15,13 +18,19 @@
 	import { Textarea } from '$kit/components/ui/textarea/index.js';
 	import * as Tooltip from '$kit/components/ui/tooltip/index.js';
 	import Avatar from '$kit/ui/avatar.svelte';
+	import EmptyState from '$kit/ui/empty-state.svelte';
+	import Field from '$kit/ui/field.svelte';
+	import Loading from '$kit/ui/loading.svelte';
+	import Notice from '$kit/ui/notice.svelte';
+	import Panel from '$kit/ui/panel.svelte';
+	import { toast } from '$kit/ui/toast.svelte';
 	import HelpTip from '$kit/ui/help-tip.svelte';
 	import OptionChips from '$kit/ui/option-chips.svelte';
 	import PageHeader from '$kit/ui/page-header.svelte';
 	import SearchInput from '$kit/ui/search-input.svelte';
 	import Segmented from '$kit/ui/segmented.svelte';
 	import TimeField from '$kit/ui/time-field.svelte';
-	import { Moon, Plus, Sun, Trash2 } from '@lucide/svelte';
+	import { Inbox, Moon, Plus, Sun, Trash2 } from '@lucide/svelte';
 
 	let range = $state('24h');
 	let chip = $state('all');
@@ -30,6 +39,10 @@
 	let kind = $state('lights');
 	let time = $state('17:30');
 	let search = $state('');
+	let volume = $state(40);
+	let agreed = $state(true);
+	let threshold = $state('0.75');
+	let dialogOpen = $state(false);
 
 	const KINDS = [
 		{ value: 'lights', label: 'Lights' },
@@ -210,6 +223,54 @@
 					</Table.Root>
 				</Card.Content>
 			</Card.Root>
+
+			<Panel title="Messages and states" description="What a page says when something is wrong, missing or on its way.">
+				<div class="grid gap-3">
+					<Notice tone="error" title="The server didn't answer" message="It may be restarting. This page tries again by itself.">
+						{#snippet actions()}<Button size="sm" variant="outline">Try again</Button>{/snippet}
+					</Notice>
+					<Notice tone="warning" message="Live updates are paused: showing what was last loaded." />
+					<Notice tone="success" message="The backup finished." />
+					<Notice tone="info" message="Roles are set in HiroLeague." />
+					<Loading label="Asking HiroLeague…" />
+					<EmptyState message="No devices yet" hint="They appear here once Home Assistant is connected.">
+						{#snippet icon()}<Inbox />{/snippet}
+						{#snippet actions()}<Button size="sm"><Plus /> Connect</Button>{/snippet}
+					</EmptyState>
+				</div>
+			</Panel>
+
+			<Panel title="More controls" description="A field with help and a way back to its default; toasts; a dialog.">
+				{#snippet actions()}<Button size="sm" variant="outline" onclick={() => (dialogOpen = true)}>Open a dialog</Button>{/snippet}
+				<div class="grid gap-4">
+					<Field label="Match threshold" for="kit-threshold" hint="Between 0 and 1. Higher is stricter." help="How sure a match must be before it counts. Change it only if matches are wrong too often." onreset={() => (threshold = '0.75')}>
+						<Input id="kit-threshold" bind:value={threshold} />
+					</Field>
+					<Field label="Volume" hint="{volume}%">
+						<Slider type="single" bind:value={volume} max={100} step={5} />
+					</Field>
+					<label class="flex items-center gap-2 text-sm"><Checkbox bind:checked={agreed} /> Tell me when it is done</label>
+					<div class="flex flex-wrap items-center gap-2">
+						<Button size="sm" variant="outline" onclick={() => toast.success('Saved')}>Toast: saved</Button>
+						<Button size="sm" variant="outline" onclick={() => toast.error("Couldn't save: the name is taken.")}>Toast: error</Button>
+						<Button size="sm" variant="outline" onclick={() => toast.info('Copied')}>Toast: info</Button>
+					</div>
+				</div>
+			</Panel>
+
+			<Dialog.Root bind:open={dialogOpen}>
+				<Dialog.Content>
+					<Dialog.Header>
+						<Dialog.Title>Add a device</Dialog.Title>
+						<Dialog.Description>A dialog for a small task that needs an answer before going on.</Dialog.Description>
+					</Dialog.Header>
+					<Field label="Name" for="kit-dialog-name"><Input id="kit-dialog-name" placeholder="Hallway lamp" /></Field>
+					<Dialog.Footer>
+						<Button variant="outline" onclick={() => (dialogOpen = false)}>Cancel</Button>
+						<Button onclick={() => ((dialogOpen = false), toast.success('Added'))}>Add</Button>
+					</Dialog.Footer>
+				</Dialog.Content>
+			</Dialog.Root>
 
 			<Card.Root class="md:col-span-2">
 				<Card.Header>

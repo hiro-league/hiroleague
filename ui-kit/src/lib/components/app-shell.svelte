@@ -22,6 +22,7 @@
 	import { who } from '$kit/state/who.svelte';
 	import ConfirmHost from '$kit/ui/confirm-host.svelte';
 	import ErrorBar from '$kit/ui/error-bar.svelte';
+	import ToastHost from '$kit/ui/toast-host.svelte';
 	import AppSidebar from './app-sidebar.svelte';
 	import NoAccess from './no-access.svelte';
 	import NotYours from './not-yours.svelte';
@@ -67,6 +68,7 @@
 <ModeWatcher defaultMode="dark" />
 <ConfirmHost />
 <ErrorBar />
+<ToastHost />
 
 {#if alone(here)}
 	{@render children()}
