@@ -39,7 +39,6 @@
     "vitest": "^4.1.5"
   },
   "dependencies": {
-    "@hiroleague/ui": "file:../ui-kit",
     "@tanstack/svelte-table": "^9.0.0-alpha.38",
     "bits-ui": "^2.19.3",
     "clsx": "^2.1.1",

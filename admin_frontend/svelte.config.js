@@ -19,7 +19,7 @@ const config = {
     // The shared UI kit (@hiroleague/ui, ../ui-kit) is read as source at $kit; it reads this app's own name, pages,
     // menu and keys at $hiro-app (src/lib/app). UI kit step 2b.
     alias: {
-      $kit: 'node_modules/@hiroleague/ui/src/lib',
+      $kit: '.kit/lib',
       '$hiro-app': 'src/lib/app'
     }
   }

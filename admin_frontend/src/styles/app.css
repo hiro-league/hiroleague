@@ -4,11 +4,11 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn-svelte/tailwind.css";
-@import "../../node_modules/@hiroleague/ui/src/lib/theme.css";
+@import "../../.kit/lib/theme.css";
 @plugin "@tailwindcss/typography";
 
-/* Tailwind reads the kit's components for the classes they use (it skips node_modules unless told). */
-@source "../../node_modules/@hiroleague/ui/src/lib";
+/* Tailwind reads the kit's components for the classes they use (.kit is not committed, and Tailwind skips what git ignores unless told). */
+@source "../../.kit/lib";
 
 :root {
   /* The admin's text was a serif (Lora) under sans-serif titles (Plus Jakarta Sans). With the kit it is one
