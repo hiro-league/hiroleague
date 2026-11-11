@@ -1,3 +1,4 @@
+<!-- UI kit, step 4: overflow-clip, not overflow-hidden: hidden makes the card a scroll container, and a sticky table head inside it then pins to the card (and is pushed down) instead of the page. -->
 <script lang="ts">
 	import { cn, type WithElementRef } from "$kit/utils.js";
 	import type { HTMLAttributes } from "svelte/elements";
@@ -15,7 +16,7 @@
 	bind:this={ref}
 	data-slot="card"
 	data-size={size}
-	class={cn("ring-foreground/10 bg-card text-card-foreground gap-(--card-spacing) overflow-hidden rounded-xl py-(--card-spacing) text-sm ring-1 [--card-spacing:--spacing(4)] has-data-[slot=card-footer]:pb-0 has-[>img:first-child]:pt-0 data-[size=sm]:[--card-spacing:--spacing(3)] data-[size=sm]:has-data-[slot=card-footer]:pb-0 *:[img:first-child]:rounded-t-xl *:[img:last-child]:rounded-b-xl group/card flex flex-col", className)}
+	class={cn("ring-foreground/10 bg-card text-card-foreground gap-(--card-spacing) overflow-clip rounded-xl py-(--card-spacing) text-sm ring-1 [--card-spacing:--spacing(4)] has-data-[slot=card-footer]:pb-0 has-[>img:first-child]:pt-0 data-[size=sm]:[--card-spacing:--spacing(3)] data-[size=sm]:has-data-[slot=card-footer]:pb-0 *:[img:first-child]:rounded-t-xl *:[img:last-child]:rounded-b-xl group/card flex flex-col", className)}
 	{...restProps}
 >
 	{@render children?.()}
