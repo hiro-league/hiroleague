@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorMessage } from '$kit/api/client';
   /**
    * Preferences → General → Spoken clips (Phase 7b): what the clip cache holds now and what it saved, beside
    * its size setting (`voice.clip_cache_mb`). Clips the extensions had spoken (an alert, a Speak node) are
@@ -18,7 +19,7 @@
     try {
       stats = await getClipCache();
     } catch (err) {
-      error = err instanceof Error ? err.message : 'The clip cache could not be read.';
+      error = errorMessage(err);
     }
   });
 

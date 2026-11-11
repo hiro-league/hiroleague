@@ -1,3 +1,4 @@
+import { errorMessage } from '$kit/api/client';
 import { getCharacterResolved, type CharacterResolvedPayload } from '$lib/api/characters';
 import type { ChatChannelRow } from '$lib/api/chat-channels';
 import {
@@ -54,7 +55,7 @@ export function createChatCharacterResolved(opts: ChatCharacterResolvedOptions) 
     } catch (e) {
       if (seq !== fetchSeq) return;
       payload = null;
-      error = e instanceof Error ? e.message : 'Request failed.';
+      error = errorMessage(e);
       uiPrefs.clearVoiceReplyTransient();
     } finally {
       if (seq === fetchSeq) loading = false;

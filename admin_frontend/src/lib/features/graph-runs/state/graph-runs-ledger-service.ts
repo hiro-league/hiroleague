@@ -1,3 +1,4 @@
+import { errorMessage } from '$kit/api/client';
 import {
   GRAPH_RUNS_PAGE_SIZE,
   tailGraphRuns,
@@ -21,7 +22,7 @@ export async function graphRunsFetchInitialLedger(): Promise<LedgerPageResult> {
       skip_from_end: 0
     });
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'Failed to load graph ledger.' };
+    return { ok: false, error: errorMessage(err) };
   }
   return {
     ok: true,
@@ -40,7 +41,7 @@ export async function graphRunsLoadMoreLedger(skipFromEnd: number): Promise<Ledg
       skip_from_end: skipFromEnd
     });
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'Failed to load more graph runs.' };
+    return { ok: false, error: errorMessage(err) };
   }
   return {
     ok: true,

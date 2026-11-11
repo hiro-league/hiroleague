@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { KnowledgeDocument, KnowledgeIngestMetadata } from '$lib/api/knowledge';
+  import { Action } from '$kit/state/action.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
   import PickSelect from '$kit/ui/pick-select.svelte';
@@ -32,7 +33,8 @@
   let categoryId = $state('');
   let subcategoryId = $state('');
   let tags = $state<string[]>([]);
-  let saving = $state(false);
+  const save = new Action();
+  const saving = $derived(save.busy);
   let saveError = $state<string | null>(null);
 
   const documentCount = $derived(documents.length);
@@ -48,7 +50,6 @@
     categoryId = document.category_id != null ? String(document.category_id) : '';
     subcategoryId = document.subcategory_id != null ? String(document.subcategory_id) : '';
     tags = [...(document.tags ?? [])];
-    saving = false;
     saveError = null;
   });
 
@@ -64,24 +65,24 @@
 
   async function handleSave() {
     if (documents.length === 0 || saving) return;
-    saving = true;
     saveError = null;
-    const result = await browse.saveDocumentsMetadata(
-      documents.map((document) => document.id),
-      {
-        owner_kind: ownerKind,
-        owner_id: ownerId,
-        category_id: optionalInt(categoryId),
-        subcategory_id: optionalInt(subcategoryId),
-        tags
-      }
+    const result = await save.run(() =>
+      browse.saveDocumentsMetadata(
+        documents.map((document) => document.id),
+        {
+          owner_kind: ownerKind,
+          owner_id: ownerId,
+          category_id: optionalInt(categoryId),
+          subcategory_id: optionalInt(subcategoryId),
+          tags
+        }
+      )
     );
-    saving = false;
-    if (result.saved > 0) {
+    if (result && result.saved > 0) {
       open = false;
       onSaved?.(result);
     } else {
-      saveError = 'Metadata update failed.';
+      saveError = save.error || 'Metadata update failed.';
     }
   }
 </script>

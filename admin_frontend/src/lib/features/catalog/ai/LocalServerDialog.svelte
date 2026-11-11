@@ -25,7 +25,7 @@
   const server = $derived(id ? ai.serverFor(id) : undefined);
   const status = $derived(server ? serverStatus(server) : null);
   const usedBy = $derived(id ? ai.profilesOnProvider(id) : []);
-  const checking = $derived(id ? !!ai.checkingServerIds[id] : false);
+  const checking = $derived(id ? ai.serverChecking(id) : false);
   const BADGE = { ok: 'success', warn: 'warning', off: 'secondary' } as const;
 </script>
 

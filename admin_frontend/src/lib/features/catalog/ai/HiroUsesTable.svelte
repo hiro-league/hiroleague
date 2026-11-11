@@ -13,6 +13,7 @@
   import { isPlanModel } from '$lib/catalog/hiro-jobs';
   import Notice from '$kit/ui/notice.svelte';
   import PickSelect from '$kit/ui/pick-select.svelte';
+  import { Action } from '$kit/state/action.svelte';
   import { cn } from '$lib/utils';
   import type { VoiceController } from '$lib/features/catalog/voice/voice-controller.svelte';
   import type { AiController } from './ai-controller.svelte';
@@ -30,8 +31,7 @@
   };
 
   const jobProfiles = $derived(ai.profiles.filter((p) => !isPlanModel(p.model)));
-  let voiceError = $state<string | null>(null);
-  let voiceBusy = $state(false);
+  const pickHiroVoice = new Action();
 
   function modelWords(model: string | null): string {
     if (!model) return '';
@@ -61,9 +61,7 @@
   const hiroVoice = $derived(voice.profiles.find((p) => p.id === voice.hiroProfile));
 
   async function pickVoice(id: string) {
-    voiceBusy = true;
-    voiceError = await voice.setHiroProfile(id || null);
-    voiceBusy = false;
+    await pickHiroVoice.run(() => voice.setHiroProfile(id || null));
   }
 </script>
 
@@ -99,7 +97,7 @@
               class="h-9 w-full text-sm"
               label={`Profile for ${job.label}`}
               value={job.profileId ?? ''}
-              disabled={ai.jobBusy[job.id]}
+              disabled={ai.jobBusy(job.id)}
               options={[
                 { value: '', label: 'Not set' },
                 ...jobProfiles.map((p) => ({ value: p.id, label: p.name })),
@@ -124,7 +122,7 @@
       The voice profile Hiro speaks its voice replies with. A character with voice profiles of its own speaks with those first.
     </p>
   </div>
-  {#if voiceError}<Notice message={voiceError} />{/if}
+  {#if pickHiroVoice.error}<Notice message={pickHiroVoice.error} />{/if}
   <TableShell layout="grid" minWidth={900} gridColumns={GRID}>
     {#snippet headRow()}
       <span>Use</span>
@@ -141,7 +139,7 @@
             class="h-9 w-full text-sm"
             label="Voice for Hiro's voice replies"
             value={voice.hiroProfile ?? ''}
-            disabled={voiceBusy}
+            disabled={pickHiroVoice.busy}
             options={[
               { value: '', label: 'None' },
               ...voice.profiles.map((vp) => ({ value: vp.id, label: vp.label })),

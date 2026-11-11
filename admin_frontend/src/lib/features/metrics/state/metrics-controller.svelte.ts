@@ -1,3 +1,4 @@
+import { errorMessage } from '$kit/api/client';
 import {
   configureMetrics,
   getMetricsTick,
@@ -83,7 +84,7 @@ export function createMetricsController(opts: { notify: Notify }) {
         clearChartSeries();
       }
     } catch (err) {
-      pollError = err instanceof Error ? err.message : 'Metrics polling failed.';
+      pollError = errorMessage(err);
     } finally {
       polling = false;
       loading = false;
@@ -104,7 +105,7 @@ export function createMetricsController(opts: { notify: Notify }) {
       await loadTick(true);
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : 'Failed to update metrics configuration.';
+        errorMessage(err);
       error = message;
       notify('error', message);
       // Resync toolbar controls from the server after optimistic checkbox/slider edits.

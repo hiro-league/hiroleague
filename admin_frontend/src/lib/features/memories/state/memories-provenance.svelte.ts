@@ -4,6 +4,7 @@
  * Graph tab uses to read episode text from Kuzu). Summaries carry no `chunk_ids` → an empty
  * "no source" state. Self-contained so the page controller stays focused on the list.
  */
+import { errorMessage } from '$kit/api/client';
 import { fetchGraphChunksDetail, type GraphChunkDetail } from '$lib/api/knowledge';
 import { memoryChunkIds } from '../shared/memory-pure';
 
@@ -34,7 +35,7 @@ export function createMemoryProvenance() {
       chunks = res?.chunks ?? [];
     } catch (e) {
       if (ctrl.signal.aborted) return; // expected when superseded / closed
-      error = e instanceof Error ? e.message : 'Failed to load source turns.';
+      error = errorMessage(e);
     } finally {
       if (!ctrl.signal.aborted) loading = false;
     }

@@ -11,9 +11,8 @@
   import CharacterViewPanel from '$lib/features/characters/view/CharacterViewPanel.svelte';
   import CharacterEditPanel from '$lib/features/characters/view/CharacterEditPanel.svelte';
   import CharacterDialogs from '$lib/features/characters/modals/CharacterDialogs.svelte';
-  import { createCharactersFormModel } from '$lib/features/characters/state/characters-form.svelte';
   import { createCharactersPageController } from '$lib/features/characters/state/characters-controller.svelte';
-  import { createUnsavedGuard } from '$lib/navigation/unsaved-guard.svelte';
+  import { ask } from '$kit/ui/confirm.svelte';
   import { toast } from '$kit/ui/toast.svelte';
   import { createCharactersPreferences } from '$lib/preferences/characters-preferences.svelte';
   import type { CharactersTabPreference } from '$lib/preferences/keys';
@@ -21,22 +20,18 @@
   const prefs = createCharactersPreferences();
   const notify = toast.show;
 
-  const formApi = createCharactersFormModel();
-
-  const unsaved = createUnsavedGuard(
-    () => formApi.dirty,
-    () => prefs.detailMode === 'edit',
-    (next) => {
-      formApi.dirty = next;
-    }
-  );
-
-  /** Remote list/detail/catalog + destructive actions wired to prefs + draft formModel. */
+  /** Remote list/detail/catalog + destructive actions wired to prefs; it holds the character being edited (`ctrl.draft`). */
   const ctrl = createCharactersPageController({
     prefs,
-    formApi,
     notify,
-    confirmDiscard: unsaved.confirmDiscard
+    confirmDiscard: async () =>
+      !ctrl.draft.dirty ||
+      ask({
+        title: 'Unsaved changes',
+        description: 'You have edits that are not saved yet. Discard them and leave, or stay to keep editing.',
+        action: 'Discard changes',
+        danger: true
+      })
   });
 
   const detailVisible = $derived(prefs.activeTab === 'detail');
@@ -114,9 +109,9 @@
       onEnterEdit={() => void ctrl.enterEditMode()}
     />
   {:else}
-    <CharacterEditPanel {ctrl} {formApi} characterId={prefs.characterId} {notify} />
+    <CharacterEditPanel {ctrl} characterId={prefs.characterId} {notify} />
   {/if}
 </section>
 
 
-<CharacterDialogs {ctrl} {unsaved} characterId={prefs.characterId} />
+<CharacterDialogs {ctrl} characterId={prefs.characterId} />

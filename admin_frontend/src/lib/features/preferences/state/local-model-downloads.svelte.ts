@@ -8,6 +8,7 @@
  * by the inline download affordance), distinct from the catalog "local model" picker options the
  * controller loads separately.
  */
+import { errorMessage } from '$kit/api/client';
 import {
   cancelKnowledgeEmbedder,
   cancelKnowledgeReranker,
@@ -77,7 +78,7 @@ export function createLocalModelDownloads(notify: Notify) {
       await downloadKnowledgeReranker(modelId);
       await pollReranker(modelId, true);
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Reranker download failed.');
+      notify('error', errorMessage(err));
     } finally {
       rerankerDownloading = null;
     }
@@ -98,7 +99,7 @@ export function createLocalModelDownloads(notify: Notify) {
       localRerankers = refreshed.local ?? localRerankers;
       notify('info', 'Download cancelled.');
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Cancel failed.');
+      notify('error', errorMessage(err));
     }
   }
 
@@ -136,7 +137,7 @@ export function createLocalModelDownloads(notify: Notify) {
       await downloadKnowledgeEmbedder(modelId);
       await pollEmbedder(modelId, true);
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Embedder download failed.');
+      notify('error', errorMessage(err));
     } finally {
       embedderDownloading = null;
     }
@@ -155,7 +156,7 @@ export function createLocalModelDownloads(notify: Notify) {
       localEmbedders = refreshed.local ?? localEmbedders;
       notify('info', 'Download cancelled.');
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Cancel failed.');
+      notify('error', errorMessage(err));
     }
   }
 

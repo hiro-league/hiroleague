@@ -8,6 +8,7 @@
  * adopt a server-reported track mid-run, and notify the model on terminal events / after hydrate.
  * Source of truth is server-side (`GET /eval/state`); there is no sessionStorage.
  */
+import { errorMessage } from '$kit/api/client';
 import {
   connectEvalEvents,
   type EvalCancelledPayload,
@@ -235,7 +236,7 @@ export function createEvalRunController(ctx: EvalRunCtx, opts: { initialModes: s
       // the run finished first), the completed/failed handler clears cancelling.
     } catch (err) {
       cancelling = false;
-      ctx.setError(err instanceof Error ? err.message : 'Failed to cancel eval run.');
+      ctx.setError(errorMessage(err));
     }
   }
 

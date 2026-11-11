@@ -1,3 +1,4 @@
+import { errorMessage } from '$kit/api/client';
 import {
   answerKnowledge,
   isAnswerCompareData,
@@ -130,7 +131,7 @@ export function createKnowledgeAskModel(deps: {
         writePersistedKnowledgeAskResult(payload);
       }
     } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Ask failed.');
+      deps.setError(errorMessage(err));
     } finally {
       searching = false;
     }

@@ -1,3 +1,4 @@
+import { errorMessage } from '$kit/api/client';
 import { tick, untrack } from 'svelte';
 import { listDevices, type DeviceRow } from '$lib/api/channels-devices';
 import {
@@ -174,7 +175,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     try {
       await reloadRows();
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to reload logs.';
+      error = errorMessage(err);
     } finally {
       loading = false;
     }
@@ -232,7 +233,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
       }
       await reloadRows();
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to load logs.';
+      error = errorMessage(err);
       rows = [];
     } finally {
       loading = false;
@@ -321,7 +322,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
       rowSelection.select(rows[0]?._rowKey ?? null);
     } catch (err) {
       if (myGen !== searchFetchGeneration) return;
-      error = err instanceof Error ? err.message : 'Search failed.';
+      error = errorMessage(err);
       rows = [];
       rowSelection.select(null);
     } finally {
@@ -350,7 +351,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
       }
       trimRowsToRollingWindow();
     } catch (err) {
-      pollError = err instanceof Error ? err.message : 'Live log polling failed.';
+      pollError = errorMessage(err);
     } finally {
       polling = false;
     }
@@ -365,7 +366,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
       try {
         await reloadRows();
       } catch (err) {
-        error = err instanceof Error ? err.message : 'Failed to reload logs.';
+        error = errorMessage(err);
       } finally {
         loading = false;
       }
@@ -397,7 +398,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     try {
       await reloadRows();
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to reload logs.';
+      error = errorMessage(err);
     } finally {
       loading = false;
     }
@@ -416,7 +417,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
       rowSelection.select(null);
       await reloadRows();
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to clear logs.';
+      error = errorMessage(err);
     } finally {
       loading = false;
       clearingLogs = false;
@@ -458,7 +459,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     try {
       await reloadRows();
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to reload logs.';
+      error = errorMessage(err);
     } finally {
       loading = false;
     }
@@ -490,7 +491,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
       await openWorkspaceFolder(dir);
       notify('info', `Opening folder: ${dir}`);
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Open folder failed.');
+      notify('error', errorMessage(err));
     }
   }
 

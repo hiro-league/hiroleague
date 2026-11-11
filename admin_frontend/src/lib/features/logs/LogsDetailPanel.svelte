@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorMessage } from '$kit/api/client';
   import { Copy } from '@lucide/svelte';
   import DetailPanelShell from '$lib/components/page/DetailPanelShell.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
@@ -36,7 +37,7 @@
     } catch (err) {
       onNotify(
         'error',
-        err instanceof Error ? err.message : 'Could not copy log details.'
+        errorMessage(err)
       );
     }
   }

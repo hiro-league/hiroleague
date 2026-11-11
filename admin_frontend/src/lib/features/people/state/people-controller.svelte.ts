@@ -9,6 +9,8 @@ import {
   type PersonFields,
   type Role
 } from '$lib/api/people';
+import { Action } from '$kit/state/action.svelte';
+import { Resource } from '$kit/state/resource.svelte';
 import type { Notify } from '$kit/ui/toast.svelte';
 
 export type PeopleController = ReturnType<typeof createPeopleController>;
@@ -26,40 +28,30 @@ const EMPTY: PersonFields = { name: '', role_id: 'adult', calls_them: '', whatsa
  * (the only Owner, the only sign-in) and says why.
  */
 export function createPeopleController(notify: Notify) {
-  let people = $state<Person[]>([]);
-  let roles = $state<Role[]>([]);
-  let loading = $state(true);
-  let busy = $state(false);
-  let error = $state<string | null>(null);
+  const list = new Resource(listPeople);
+  const people = $derived(list.data?.people ?? []);
+  const roles = $derived(list.data?.roles ?? []);
+  /** One action per kind of change; `busy` is any of them, so one button waits for all. */
+  const saveFormAction = new Action();
+  const saveSignInAction = new Action();
+  const removeAction = new Action();
+  const removeSignInAction = new Action();
+  const busy = $derived(
+    saveFormAction.busy || saveSignInAction.busy || removeAction.busy || removeSignInAction.busy
+  );
 
   /** The add/edit dialog: null = closed; editing = null for a new person. */
   let form = $state<PersonFields | null>(null);
   let editing = $state<Person | null>(null);
-  let formError = $state<string | null>(null);
 
   /** The sign-in dialog. */
   let signInFor = $state<Person | null>(null);
   let signInName = $state('');
   let password = $state('');
   let passwordAgain = $state('');
-  let signInError = $state<string | null>(null);
 
   let removeTarget = $state<Person | null>(null);
   let removeSignInTarget = $state<Person | null>(null);
-
-  async function load() {
-    loading = true;
-    error = null;
-    try {
-      const data = (await listPeople());
-      people = data.people;
-      roles = data.roles;
-    } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to load the family list.';
-    } finally {
-      loading = false;
-    }
-  }
 
   function roleName(roleId: string): string {
     return roles.find((r) => r.role_id === roleId)?.name ?? roleId;
@@ -68,7 +60,7 @@ export function createPeopleController(notify: Notify) {
   function openAdd() {
     editing = null;
     form = { ...EMPTY };
-    formError = null;
+    saveFormAction.clear();
   }
 
   function openEdit(person: Person) {
@@ -79,7 +71,7 @@ export function createPeopleController(notify: Notify) {
       calls_them: person.calls_them,
       whatsapp: shownNumber(person.whatsapp)
     };
-    formError = null;
+    saveFormAction.clear();
   }
 
   function closeForm() {
@@ -90,24 +82,20 @@ export function createPeopleController(notify: Notify) {
 
   async function saveForm() {
     if (!form) return;
-    busy = true;
-    formError = null;
-    try {
-      if (editing) {
-        await updatePerson(editing.person_id, form);
-        notify('success', `Saved ${form.name}.`);
+    const fields = form;
+    const person = editing;
+    await saveFormAction.run(async () => {
+      if (person) {
+        await updatePerson(person.person_id, fields);
+        notify('success', `Saved ${fields.name}.`);
       } else {
-        await addPerson(form);
-        notify('success', `Added ${form.name}.`);
+        await addPerson(fields);
+        notify('success', `Added ${fields.name}.`);
       }
       form = null;
       editing = null;
-      await load();
-    } catch (err) {
-      formError = err instanceof Error ? err.message : 'Saving failed.';
-    } finally {
-      busy = false;
-    }
+      await list.reload();
+    });
   }
 
   function openSignIn(person: Person) {
@@ -115,7 +103,7 @@ export function createPeopleController(notify: Notify) {
     signInName = person.sign_in ?? person.name.split(' ')[0].toLowerCase();
     password = '';
     passwordAgain = '';
-    signInError = null;
+    saveSignInAction.clear();
   }
 
   function closeSignIn() {
@@ -125,21 +113,16 @@ export function createPeopleController(notify: Notify) {
 
   async function saveSignIn() {
     if (!signInFor) return;
-    if (password !== passwordAgain) {
-      signInError = "The two passwords aren't the same.";
-      return;
-    }
-    busy = true;
-    signInError = null;
-    try {
-      await setSignIn(signInFor.person_id, signInName.trim(), password);
-      notify('success', `${signInFor.name} signs in as ${signInName.trim()}.`);
+    const person = signInFor;
+    const same = password === passwordAgain;
+    await saveSignInAction.run(async () => {
+      if (!same) throw new Error("The two passwords aren't the same.");
+      await setSignIn(person.person_id, signInName.trim(), password);
+      notify('success', `${person.name} signs in as ${signInName.trim()}.`);
       signInFor = null;
-      await load();
-    } catch (err) {
-      signInError = err instanceof Error ? err.message : 'Saving the sign-in failed.';
-    } finally {
-      busy = false;
+      await list.reload();
+    });
+    if (same) {
       password = '';
       passwordAgain = '';
     }
@@ -147,32 +130,26 @@ export function createPeopleController(notify: Notify) {
 
   async function submitRemoveSignIn() {
     if (!removeSignInTarget) return;
-    busy = true;
-    try {
-      await removeSignIn(removeSignInTarget.person_id);
-      notify('success', `${removeSignInTarget.name} no longer signs in to the admin.`);
+    const person = removeSignInTarget;
+    await removeSignInAction.run(async () => {
+      await removeSignIn(person.person_id);
+      notify('success', `${person.name} no longer signs in to the admin.`);
       removeSignInTarget = null;
-      await load();
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Removing the sign-in failed.');
-    } finally {
-      busy = false;
-    }
+      await list.reload();
+    });
+    if (removeSignInAction.error) notify('error', removeSignInAction.error);
   }
 
   async function submitRemove() {
     if (!removeTarget) return;
-    busy = true;
-    try {
-      await removePerson(removeTarget.person_id);
-      notify('success', `Removed ${removeTarget.name}.`);
+    const person = removeTarget;
+    await removeAction.run(async () => {
+      await removePerson(person.person_id);
+      notify('success', `Removed ${person.name}.`);
       removeTarget = null;
-      await load();
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Remove failed.');
-    } finally {
-      busy = false;
-    }
+      await list.reload();
+    });
+    if (removeAction.error) notify('error', removeAction.error);
   }
 
   return {
@@ -183,13 +160,13 @@ export function createPeopleController(notify: Notify) {
       return roles;
     },
     get loading() {
-      return loading;
+      return list.data === null && !list.error;
     },
     get busy() {
       return busy;
     },
     get error() {
-      return error;
+      return list.error || null;
     },
     get form() {
       return form;
@@ -198,7 +175,7 @@ export function createPeopleController(notify: Notify) {
       return editing;
     },
     get formError() {
-      return formError;
+      return saveFormAction.error || null;
     },
     get signInFor() {
       return signInFor;
@@ -222,7 +199,7 @@ export function createPeopleController(notify: Notify) {
       passwordAgain = value;
     },
     get signInError() {
-      return signInError;
+      return saveSignInAction.error || null;
     },
     get removeTarget() {
       return removeTarget;
@@ -236,7 +213,7 @@ export function createPeopleController(notify: Notify) {
     set removeSignInTarget(value: Person | null) {
       if (!busy) removeSignInTarget = value;
     },
-    load,
+    load: list.reload,
     roleName,
     openAdd,
     openEdit,

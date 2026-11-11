@@ -1,3 +1,4 @@
+import { errorMessage } from '$kit/api/client';
 import { sendChatMessage } from '$lib/api/chat-channels';
 import type { ToastKind } from '$kit/ui/toast.svelte';
 import { pickRecordingMimeType } from '$lib/features/chat-channels/shared/chat-channel-media';
@@ -60,7 +61,7 @@ export function createChatComposer(opts: ChatComposerOptions) {
       engine.markAgentReplyPending(sentAt, requestVoiceReply);
       notify('success', 'Message sent.');
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Send failed.');
+      notify('error', errorMessage(err));
     } finally {
       composingBusy = false;
     }
@@ -90,7 +91,7 @@ export function createChatComposer(opts: ChatComposerOptions) {
     } catch (err) {
       recordingStartedAt = null;
       mediaRecorderObj = null;
-      notify('error', err instanceof Error ? err.message : 'Could not start microphone.');
+      notify('error', errorMessage(err));
     } finally {
       composingBusy = false;
     }
@@ -146,7 +147,7 @@ export function createChatComposer(opts: ChatComposerOptions) {
       engine.markAgentReplyPending(sentAt, requestVoiceReply);
       notify('success', 'Voice message sent.');
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Send failed.');
+      notify('error', errorMessage(err));
     } finally {
       composingBusy = false;
     }

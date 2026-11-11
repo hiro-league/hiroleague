@@ -7,7 +7,10 @@
    * right. A profile whose designed voice Google no longer has says so. Designing a voice happens inside
    * the Voice section (My voices), as in HomeHiro. Saved through the preferences API (`voice.profiles`).
    */
+  import { untrack } from 'svelte';
   import type { CatalogProviderRow } from '$lib/api/catalog';
+  import { Action } from '$kit/state/action.svelte';
+  import { Draft } from '$kit/state/draft.svelte';
   import { Copy, Trash2, TriangleAlert } from '@lucide/svelte';
   import Section from '$kit/ui/section.svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
@@ -54,13 +57,27 @@
     style: '',
     speed: 1
   };
-  let d = $state<VoiceProfileFields>({ ...NEW });
-  let base = $state('');
+  // The profile being edited. It asks nothing on leaving the page (the dialog has no unsaved-changes question).
+  const form = new Draft<VoiceProfileFields>(
+    { ...NEW },
+    {
+      guard: false,
+      save: async (fields) => {
+        const id = await ctrl.save(editingId, { ...fields, speed: fields.model.startsWith('openai:') ? fields.speed : 1 });
+        open = false;
+        onsaved?.(id);
+      }
+    }
+  );
+  const d = $derived(form.value);
+  // Counts the times the dialog opened: the voice picker starts afresh each time.
+  let opened = $state(0);
   // The saved profile being edited; null for a new one (or after Duplicate, which saves a new profile).
   let editingId = $state<string | null>(null);
-  let saving = $state(false);
+  const removing = new Action();
   let confirmDelete = $state(false);
-  let error = $state<string | null>(null);
+  const saving = $derived(form.action.busy || removing.busy);
+  const error = $derived(form.action.error || removing.error || null);
 
   // A fresh draft each time the dialog opens.
   $effect(() => {
@@ -70,14 +87,17 @@
       : copyOf
         ? { ...fieldsOf(copyOf), label: `${copyOf.label} (copy)` }
         : { ...NEW };
-    // Built from `next`, not by reading `d` back: reading the draft here made the effect re-run on every edit.
-    d = next;
-    base = JSON.stringify(next);
-    editingId = profile?.id ?? null;
-    error = null;
-    confirmDelete = false;
+    // Built from `next`, not by reading the draft back: reading it here made the effect re-run on every edit.
+    untrack(() => {
+      form.load(next, true);
+      opened += 1;
+      editingId = profile?.id ?? null;
+      form.action.clear();
+      removing.clear();
+      confirmDelete = false;
+    });
   });
-  const dirty = $derived(JSON.stringify(d) !== base);
+  const dirty = $derived(form.dirty);
   const isOpenAi = $derived(d.model.startsWith('openai:'));
   const openAiVoices = $derived(ctrl.catalog?.openai_voices ?? []);
   const current = $derived(ctrl.profiles.find((p) => p.id === editingId) ?? null);
@@ -89,28 +109,11 @@
     current ? [...(ctrl.hiroProfile === current.id ? ["Hiro's voice"] : []), ...current.used_by.map(ctrl.useLabel)] : []
   );
 
-  async function save() {
-    saving = true;
-    const res = await ctrl.save(editingId, { ...d, speed: isOpenAi ? d.speed : 1 });
-    saving = false;
-    if ('error' in res) {
-      error = res.error;
-      return;
-    }
-    open = false;
-    onsaved?.(res.id);
-  }
-
   async function remove() {
     if (!current) return;
-    saving = true;
-    const err = await ctrl.remove(current.id);
-    saving = false;
-    if (err) {
-      error = err;
-      return;
-    }
-    open = false;
+    const id = current.id;
+    await removing.run(() => ctrl.remove(id));
+    if (!removing.error) open = false;
   }
 </script>
 
@@ -180,7 +183,7 @@
               }}
             />
           {:else}
-            {#key base}
+            {#key opened}
               <GeminiVoicePicker
                 value={d.voice}
                 designLanguages={ctrl.catalog?.design_languages ?? []}
@@ -236,12 +239,12 @@
           disabled={!current}
           onclick={() => {
             // Duplicate: the same settings as a new profile (saved under a new name).
-            d = { ...d, label: `${d.label} (copy)` };
+            form.value.label = `${d.label} (copy)`;
             editingId = null;
           }}><Copy size={13} /> Duplicate</Button
         >
         <Button variant="outline" onclick={() => (open = false)}>Cancel</Button>
-        <Button onclick={save} disabled={saving || !d.label.trim() || !d.voice.trim() || (!!current && !dirty)}>Save</Button>
+        <Button onclick={form.save} disabled={saving || !d.label.trim() || !d.voice.trim() || (!!current && !dirty)}>Save</Button>
       </span>
     </Dialog.Footer>
   </Dialog.Content>

@@ -15,6 +15,7 @@
  * state without each maintaining its own poller.
  */
 
+import { errorMessage } from '$kit/api/client';
 import { getRuntimeStatus, type RuntimeStatus } from '$lib/api/runtime';
 import { registerServerStaleHandler } from './server-stale-signal';
 
@@ -52,7 +53,7 @@ function createServerReadinessStore() {
         backoffMs = POLL_INTERVAL_MS;
       }
     } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err);
+      lastError = errorMessage(err);
       ready = false;
       backoffMs = Math.min(backoffMs * 2, POLL_INTERVAL_MAX_MS);
     }

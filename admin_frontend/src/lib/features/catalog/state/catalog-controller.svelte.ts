@@ -17,7 +17,8 @@ import { useTableSort } from '$lib/components/page/table/use-table-sort.svelte';
 import { asTableSortDirection } from '$lib/components/page/table/table-sort-utils';
 import { createCatalogPreferences } from '$lib/preferences/catalog-preferences.svelte';
 import type { CatalogTabPreference } from '$lib/preferences/keys';
-import { createMutation, createResource } from '$lib/state/create-resource.svelte';
+import { createResource } from '$lib/state/create-resource.svelte';
+import { Action } from '$kit/state/action.svelte';
 import type { Notify } from '$kit/ui/toast.svelte';
 import {
   AVAILABILITY_FILTER_IDS,
@@ -153,14 +154,14 @@ export function createCatalogController(notify: Notify) {
     errorPrefix: 'Failed to load catalog models.'
   });
 
-  const catalogReloadMutation = createMutation(() => reloadCatalogAndRefetch([]), {
-    notify,
-    successMsg: (result) => catalogReloadSuccessMessage(result.reload),
-    errorPrefix: 'Catalog reload failed.',
-    onDone: async (result) => {
-      providersResource.replace(result.providers);
+  const catalogReload = new Action();
+
+  async function reloadBundledCatalog() {
+    const result = await catalogReload.run(async () => {
+      const done = await reloadCatalogAndRefetch([]);
+      providersResource.replace(done.providers);
       const indexRows: CatalogModelRow[] = [];
-      for (const list of Object.values(result.modelsByKind)) {
+      for (const list of Object.values(done.modelsByKind)) {
         if (list) indexRows.push(...list);
       }
       catalogModelDisplayNames = catalogModelDisplayNameMap(indexRows);
@@ -169,8 +170,14 @@ export function createCatalogController(notify: Notify) {
       if (prefs.activeTab === 'models') {
         await modelsResource.load({ silent: true });
       }
+      return done;
+    });
+    if (catalogReload.error) notify('error', catalogReload.error);
+    else if (result) {
+      const message = catalogReloadSuccessMessage(result.reload);
+      if (message) notify('success', message);
     }
-  });
+  }
 
   const providerLabels = $derived(
     providersResource.data.reduce<Record<string, string>>((acc, provider) => {
@@ -420,7 +427,7 @@ export function createCatalogController(notify: Notify) {
       return modelsResource.error;
     },
     get catalogReloadBusy() {
-      return catalogReloadMutation.busy;
+      return catalogReload.busy;
     },
     get providerLabels() {
       return providerLabels;
@@ -467,7 +474,7 @@ export function createCatalogController(notify: Notify) {
     toggleHostingFilter,
     toggleAvailabilityFilter,
     loadModels: () => modelsResource.load(),
-    reloadBundledCatalog: () => catalogReloadMutation.run(),
+    reloadBundledCatalog,
     initialize
   };
 }

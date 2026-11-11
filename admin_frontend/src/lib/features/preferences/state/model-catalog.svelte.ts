@@ -6,6 +6,7 @@
  * The embedding/rerank picker options merge cloud catalog models with local-source models; the live
  * DOWNLOAD status is owned separately by `createLocalModelDownloads`.
  */
+import { errorMessage } from '$kit/api/client';
 import {
   listCatalogModels,
   listCatalogProviders,
@@ -98,7 +99,7 @@ export function createModelCatalog(notify: Notify) {
       await activeProvidersStore.load({ silent: true });
       notify('success', catalogReloadSuccessMessage(result.reload));
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Catalog reload failed.');
+      notify('error', errorMessage(err));
     } finally {
       reloadBusy = false;
     }

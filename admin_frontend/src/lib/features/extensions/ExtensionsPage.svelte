@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import PageHeader from '$kit/ui/page-header.svelte';
   import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
   import { toast } from '$kit/ui/toast.svelte';
@@ -10,10 +9,6 @@
   import ListenAddressCard from './view/ListenAddressCard.svelte';
 
   const ctrl = createExtensionsController(toast.show);
-
-  onMount(() => {
-    void ctrl.load();
-  });
 </script>
 
 <section class={ADMIN_PAGE_MAX_W}>

@@ -10,7 +10,8 @@ import {
   type AddableProviderRow,
   type ProviderCheckResult
 } from '$lib/api/catalog';
-import { createMutation, createResource } from '$lib/state/create-resource.svelte';
+import { createResource } from '$lib/state/create-resource.svelte';
+import { Action } from '$kit/state/action.svelte';
 import type { ToastKind } from '$kit/ui/toast.svelte';
 
 type Notify = (kind: ToastKind, message: string) => void;
@@ -23,12 +24,13 @@ export function createActiveProvidersStore(notify: Notify = () => {}) {
     { initial: [] as ActiveProviderRow[], errorPrefix: 'Failed to load active providers.' }
   );
 
-  // True only while the (non-mutation) "list addable providers" fetch runs; the credential
-  // mutations below each own their `.busy`. The exposed `busy` getter is the union of both.
-  let openingDialog = $state(false);
+  // The "list addable providers" fetch (opening the add dialog) and the credential mutations below
+  // each own their `busy`; the exposed `busy` getter is the union of both.
+  const opening = new Action();
+  const work = new Action();
+  const test = new Action();
   let resolved = $state(false);
   let addableProviders = $state<AddableProviderRow[]>([]);
-  let addableProvidersLoading = $state(false);
   let dialog = $state<ActiveProviderDialog>(null);
   let selectedProvider = $state<ActiveProviderRow | null>(null);
   let addForm = $state({
@@ -45,7 +47,6 @@ export function createActiveProvidersStore(notify: Notify = () => {}) {
   }
 
   // Dialog "Test connection" state (probe of the candidate endpoint before saving).
-  let checking = $state(false);
   let checkResult = $state<ProviderCheckResult | null>(null);
   // Live reachability per configured local provider, keyed by provider_id (probed on load).
   type ProviderStatus = { checking: boolean; result: ProviderCheckResult | null };
@@ -97,71 +98,7 @@ export function createActiveProvidersStore(notify: Notify = () => {}) {
     probeConfiguredLocal();
   }
 
-  // ── Credential mutations ────────────────────────────────────────────────────
-  // Hoisted so each owns its busy/try-catch/notify envelope, instead of allocating a throwaway
-  // mutation per click. successMsg is a thunk because it reads the current form/selection at run
-  // time; the add path splits by auth_method so each branch keeps a correct static errorPrefix.
-  async function afterAddMutate() {
-    dialog = null;
-    await load({ silent: true });
-  }
-
-  const setEndpointMutation = createMutation(
-    () => setLocalEndpoint(addForm.provider_id, addForm.base_url),
-    {
-      notify,
-      successMsg: () => `Set endpoint for ${addForm.provider_id}.`,
-      errorPrefix: 'Failed to set endpoint.',
-      onDone: afterAddMutate
-    }
-  );
-
-  const addKeyMutation = createMutation(
-    () => addProviderApiKey(addForm.provider_id, addForm.api_key, addForm.account_id),
-    {
-      notify,
-      successMsg: () => `Stored API key for ${addForm.provider_id}.`,
-      errorPrefix: 'Failed to store API key.',
-      onDone: afterAddMutate
-    }
-  );
-
-  const scanMutation = createMutation(async () => (await scanProviderEnvironment()), {
-    notify,
-    successMsg: (count) =>
-      count > 0
-        ? `Imported ${count} provider key${count === 1 ? '' : 's'} from the environment.`
-        : undefined,
-    errorPrefix: 'Environment scan failed.',
-    onDone: async (count) => {
-      if (count === 0) notify('info', 'No new keys imported.');
-      await load({ silent: true });
-    }
-  });
-
-  const removeMutation = createMutation(
-    async () => (await removeProvider(selectedProvider!.provider_id)),
-    {
-      notify,
-      successMsg: (removed) =>
-        removed ? `Removed credentials for ${selectedProvider!.provider_id}.` : undefined,
-      errorPrefix: 'Remove provider failed.',
-      onDone: async (removed) => {
-        if (!removed) notify('warning', 'Provider was not configured.');
-        dialog = null;
-        selectedProvider = null;
-        await load({ silent: true });
-      }
-    }
-  );
-
-  const busy = $derived(
-    openingDialog ||
-      setEndpointMutation.busy ||
-      addKeyMutation.busy ||
-      scanMutation.busy ||
-      removeMutation.busy
-  );
+  const busy = $derived(opening.busy || work.busy);
 
   function closeDialog() {
     if (busy) return;
@@ -170,13 +107,10 @@ export function createActiveProvidersStore(notify: Notify = () => {}) {
   }
 
   async function openAddDialog(preferredProviderId?: string) {
-    openingDialog = true;
-    addableProvidersLoading = true;
-    try {
+    await opening.run(async () => {
       const payload = await listAddableProviders();
       addableProviders = payload;
       checkResult = null;
-      checking = false;
       // Per-row "Add" passes the clicked provider so the dialog opens preselected to it;
       // the generic add button falls back to the first addable provider.
       const chosen =
@@ -193,18 +127,22 @@ export function createActiveProvidersStore(notify: Notify = () => {}) {
         return;
       }
       dialog = 'add';
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Failed to list addable providers.');
-    } finally {
-      openingDialog = false;
-      addableProvidersLoading = false;
-    }
+    });
+    if (opening.error) notify('error', opening.error);
   }
 
   async function submitAddProvider() {
     const selected = addableProviderById(addForm.provider_id);
+    const providerId = addForm.provider_id;
     const isLocal = selected?.auth_method === 'local_endpoint';
-    await (isLocal ? setEndpointMutation : addKeyMutation).run();
+    await work.run(async () => {
+      if (isLocal) await setLocalEndpoint(providerId, addForm.base_url);
+      else await addProviderApiKey(providerId, addForm.api_key, addForm.account_id);
+      dialog = null;
+      await load({ silent: true });
+    });
+    if (work.error) notify('error', work.error);
+    else notify('success', isLocal ? `Set endpoint for ${providerId}.` : `Stored API key for ${providerId}.`);
   }
 
   // Discard a stale dialog test result when the provider or endpoint changes.
@@ -215,16 +153,11 @@ export function createActiveProvidersStore(notify: Notify = () => {}) {
   async function testConnection() {
     const providerId = addForm.provider_id;
     if (!providerId) return;
-    checking = true;
     checkResult = null;
-    try {
-      const payload = await checkProviderEndpoint(providerId, addForm.base_url);
-      checkResult = payload;
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Connection test failed.');
-    } finally {
-      checking = false;
-    }
+    await test.run(async () => {
+      checkResult = await checkProviderEndpoint(providerId, addForm.base_url);
+    });
+    if (test.error) notify('error', test.error);
   }
 
   async function probeProvider(providerId: string) {
@@ -249,7 +182,14 @@ export function createActiveProvidersStore(notify: Notify = () => {}) {
   }
 
   async function scanEnvironment() {
-    await scanMutation.run();
+    const count = await work.run(async () => {
+      const imported = await scanProviderEnvironment();
+      await load({ silent: true });
+      return imported;
+    });
+    if (work.error) notify('error', work.error);
+    else if (count === 0) notify('info', 'No new keys imported.');
+    else if (count) notify('success', `Imported ${count} provider key${count === 1 ? '' : 's'} from the environment.`);
   }
 
   function openRemoveDialog(provider: ActiveProviderRow) {
@@ -259,7 +199,17 @@ export function createActiveProvidersStore(notify: Notify = () => {}) {
 
   async function submitRemoveProvider() {
     if (!selectedProvider) return;
-    await removeMutation.run();
+    const { provider_id } = selectedProvider;
+    const removed = await work.run(async () => {
+      const done = await removeProvider(provider_id);
+      dialog = null;
+      selectedProvider = null;
+      await load({ silent: true });
+      return done;
+    });
+    if (work.error) notify('error', work.error);
+    else if (removed) notify('success', `Removed credentials for ${provider_id}.`);
+    else notify('warning', 'Provider was not configured.');
   }
 
   return {
@@ -306,7 +256,7 @@ export function createActiveProvidersStore(notify: Notify = () => {}) {
       return addableProviders;
     },
     get addableProvidersLoading(): boolean {
-      return addableProvidersLoading;
+      return opening.busy;
     },
     get dialog(): ActiveProviderDialog {
       return dialog;
@@ -326,7 +276,7 @@ export function createActiveProvidersStore(notify: Notify = () => {}) {
       addForm = value;
     },
     get checking(): boolean {
-      return checking;
+      return test.busy;
     },
     get checkResult(): ProviderCheckResult | null {
       return checkResult;

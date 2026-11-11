@@ -26,8 +26,7 @@
     resolved = null,
     resolvedError = null,
     dirty = false,
-    onReloadProfiles,
-    markDirty
+    onReloadProfiles
   }: {
     variant: 'ai' | 'voice';
     form: CharacterForm;
@@ -38,7 +37,6 @@
     resolvedError?: string | null;
     dirty?: boolean;
     onReloadProfiles: () => void;
-    markDirty: () => void;
   } = $props();
 
   const isAi = $derived(variant === 'ai');
@@ -46,7 +44,6 @@
   function setIds(next: string[]) {
     if (isAi) form.ai_profiles = next;
     else form.voice_profiles = next;
-    markDirty();
   }
 </script>
 

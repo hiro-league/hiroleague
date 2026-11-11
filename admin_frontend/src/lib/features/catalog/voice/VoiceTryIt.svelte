@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorMessage } from '$kit/api/client';
   /**
    * Try it, beside the voice profile editor (Phase 7b), as HomeHiro's "Speak with a voice" did: speak a
    * text with the profile as it is in the editor (saved or not) or with another saved profile; Gemini's
@@ -86,7 +87,7 @@
     try {
       res = picked ? await tryVoice({ text: said, profile_id: picked.id }) : await tryVoice({ text: said, draft: editing.fields });
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Nothing was spoken.';
+      error = errorMessage(err);
       return;
     } finally {
       generating = false;
@@ -102,7 +103,7 @@
       const res = await sendVoiceClip(t.clip.id, recipient.person_id);
       t.note = `Sent to ${res.name ?? recipient.name} as a voice note.`;
     } catch (err) {
-      t.note = `Not sent: ${err instanceof Error ? err.message : 'unknown error'}`;
+      t.note = `Not sent: ${errorMessage(err)}`;
     } finally {
       t.sending = false;
     }

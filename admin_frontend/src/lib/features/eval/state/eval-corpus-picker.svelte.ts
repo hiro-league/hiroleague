@@ -5,6 +5,8 @@
  * owns none of the run options or saved-results surface; those siblings are reached through the
  * injected `EvalCorpusPickerDeps` callbacks (`onCorpusResolved` / `reloadResults`).
  */
+import { errorMessage } from '$kit/api/client';
+import { Action } from '$kit/state/action.svelte';
 import { pickKnowledgeFolder } from '$lib/api/knowledge';
 import {
   getCorpusIngestExtraction,
@@ -43,7 +45,7 @@ export function createEvalCorpusPicker(deps: EvalCorpusPickerDeps) {
   let logDir = $state<string>('');
   let corpusesLoading = $state(false);
   let corpusesError = $state<string | null>(null);
-  let pickingFolder = $state(false);
+  const folderPick = new Action();
   let selectedCorpusId = $state<string>('');
 
   // Question bank of the chosen corpus.
@@ -102,7 +104,7 @@ export function createEvalCorpusPicker(deps: EvalCorpusPickerDeps) {
       deps.onCorpusResolved();
       await loadQuestions();
     } catch (err) {
-      corpusesError = err instanceof Error ? err.message : 'Failed to scan corpuses.';
+      corpusesError = errorMessage(err);
       corpuses = [];
       selectedCorpusId = '';
       questions = [];
@@ -112,19 +114,15 @@ export function createEvalCorpusPicker(deps: EvalCorpusPickerDeps) {
   }
 
   async function browseFolder() {
-    pickingFolder = true;
     deps.setError(null);
-    try {
+    await folderPick.run(async () => {
       const res = await pickKnowledgeFolder(folder.trim() || undefined);
       if (res.folder) {
         setFolder(res.folder);
         await scanCorpuses();
       }
-    } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Folder picker failed.');
-    } finally {
-      pickingFolder = false;
-    }
+    });
+    if (folderPick.error) deps.setError(folderPick.error);
   }
 
   function setFolder(v: string) {
@@ -154,7 +152,7 @@ export function createEvalCorpusPicker(deps: EvalCorpusPickerDeps) {
         last_timestamp: res.last_timestamp
       };
     } catch (err) {
-      corpusError = err instanceof Error ? err.message : 'Failed to load corpus episodes.';
+      corpusError = errorMessage(err);
     } finally {
       corpusLoading = false;
     }
@@ -204,7 +202,7 @@ export function createEvalCorpusPicker(deps: EvalCorpusPickerDeps) {
       const res = await listEvalQuestions(corpus.questions_path);
       questions = res.questions ?? [];
     } catch (err) {
-      questionsError = err instanceof Error ? err.message : 'Failed to load questions.';
+      questionsError = errorMessage(err);
       questions = [];
     } finally {
       questionsLoading = false;
@@ -259,7 +257,7 @@ export function createEvalCorpusPicker(deps: EvalCorpusPickerDeps) {
     browseFolder,
     scanCorpuses,
     get pickingFolder() {
-      return pickingFolder;
+      return folderPick.busy;
     },
     get corpuses() {
       return corpuses;

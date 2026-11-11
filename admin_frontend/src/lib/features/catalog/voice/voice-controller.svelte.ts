@@ -11,6 +11,7 @@
  */
 import { listCatalogModels, type CatalogModelRow } from '$lib/api/catalog';
 import { listPeople, type Person } from '$lib/api/people';
+import { errorMessage } from '$kit/api/client';
 import { getPreferences, patchPreferences } from '$lib/api/preferences';
 import {
   getVoiceCatalog,
@@ -68,7 +69,7 @@ export class VoiceController {
     let profilesError: string | null = null;
     const [profiles, catalog, uses, people, prefs, speech] = await Promise.all([
       listVoiceProfiles().catch((err) => {
-        profilesError = err instanceof Error ? err.message : 'Voice profiles could not be read.';
+        profilesError = errorMessage(err);
         return null;
       }),
       getVoiceCatalog().catch(() => null),
@@ -91,54 +92,38 @@ export class VoiceController {
     if (people) this.people = people.people.filter((p) => !!p.whatsapp);
   };
 
-  /** Save a profile (new: `id` null → an id from its name). The answer is the error, or null. */
-  save = async (id: string | null, fields: VoiceProfileFields): Promise<{ id: string } | { error: string }> => {
+  /** Save a profile (new: `id` null → an id from its name). Resolves with its id; a refused save throws. */
+  save = async (id: string | null, fields: VoiceProfileFields): Promise<string> => {
     const pid = id ?? voiceProfileId(fields.label, new Set(this.profiles.map((p) => p.id)));
-    // Step 1d: a failed request throws (answers are the data itself; there is no {ok, error} to test).
-    try {
-      await patchPreferences({ [`voice.profiles.${pid}`]: fields });
-    } catch (err) {
-      return { error: err instanceof Error ? err.message : 'Not saved.' };
-    }
+    await patchPreferences({ [`voice.profiles.${pid}`]: fields });
     await this.load();
-    return { id: pid };
+    return pid;
   };
 
-  /** Delete a profile: the whole map without it, and the uses that pointed at it cleared. */
-  remove = async (id: string): Promise<string | null> => {
+  /** Delete a profile: the whole map without it, and the uses that pointed at it cleared. A refused delete throws. */
+  remove = async (id: string): Promise<void> => {
     const rest = Object.fromEntries(this.profiles.filter((p) => p.id !== id).map((p) => [p.id, fieldsOf(p)]));
     const uses = Object.fromEntries(
       this.uses.extensions.flatMap((e) => e.uses.map((u) => [u.key, u.profile_id === id ? null : u.profile_id]))
     );
     // Phase 7b step 5: Hiro's voice can't name a missing profile; it goes to none with it.
     const hiro = this.hiroProfile === id ? { 'voice.hiro_profile': null } : {};
-    try {
-      await patchPreferences({ 'voice.profiles': rest, 'voice.uses': uses, ...hiro });
-    } catch (err) {
-      return err instanceof Error ? err.message : 'Not deleted.';
-    }
+    await patchPreferences({ 'voice.profiles': rest, 'voice.uses': uses, ...hiro });
     await this.load();
-    return null;
   };
 
   /** Phase 7b step 5: Hiro's own voice (`voice.hiro_profile`); null = Hiro doesn't speak its replies.
-   *  The answer is the error, or null. */
-  setHiroProfile = async (profileId: string | null): Promise<string | null> => {
-    // A refused save throws (step 1d), and must not look saved.
-    try {
-      await patchPreferences({ 'voice.hiro_profile': profileId });
-    } catch (err) {
-      return err instanceof Error ? err.message : 'Not saved.';
-    }
+   *  A refused save throws, and must not look saved. */
+  setHiroProfile = async (profileId: string | null): Promise<void> => {
+    await patchPreferences({ 'voice.hiro_profile': profileId });
     this.hiroProfile = profileId;
-    return null;
   };
 
   setUse = async (key: string, profileId: string | null): Promise<string | null> => {
     try {
       await setVoiceUse(key, profileId);
     } catch (err) {
-      return err instanceof Error ? err.message : 'Not saved.';
+      return errorMessage(err);
     }
     await this.load();
     return null;

@@ -8,8 +8,6 @@
   import ChatChannelEditorModal from '$lib/features/chat-channels/edit/ChatChannelEditorModal.svelte';
   import ChatChannelsMessagesPanel from '$lib/features/chat-channels/messages/ChatChannelsMessagesPanel.svelte';
   import ChatChannelDeleteModal from '$lib/features/chat-channels/modals/ChatChannelDeleteModal.svelte';
-  import { Button } from '$kit/components/ui/button/index.js';
-  import * as Dialog from '$kit/components/ui/dialog/index.js';
   import { getChatEngine } from '$lib/features/chat-channels/state/chat-engine-singleton.svelte';
   import {
     CHAT_CHANNELS_PANEL_IDS,
@@ -126,33 +124,6 @@
   onCancelExplicit={() => void ctrl.cancelChannelFormExplicit()}
   onSubmit={() => void ctrl.submitForm()}
 />
-
-<Dialog.Root
-  open={ctrl.unsaved.unsavedModalOpen}
-  onOpenChange={(next) => {
-    if (!next) ctrl.unsaved.closeUnsavedModalContinueEditing();
-  }}
->
-  <Dialog.Content overlayClass="z-[60]" class="z-[60] sm:max-w-md">
-    <Dialog.Header>
-      <Dialog.Title>Discard changes?</Dialog.Title>
-      <Dialog.Description>
-        You have unsaved edits for this conversation channel.
-      </Dialog.Description>
-    </Dialog.Header>
-    <p class="font-sans text-sm text-muted-foreground">
-      Discard them and close the editor, or keep editing.
-    </p>
-    <Dialog.Footer>
-      <Button variant="outline" onclick={ctrl.unsaved.closeUnsavedModalContinueEditing}>
-        Keep editing
-      </Button>
-      <Button variant="destructive" onclick={ctrl.unsaved.confirmUnsavedModalDiscard}>
-        Discard
-      </Button>
-    </Dialog.Footer>
-  </Dialog.Content>
-</Dialog.Root>
 
 <ChatChannelDeleteModal
   target={ctrl.deleteTarget}

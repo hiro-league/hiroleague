@@ -3,6 +3,7 @@
  * grouped by and measure, and a filter per dimension. Loads the core's hourly rows (`/ai/usage`) for
  * the days shown and the same span before (the tiles compare with it).
  */
+import { errorMessage } from '$kit/api/client';
 import { fetchAiUsage } from '$lib/api/ai';
 import {
   applyFilters,
@@ -79,7 +80,7 @@ export class AiUsagePage {
     try {
       rows = (await fetchAiUsage(from, to)).rows;
     } catch (err) {
-      failure = err instanceof Error ? err.message : 'AI usage could not be read.';
+      failure = errorMessage(err);
     }
     // A later range picked while this one loaded wins.
     if (this.loadedFor !== key) return;

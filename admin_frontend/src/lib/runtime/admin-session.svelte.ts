@@ -5,6 +5,7 @@
  * any API call answered 401 later (session ended, password changed elsewhere) brings
  * the sign-in page back through `sign-in-signal`.
  */
+import { errorMessage } from '$kit/api/client';
 import {
   getAuthMe,
   signIn as apiSignIn,
@@ -39,7 +40,7 @@ function createAdminSession() {
       error = null;
     } catch (err) {
       state = 'unreachable';
-      error = err instanceof Error ? err.message : 'The server did not answer.';
+      error = errorMessage(err);
     }
   }
 
@@ -50,7 +51,7 @@ function createAdminSession() {
       await check();
       return null;
     } catch (err) {
-      return err instanceof Error ? err.message : 'Sign-in failed.';
+      return errorMessage(err);
     }
   }
 

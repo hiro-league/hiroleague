@@ -1,3 +1,4 @@
+import { errorMessage } from '$kit/api/client';
 import {
   createKnowledgeCategory,
   createKnowledgeTag,
@@ -33,7 +34,7 @@ export function createKnowledgeOptionsModel(deps: { setError: (message: string |
       users = payload.users;
       rewriteDefaultOn = payload.rewrite_default_on ?? false;
     } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Could not load knowledge options.');
+      deps.setError(errorMessage(err));
     }
   }
 
@@ -48,7 +49,7 @@ export function createKnowledgeOptionsModel(deps: { setError: (message: string |
       );
       return payload;
     } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Could not create category.');
+      deps.setError(errorMessage(err));
       throw err;
     } finally {
       creatingCategory = false;
@@ -68,7 +69,7 @@ export function createKnowledgeOptionsModel(deps: { setError: (message: string |
       );
       return payload;
     } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Could not create tag.');
+      deps.setError(errorMessage(err));
       throw err;
     } finally {
       creatingTag = false;

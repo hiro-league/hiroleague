@@ -9,6 +9,7 @@
    * ?signin_error= says why the last try didn't work.
    */
   import { base } from '$app/paths';
+  import { Action } from '$kit/state/action.svelte';
   import { page } from '$app/state';
   import { House, LogIn, TriangleAlert } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
@@ -20,7 +21,7 @@
   const uid = $props.id();
   let name = $state('');
   let password = $state('');
-  let busy = $state(false);
+  const signing = new Action();
   let error = $state<string | null>(null);
 
   const forApp = $derived(page.url.searchParams.get('for'));
@@ -32,9 +33,8 @@
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     if (!name.trim() || !password) return;
-    busy = true;
-    error = await adminSession.signIn(name.trim(), password);
-    busy = false;
+    const refused = await signing.run(() => adminSession.signIn(name.trim(), password));
+    error = refused || signing.error || null;
     if (error) {
       password = '';
     } else if (forApp) {
@@ -96,7 +96,7 @@
         {#if error}
           <p class="text-sm text-destructive" role="alert">{error}</p>
         {/if}
-        <Button type="submit" disabled={busy || !name.trim() || !password}>
+        <Button type="submit" disabled={signing.busy || !name.trim() || !password}>
           <LogIn size={15} /> Sign in
         </Button>
       </form>

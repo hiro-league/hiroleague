@@ -13,7 +13,9 @@ import {
   updateWorkspace,
   type WorkspaceRow
 } from '$lib/api/server';
-import { createMutation, createResource } from '$lib/state/create-resource.svelte';
+import { createResource } from '$lib/state/create-resource.svelte';
+import { Action } from '$kit/state/action.svelte';
+import { errorMessage } from '$kit/api/client';
 import type { Notify } from '$kit/ui/toast.svelte';
 
 type WorkspaceListSnapshot = {
@@ -52,7 +54,8 @@ export function createWorkspaceStore(notify: Notify) {
   let hydrated = $state(false);
   let dialog = $state<WorkspaceDialog>(null);
   let selected = $state<WorkspaceRow | null>(null);
-  let busy = $state(false);
+  /** One thing at a time: the create / edit / remove / restart / setup / start / stop / key in progress (its failure is told by a toast). */
+  const work = new Action();
 
   let createForm = $state({ name: '', path: '' });
   let editForm = $state({ name: '', gatewayUrl: '', setDefault: false });
@@ -81,7 +84,7 @@ export function createWorkspaceStore(notify: Notify) {
   }
 
   async function load(options: { silent?: boolean } = {}) {
-    if (options.silent && busy) return;
+    if (options.silent && work.busy) return;
     await listResource.load({ silent: options.silent });
     if (!options.silent) {
       error = listResource.error;
@@ -102,7 +105,7 @@ export function createWorkspaceStore(notify: Notify) {
   }
 
   function closeDialog() {
-    if (busy) return;
+    if (work.busy) return;
     resetDialog();
   }
 
@@ -152,157 +155,105 @@ export function createWorkspaceStore(notify: Notify) {
   }
 
   async function submitCreate() {
-    busy = true;
-    try {
-      await createMutation(
-        () =>
-          createWorkspace({
-            name: createForm.name,
-            path: createForm.path.trim() || null
-          }),
-        {
-          notify,
-          successMsg: (result) => result ?? 'Workspace created.',
-          errorPrefix: 'Create failed.',
-          onDone: async () => {
-            resetDialog();
-            await load();
-          }
-        }
-      ).run();
-    } finally {
-      busy = false;
-    }
+    const result = await work.run(async () => {
+      const done = await createWorkspace({
+        name: createForm.name,
+        path: createForm.path.trim() || null
+      });
+      resetDialog();
+      await load();
+      return done;
+    });
+    if (work.error) notify('error', work.error);
+    else notify('success', result ?? 'Workspace created.');
   }
 
   async function submitEdit() {
     if (!selected) return;
-    busy = true;
-    try {
-      await createMutation(
-        () =>
-          updateWorkspace(selected!.id, {
-            name: editForm.name.trim() || null,
-            gateway_url: editForm.gatewayUrl.trim() || null,
-            set_default: editForm.setDefault,
-            previous_display_name: selected!.name
-          }),
-        {
-          notify,
-          successMsg: (result) => result ?? 'Workspace updated.',
-          errorPrefix: 'Update failed.',
-          onDone: async () => {
-            resetDialog();
-            await load();
-          }
-        }
-      ).run();
-    } finally {
-      busy = false;
-    }
+    const row = selected;
+    const result = await work.run(async () => {
+      const done = await updateWorkspace(row.id, {
+        name: editForm.name.trim() || null,
+        gateway_url: editForm.gatewayUrl.trim() || null,
+        set_default: editForm.setDefault,
+        previous_display_name: row.name
+      });
+      resetDialog();
+      await load();
+      return done;
+    });
+    if (work.error) notify('error', work.error);
+    else notify('success', result ?? 'Workspace updated.');
   }
 
   async function submitRemove() {
     if (!selected) return;
-    busy = true;
-    try {
-      await createMutation(() => removeWorkspace(selected!.id, removeForm.purge), {
-        notify,
-        successMsg: (result) => result ?? 'Workspace removed.',
-        errorPrefix: 'Remove failed.',
-        onDone: async () => {
-          resetDialog();
-          await load();
-        }
-      }).run();
-    } finally {
-      busy = false;
-    }
+    const row = selected;
+    const result = await work.run(async () => {
+      const done = await removeWorkspace(row.id, removeForm.purge);
+      resetDialog();
+      await load();
+      return done;
+    });
+    if (work.error) notify('error', work.error);
+    else notify('success', result ?? 'Workspace removed.');
   }
 
   async function submitRestart() {
     if (!selected) return;
-    busy = true;
-    try {
-      await createMutation(() => restartWorkspace(selected!.id, restartForm.admin), {
-        notify,
-        successMsg: () =>
-          selected!.id === listResource.data.hostingWorkspaceId
-            ? 'Restarting current workspace. The admin UI should return shortly.'
-            : `Workspace '${selected!.name}' restarted.`,
-        errorPrefix: 'Restart failed.',
-        onDone: async () => {
-          resetDialog();
-          await load();
-        }
-      }).run();
-    } finally {
-      busy = false;
-    }
+    const row = selected;
+    await work.run(async () => {
+      await restartWorkspace(row.id, restartForm.admin);
+      resetDialog();
+      await load();
+    });
+    if (work.error) notify('error', work.error);
+    else
+      notify(
+        'success',
+        row.id === listResource.data.hostingWorkspaceId
+          ? 'Restarting current workspace. The admin UI should return shortly.'
+          : `Workspace '${row.name}' restarted.`
+      );
   }
 
   async function submitSetup() {
     if (!selected) return;
-    busy = true;
-    try {
-      await createMutation(
-        () =>
-          setupWorkspace(selected!.id, {
-            gateway_url: setupForm.gatewayUrl,
-            http_port: setupForm.httpPort.trim() ? Number(setupForm.httpPort) : null,
-            skip_autostart: setupForm.skipAutostart,
-            start_server: setupForm.startServer,
-            elevated_task: setupForm.elevatedTask
-          }),
-        {
-          notify,
-          errorPrefix: 'Setup failed.',
-          onDone: async (result) => {
-            setupPublicKey = result.desktop_pub;
-            dialog = 'setup-key';
-            await load();
-          }
-        }
-      ).run();
-    } finally {
-      busy = false;
-    }
+    const row = selected;
+    await work.run(async () => {
+      const result = await setupWorkspace(row.id, {
+        gateway_url: setupForm.gatewayUrl,
+        http_port: setupForm.httpPort.trim() ? Number(setupForm.httpPort) : null,
+        skip_autostart: setupForm.skipAutostart,
+        start_server: setupForm.startServer,
+        elevated_task: setupForm.elevatedTask
+      });
+      setupPublicKey = result.desktop_pub;
+      dialog = 'setup-key';
+      await load();
+    });
+    if (work.error) notify('error', work.error);
   }
 
   async function start(row: WorkspaceRow) {
-    busy = true;
-    try {
-      await createMutation(() => startWorkspace(row.id), {
-        notify,
-        successMsg: (result) =>
-          result.already_running
-            ? undefined
-            : `'${result.name}' started (PID ${result.pid}).`,
-        errorPrefix: 'Start failed.',
-        onDone: async (result) => {
-          if (result.already_running) {
-            notify('warning', `'${result.name}' is already running.`);
-          }
-          await load();
-        }
-      }).run();
-    } finally {
-      busy = false;
-    }
+    const result = await work.run(async () => {
+      const started = await startWorkspace(row.id);
+      await load();
+      return started;
+    });
+    if (work.error) notify('error', work.error);
+    else if (result?.already_running) notify('warning', `'${result.name}' is already running.`);
+    else if (result) notify('success', `'${result.name}' started (PID ${result.pid}).`);
   }
 
   async function stop(row: WorkspaceRow) {
-    busy = true;
-    try {
-      await createMutation(() => stopWorkspace(row.id), {
-        notify,
-        successMsg: (result) => result ?? `'${row.name}' stopped.`,
-        errorPrefix: 'Stop failed.',
-        onDone: () => load()
-      }).run();
-    } finally {
-      busy = false;
-    }
+    const result = await work.run(async () => {
+      const done = await stopWorkspace(row.id);
+      await load();
+      return done;
+    });
+    if (work.error) notify('error', work.error);
+    else notify('success', result ?? `'${row.name}' stopped.`);
   }
 
   async function openFolder(row: WorkspaceRow) {
@@ -310,7 +261,7 @@ export function createWorkspaceStore(notify: Notify) {
       await openWorkspaceFolder(row.path);
       notify('info', `Opening folder: ${row.path}`);
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Open folder failed.');
+      notify('error', errorMessage(err));
     }
   }
 
@@ -320,36 +271,27 @@ export function createWorkspaceStore(notify: Notify) {
       await openPath(row.stderr_log_path);
       notify('info', `Opening stderr log: ${row.stderr_log_path}`);
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Open stderr log failed.');
+      notify('error', errorMessage(err));
     }
   }
 
   async function openPublicKey(row: WorkspaceRow) {
-    busy = true;
     selected = row;
-    try {
-      const result = await getWorkspacePublicKey(row.id);
-      publicKey = result;
+    await work.run(async () => {
+      publicKey = await getWorkspacePublicKey(row.id);
       dialog = 'public-key';
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Failed to load public key.');
-    } finally {
-      busy = false;
-    }
+    });
+    if (work.error) notify('error', work.error);
   }
 
   async function regenerateKey() {
     if (!selected) return;
-    busy = true;
-    try {
-      const result = await regenerateWorkspaceKey(selected.id);
-      publicKey = result;
-      notify('warning', `New key generated for '${selected.name}'. Update your gateway.`);
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Regenerate failed.');
-    } finally {
-      busy = false;
-    }
+    const row = selected;
+    await work.run(async () => {
+      publicKey = await regenerateWorkspaceKey(row.id);
+    });
+    if (work.error) notify('error', work.error);
+    else notify('warning', `New key generated for '${row.name}'. Update your gateway.`);
   }
 
   async function copyText(text: string) {
@@ -376,7 +318,7 @@ export function createWorkspaceStore(notify: Notify) {
       return !hydrated;
     },
     get busy() {
-      return busy;
+      return work.busy;
     },
     get error() {
       return error;

@@ -1,3 +1,4 @@
+import { errorMessage } from '$kit/api/client';
 import {
   deleteKnowledgeDocument,
   getKnowledgeDocument,
@@ -201,7 +202,7 @@ export function createKnowledgeBrowseModel(deps: {
         await openDocument(activeDocumentId);
       }
     } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Could not load documents.');
+      deps.setError(errorMessage(err));
     } finally {
       loadingDocs = false;
     }
@@ -233,7 +234,7 @@ export function createKnowledgeBrowseModel(deps: {
       const listTags = documents.find((document) => document.id === documentId)?.tags ?? [];
       detailTags = [...(apiTags.length > 0 ? apiTags : chunkTags.length > 0 ? chunkTags : listTags)];
     } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Could not load document.');
+      deps.setError(errorMessage(err));
     }
   }
 
@@ -247,7 +248,7 @@ export function createKnowledgeBrowseModel(deps: {
       });
       applyFetchedChunks(payload.chunks, payload.chunk_next_offset, true);
     } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Could not load more chunks.');
+      deps.setError(errorMessage(err));
     } finally {
       loadingMoreChunks = false;
     }
@@ -277,7 +278,7 @@ export function createKnowledgeBrowseModel(deps: {
         }
       } catch (err) {
         failed++;
-        deps.setError(err instanceof Error ? err.message : 'Delete failed.');
+        deps.setError(errorMessage(err));
       }
     }
     if (deleted > 0) {
@@ -322,7 +323,7 @@ export function createKnowledgeBrowseModel(deps: {
         saved++;
       } catch (err) {
         failed++;
-        deps.setError(err instanceof Error ? err.message : 'Metadata update failed.');
+        deps.setError(errorMessage(err));
       }
     }
     if (saved > 0) {

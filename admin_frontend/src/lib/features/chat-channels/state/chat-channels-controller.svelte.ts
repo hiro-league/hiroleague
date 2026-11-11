@@ -1,3 +1,4 @@
+import { errorMessage } from '$kit/api/client';
 import {
   clearChatMessages,
   deleteChatChannel,
@@ -8,6 +9,7 @@ import {
 import { listCharacters, type CharacterRow } from '$lib/api/characters';
 import type { ChatChannelFormFields } from '$lib/features/chat-channels/shared/chat-channel-form';
 import { createChatChannelsPreferences } from '$lib/preferences/chat-channels-preferences.svelte';
+import { Action } from '$kit/state/action.svelte';
 import { toast } from '$kit/ui/toast.svelte';
 import { createChatChannelsDialogs } from '$lib/features/chat-channels/state/chat-channels-dialogs.svelte';
 import { createChatChannelsUiPrefs } from '$lib/features/chat-channels/state/chat-channels-ui-prefs.svelte';
@@ -28,8 +30,16 @@ export function createChatChannelsPageController() {
   let characters = $state<CharacterRow[]>([]);
   let channelsLoading = $state(true);
   let channelsError = $state<string | null>(null);
-  /** Shared "channel admin mutation in progress" flag (form submit + delete + clear). */
-  let busy = $state(false);
+  /** Create/edit channel form: its draft (dirty, undo, leave question), photo and submit. */
+  const form = createChatChannelForm({
+    getCharacters: () => characters,
+    getChannels: () => channels,
+    notify: toast.show,
+    onSaved: () => refreshCurrent()
+  });
+  /** Delete and clear-messages in progress (the form's save has its own; `busy` is either). */
+  const work = new Action();
+  const busy = $derived(work.busy || form.busy);
   /** Confirm/delete/discard overlay flags live here so destructive UX rules stay centralized. */
   const dlg = createChatChannelsDialogs({ isBusy: () => busy });
   /** Composer/bubble UI toggles (voice-reply, use-knowledge, disable-tools, stats, tools) — localStorage-backed. */
@@ -40,15 +50,6 @@ export function createChatChannelsPageController() {
    * via `getSelectedChannelId`. Backs BOTH the /chats Messages tab and the global overlay.
    */
   const engine = createChatMessagesEngine({ getSelectedChannelId: () => selectedChannelId });
-  /** Create/edit channel form — lifecycle, dirty tracking, unsaved guard, photo + submit. */
-  const form = createChatChannelForm({
-    getCharacters: () => characters,
-    getChannels: () => channels,
-    isBusy: () => busy,
-    setBusy: (b) => (busy = b),
-    notify: toast.show,
-    onSaved: () => refreshCurrent()
-  });
   /** Idempotent boot guard so the shared engine starts (load channels/chars) exactly once. */
   let started = false;
 
@@ -170,7 +171,7 @@ export function createChatChannelsPageController() {
         engine.resetConversation();
       }
     } catch (err) {
-      channelsError = err instanceof Error ? err.message : 'Failed to load chat channels.';
+      channelsError = errorMessage(err);
     } finally {
       channelsLoading = false;
     }
@@ -235,8 +236,7 @@ export function createChatChannelsPageController() {
     const target = dlg.deleteTarget;
     if (!target) return;
 
-    busy = true;
-    try {
+    await work.run(async () => {
       const deletedId = target.id;
       await deleteChatChannel(deletedId);
       notify('success', 'Channel deleted.');
@@ -246,11 +246,8 @@ export function createChatChannelsPageController() {
         engine.resetConversation();
       }
       await refreshCurrent();
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Delete failed.');
-    } finally {
-      busy = false;
-    }
+    });
+    if (work.error) notify('error', work.error);
   }
 
   function closeClearMessagesModal() {
@@ -261,18 +258,14 @@ export function createChatChannelsPageController() {
     const id = selectedChannelId ? Number(selectedChannelId) : NaN;
     if (!Number.isFinite(id)) return;
 
-    busy = true;
-    try {
+    await work.run(async () => {
       await clearChatMessages(id);
       dlg.closeClearMessagesAfterSuccess();
       notify('success', 'All messages were cleared.');
       await loadChannels();
       await loadMessages();
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Failed to clear messages.');
-    } finally {
-      busy = false;
-    }
+    });
+    if (work.error) notify('error', work.error);
   }
 
   /**
@@ -371,9 +364,7 @@ export function createChatChannelsPageController() {
     discardRecording: composer.discardRecording,
     disposeActiveRecording: composer.disposeActiveRecording,
 
-    get unsaved() {
-      return form.unsaved;
-    },
+
     get activeTab() {
       return nav.activeTab;
     },

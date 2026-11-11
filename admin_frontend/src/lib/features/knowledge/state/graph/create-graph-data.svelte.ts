@@ -1,3 +1,4 @@
+import { errorMessage } from '$kit/api/client';
 import {
   exportKnowledgeGraph,
   type GraphEdgeDTO,
@@ -125,7 +126,7 @@ export function createGraphDataStore(deps: GraphDataStoreDeps) {
       loadVersion += 1;
       deps.onLoadComplete();
     } catch (err) {
-      loadError = err instanceof Error ? err.message : String(err);
+      loadError = errorMessage(err);
       deps.setError(loadError);
     } finally {
       loading = false;

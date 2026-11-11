@@ -1,3 +1,4 @@
+import { errorMessage } from '$kit/api/client';
 import { browser } from '$app/environment';
 import { untrack } from 'svelte';
 import { listChatMessages, type ChatHistoryMessage } from '$lib/api/chat-channels';
@@ -242,7 +243,7 @@ export function createChatMessagesEngine(opts: ChatMessagesEngineOptions) {
       updateTailCursor();
       resetPollErrors();
     } catch (err) {
-      messagesError = err instanceof Error ? err.message : 'Failed to load messages.';
+      messagesError = errorMessage(err);
     } finally {
       messagesLoading = false;
     }

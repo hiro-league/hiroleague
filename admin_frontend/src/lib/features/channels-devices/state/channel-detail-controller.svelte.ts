@@ -1,3 +1,5 @@
+import { errorMessage } from '$kit/api/client';
+import { Action } from '$kit/state/action.svelte';
 import {
   channelAction,
   disableChannel,
@@ -31,9 +33,9 @@ export function createChannelDetailController(name: string, notify: Notify, onCh
   let status = $state<ChannelStatus | null>(null);
   let qrSvg = $state('');
   let loading = $state(true);
-  let saving = $state(false);
-  let busy = $state(false);
-  let uninstalling = $state(false); // full teardown (uninstall) in flight
+  const settingsSave = new Action();
+  const lifecycle = new Action(); // enable / disable / a capability action
+  const teardown = new Action(); // full teardown (uninstall)
   let error = $state<string | null>(null);
 
   // Editable field values, bound by the form. Baseline is the last-loaded snapshot;
@@ -85,7 +87,7 @@ export function createChannelDetailController(name: string, notify: Notify, onCh
       baseline = {};
       await Promise.all([loadConfig(), refreshStatus()]);
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to load channel.';
+      error = errorMessage(err);
     } finally {
       loading = false;
     }
@@ -113,8 +115,7 @@ export function createChannelDetailController(name: string, notify: Notify, onCh
   }
 
   async function save() {
-    saving = true;
-    try {
+    await settingsSave.run(async () => {
       let wrote = false;
       let applied = false;
       for (const field of fields) {
@@ -142,11 +143,8 @@ export function createChannelDetailController(name: string, notify: Notify, onCh
             : 'Settings saved. Enable the channel to apply.'
       );
       await loadConfig();
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Failed to save settings.');
-    } finally {
-      saving = false;
-    }
+    });
+    if (settingsSave.error) notify('error', settingsSave.error);
   }
 
   async function clearSecret(key: string) {
@@ -156,29 +154,24 @@ export function createChannelDetailController(name: string, notify: Notify, onCh
       secretSet[key] = false;
       notify('success', `${key} cleared.`);
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : `Failed to clear ${key}.`);
+      notify('error', errorMessage(err));
     }
   }
 
-  async function runLifecycle(fn: () => Promise<unknown>, okMsg: string, failMsg: string) {
-    busy = true;
-    try {
+  async function runLifecycle(fn: () => Promise<unknown>, okMsg: string) {
+    await lifecycle.run(async () => {
       await fn();
       await refreshStatus();
       onChanged?.();
       notify('success', okMsg);
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : failMsg);
-    } finally {
-      busy = false;
-    }
+    });
+    if (lifecycle.error) notify('error', lifecycle.error);
   }
 
   // Full teardown (inverse of Install): stop + delete config + uv uninstall. Returns true
   // so the caller can navigate back to the list (the channel no longer exists).
   async function uninstall(): Promise<boolean> {
-    uninstalling = true;
-    try {
+    await teardown.run(async () => {
       const res = await uninstallChannel(name);
       notify(
         'success',
@@ -187,19 +180,15 @@ export function createChannelDetailController(name: string, notify: Notify, onCh
           : `Uninstalled '${name}' (package left in place).`
       );
       onChanged?.();
-      return true;
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : `Failed to uninstall '${name}'.`);
-      return false;
-    } finally {
-      uninstalling = false;
-    }
+    });
+    if (teardown.error) notify('error', teardown.error);
+    return !teardown.error;
   }
 
-  const enable = () => runLifecycle(() => enableChannel(name), 'Channel enabled.', 'Failed to enable.');
-  const disable = () => runLifecycle(() => disableChannel(name), 'Channel disabled.', 'Failed to disable.');
+  const enable = () => runLifecycle(() => enableChannel(name), 'Channel enabled.');
+  const disable = () => runLifecycle(() => disableChannel(name), 'Channel disabled.');
   const runAction = (action: string) =>
-    runLifecycle(() => channelAction(name, action), `${action} requested.`, `Failed to ${action}.`);
+    runLifecycle(() => channelAction(name, action), `${action} requested.`);
 
   return {
     name,
@@ -222,13 +211,13 @@ export function createChannelDetailController(name: string, notify: Notify, onCh
       return loading;
     },
     get saving() {
-      return saving;
+      return settingsSave.busy;
     },
     get busy() {
-      return busy;
+      return lifecycle.busy;
     },
     get uninstalling() {
-      return uninstalling;
+      return teardown.busy;
     },
     get error() {
       return error;

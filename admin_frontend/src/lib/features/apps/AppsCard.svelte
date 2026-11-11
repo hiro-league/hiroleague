@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorMessage } from '$kit/api/client';
   /**
    * The dashboard's Apps card (Phase 8): each extension's own site, as it declared it when it connected
    * (title, icon, address, the roles that see it). A tile opens the site in a new tab, where the same
@@ -22,7 +23,7 @@
     try {
       apps = (await listApps()).apps;
     } catch (err) {
-      error = err instanceof Error ? err.message : "The apps couldn't be read.";
+      error = errorMessage(err);
     } finally {
       loaded = true;
     }

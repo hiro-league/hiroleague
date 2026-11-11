@@ -5,13 +5,7 @@
   import { Textarea } from '$kit/components/ui/textarea/index.js';
   import type { CharacterForm } from '$lib/features/characters/shared/characters-pure';
 
-  let {
-    form,
-    markDirty
-  }: {
-    form: CharacterForm;
-    markDirty: () => void;
-  } = $props();
+  let { form }: { form: CharacterForm } = $props();
   const uid = $props.id();
 </script>
 
@@ -20,6 +14,6 @@
     <p class={characterSectionHintClass}>Future use - Extra character metadata</p>
   {/snippet}
   <Field label="extras (JSON object)" for="{uid}-extras">
-    <Textarea id="{uid}-extras" class="min-h-28 font-mono" bind:value={form.extras_json} oninput={markDirty} />
+    <Textarea id="{uid}-extras" class="min-h-28 font-mono" bind:value={form.extras_json} />
   </Field>
 </CharacterSectionCard>

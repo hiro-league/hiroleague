@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorMessage } from '$kit/api/client';
   /**
    * Picks a Gemini voice for a voice profile (Phase 7b), as HomeHiro's TTS page did, from three places
    * (Gemini's own voice list, read by the core and cached a day):
@@ -68,7 +69,7 @@
           ? await listVoices({ source, language, gender, q: query.trim(), limit: 60, refresh })
           : await listVoices({ source, limit: 300, refresh });
     } catch (err) {
-      error = err instanceof Error ? err.message : "Gemini's voices could not be read.";
+      error = errorMessage(err);
       return;
     } finally {
       loading = false;
@@ -142,7 +143,7 @@
         gender: form.gender || undefined
       });
     } catch (err) {
-      error = err instanceof Error ? err.message : 'The voice was not designed.';
+      error = errorMessage(err);
       return;
     } finally {
       designing = false;
@@ -158,7 +159,7 @@
     try {
       await deleteVoice(v.id);
     } catch (err) {
-      error = err instanceof Error ? err.message : 'The voice was not deleted.';
+      error = errorMessage(err);
       return;
     } finally {
       deleting = false;
@@ -172,7 +173,7 @@
     try {
       await addVoice(pasteId.trim());
     } catch (err) {
-      error = err instanceof Error ? err.message : 'The voice was not added.';
+      error = errorMessage(err);
       return;
     } finally {
       adding = false;

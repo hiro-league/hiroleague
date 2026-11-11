@@ -8,6 +8,8 @@
  * this controller and every pane calls these methods. Keeps the view components thin (the dialog
  * fetch/loading/error bookkeeping is async orchestration, not markup).
  */
+import { errorMessage } from '$kit/api/client';
+import { Action } from '$kit/state/action.svelte';
 import { goto } from '$app/navigation';
 import {
   getGraphRunIngestTrace,
@@ -59,11 +61,10 @@ export function createEvalTraces(ctx: EvalTracesCtx) {
   // arrows can step through every episode of the remember run.
   let ingestTraces = $state<IngestTraceRecord[]>([]);
   let ingestTraceIndex = $state(0);
-  let ingestTraceLoading = $state(false);
+  const ingestLoad = new Action();
 
   async function openIngestTrace(runId: string) {
-    ingestTraceLoading = true;
-    try {
+    await ingestLoad.run(async () => {
       const res = await getGraphRunIngestTrace(runId);
       const traces = res.traces ?? [];
       if (traces.length > 0) {
@@ -73,11 +74,8 @@ export function createEvalTraces(ctx: EvalTracesCtx) {
       } else {
         notify('error', 'No ingest trace recorded for this run (graph tracing may have been off).');
       }
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Failed to load ingest trace.');
-    } finally {
-      ingestTraceLoading = false;
-    }
+    });
+    if (ingestLoad.error) notify('error', ingestLoad.error);
   }
 
   /** Open the ingest-pipeline dialog for ONE corpus episode (Corpus tab "pipeline" button). Loads
@@ -88,8 +86,7 @@ export function createEvalTraces(ctx: EvalTracesCtx) {
     runId: string;
     stepIndex: number | '';
   }) {
-    ingestTraceLoading = true;
-    try {
+    await ingestLoad.run(async () => {
       const res = await getGraphRunIngestTrace(info.runId);
       const traces = res.traces ?? [];
       if (traces.length === 0) {
@@ -105,11 +102,8 @@ export function createEvalTraces(ctx: EvalTracesCtx) {
       ingestTraces = traces;
       ingestTraceIndex = idx >= 0 ? idx : 0;
       activeIngestTrace = traces[ingestTraceIndex];
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Failed to load ingest trace.');
-    } finally {
-      ingestTraceLoading = false;
-    }
+    });
+    if (ingestLoad.error) notify('error', ingestLoad.error);
   }
 
   /** Step the open ingest-trace dialog to the prev/next episode of the run (arrow-nav). */
@@ -156,18 +150,17 @@ export function createEvalTraces(ctx: EvalTracesCtx) {
         if (copiedRow === r.index) copiedRow = null;
       }, 1500);
     } catch (err) {
-      notify('error', `Copy for AI failed: ${err instanceof Error ? err.message : 'Could not copy to clipboard.'}`);
+      notify('error', `Copy for AI failed: ${errorMessage(err)}`);
     }
   }
 
   // --- LoCoMo export (memory track) ---------------------------------------------------------
-  let exportingLocomo = $state(false);
+  const locomoExport = new Action();
 
   async function exportLocomoResults() {
     const corpus = eval_.selectedCorpus;
     if (!corpus) return;
-    exportingLocomo = true;
-    try {
+    await locomoExport.run(async () => {
       const res = await exportEvalResultsLocomo(corpus.id, corpus.questions_path);
       const blob = new Blob([res.content], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -184,14 +177,8 @@ export function createEvalTraces(ctx: EvalTracesCtx) {
           res.partial ? ' (partial)' : ''
         }.`
       );
-    } catch (err) {
-      notify(
-        'error',
-        `LoCoMo export failed: ${err instanceof Error ? err.message : 'Could not export LoCoMo results.'}`
-      );
-    } finally {
-      exportingLocomo = false;
-    }
+    });
+    if (locomoExport.error) notify('error', `LoCoMo export failed: ${locomoExport.error}`);
   }
 
   return {
@@ -225,7 +212,7 @@ export function createEvalTraces(ctx: EvalTracesCtx) {
       return ingestTraceIndex;
     },
     get ingestTraceLoading() {
-      return ingestTraceLoading;
+      return ingestLoad.busy;
     },
     openIngestTrace,
     openIngestTraceForEpisode,
@@ -239,7 +226,7 @@ export function createEvalTraces(ctx: EvalTracesCtx) {
     copyRowForAI,
     // LoCoMo export surface.
     get exportingLocomo() {
-      return exportingLocomo;
+      return locomoExport.busy;
     },
     exportLocomoResults
   };

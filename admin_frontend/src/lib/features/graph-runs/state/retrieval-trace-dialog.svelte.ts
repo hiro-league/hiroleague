@@ -9,6 +9,7 @@
  *
  * Follows getters for `$derived`/`$state` consumers (avoid returning shorthand — stale capture).
  */
+import { errorMessage } from '$kit/api/client';
 import {
   getGraphRunRetrievalTrace,
   type RetrievalTraceRecord
@@ -50,7 +51,7 @@ export function createRetrievalTraceDialogController(
         );
       }
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Failed to load retrieval trace.');
+      notify('error', errorMessage(err));
     } finally {
       traceLoadingRunId = null;
     }
@@ -76,7 +77,7 @@ export function createRetrievalTraceDialogController(
         );
       }
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Failed to load retrieval trace.');
+      notify('error', errorMessage(err));
     } finally {
       traceLoadingSid = null;
     }

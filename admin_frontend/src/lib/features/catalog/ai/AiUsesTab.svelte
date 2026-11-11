@@ -90,7 +90,7 @@
   {#each ai.useGroups.filter((g) => g.extension === activeSource) as group (group.extension)}
     {@const rows = ai.uses.filter((u) => u.extension === group.extension)}
     {@const offered = rows.filter((u) => u.status !== 'removed').length}
-    {@const refreshing = ai.refreshingExtensions[group.extension]}
+    {@const refreshing = ai.refreshingExtension(group.extension)}
     <div class="grid gap-2">
       <div class="flex flex-wrap items-end justify-between gap-2">
         <div>
@@ -128,7 +128,7 @@
           {#each rows as use (use.id)}
             {@const n = note(use)}
             {@const removed = use.status === 'removed'}
-            {@const busy = ai.useBusy[use.id]}
+            {@const busy = ai.useBusy(use.id)}
             <div class={cn(ADMIN_TABLE_GRID_ROW, removed && 'opacity-60')} style:grid-template-columns={GRID}>
               <span class="flex items-start gap-2">
                 <span class="font-sans text-sm font-semibold">{use.label}</span>

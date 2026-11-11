@@ -10,6 +10,7 @@
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
+  import { Action } from '$kit/state/action.svelte';
   import Notice from '$kit/ui/notice.svelte';
   import EmptyState from '$kit/ui/empty-state.svelte';
   import Loading from '$kit/ui/loading.svelte';
@@ -60,10 +61,10 @@
   const usedByLine = (r: VoiceProfileRow) =>
     [...(isHiroVoice(r) ? ["Hiro's voice"] : []), ...r.used_by.map(ctrl.useLabel)].join(', ');
   let confirmDelete = $state<string | null>(null);
-  let deleteError = $state<string | null>(null);
+  const deleting = new Action();
 
   async function remove(r: VoiceProfileRow) {
-    deleteError = await ctrl.remove(r.id);
+    await deleting.run(() => ctrl.remove(r.id));
     confirmDelete = null;
   }
   const voiceKind = (r: VoiceProfileRow) => (r.provider === 'openai' ? 'OpenAI voice' : VOICE_SOURCE[sourceOf(r.voice)]);
@@ -84,7 +85,7 @@
   </div>
 
   {#if ctrl.error}<Notice message={ctrl.error} />{/if}
-  {#if deleteError}<Notice message={deleteError} />{/if}
+  {#if deleting.error}<Notice message={deleting.error} />{/if}
 
   {#if ctrl.loading && !ctrl.profiles.length}
     <Loading label="Reading voice profiles…" />

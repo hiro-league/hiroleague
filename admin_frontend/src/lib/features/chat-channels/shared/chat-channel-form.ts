@@ -7,42 +7,6 @@ export type ChatChannelFormFields = {
   description: string;
 };
 
-/** Snapshot when opening the dialog — unsaved-change detection vs current form state. */
-export type ChatChannelFormBaseline = {
-  name: string;
-  characterId: string;
-  description: string;
-  pendingPhotoDataUrl: string | null;
-};
-
-export function snapshotChatChannelFormBaseline(
-  form: ChatChannelFormFields,
-  pendingPhotoDataUrl: string | null
-): ChatChannelFormBaseline {
-  return {
-    name: form.name,
-    characterId: form.characterId,
-    description: form.description,
-    pendingPhotoDataUrl: pendingPhotoDataUrl ?? null
-  };
-}
-
-export function isChatChannelFormDirty(args: {
-  formOpen: boolean;
-  baseline: ChatChannelFormBaseline | null;
-  form: ChatChannelFormFields;
-  pendingPhotoDataUrl: string | null;
-}): boolean {
-  const { formOpen, baseline, form, pendingPhotoDataUrl } = args;
-  if (!formOpen || !baseline) return false;
-  return (
-    form.name !== baseline.name ||
-    form.characterId !== baseline.characterId ||
-    form.description !== baseline.description ||
-    (pendingPhotoDataUrl ?? null) !== (baseline.pendingPhotoDataUrl ?? null)
-  );
-}
-
 export type ParsedChannelFormResult =
   | { ok: true; payload: ChatChannelPayload }
   | { ok: false; error: string };

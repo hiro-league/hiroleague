@@ -1,3 +1,4 @@
+import { errorMessage } from '$kit/api/client';
 import {
   ingestKnowledge,
   listKnowledgeDocuments,
@@ -164,7 +165,7 @@ export function createKnowledgeIngestModel(deps: {
       graphBuildStatus = 'completed';
     } catch (err) {
       graphBuildStatus = 'failed';
-      graphBuildError = err instanceof Error ? err.message : 'Graph build failed.';
+      graphBuildError = errorMessage(err);
     }
   }
 
@@ -194,7 +195,7 @@ export function createKnowledgeIngestModel(deps: {
         };
       }
     } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Could not load knowledge jobs.');
+      deps.setError(errorMessage(err));
     }
   }
 
@@ -221,7 +222,7 @@ export function createKnowledgeIngestModel(deps: {
         await scan();
       }
     } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Folder picker failed.');
+      deps.setError(errorMessage(err));
     } finally {
       pickingFolder = false;
     }
@@ -247,7 +248,7 @@ export function createKnowledgeIngestModel(deps: {
     try {
       await openWorkspaceFolder(path);
     } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Open folder failed.');
+      deps.setError(errorMessage(err));
     }
   }
 
@@ -262,7 +263,7 @@ export function createKnowledgeIngestModel(deps: {
       selected = {};
       hasScanned = true;
     } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Folder scan failed.');
+      deps.setError(errorMessage(err));
     } finally {
       scanning = false;
     }
@@ -299,7 +300,7 @@ export function createKnowledgeIngestModel(deps: {
       );
       applyJobUpdate(payload);
     } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Ingest failed.');
+      deps.setError(errorMessage(err));
       lastOwnedIngestPaths = [];  // ingest failed → don't trigger graph build later
     } finally {
       ingesting = false;
@@ -314,7 +315,7 @@ export function createKnowledgeIngestModel(deps: {
       applyJobUpdate(payload);
       return payload;
     } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Re-ingest failed.');
+      deps.setError(errorMessage(err));
       return null;
     } finally {
       ingesting = false;
@@ -382,7 +383,7 @@ export function createKnowledgeIngestModel(deps: {
       });
       applyJobUpdate(payload);
     } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Retry failed.');
+      deps.setError(errorMessage(err));
     } finally {
       ingesting = false;
     }

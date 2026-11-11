@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorMessage } from '$kit/api/client';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
   import { previewKnowledgeFile, type KnowledgeScannedFile } from '$lib/api/knowledge';
   import Notice from '$kit/ui/notice.svelte';
@@ -30,7 +31,7 @@
       const payload = await previewKnowledgeFile(target.path);
       preview = payload;
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Could not load file preview.';
+      error = errorMessage(err);
     } finally {
       loading = false;
     }

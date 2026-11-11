@@ -3,7 +3,6 @@
    * People (Phase 6): one family list in the core, read by extensions such as HomeHiro.
    * Phase 9a: two tabs — People (the list) and Roles (what each role may do in HiroLeague and each app).
    */
-  import { onMount } from 'svelte';
   import { UserPlus } from '@lucide/svelte';
   import { page } from '$app/state';
   import PageHeader from '$kit/ui/page-header.svelte';
@@ -21,25 +20,17 @@
   import { createRolesController } from './state/roles-controller.svelte';
   import RolesTab from './view/RolesTab.svelte';
 
-  const ctrl = createPeopleController(toast.show);
-  // A role added, renamed or removed changes the People tab's role names too.
-  const roles = createRolesController(toast.show, () => ctrl.load());
-
   // Phase 9a: an app's Edit link opens People → Roles at one role (?tab=roles&role=kid).
   const asked = page.url.searchParams;
+  const ctrl = createPeopleController(toast.show);
+  // A role added, renamed or removed changes the People tab's role names too.
+  const roles = createRolesController(toast.show, () => ctrl.load(), asked.get('role'));
+
   let tab = $state<'people' | 'roles'>(asked.get('tab') === 'roles' ? 'roles' : 'people');
   const tabDescriptors = [
     { id: 'people' as const, label: 'People' },
     { id: 'roles' as const, label: 'Roles' }
   ];
-
-  onMount(() => {
-    void ctrl.load();
-    void roles.load().then(() => {
-      const role = asked.get('role');
-      if (role && roles.roles.some((r) => r.role_id === role)) roles.tab = role;
-    });
-  });
 </script>
 
 <section class={ADMIN_PAGE_MAX_W}>

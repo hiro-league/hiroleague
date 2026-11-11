@@ -9,6 +9,7 @@
  * Follows getters for `$derived` consumers (avoid returning shorthand `$derived`
  * from a factory — that captures a stale value).
  */
+import { errorMessage } from '$kit/api/client';
 import { listChatChannels, type ChatChannelRow } from '$lib/api/chat-channels';
 import { listCharacters, type CharacterRow } from '$lib/api/characters';
 import { listKnowledgeGraphGroups, type GraphGroup } from '$lib/api/knowledge';
@@ -288,7 +289,7 @@ export function createMemoriesPageController() {
       clearMemoriesConfirmOpen = false;
       await loadMemories();
     } catch (e) {
-      memoriesError = e instanceof Error ? e.message : 'Failed to clear memories.';
+      memoriesError = errorMessage(e);
     } finally {
       memoryActionBusy = false;
     }
@@ -320,7 +321,7 @@ export function createMemoriesPageController() {
         await loadMemories();
       }
     } catch (e) {
-      memoriesError = e instanceof Error ? e.message : 'Failed to clear group.';
+      memoriesError = errorMessage(e);
     } finally {
       memoryActionBusy = false;
     }

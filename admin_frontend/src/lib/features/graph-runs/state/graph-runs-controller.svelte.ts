@@ -11,6 +11,7 @@
  * Follows getters for `$derived` consumers (avoid returning shorthand `$derived`
  * from factory — stale capture).
  */
+import { errorMessage } from '$kit/api/client';
 import { listChatChannels, type ChatChannelRow } from '$lib/api/chat-channels';
 import { getCharacter, listCharacters, type CharacterDetail, type CharacterRow } from '$lib/api/characters';
 import { preserveStickyAnchorAround } from '$lib/components/page/table/preserve-sticky-anchor';
@@ -93,7 +94,7 @@ export function createGraphRunsPageController(
         );
       }
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Failed to load the eval row.');
+      notify('error', errorMessage(err));
     } finally {
       evalRowLoadingRunId = null;
     }
@@ -175,7 +176,7 @@ export function createGraphRunsPageController(
         );
       }
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Failed to load the retrieval trajectory.');
+      notify('error', errorMessage(err));
     } finally {
       retrievalLoopLoadingRunId = null;
     }

@@ -1,3 +1,4 @@
+import { errorMessage } from '$kit/api/client';
 import {
   disableChannel,
   enableChannel,
@@ -39,7 +40,7 @@ export function createChannelsController(notify: Notify) {
       allRows = list.channels;
       mandatoryChannelName = list.mandatory_channel_name;
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to load channels.';
+      error = errorMessage(err);
     } finally {
       loading = false;
     }
@@ -64,7 +65,7 @@ export function createChannelsController(notify: Notify) {
       await load();
       return true;
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : `Failed to install '${name}'.`);
+      notify('error', errorMessage(err));
       return false;
     } finally {
       installing = null;
@@ -84,7 +85,7 @@ export function createChannelsController(notify: Notify) {
       notify('success', `Channel '${row.name}' ${row.enabled ? 'disabled' : 'enabled'}.`);
       await load();
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Channel update failed.');
+      notify('error', errorMessage(err));
     } finally {
       busyChannel = null;
     }

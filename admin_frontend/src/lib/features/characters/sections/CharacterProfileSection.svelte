@@ -13,13 +13,11 @@
     form,
     characterId,
     selected,
-    markDirty,
     onPickPhoto
   }: {
     form: CharacterForm;
     characterId: string | null | undefined;
     selected: CharacterDetail | null;
-    markDirty: () => void;
     onPickPhoto: (event: Event) => void;
   } = $props();
   const uid = $props.id();
@@ -30,7 +28,7 @@
 <CharacterSectionCard title="Profile">
   {#if !characterId}
     <Field label="Character id" for="{uid}-id" class="mb-4 max-w-md">
-      <Input id="{uid}-id" bind:value={form.new_id} oninput={markDirty} />
+      <Input id="{uid}-id" bind:value={form.new_id} />
     </Field>
   {/if}
 
@@ -68,15 +66,15 @@
 
     <div class="grid min-w-0 gap-4">
       <Field label="Display name" for="{uid}-name" class="w-full md:max-w-[33%] md:min-w-[12rem]">
-        <Input id="{uid}-name" bind:value={form.name} oninput={markDirty} />
+        <Input id="{uid}-name" bind:value={form.name} />
       </Field>
 
       <Field label="Description" for="{uid}-description">
-        <Textarea id="{uid}-description" class="min-h-24" bind:value={form.description} oninput={markDirty} />
+        <Textarea id="{uid}-description" class="min-h-24" bind:value={form.description} />
       </Field>
 
       <label class="flex cursor-pointer items-center gap-2 font-sans text-sm font-semibold text-foreground">
-        <Checkbox bind:checked={form.emotions_enabled} onCheckedChange={markDirty} />
+        <Checkbox bind:checked={form.emotions_enabled} />
         Emotions enabled (reserved)
       </label>
     </div>

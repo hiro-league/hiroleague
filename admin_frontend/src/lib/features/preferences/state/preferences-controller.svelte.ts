@@ -1,3 +1,4 @@
+import { errorMessage } from '$kit/api/client';
 import {
   getPreferences,
   normalizeWorkspacePreferences,
@@ -123,7 +124,7 @@ export function createPreferencesController(notify: Notify) {
       notify('success', 'Prompt saved.');
       return true;
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Save failed.');
+      notify('error', errorMessage(err));
       return false;
     } finally {
       busy = false;
@@ -147,7 +148,7 @@ export function createPreferencesController(notify: Notify) {
       // the picker, not merged into the options); fetch them with the download-status rows.
       await Promise.all([catalog.load(), downloads.load()]);
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to load preferences.';
+      error = errorMessage(err);
     } finally {
       loading = false;
     }
@@ -165,7 +166,7 @@ export function createPreferencesController(notify: Notify) {
       setDraftFromServer(payload.preferences);
       notify('success', 'Workspace preferences saved.');
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Save failed.');
+      notify('error', errorMessage(err));
     } finally {
       busy = false;
     }
