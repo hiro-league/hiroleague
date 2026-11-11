@@ -9,7 +9,7 @@
    */
   import type { CatalogProviderRow } from '$lib/api/catalog';
   import { Copy, Trash2, TriangleAlert } from '@lucide/svelte';
-  import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
+  import Section from '$kit/ui/section.svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
@@ -126,7 +126,7 @@
       <div class="grid content-start gap-4">
         <FormField label="Name"><input bind:value={d.label} maxlength="80" placeholder="e.g. Door alert" /></FormField>
 
-        <SectionCardMuted title="Model">
+        <Section title="Model">
           <SingleModelPicker
             embedded
             label="Speech model"
@@ -153,9 +153,9 @@
               d.model = id;
             }}
           />
-        </SectionCardMuted>
+        </Section>
 
-        <SectionCardMuted title="Voice">
+        <Section title="Voice">
           <div class="flex items-baseline justify-end">
             <span class="text-xs text-muted-foreground">Using <span class="font-medium text-foreground">{d.voice_label || d.voice}</span></span>
           </div>
@@ -187,7 +187,7 @@
               />
             {/key}
           {/if}
-        </SectionCardMuted>
+        </Section>
 
         <FormField label="Speaking style" hint="Tone, pace, accent and emotion, in plain words. It is never read aloud.">
           <textarea rows="3" bind:value={d.style} maxlength="2000" placeholder="e.g. Warm and calm, medium pace, a slight smile in the voice."></textarea>

@@ -4,7 +4,7 @@
    * Speak) and the voice profile each speaks with (`voice.uses`). An alert or a Speak node can still pick
    * its own profile in the extension; this is the default.
    */
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import Notice from '$kit/ui/notice.svelte';
@@ -31,7 +31,7 @@
       <p class="text-xs text-muted-foreground">What it asks the core to say, and the voice profile it speaks with by default.</p>
     </div>
     {#if error}<Notice message={error} />{/if}
-    <AdminTableShell layout="grid" minWidth={900} gridColumns={GRID}>
+    <TableShell layout="grid" minWidth={900} gridColumns={GRID}>
       {#snippet headRow()}
         <span>Use</span>
         <span>Needs</span>
@@ -62,6 +62,6 @@
           </div>
         {/each}
       {/snippet}
-    </AdminTableShell>
+    </TableShell>
   </div>
 {/if}

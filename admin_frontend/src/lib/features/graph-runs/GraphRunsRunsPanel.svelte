@@ -2,11 +2,11 @@
   import type { ChatChannelRow } from '$lib/api/chat-channels';
   import type { CharacterRow } from '$lib/api/characters';
   import type { GraphLedgerRow } from '$lib/api/graph-runs';
-  import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
+  import FilterBar from '$kit/ui/filter-bar.svelte';
   import SearchInput from '$lib/search/SearchInput.svelte';
   import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
   import StickyBar from '$kit/ui/sticky-bar.svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import AdminAvatarNameCell from '$lib/components/page/table/AdminAvatarNameCell.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import { FileText } from '@lucide/svelte';
@@ -100,7 +100,7 @@
 >
   {#if !hidden}
     <StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
-      <AdminFilterBar class="items-end">
+      <FilterBar class="items-end">
       <AdminFilterBarSelect
         label="Run kind"
         bind:value={filterRunKind}
@@ -135,7 +135,7 @@
         placeholder="Search input / output previews…"
         class="min-w-[12rem] flex-1"
       />
-      </AdminFilterBar>
+      </FilterBar>
     </StickyBar>
   {/if}
 
@@ -143,7 +143,7 @@
     <p class="error m-0 font-sans text-sm text-muted-foreground" role="alert">{error}</p>
   {/if}
 
-  <AdminTableShell density="dense" stickyHead>
+  <TableShell density="dense" stickyHead>
     <thead>
       <tr>
         <th>Time</th>
@@ -218,7 +218,7 @@
         </tr>
       {/each}
     </tbody>
-  </AdminTableShell>
+  </TableShell>
 
   {#if hasMoreRuns && onLoadMore}
     <div class="border-t py-3 text-center">

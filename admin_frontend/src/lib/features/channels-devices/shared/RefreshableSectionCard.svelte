@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { RefreshCw } from '@lucide/svelte';
-  import SectionCard from '$lib/components/page/SectionCard.svelte';
+  import Panel from '$kit/ui/panel.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import Notice from '$kit/ui/notice.svelte';
   import EmptyState from '$kit/ui/empty-state.svelte';
@@ -34,7 +34,7 @@
   }: Props = $props();
 </script>
 
-<SectionCard class="grid gap-4">
+<Panel class="grid gap-4">
   <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
     <div>
       <h3 class="text-lg font-semibold">{title}</h3>
@@ -54,4 +54,4 @@
   {:else}
     {@render children?.()}
   {/if}
-</SectionCard>
+</Panel>

@@ -5,7 +5,7 @@
   import PageHeader from '$kit/ui/page-header.svelte';
   import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
   import PageTabs from '$kit/ui/page-tabs.svelte';
-  import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
+  import type { PageTab } from '$kit/ui/page-tabs.svelte';
   import Notice from '$kit/ui/notice.svelte';
   import { createKnowledgePreferences } from '$lib/preferences/knowledge-preferences.svelte';
   import KnowledgeAskPanel from './ask/KnowledgeAskPanel.svelte';
@@ -32,9 +32,9 @@
     ingest: FolderPlus,
     browse: Library,
     ask: MessageCircleQuestion
-  } as const satisfies Record<KnowledgeTabId, AdminTabDescriptor<KnowledgeTabId>['icon']>;
+  } as const satisfies Record<KnowledgeTabId, PageTab<KnowledgeTabId>['icon']>;
 
-  const tabDescriptors: readonly AdminTabDescriptor<KnowledgeTabId>[] = KNOWLEDGE_TABS.map(
+  const tabDescriptors: readonly PageTab<KnowledgeTabId>[] = KNOWLEDGE_TABS.map(
     (tab) => ({
       id: tab.id,
       label: tab.label,

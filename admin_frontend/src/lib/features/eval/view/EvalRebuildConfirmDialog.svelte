@@ -5,7 +5,7 @@
   explicit confirm.
 -->
 <script lang="ts">
-  import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
+  import ConfirmDialog from '$kit/ui/confirm-dialog.svelte';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
   import type { EvalTrack } from '$lib/features/eval/state/eval-model.svelte';
 

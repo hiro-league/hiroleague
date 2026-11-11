@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Button } from '$kit/components/ui/button/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
-  import SectionCard from '$lib/components/page/SectionCard.svelte';
+  import Panel from '$kit/ui/panel.svelte';
   import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
   import Notice from '$kit/ui/notice.svelte';
   import type { ExtensionsController } from '../state/extensions-controller.svelte';
@@ -15,7 +15,7 @@
   );
 </script>
 
-<SectionCard class="grid gap-4">
+<Panel class="grid gap-4">
   <div>
     <h3 class="text-lg font-semibold">Where extensions connect</h3>
     <p class="font-sans text-sm text-muted-foreground">
@@ -60,4 +60,4 @@
       Save
     </Button>
   </form>
-</SectionCard>
+</Panel>

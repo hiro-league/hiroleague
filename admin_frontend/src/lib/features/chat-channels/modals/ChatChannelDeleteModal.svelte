@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { ChatChannelRow } from '$lib/api/chat-channels';
-  import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
+  import ConfirmDialog from '$kit/ui/confirm-dialog.svelte';
 
   type Props = {
     target: ChatChannelRow | null;

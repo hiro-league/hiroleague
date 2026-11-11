@@ -5,7 +5,7 @@
   import PageHeader from '$kit/ui/page-header.svelte';
   import AdminRecordTabChip from '$lib/components/page/AdminRecordTabChip.svelte';
   import PageTabs from '$kit/ui/page-tabs.svelte';
-  import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
+  import type { PageTab } from '$kit/ui/page-tabs.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import CharactersBrowseSection from '$lib/features/characters/browse/CharactersBrowseSection.svelte';
   import CharacterViewPanel from '$lib/features/characters/view/CharacterViewPanel.svelte';
@@ -46,7 +46,7 @@
     isNew ? 'New character' : ctrl.selected?.name?.trim() || prefs.characterId || 'Detail'
   );
 
-  const fixedTabs: readonly AdminTabDescriptor<CharactersTabPreference>[] = [
+  const fixedTabs: readonly PageTab<CharactersTabPreference>[] = [
     { id: 'browse', label: 'Browse', kind: 'pane' }
   ];
 

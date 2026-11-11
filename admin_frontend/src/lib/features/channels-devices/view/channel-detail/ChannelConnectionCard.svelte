@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Button } from '$kit/components/ui/button/index.js';
-  import SectionCard from '$lib/components/page/SectionCard.svelte';
+  import Panel from '$kit/ui/panel.svelte';
   import Notice from '$kit/ui/notice.svelte';
   import StatusDot from '$kit/ui/status-dot.svelte';
   import { ADMIN_SECTION_TITLE } from '$lib/styling/admin-tokens';
@@ -17,7 +17,7 @@
   const label = (action: string) => ACTION_LABELS[action] ?? action;
 </script>
 
-<SectionCard class="grid gap-3">
+<Panel class="grid gap-3">
   <h2 class={ADMIN_SECTION_TITLE}>Connection</h2>
 
   <div class="flex items-center gap-2 text-sm">
@@ -64,4 +64,4 @@
       {ctrl.uninstalling ? 'Uninstalling…' : 'Uninstall'}
     </Button>
   </div>
-</SectionCard>
+</Panel>

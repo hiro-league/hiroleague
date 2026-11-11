@@ -2,7 +2,7 @@
   import { onMount, tick } from 'svelte';
   import { page } from '$app/state';
   import StickyBar from '$kit/ui/sticky-bar.svelte';
-  import AdminMasterDetail from '$lib/components/page/table/AdminMasterDetail.svelte';
+  import MasterDetail from '$kit/ui/master-detail.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
   import Notice from '$kit/ui/notice.svelte';
@@ -111,7 +111,7 @@
   <Notice tone="warning" message={ctrl.pollError} class="px-3 py-2 text-sm" />
 {/if}
 
-<AdminMasterDetail bind:detailOpen={prefs.detailPanelOpen} scroll="page">
+<MasterDetail bind:detailOpen={prefs.detailPanelOpen} scroll="page">
   {#snippet list()}
     <LogsTablePanel
       {ctrl}
@@ -137,7 +137,7 @@
       style="top: {detailStickyTop}; height: {detailHeight};"
     />
   {/snippet}
-</AdminMasterDetail>
+</MasterDetail>
 
 <Dialog.Root
   open={clearLogsConfirmOpen}

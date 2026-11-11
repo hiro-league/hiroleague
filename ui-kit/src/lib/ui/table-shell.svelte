@@ -1,12 +1,10 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import * as Table from '$kit/components/ui/table/index.js';
-  import { cn } from '$lib/utils';
-  import {
-    ADMIN_TABLE,
-    ADMIN_TABLE_GRID_HEAD,
-    ADMIN_TABLE_STICKY_TOP
-  } from '$lib/styling/admin-tokens';
+  import { cn } from '$kit/utils';
+  // pinned beneath the shell's top bar, the page header and a sticky bar (all published as CSS variables)
+  const TABLE = 'w-full text-left text-sm';
+  const STICKY_TOP = 'calc(var(--app-top, 0px) + var(--page-header, 0px) + var(--sticky-bar, 0px))';
 
   type Props = {
     /** Semantic `<table>` (default) or CSS-grid row layout for wide admin tables. */
@@ -17,7 +15,7 @@
     gridColumns?: string;
     /** Pin the head row beneath sticky page chrome. */
     stickyHead?: boolean;
-    /** Override `--admin-table-sticky-top` when `stickyHead` is set (eval toolbars, etc.). */
+    /** Override `--table-sticky-top` when `stickyHead` is set (eval toolbars, etc.). */
     stickyTop?: string;
     /**
      * `default` — catalog/server tables (14px, muted uppercase head).
@@ -61,18 +59,18 @@
 
 <div
   class={cn(
-    'admin-table-shell rounded-md border',
+    'table-shell rounded-md border',
     density === 'default' && 'bg-card',
     // overflow-x on the shell breaks page-level sticky; only use it when the head is not page-pinned.
     density === 'default' && !pageStickyHead && 'overflow-x-auto',
-    density === 'dense' && 'admin-table-shell-dense',
+    density === 'dense' && 'table-shell-dense',
     density === 'dense' && !stickyHead && 'overflow-auto',
-    pageStickyHead && layout === 'table' && density === 'default' && 'admin-table-shell-sticky-page',
-    containerStickyHead && layout === 'table' && density === 'default' && 'admin-table-shell-sticky-container',
-    pageStickyHead && layout === 'table' && density === 'dense' && 'admin-table-shell-dense-sticky-page',
+    pageStickyHead && layout === 'table' && density === 'default' && 'table-shell-sticky-page',
+    containerStickyHead && layout === 'table' && density === 'default' && 'table-shell-sticky-container',
+    pageStickyHead && layout === 'table' && density === 'dense' && 'table-shell-dense-sticky-page',
     className
   )}
-  style:--admin-table-sticky-top={pageStickyHead ? (stickyTop ?? ADMIN_TABLE_STICKY_TOP) : undefined}
+  style:--table-sticky-top={pageStickyHead ? (stickyTop ?? STICKY_TOP) : undefined}
   data-sticky-head={stickyHead || undefined}
   data-sticky-scope={pageStickyHead ? 'page' : containerStickyHead ? 'container' : undefined}
   data-density={density}
@@ -82,9 +80,9 @@
       {#if headRow}
         <div
           class={cn(
-            'admin-table-grid-head',
-            pageStickyHead && 'admin-table-grid-head-sticky-page',
-            containerStickyHead && 'admin-table-grid-head-sticky-container'
+            'table-grid-head',
+            pageStickyHead && 'table-grid-head-sticky-page',
+            containerStickyHead && 'table-grid-head-sticky-container'
           )}
           style:grid-template-columns={gridColumns}
         >
@@ -100,7 +98,7 @@
       class={cn(maxBodyHeight && 'overflow-auto', !pageStickyHead && 'overflow-x-auto')}
       style:max-height={maxBodyHeight}
     >
-      <Table.Root scroll={false} class={ADMIN_TABLE}>
+      <Table.Root scroll={false} class={TABLE}>
         {@render children?.()}
       </Table.Root>
     </div>
@@ -109,37 +107,37 @@
 
 <style>
   /* Page scroll: pin beneath shell bar + sticky page header + sticky toolbar.
-     `--admin-table-sticky-top` is set inline by the shell; v-bind cannot bind a
+     `--table-sticky-top` is set inline by the shell; v-bind cannot bind a
      plain JS constant, so we publish the value via a CSS variable instead. */
-  .admin-table-shell-sticky-page :global(thead th),
-  .admin-table-grid-head-sticky-page {
+  .table-shell-sticky-page :global(thead th),
+  .table-grid-head-sticky-page {
     position: sticky;
-    top: var(--admin-table-sticky-top, var(--app-top, 0px));
+    top: var(--table-sticky-top, var(--app-top, 0px));
     z-index: 5;
   }
 
-  .admin-table-shell-sticky-page :global(thead th) {
+  .table-shell-sticky-page :global(thead th) {
     background: var(--muted);
     box-shadow: 0 1px 0 var(--border);
   }
 
-  .admin-table-grid-head-sticky-page {
+  .table-grid-head-sticky-page {
     box-shadow: 0 1px 0 var(--border);
   }
 
   /* Nested max-height scroller: pin at top of the scroll container. */
-  .admin-table-shell-sticky-container :global(thead th),
-  .admin-table-grid-head-sticky-container {
+  .table-shell-sticky-container :global(thead th),
+  .table-grid-head-sticky-container {
     position: sticky;
     top: 0;
     z-index: 1;
   }
 
-  .admin-table-shell-sticky-container :global(thead th) {
+  .table-shell-sticky-container :global(thead th) {
     background: var(--muted);
   }
 
-  .admin-table-grid-head {
+  .table-grid-head {
     display: grid;
     gap: 0.75rem;
     background: var(--muted);
@@ -152,7 +150,7 @@
   }
 
   /* Ledger-style tables (Graph Runs) — matches former GraphRunsTableShell. */
-  .admin-table-shell-dense :global(table) {
+  .table-shell-dense :global(table) {
     width: 100%;
     border-collapse: collapse;
     font-size: 12px;
@@ -160,14 +158,14 @@
     text-align: left;
   }
 
-  .admin-table-shell-dense :global(th),
-  .admin-table-shell-dense :global(td) {
+  .table-shell-dense :global(th),
+  .table-shell-dense :global(td) {
     border-bottom: 1px solid var(--border);
     padding: 8px 10px;
     text-align: left;
   }
 
-  .admin-table-shell-dense :global(thead th) {
+  .table-shell-dense :global(thead th) {
     position: sticky;
     top: 0;
     background: var(--background);
@@ -177,8 +175,8 @@
   }
 
   /* Dense tables pinned beneath page chrome on document scroll. */
-  .admin-table-shell-dense-sticky-page :global(thead th) {
-    top: var(--admin-table-sticky-top, var(--app-top, 0px));
+  .table-shell-dense-sticky-page :global(thead th) {
+    top: var(--table-sticky-top, var(--app-top, 0px));
     z-index: 5;
     box-shadow: 0 1px 0 var(--border);
   }

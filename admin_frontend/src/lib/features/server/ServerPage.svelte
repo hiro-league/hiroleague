@@ -3,7 +3,7 @@
   import PageHeader from '$kit/ui/page-header.svelte';
   import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
   import PageTabs from '$kit/ui/page-tabs.svelte';
-  import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
+  import type { PageTab } from '$kit/ui/page-tabs.svelte';
   import { createServerPreferences } from '$lib/preferences/server-preferences.svelte';
   import type { ServerTabPreference } from '$lib/preferences/keys';
   import { isFeatureActive } from '$lib/shell/features';
@@ -17,13 +17,13 @@
   // The Gateways and Metrics subtabs are each gated by their feature (features.ts). When hidden a
   // tab is dropped here and from the allowed-tab whitelist (server-preferences), so a hidden
   // `?tab=gateways`/`?tab=metrics` falls back to the default (Workspaces) tab.
-  const tabDescriptors: readonly AdminTabDescriptor<ServerTabPreference>[] = [
+  const tabDescriptors: readonly PageTab<ServerTabPreference>[] = [
     { id: 'workspaces', label: 'Workspaces', kind: 'pane' },
     ...(isFeatureActive('gateway')
-      ? [{ id: 'gateways', label: 'Gateways', kind: 'pane' } as AdminTabDescriptor<ServerTabPreference>]
+      ? [{ id: 'gateways', label: 'Gateways', kind: 'pane' } as PageTab<ServerTabPreference>]
       : []),
     ...(isFeatureActive('metrics')
-      ? [{ id: 'metrics', label: 'Metrics', kind: 'pane' } as AdminTabDescriptor<ServerTabPreference>]
+      ? [{ id: 'metrics', label: 'Metrics', kind: 'pane' } as PageTab<ServerTabPreference>]
       : [])
   ];
 

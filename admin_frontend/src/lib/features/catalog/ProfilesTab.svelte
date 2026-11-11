@@ -20,7 +20,7 @@
   import { page } from '$app/state';
   import type { CatalogProviderRow } from '$lib/api/catalog';
   import type { VoiceProfileRow } from '$lib/api/voice';
-  import AdminSubtabStrip from '$lib/components/page/AdminSubtabStrip.svelte';
+  import Subtabs from '$kit/ui/subtabs.svelte';
   import AiProfilesTab from '$lib/features/catalog/ai/AiProfilesTab.svelte';
   import AiUsesTab from '$lib/features/catalog/ai/AiUsesTab.svelte';
   import type { AiController } from '$lib/features/catalog/ai/ai-controller.svelte';
@@ -92,7 +92,7 @@
 </script>
 
 <div class="grid gap-4">
-  <AdminSubtabStrip ariaLabel="Profiles sections" tabs={subtabs} {active} {onSelect} />
+  <Subtabs ariaLabel="Profiles sections" tabs={subtabs} {active} {onSelect} />
 
   {#if active === 'profiles'}
     <AiProfilesTab {ai} />

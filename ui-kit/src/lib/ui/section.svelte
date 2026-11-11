@@ -8,12 +8,11 @@
   import type { Snippet } from 'svelte';
   import { getContext, hasContext, onMount, untrack } from 'svelte';
   import { ChevronRight } from '@lucide/svelte';
-  import { cn } from '$lib/utils';
-  import { ADMIN_SECTION_CARD_MUTED } from '$lib/styling/admin-tokens';
-  import {
+  import { cn } from '$kit/utils';
+    import {
     COLLAPSIBLE_SECTION_REGISTRY,
     type CollapsibleSectionRegistry
-  } from './collapsible-section-registry.svelte';
+  } from './collapsible-registry.svelte';
 
   type Props = {
     /** Section heading; required when `collapsible` is true. */
@@ -79,7 +78,7 @@
 <!-- `grid-cols-1` (minmax(0,1fr)) bounds the single column to the card box, so content wraps within
      the card and the header's description caption truncates as designed (a bare `grid` auto column
      would size to content and overflow the box). -->
-<div class={cn(ADMIN_SECTION_CARD_MUTED, 'grid grid-cols-1 gap-3', className)}>
+<div class={cn('rounded-md border bg-background/45 p-4 shadow-sm', 'grid grid-cols-1 gap-3', className)}>
   {#if title}
     {#if collapsible}
       <!-- `group` makes the whole header LINE the hover target: the description reveals inline next

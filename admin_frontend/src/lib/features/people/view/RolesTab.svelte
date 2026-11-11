@@ -9,8 +9,8 @@
    * - Each feature lists its rights; a role has each one or not. Changes save at once and the app follows.
    */
   import { Lock, Plus, Trash2 } from '@lucide/svelte';
-  import AdminSubtabStrip from '$lib/components/page/AdminSubtabStrip.svelte';
-  import SectionCard from '$lib/components/page/SectionCard.svelte';
+  import Subtabs from '$kit/ui/subtabs.svelte';
+  import Panel from '$kit/ui/panel.svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import { Checkbox } from '$kit/components/ui/checkbox/index.js';
@@ -68,14 +68,14 @@
   <Badge variant="secondary" class="shrink-0">{s.name}</Badge>
 {/snippet}
 
-<SectionCard class="grid gap-4">
-  <AdminSubtabStrip ariaLabel="Roles" tabs={subtabs} active={ctrl.tab} onSelect={(id) => (ctrl.tab = id)} scrollable>
+<Panel class="grid gap-4">
+  <Subtabs ariaLabel="Roles" tabs={subtabs} active={ctrl.tab} onSelect={(id) => (ctrl.tab = id)} scrollable>
     {#snippet toolbar()}
       <Button size="sm" variant="outline" disabled={ctrl.busy} onclick={() => (ctrl.newName = '')}>
         <Plus size={14} /> New role
       </Button>
     {/snippet}
-  </AdminSubtabStrip>
+  </Subtabs>
 
   {#if ctrl.error}
     <p class="font-sans text-sm text-destructive">{ctrl.error}</p>
@@ -199,4 +199,4 @@
       Each change saves at once; the app follows within seconds. Hiro's own tools get their rights here later (Phase 10).
     </p>
   {/if}
-</SectionCard>
+</Panel>

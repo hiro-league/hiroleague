@@ -1,7 +1,7 @@
 <script lang="ts" generics="TId extends string">
   /**
    * Second-level underline subtab strip (Preferences sections, Graph runs
-   * ledger + open inspectors). Page-level pill tabs use `<AdminTabStrip>`.
+   * ledger + open inspectors). Page-level tabs use PageTabs.
    *
    * - Fixed `tabs` render as underline buttons and call `onSelect`.
    * - `extraTabs` — dynamic subtabs after the fixed set (Graph runs per-run).
@@ -11,14 +11,14 @@
    */
   import type { Snippet } from 'svelte';
   import { ChevronLeft, ChevronRight } from '@lucide/svelte';
-  import { cn } from '$lib/utils';
-  import { ADMIN_SUBTAB_STRIP_SHELL, ADMIN_SUBTAB_TABLIST } from '$lib/styling/admin-tokens';
-  import AdminSubtabButton from './AdminSubtabButton.svelte';
-  import type { AdminSubtabDescriptor } from './tab-types';
+  import { cn } from '$kit/utils';
+  import { SUBTAB_STRIP_SHELL, SUBTAB_TABLIST } from './subtab-class';
+  import SubtabButton from './subtab-button.svelte';
+  import type { SubtabDescriptor } from './subtabs-types';
 
   type Props = {
     ariaLabel: string;
-    tabs: readonly AdminSubtabDescriptor<TId>[];
+    tabs: readonly SubtabDescriptor<TId>[];
     active: TId;
     onSelect?: (id: TId) => void;
     class?: string;
@@ -108,7 +108,7 @@
   });
 </script>
 
-<div class={cn(ADMIN_SUBTAB_STRIP_SHELL, className)}>
+<div class={cn(SUBTAB_STRIP_SHELL, className)}>
   {#if scrollable && overflowing}
     <button
       type="button"
@@ -123,7 +123,7 @@
   <div
     bind:this={tablistEl}
     class={cn(
-      ADMIN_SUBTAB_TABLIST,
+      SUBTAB_TABLIST,
       // Hide the native scrollbar — the chevron buttons are the affordance (trackpad/shift-wheel
       // still work). `scroll-smooth` animates the arrow paging.
       scrollable &&
@@ -134,7 +134,7 @@
     onscroll={scrollable ? measure : undefined}
   >
     {#each tabs as tab (tab.id)}
-      <AdminSubtabButton
+      <SubtabButton
         label={tab.label}
         count={tab.count}
         countText={tab.countText}

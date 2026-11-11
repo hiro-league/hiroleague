@@ -5,7 +5,7 @@
    * limit is used.
    */
   import { ImagePlus, MessageSquare, X } from '@lucide/svelte';
-  import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
+  import Section from '$kit/ui/section.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
   import { ADMIN_TEXTAREA } from '$lib/styling/admin-tokens';
@@ -19,7 +19,7 @@
   const model = $derived(ai.draftModel.model);
 </script>
 
-<SectionCardMuted title="Try it" description="Asks one question with this profile as it is now, saved or not.">
+<Section title="Try it" description="Asks one question with this profile as it is now, saved or not.">
   <p class="text-xs text-muted-foreground">
     {ai.draftModel.provider?.label ?? 'No provider'} · {model?.name ?? ai.draft.model} · thinking
     {thinkingWords(ai.draft.thinking).toLowerCase()}
@@ -81,4 +81,4 @@
   {:else if ai.tryError}
     <Notice message={ai.tryError} />
   {/if}
-</SectionCardMuted>
+</Section>

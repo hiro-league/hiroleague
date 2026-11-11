@@ -3,7 +3,7 @@
    * AI profile editor (dialog): Model, Answer, Budget and Fallback groups on the left, Try it on the
    * right. Inputs bind to `ai.draft`; Save writes `ai.profiles.<id>` through the preferences API.
    */
-  import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
+  import Section from '$kit/ui/section.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
@@ -51,7 +51,7 @@
           <input bind:value={ai.draft.name} placeholder="e.g. Camera questions" />
         </FormField>
 
-        <SectionCardMuted title="Model">
+        <Section title="Model">
           <!-- The admin's shared single-model picker (provider list → model list). Local servers'
                and plan tools' models are fed to it as catalog-shaped rows by the AI controller. -->
           <SingleModelPicker
@@ -77,9 +77,9 @@
           {#if provider?.notReady}
             <p class="text-xs text-warning">{provider.notReady} Its fallback asks meanwhile.</p>
           {/if}
-        </SectionCardMuted>
+        </Section>
 
-        <SectionCardMuted title="Answer">
+        <Section title="Answer">
           <!-- items-start: a two-line hint in one cell must not stretch the other cells' controls. -->
           <div class="grid items-start gap-3 sm:grid-cols-3">
             <FormField label="Thinking">
@@ -118,9 +118,9 @@
           <FormField label="Extra instructions (optional)" hint="Added to every question; leave empty for none.">
             <textarea rows="2" bind:value={ai.draft.instructions} placeholder="e.g. Answer only from what the picture shows."></textarea>
           </FormField>
-        </SectionCardMuted>
+        </Section>
 
-        <SectionCardMuted title="Budget">
+        <Section title="Budget">
           <div class="grid items-start gap-3 sm:grid-cols-2">
             {#if kind === 'api'}
               <FormField label="Cost per day (USD)" hint="Past it, the fallback asks. Empty = no limit.">
@@ -146,9 +146,9 @@
               />
             </FormField>
           </div>
-        </SectionCardMuted>
+        </Section>
 
-        <SectionCardMuted title="Fallback">
+        <Section title="Fallback">
           <FormField
             label="When it can't answer, ask"
             hint="Used when a budget is reached, the provider fails, or the ask must stay local."
@@ -172,7 +172,7 @@
           {:else}
             <p class="text-xs text-muted-foreground">At most {MAX_FALLBACKS} fallbacks in a row, and no loops.</p>
           {/if}
-        </SectionCardMuted>
+        </Section>
       </div>
 
       <!-- Try it stays in view while the form on the left scrolls. -->

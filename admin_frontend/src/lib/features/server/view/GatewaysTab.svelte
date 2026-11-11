@@ -6,7 +6,7 @@
   import Notice from '$kit/ui/notice.svelte';
   import EmptyState from '$kit/ui/empty-state.svelte';
   import Loading from '$kit/ui/loading.svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import type { Notify } from '$kit/ui/toast.svelte';
   import { createGatewayStore } from '../state/gateway-store.svelte';
   import GatewayRow from './GatewayRow.svelte';
@@ -57,7 +57,7 @@
   {:else if gateway.rows.length === 0}
     <EmptyState message="No gateway instances configured yet." />
   {:else}
-    <AdminTableShell layout="grid" minWidth={880} gridColumns={GATEWAY_GRID}>
+    <TableShell layout="grid" minWidth={880} gridColumns={GATEWAY_GRID}>
       {#snippet headRow()}
         <span>Name</span>
         <span>Status</span>
@@ -70,7 +70,7 @@
           <GatewayRow {row} {gateway} grid={GATEWAY_GRID} />
         {/each}
       {/snippet}
-    </AdminTableShell>
+    </TableShell>
   {/if}
 </section>
 

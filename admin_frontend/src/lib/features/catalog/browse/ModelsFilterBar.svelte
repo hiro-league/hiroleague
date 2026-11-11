@@ -1,6 +1,6 @@
 <script lang="ts">
   import { FilterX } from '@lucide/svelte';
-  import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
+  import FilterBar from '$kit/ui/filter-bar.svelte';
   import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
   import AdminIconToggleGroup from '$lib/components/page/AdminIconToggleGroup.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
@@ -60,7 +60,7 @@
   );
 </script>
 
-<AdminFilterBar class="items-end">
+<FilterBar class="items-end">
   <AdminFilterBarSelect
     label="Provider"
     value={ctrl.modelFilters.filters.provider_id}
@@ -120,4 +120,4 @@
       <FilterX size={15} /> Clear filters
     </Button>
   </div>
-</AdminFilterBar>
+</FilterBar>

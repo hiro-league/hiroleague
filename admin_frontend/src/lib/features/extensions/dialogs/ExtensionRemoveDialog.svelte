@@ -1,5 +1,5 @@
 <script lang="ts">
-  import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
+  import ConfirmDialog from '$kit/ui/confirm-dialog.svelte';
   import type { ExtensionsController } from '../state/extensions-controller.svelte';
 
   let { ctrl }: { ctrl: ExtensionsController } = $props();

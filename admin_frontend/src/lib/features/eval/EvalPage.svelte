@@ -5,7 +5,7 @@
   import PageHeader from '$kit/ui/page-header.svelte';
   import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
   import PageTabs from '$kit/ui/page-tabs.svelte';
-  import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
+  import type { PageTab } from '$kit/ui/page-tabs.svelte';
   import Notice from '$kit/ui/notice.svelte';
   import EvalPanel from '$lib/features/eval/EvalPanel.svelte';
   import LiveDegradedBanner from '$lib/live/LiveDegradedBanner.svelte';
@@ -47,13 +47,13 @@
   const trackTabIcons = {
     memory: Brain,
     knowledge: Database
-  } as const satisfies Record<EvalTrack, AdminTabDescriptor<EvalTrack>['icon']>;
+  } as const satisfies Record<EvalTrack, PageTab<EvalTrack>['icon']>;
 
   // Switching the track resets the corpus picker + rescans, so lock the tabs while a
   // run is in flight (mirrors the inline pill tablist this strip replaced).
   const isBusy = $derived(eval_.status === 'starting' || eval_.status === 'running');
 
-  const tabDescriptors: AdminTabDescriptor<EvalTrack>[] = $derived([
+  const tabDescriptors: PageTab<EvalTrack>[] = $derived([
     { id: 'memory', label: 'Memory', kind: 'pane', icon: trackTabIcons.memory, disabled: isBusy },
     { id: 'knowledge', label: 'Knowledge', kind: 'pane', icon: trackTabIcons.knowledge, disabled: isBusy }
   ]);

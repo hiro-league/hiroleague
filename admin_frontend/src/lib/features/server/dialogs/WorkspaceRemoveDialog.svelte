@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Checkbox } from '$kit/components/ui/checkbox/index.js';
-  import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
+  import ConfirmDialog from '$kit/ui/confirm-dialog.svelte';
   import type { createWorkspaceStore } from '../state/workspace-store.svelte';
 
   let { workspace }: { workspace: ReturnType<typeof createWorkspaceStore> } = $props();

@@ -4,7 +4,7 @@
    * Primary pill tabs live in the page header's `tabs`.
    */
   import { ChevronDown, ChevronUp, RefreshCw, X } from '@lucide/svelte';
-  import AdminSubtabStrip from '$lib/components/page/AdminSubtabStrip.svelte';
+  import Subtabs from '$kit/ui/subtabs.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import { cn } from '$lib/utils';
   import {
@@ -51,7 +51,7 @@
   ] as const;
 </script>
 
-<AdminSubtabStrip
+<Subtabs
   ariaLabel={GRAPH_RUNS_SUBTAB_TABLIST_LABEL}
   tabs={browseTab}
   active={activePane}
@@ -139,4 +139,4 @@
       </Button>
     {/if}
   {/snippet}
-</AdminSubtabStrip>
+</Subtabs>

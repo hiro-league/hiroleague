@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Search } from '@lucide/svelte';
   import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import { Checkbox } from '$kit/components/ui/checkbox/index.js';
@@ -36,7 +36,7 @@
   );
 </script>
 
-<AdminTableShell stickyHead maxBodyHeight="280px">
+<TableShell stickyHead maxBodyHeight="280px">
   <thead class={KNOWLEDGE_TABLE_HEAD}>
     <tr>
       <th class="w-10 px-3 py-2">
@@ -133,4 +133,4 @@
       </tr>
     {/each}
   </tbody>
-</AdminTableShell>
+</TableShell>

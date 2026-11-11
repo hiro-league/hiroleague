@@ -4,7 +4,7 @@
   import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
   import StickyBar from '$kit/ui/sticky-bar.svelte';
   import PageTabs from '$kit/ui/page-tabs.svelte';
-  import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
+  import type { PageTab } from '$kit/ui/page-tabs.svelte';
   import ModelsFilterBar from '$lib/features/catalog/browse/ModelsFilterBar.svelte';
   import ModelsTab from '$lib/features/catalog/browse/ModelsTab.svelte';
   import ProvidersTab from '$lib/features/catalog/browse/ProvidersTab.svelte';
@@ -23,7 +23,7 @@
   // Phase 7a: AI profiles, uses, local servers and plan tools (`/api/ai`).
   const ai = createAiController(toast.show, ctrl);
 
-  const tabDescriptors: readonly AdminTabDescriptor<CatalogTabPreference>[] = [
+  const tabDescriptors: readonly PageTab<CatalogTabPreference>[] = [
     // Providers tab merges the former Active + Catalog provider tabs into one list.
     { id: 'providers', label: 'Providers', kind: 'pane' },
     { id: 'models', label: 'Models', kind: 'pane' },

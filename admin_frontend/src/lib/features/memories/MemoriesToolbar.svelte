@@ -1,6 +1,6 @@
 <script lang="ts">
   import { RefreshCw, Trash2 } from '@lucide/svelte';
-  import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
+  import FilterBar from '$kit/ui/filter-bar.svelte';
   import SearchInput from '$lib/search/SearchInput.svelte';
   import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
   import StickyBar from '$kit/ui/sticky-bar.svelte';
@@ -42,7 +42,7 @@
 
 <StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
   <div class="memories-controls">
-    <AdminFilterBar class="min-w-0 flex-1 items-end">
+    <FilterBar class="min-w-0 flex-1 items-end">
       {#if groupsForMemoryFilterDropdown.length > 0}
         <!-- A single group is always selected — no "All" scope (it only ever meant conversation
              memory, never knowledge/eval, which was confusing). No placeholder option. -->
@@ -83,7 +83,7 @@
         placeholder="Search memory text, id, source…"
         class="min-w-[12rem] flex-1"
       />
-    </AdminFilterBar>
+    </FilterBar>
     <div class="memories-actions">
       {#if canClearMemories}
         <!-- Deletes only the filtered relation facts in view (entities are excluded — use

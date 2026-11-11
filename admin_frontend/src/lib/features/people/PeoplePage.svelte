@@ -8,9 +8,9 @@
   import { page } from '$app/state';
   import PageHeader from '$kit/ui/page-header.svelte';
   import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
-  import SectionCard from '$lib/components/page/SectionCard.svelte';
+  import Panel from '$kit/ui/panel.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
-  import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
+  import ConfirmDialog from '$kit/ui/confirm-dialog.svelte';
   import { toast } from '$kit/ui/toast.svelte';
   import PersonDialog from './dialogs/PersonDialog.svelte';
   import SignInDialog from './dialogs/SignInDialog.svelte';
@@ -53,7 +53,7 @@
     <RolesTab ctrl={roles} people={ctrl.people} />
   {:else}
   <section class="grid gap-4">
-    <SectionCard class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+    <Panel class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
       <p class="font-sans text-sm text-muted-foreground">
         One sign-in for HiroLeague and its apps: a password given here, or Home Assistant's login while Home
         is connected. Roles says what each role may do here and in each app.
@@ -61,7 +61,7 @@
       <Button disabled={ctrl.busy} onclick={() => ctrl.openAdd()}>
         <UserPlus size={15} /> Add person
       </Button>
-    </SectionCard>
+    </Panel>
     <PeopleListCard {ctrl} />
   </section>
   {/if}

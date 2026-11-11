@@ -2,12 +2,12 @@
   import { untrack } from 'svelte';
   import { ArrowLeft } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
-  import SectionCard from '$lib/components/page/SectionCard.svelte';
+  import Panel from '$kit/ui/panel.svelte';
   import { ADMIN_SECTION_TITLE } from '$lib/styling/admin-tokens';
   import Loading from '$kit/ui/loading.svelte';
   import Notice from '$kit/ui/notice.svelte';
   import EmptyState from '$kit/ui/empty-state.svelte';
-  import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
+  import ConfirmDialog from '$kit/ui/confirm-dialog.svelte';
   import type { Notify } from '$kit/ui/toast.svelte';
   import { createChannelDetailController } from '../state/channel-detail-controller.svelte';
   import ChannelConnectionCard from './channel-detail/ChannelConnectionCard.svelte';
@@ -58,7 +58,7 @@
   {:else}
     <ChannelConnectionCard {ctrl} onRequestUninstall={() => (confirmingUninstall = true)} />
 
-    <SectionCard class="grid gap-3">
+    <Panel class="grid gap-3">
       <h2 class={ADMIN_SECTION_TITLE}>Settings</h2>
       {#if ctrl.fields.length === 0}
         <EmptyState message="This channel has no configurable settings." />
@@ -78,7 +78,7 @@
           </span>
         </div>
       {/if}
-    </SectionCard>
+    </Panel>
   {/if}
 </div>
 

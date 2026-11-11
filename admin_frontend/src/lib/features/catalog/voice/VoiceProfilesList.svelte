@@ -5,8 +5,8 @@
    * extension's or the unused ones, so the sources don't mix. A designed voice Google dropped is flagged.
    */
   import { Copy, Pencil, Plus, Trash2, TriangleAlert } from '@lucide/svelte';
-  import SectionCard from '$lib/components/page/SectionCard.svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import Panel from '$kit/ui/panel.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
@@ -69,7 +69,7 @@
   const voiceKind = (r: VoiceProfileRow) => (r.provider === 'openai' ? 'OpenAI voice' : VOICE_SOURCE[sourceOf(r.voice)]);
 </script>
 
-<SectionCard class="grid gap-4">
+<Panel class="grid gap-4">
   <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
     <div>
       <h3 class={ADMIN_SECTION_HEADING_LG}>Voice profiles</h3>
@@ -91,7 +91,7 @@
   {:else if !ctrl.profiles.length}
     <EmptyState message="No voice profiles yet. Make one for each way something should speak (an alert, a story, Hiro)." />
   {:else}
-    <AdminTableShell layout="grid" minWidth={980} gridColumns={GRID}>
+    <TableShell layout="grid" minWidth={980} gridColumns={GRID}>
       {#snippet headRow()}
         <span>Name</span>
         <span>Model</span>
@@ -141,6 +141,6 @@
           </div>
         {/each}
       {/snippet}
-    </AdminTableShell>
+    </TableShell>
   {/if}
-</SectionCard>
+</Panel>

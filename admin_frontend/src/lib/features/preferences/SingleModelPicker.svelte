@@ -62,7 +62,7 @@
      * "No workspace default set." `null` = no fallback (this picker IS the default).
      */
     emptyFallbackId?: string | null;
-    /** When true, omit outer card chrome — host `<SectionCardMuted>` owns title/collapse. */
+    /** When true, omit outer card chrome — host `<Section>` owns title/collapse. */
     embedded?: boolean;
     /**
      * When embedded, still render the `label`/`hint` as a FormField-style header.

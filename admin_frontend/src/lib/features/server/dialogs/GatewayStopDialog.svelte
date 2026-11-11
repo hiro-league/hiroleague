@@ -1,5 +1,5 @@
 <script lang="ts">
-  import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
+  import ConfirmDialog from '$kit/ui/confirm-dialog.svelte';
   import type { createGatewayStore } from '../state/gateway-store.svelte';
 
   let { gateway }: { gateway: ReturnType<typeof createGatewayStore> } = $props();

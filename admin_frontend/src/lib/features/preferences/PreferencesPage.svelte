@@ -7,12 +7,12 @@
   import PageHeader from '$kit/ui/page-header.svelte';
   import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
   import StickyBar from '$kit/ui/sticky-bar.svelte';
-  import AdminSubtabStrip from '$lib/components/page/AdminSubtabStrip.svelte';
+  import Subtabs from '$kit/ui/subtabs.svelte';
   import {
     COLLAPSIBLE_SECTION_REGISTRY,
     createCollapsibleSectionRegistry
-  } from '$lib/components/page/collapsible-section-registry.svelte';
-  import type { AdminSubtabDescriptor } from '$lib/components/page/tab-types';
+  } from '$kit/ui/collapsible-registry.svelte';
+  import type { SubtabDescriptor } from '$kit/ui/subtabs-types';
   import { Button } from '$kit/components/ui/button/index.js';
   import PrefManifestTab from '$lib/features/preferences/widgets/manifest/PrefManifestTab.svelte';
   import {
@@ -71,7 +71,7 @@
   });
 
   // Per-tab result counts appear in the tab strip while a search is active (e.g. "Memory (3)").
-  const subtabDescriptors = $derived<readonly AdminSubtabDescriptor<PreferenceTabId>[]>(
+  const subtabDescriptors = $derived<readonly SubtabDescriptor<PreferenceTabId>[]>(
     VISIBLE_PREFERENCE_TABS.map((tab) => ({
       id: tab.id,
       label: tab.label,
@@ -194,7 +194,7 @@
   <PageHeader title="Settings" description="Runtime settings are held in memory and persisted to preferences.json when saved." />
   {#if !ctrl.error}
     <StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
-      <AdminSubtabStrip
+      <Subtabs
         ariaLabel={PREFERENCE_TABLIST_LABEL}
         tabs={subtabDescriptors}
         active={tabPrefs.activeTab}
@@ -267,7 +267,7 @@
             {/if}
           </div>
         {/snippet}
-      </AdminSubtabStrip>
+      </Subtabs>
     </StickyBar>
   {/if}
 

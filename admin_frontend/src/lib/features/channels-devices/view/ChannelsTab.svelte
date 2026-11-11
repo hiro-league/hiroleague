@@ -3,8 +3,8 @@
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import PickSelect from '$kit/ui/pick-select.svelte';
-  import SectionCard from '$lib/components/page/SectionCard.svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import Panel from '$kit/ui/panel.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import type { Notify } from '$kit/ui/toast.svelte';
   import type { ChannelsController } from '../state/channels-controller.svelte';
@@ -49,7 +49,7 @@
 {:else}
 <div class="flex flex-col gap-4">
 {#if ctrl.available.length > 0}
-  <SectionCard class="grid gap-3">
+  <Panel class="grid gap-3">
     <div>
       <h3 class="text-lg font-semibold">Install a channel</h3>
       <span class="font-sans text-sm text-muted-foreground">
@@ -78,7 +78,7 @@
         run while native dependencies download.
       </p>
     {/if}
-  </SectionCard>
+  </Panel>
 {/if}
 
 <RefreshableSectionCard
@@ -92,7 +92,7 @@
   emptyMessage="No channels configured for this workspace."
   onRefresh={() => void ctrl.load()}
 >
-  <AdminTableShell layout="grid" minWidth={920} gridColumns={CHANNEL_GRID}>
+  <TableShell layout="grid" minWidth={920} gridColumns={CHANNEL_GRID}>
     {#snippet headRow()}
       <span>Name</span>
       <span>Status</span>
@@ -159,7 +159,7 @@
         </div>
       {/each}
     {/snippet}
-  </AdminTableShell>
+  </TableShell>
 </RefreshableSectionCard>
 </div>
 {/if}

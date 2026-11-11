@@ -7,7 +7,7 @@
   import Notice from '$kit/ui/notice.svelte';
   import EmptyState from '$kit/ui/empty-state.svelte';
   import Loading from '$kit/ui/loading.svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import type { Notify } from '$kit/ui/toast.svelte';
   import { createWorkspaceStore } from '../state/workspace-store.svelte';
   import WorkspaceRow from './WorkspaceRow.svelte';
@@ -85,7 +85,7 @@
   {:else if workspace.rows.length === 0}
     <EmptyState message="No workspaces configured yet." />
   {:else}
-    <AdminTableShell layout="grid" minWidth={1180} gridColumns={WORKSPACE_GRID}>
+    <TableShell layout="grid" minWidth={1180} gridColumns={WORKSPACE_GRID}>
       {#snippet headRow()}
         <span>Name</span>
         <span>Setup</span>
@@ -99,7 +99,7 @@
           <WorkspaceRow {row} {workspace} grid={WORKSPACE_GRID} />
         {/each}
       {/snippet}
-    </AdminTableShell>
+    </TableShell>
   {/if}
 </section>
 

@@ -12,7 +12,7 @@
     Search
   } from '@lucide/svelte';
   import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Checkbox } from '$kit/components/ui/checkbox/index.js';
@@ -138,7 +138,7 @@
         No supported files in this folder
       </div>
     {:else}
-      <AdminTableShell stickyHead maxBodyHeight="400px">
+      <TableShell stickyHead maxBodyHeight="400px">
         <thead class={KNOWLEDGE_TABLE_HEAD}>
           <tr>
             <th class="w-10 px-3 py-2">
@@ -205,7 +205,7 @@
             </tr>
           {/each}
         </tbody>
-      </AdminTableShell>
+      </TableShell>
     {/if}
     {#if ingest.supportedFiles.length > 0}
       <div class="font-sans text-xs text-muted-foreground">{ingest.supportedFiles.length} markdown files</div>

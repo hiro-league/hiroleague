@@ -3,7 +3,7 @@
   import { afterNavigate } from '$app/navigation';
   import PageHeader from '$kit/ui/page-header.svelte';
   import PageTabs from '$kit/ui/page-tabs.svelte';
-  import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
+  import type { PageTab } from '$kit/ui/page-tabs.svelte';
   import ChatChannelsBrowse from '$lib/features/chat-channels/browse/ChatChannelsBrowse.svelte';
   import ChatChannelEditorModal from '$lib/features/chat-channels/edit/ChatChannelEditorModal.svelte';
   import ChatChannelsMessagesPanel from '$lib/features/chat-channels/messages/ChatChannelsMessagesPanel.svelte';
@@ -43,7 +43,7 @@
     ctrl.setPageMessagesActive(ctrl.activeTab === 'messages');
   });
 
-  const tabDescriptors: readonly AdminTabDescriptor<ChatChannelsTabPreference>[] = [
+  const tabDescriptors: readonly PageTab<ChatChannelsTabPreference>[] = [
     {
       id: 'channels',
       label: 'Channels',

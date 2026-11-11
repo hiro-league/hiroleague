@@ -1,10 +1,10 @@
 <script lang="ts">
   /**
-   * Single underline tab inside `<AdminSubtabStrip>`. Also used directly for
+   * Single underline tab inside `<Subtabs>`. Also used directly for
    * dynamic subtabs (Graph runs open-run inspectors with a close affordance).
    */
   import type { Snippet } from 'svelte';
-  import { cnAdminSubtab } from '$lib/styling/admin-tokens';
+  import { subtabClass } from './subtab-class';
 
   type Props = {
     label: string;
@@ -46,7 +46,7 @@
 <button
   type="button"
   id={htmlId}
-  class={cnAdminSubtab(active, className)}
+  class={subtabClass(active, className)}
   role="tab"
   aria-selected={active}
   aria-controls={ariaControls}

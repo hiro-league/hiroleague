@@ -14,7 +14,7 @@
     CircleSlash,
     CircleX
   } from '@lucide/svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { fmtScore, pct } from '$lib/features/eval/shared/eval-format';
   import { legLabel } from '$lib/features/eval/shared/eval-display';
   import { breakdownTotals } from '$lib/features/eval/shared/eval-derive';
@@ -112,7 +112,7 @@
 </button>
 {#if !collapsed}
   <div class="mt-2">
-    <AdminTableShell>
+    <TableShell>
       <thead class={ADMIN_TABLE_HEAD}>
         {#if multi}
           <tr>
@@ -145,6 +145,6 @@
           {@render bdCells(totals, totals.correct.flat ?? 0, true)}
         </tr>
       </tbody>
-    </AdminTableShell>
+    </TableShell>
   </div>
 {/if}

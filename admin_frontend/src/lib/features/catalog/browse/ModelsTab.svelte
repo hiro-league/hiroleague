@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ArrowUpRight } from '@lucide/svelte';
   import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import CatalogTabActions from '$lib/features/catalog/browse/CatalogTabActions.svelte';
   import type { CatalogController } from '$lib/features/catalog/state/catalog-controller.svelte';
@@ -56,7 +56,7 @@
   {:else}
     <!-- min-w is shared with ProvidersTab (keep in sync) so both tabs render at the same content
          width and switching Models↔Providers doesn't jump. -->
-    <AdminTableShell stickyHead class={cn('min-w-[1540px]', ctrl.modelsLoading && 'opacity-60 transition-opacity')}>
+    <TableShell stickyHead class={cn('min-w-[1540px]', ctrl.modelsLoading && 'opacity-60 transition-opacity')}>
       <thead class={ADMIN_TABLE_HEAD}>
         <tr>
           <AdminTableHeaderCell column="online" sort={ctrl.modelSort} class="w-12 text-center">
@@ -180,6 +180,6 @@
           </tr>
         {/each}
       </tbody>
-    </AdminTableShell>
+    </TableShell>
   {/if}
 </section>

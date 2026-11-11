@@ -1,4 +1,4 @@
-/** Stable `bodyId` values for collapsible `<SectionCardMuted>` regions in preferences. */
+/** Stable `bodyId` values for collapsible `<Section>` regions in preferences. */
 export const PREFERENCES_SECTION_BODY_IDS = {
   modelsChat: 'preferences-section-models-chat',
   modelsStt: 'preferences-section-models-stt',

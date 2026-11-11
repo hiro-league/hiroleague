@@ -3,7 +3,7 @@
   import PageHeader from '$kit/ui/page-header.svelte';
   import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
   import PageTabs from '$kit/ui/page-tabs.svelte';
-  import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
+  import type { PageTab } from '$kit/ui/page-tabs.svelte';
   import type { ChannelsDevicesTabPreference } from '$lib/preferences/keys';
   import { createChannelsDevicesPreferences } from '$lib/preferences/channels-devices-preferences.svelte';
   import { toast } from '$kit/ui/toast.svelte';
@@ -22,10 +22,10 @@
   // here and from the allowed-tab whitelist (channels-devices-preferences), so a hidden
   // `?tab=devices` falls back to the default (Channels) tab.
   const devicesActive = isFeatureActive('devices');
-  const tabDescriptors: readonly AdminTabDescriptor<ChannelsDevicesTabPreference>[] = [
+  const tabDescriptors: readonly PageTab<ChannelsDevicesTabPreference>[] = [
     { id: 'channels', label: 'Channels', kind: 'pane' },
     ...(devicesActive
-      ? [{ id: 'devices', label: 'Devices', kind: 'pane' } as AdminTabDescriptor<ChannelsDevicesTabPreference>]
+      ? [{ id: 'devices', label: 'Devices', kind: 'pane' } as PageTab<ChannelsDevicesTabPreference>]
       : [])
   ];
 

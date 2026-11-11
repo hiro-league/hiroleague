@@ -8,7 +8,7 @@
   import { tick } from 'svelte';
   import { ChevronDown, ChevronRight, Trash2 } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { fmtCost, pct } from '$lib/features/eval/shared/eval-format';
   import { orderedDifficulty } from '$lib/features/eval/shared/eval-display';
   import EvalBreakdownTable from '$lib/features/eval/report/EvalBreakdownTable.svelte';
@@ -110,7 +110,7 @@
       <span class="text-sm font-semibold">{bench.benchmark.label} · By corpus</span>
     </button>
     {#if !sections.benchByCorpus}
-      <AdminTableShell class="mt-1">
+      <TableShell class="mt-1">
         <thead class={ADMIN_TABLE_HEAD}>
           <tr>
             <th class="px-3 py-2 text-left">Corpus</th>
@@ -156,7 +156,7 @@
             </tr>
           </tfoot>
         {/if}
-      </AdminTableShell>
+      </TableShell>
       <p class="mt-1 font-sans text-[11px] text-muted-foreground">
         Click a corpus to load its detailed breakdown below.
       </p>

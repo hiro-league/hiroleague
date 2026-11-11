@@ -3,8 +3,8 @@
   import { Button } from '$kit/components/ui/button/index.js';
   import PickSelect from '$kit/ui/pick-select.svelte';
   import FormField from '$lib/components/ui/form-field.svelte';
-  import SectionCard from '$lib/components/page/SectionCard.svelte';
-  import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
+  import Panel from '$kit/ui/panel.svelte';
+  import Section from '$kit/ui/section.svelte';
   import { ADMIN_SECTION_TITLE } from '$lib/styling/admin-tokens';
   import { toast } from '$kit/ui/toast.svelte';
   import type { ImageLabController } from './state/image-lab-controller.svelte';
@@ -14,7 +14,7 @@
   const isDefaultModel = $derived(ctl.options?.default_model === ctl.model);
 </script>
 
-<SectionCard class="grid content-start gap-4">
+<Panel class="grid content-start gap-4">
   <h2 class={ADMIN_SECTION_TITLE}>Generate</h2>
 
   <FormField label="Model">
@@ -68,7 +68,7 @@
     {/snippet}
   </FormField>
 
-  <SectionCardMuted class="grid gap-3">
+  <Section class="grid gap-3">
     <FormField label="Style prefix" hint="Prepended to every prompt — the recipe's look-and-feel.">
       {#snippet children()}
         <input type="text" bind:value={ctl.stylePrefix} placeholder="warm photorealistic style, soft lighting" />
@@ -91,7 +91,7 @@
         {/snippet}
       </FormField>
     </div>
-  </SectionCardMuted>
+  </Section>
 
   {#if ctl.composedPrompt}
     <p class="font-sans text-xs text-muted-foreground">
@@ -114,4 +114,4 @@
       </span>
     {/if}
   </div>
-</SectionCard>
+</Panel>

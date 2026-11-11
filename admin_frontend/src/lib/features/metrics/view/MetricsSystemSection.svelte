@@ -1,5 +1,5 @@
 <script lang="ts">
-  import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
+  import Section from '$kit/ui/section.svelte';
   import { METRICS_SYSTEM_CARDS } from '../shared/metrics-card-config';
   import { METRICS_SYSTEM_SECTION_ID } from '../shared/metrics-a11y';
   import type { MetricsController } from '../state/metrics-controller.svelte';
@@ -12,11 +12,11 @@
   let { ctrl }: Props = $props();
 </script>
 
-<SectionCardMuted
+<Section
   title="System-wide"
   collapsible
   defaultExpanded={false}
   bodyId={METRICS_SYSTEM_SECTION_ID}
 >
   <MetricsCardsGrid {ctrl} cards={METRICS_SYSTEM_CARDS} class="grid gap-4 lg:grid-cols-2" />
-</SectionCardMuted>
+</Section>

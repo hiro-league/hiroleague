@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Image as ImageIcon, Save } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
-  import SectionCard from '$lib/components/page/SectionCard.svelte';
+  import Panel from '$kit/ui/panel.svelte';
   import Notice from '$kit/ui/notice.svelte';
   import EmptyState from '$kit/ui/empty-state.svelte';
   import Loading from '$kit/ui/loading.svelte';
@@ -20,7 +20,7 @@
   );
 </script>
 
-<SectionCard class="grid content-start gap-4">
+<Panel class="grid content-start gap-4">
   <div class="flex items-center justify-between gap-3">
     <h2 class={ADMIN_SECTION_TITLE}>Result</h2>
     {#if ctl.result}
@@ -76,4 +76,4 @@
       {/snippet}
     </EmptyState>
   {/if}
-</SectionCard>
+</Panel>

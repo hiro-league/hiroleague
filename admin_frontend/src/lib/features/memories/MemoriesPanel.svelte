@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Eye, MessagesSquare } from '@lucide/svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
   import AdminAvatarNameCell from '$lib/components/page/table/AdminAvatarNameCell.svelte';
   import type { TableSortController } from '$lib/components/page/table/use-table-sort.svelte';
@@ -135,7 +135,7 @@
         <EmptyState message="No memories match the current filters." />
       {:else}
         <div class="memories-table-container">
-          <AdminTableShell density="dense" stickyHead class="memories-table-wrap">
+          <TableShell density="dense" stickyHead class="memories-table-wrap">
             <thead>
               <tr>
                 <AdminTableHeaderCell column="kind" {sort}>Kind</AdminTableHeaderCell>
@@ -224,7 +224,7 @@
                 </tr>
               {/each}
             </tbody>
-          </AdminTableShell>
+          </TableShell>
         </div>
       {/if}
     {/if}

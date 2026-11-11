@@ -6,7 +6,7 @@
 -->
 <script lang="ts">
   import { ChevronRight, CircleSlash, Flag, LoaderCircle } from '@lucide/svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Checkbox } from '$kit/components/ui/checkbox/index.js';
   import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
@@ -113,7 +113,7 @@
 {/snippet}
 
 <!-- No overflow wrapper on the shell: a scroll container would trap the sticky header. -->
-<AdminTableShell stickyHead stickyTop={EVAL_ANSWERS_TABLE_STICKY_TOP}>
+<TableShell stickyHead stickyTop={EVAL_ANSWERS_TABLE_STICKY_TOP}>
   <thead class={ADMIN_TABLE_HEAD}>
     <tr>
       <th class="w-10 px-3 py-2 text-center">
@@ -335,4 +335,4 @@
       </tr>
     {/if}
   </tbody>
-</AdminTableShell>
+</TableShell>

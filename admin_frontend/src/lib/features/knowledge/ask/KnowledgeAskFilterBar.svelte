@@ -1,6 +1,6 @@
 <script lang="ts">
   import { FilterX } from '@lucide/svelte';
-  import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
+  import FilterBar from '$kit/ui/filter-bar.svelte';
   import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import { Checkbox } from '$kit/components/ui/checkbox/index.js';
@@ -34,7 +34,7 @@
   );
 </script>
 
-<AdminFilterBar class="flex-wrap items-end">
+<FilterBar class="flex-wrap items-end">
   <AdminFilterBarSelect
     label="Owner"
     bind:value={ask.askOwnerKind}
@@ -166,4 +166,4 @@
       <FilterX size={15} /> Clear
     </Button>
   </div>
-</AdminFilterBar>
+</FilterBar>

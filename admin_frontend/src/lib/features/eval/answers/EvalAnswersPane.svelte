@@ -6,7 +6,7 @@
 -->
 <script lang="ts">
   import { Download, FoldVertical, ListChecks, ListX, LoaderCircle, UnfoldVertical } from '@lucide/svelte';
-  import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
+  import FilterBar from '$kit/ui/filter-bar.svelte';
   import { useTableFilters } from '$lib/components/page/table/use-table-filters.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import { setupStickyHeightVar } from '$lib/styling/sticky-height';
@@ -277,7 +277,7 @@
         .length} selected{#if resultsSummary} · {resultsSummary}{/if}{#if ansFiltered}
         · {filteredAnswerRows.length}/{eval_.rows.length} shown{/if}
     </span>
-    <AdminFilterBar class="ml-auto items-center gap-2">
+    <FilterBar class="ml-auto items-center gap-2">
       <SearchInput
         variant="inline"
         class="h-8 w-48 min-w-0 shadow-xs"
@@ -395,7 +395,7 @@
           LoCoMo
         </Button>
       {/if}
-    </AdminFilterBar>
+    </FilterBar>
   </div>
   {#if showMemorySummaryBar}
     <div

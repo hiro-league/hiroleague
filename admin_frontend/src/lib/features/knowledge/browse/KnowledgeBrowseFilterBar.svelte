@@ -1,6 +1,6 @@
 <script lang="ts">
   import { FilterX } from '@lucide/svelte';
-  import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
+  import FilterBar from '$kit/ui/filter-bar.svelte';
   import SearchInput from '$lib/search/SearchInput.svelte';
   import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
@@ -32,7 +32,7 @@
   );
 </script>
 
-<AdminFilterBar class="flex-wrap items-end">
+<FilterBar class="flex-wrap items-end">
   <SearchInput
     label="Title"
     value={browse.browseTitle}
@@ -121,4 +121,4 @@
       <FilterX size={15} /> Clear
     </Button>
   </div>
-</AdminFilterBar>
+</FilterBar>

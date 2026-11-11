@@ -4,7 +4,7 @@
   import { Brain, Share2 } from '@lucide/svelte';
   import PageHeader from '$kit/ui/page-header.svelte';
   import PageTabs from '$kit/ui/page-tabs.svelte';
-  import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
+  import type { PageTab } from '$kit/ui/page-tabs.svelte';
   import Notice from '$kit/ui/notice.svelte';
   import { ADMIN_PAGE_MAX_W_WIDE } from '$lib/styling/admin-tokens';
   import { createMemoriesPreferences } from '$lib/preferences/memories-preferences.svelte';
@@ -38,7 +38,7 @@
     tabPrefs.syncActiveTabFromUrl();
   });
 
-  const tabDescriptors: readonly AdminTabDescriptor<MemoriesTabPreference>[] = [
+  const tabDescriptors: readonly PageTab<MemoriesTabPreference>[] = [
     {
       id: 'memories',
       label: 'Memories',

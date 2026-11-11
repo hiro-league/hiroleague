@@ -2,8 +2,8 @@
   import { Link2, Link2Off, PlugZap } from '@lucide/svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
-  import SectionCard from '$lib/components/page/SectionCard.svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import Panel from '$kit/ui/panel.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import RefreshableSectionCard from '$lib/features/channels-devices/shared/RefreshableSectionCard.svelte';
   import { dateTime } from '$lib/format/time';
@@ -14,7 +14,7 @@
   const GRID = '170px 110px 1.4fr 190px 240px';
 </script>
 
-<SectionCard class="grid gap-4">
+<Panel class="grid gap-4">
   <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
     <div>
       <h3 class="text-lg font-semibold">Add an extension</h3>
@@ -27,7 +27,7 @@
       <Link2 size={15} /> Make a pairing code
     </Button>
   </div>
-</SectionCard>
+</Panel>
 
 <RefreshableSectionCard
   title="Paired extensions"
@@ -40,7 +40,7 @@
   emptyMessage="No extensions yet. Make a pairing code above to add one."
   onRefresh={() => void ctrl.load()}
 >
-  <AdminTableShell layout="grid" minWidth={900} gridColumns={GRID} stickyHead>
+  <TableShell layout="grid" minWidth={900} gridColumns={GRID} stickyHead>
     {#snippet headRow()}
       <span>Name</span>
       <span>Version</span>
@@ -97,5 +97,5 @@
         </div>
       {/each}
     {/snippet}
-  </AdminTableShell>
+  </TableShell>
 </RefreshableSectionCard>

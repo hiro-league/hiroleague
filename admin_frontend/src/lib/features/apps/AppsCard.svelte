@@ -6,7 +6,7 @@
    */
   import { onMount } from 'svelte';
   import { AppWindow, ChartColumn, ExternalLink, House } from '@lucide/svelte';
-  import SectionCard from '$lib/components/page/SectionCard.svelte';
+  import Panel from '$kit/ui/panel.svelte';
   import Notice from '$kit/ui/notice.svelte';
   import StatusDot from '$kit/ui/status-dot.svelte';
   import { listApps, type AppSite } from '$lib/api/auth';
@@ -34,7 +34,7 @@
 {#if error}
   <Notice message={error} class="text-xs" />
 {:else if loaded && apps.length}
-  <SectionCard class="grid gap-4">
+  <Panel class="grid gap-4">
     <div class="flex items-baseline justify-between gap-3">
       <h2 class="font-sans text-base font-semibold">Apps</h2>
       <span class="font-sans text-xs text-muted-foreground">Open in a new tab; the same sign-in lets you in</span>
@@ -63,5 +63,5 @@
         </a>
       {/each}
     </div>
-  </SectionCard>
+  </Panel>
 {/if}

@@ -7,7 +7,7 @@
    * extensions' groups. A job can't use a plan tool's model (claude_code:* / codex:*), so those
    * profiles aren't offered.
    */
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { isPlanModel } from '$lib/catalog/hiro-jobs';
@@ -76,7 +76,7 @@
       The core's own work. Each job asks with one AI profile; not set, it borrows the profile of the job it falls back to.
     </p>
   </div>
-  <AdminTableShell layout="grid" minWidth={900} gridColumns={GRID}>
+  <TableShell layout="grid" minWidth={900} gridColumns={GRID}>
     {#snippet headRow()}
       <span>Job</span>
       <span>Needs</span>
@@ -114,7 +114,7 @@
         </div>
       {/each}
     {/snippet}
-  </AdminTableShell>
+  </TableShell>
 
   <div class="mt-3">
     <h4 class="font-sans text-base font-semibold text-primary">
@@ -125,7 +125,7 @@
     </p>
   </div>
   {#if voiceError}<Notice message={voiceError} />{/if}
-  <AdminTableShell layout="grid" minWidth={900} gridColumns={GRID}>
+  <TableShell layout="grid" minWidth={900} gridColumns={GRID}>
     {#snippet headRow()}
       <span>Use</span>
       <span>Needs</span>
@@ -155,5 +155,5 @@
         </span>
       </div>
     {/snippet}
-  </AdminTableShell>
+  </TableShell>
 </div>

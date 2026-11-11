@@ -11,13 +11,13 @@
   import { Copy, Pencil, Plus, RotateCcw, Trash2 } from '@lucide/svelte';
   import FieldHelp from '$lib/components/ui/field-help.svelte';
   import Segmented from '$kit/ui/segmented.svelte';
-  import SectionCard from '$lib/components/page/SectionCard.svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import Panel from '$kit/ui/panel.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
-  import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
+  import ConfirmDialog from '$kit/ui/confirm-dialog.svelte';
   import Notice from '$kit/ui/notice.svelte';
   import EmptyState from '$kit/ui/empty-state.svelte';
   import Loading from '$kit/ui/loading.svelte';
@@ -76,7 +76,7 @@
   });
 </script>
 
-<SectionCard class="grid gap-4">
+<Panel class="grid gap-4">
   <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
     <div>
       <h3 class={ADMIN_SECTION_HEADING_LG}>AI profiles</h3>
@@ -99,7 +99,7 @@
   {:else if ai.profiles.length === 0}
     <EmptyState message="No AI profiles yet." hint="Make one with New profile." />
   {:else}
-    <AdminTableShell layout="grid" minWidth={1260} gridColumns={GRID}>
+    <TableShell layout="grid" minWidth={1260} gridColumns={GRID}>
       {#snippet headRow()}
         <span>Name</span>
         <span>Model</span>
@@ -187,9 +187,9 @@
           </div>
         {/each}
       {/snippet}
-    </AdminTableShell>
+    </TableShell>
   {/if}
-</SectionCard>
+</Panel>
 
 <AiProfileEditorDialog {ai} />
 

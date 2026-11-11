@@ -9,7 +9,7 @@
    */
   import { tick } from 'svelte';
   import { Download, Loader, Send } from '@lucide/svelte';
-  import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
+  import Section from '$kit/ui/section.svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import Notice from '$kit/ui/notice.svelte';
@@ -111,7 +111,7 @@
   const tagBtn = 'rounded-md border px-1.5 py-0.5 font-mono text-[11px] hover:bg-accent disabled:opacity-50';
 </script>
 
-<SectionCardMuted title="Try it">
+<Section title="Try it">
   <div class="grid gap-3">
     <label class="grid gap-1 text-xs text-muted-foreground">
       Speak with
@@ -208,4 +208,4 @@
       <p class="text-right text-xs text-muted-foreground">This visit: {takes.length} takes, {money(spent, takes.every((t) => t.clip.cost_exact))}</p>
     {/if}
   </div>
-</SectionCardMuted>
+</Section>

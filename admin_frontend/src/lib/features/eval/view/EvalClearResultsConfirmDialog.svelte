@@ -6,7 +6,7 @@
   and is NOT gated.
 -->
 <script lang="ts">
-  import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
+  import ConfirmDialog from '$kit/ui/confirm-dialog.svelte';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
 
   type Props = {

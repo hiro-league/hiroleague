@@ -2,7 +2,7 @@
   import type { Snippet } from 'svelte';
   import { Filter, Plus, RefreshCw, Search, Trash2 } from '@lucide/svelte';
   import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import CatalogTabActions from '$lib/features/catalog/browse/CatalogTabActions.svelte';
@@ -115,7 +115,7 @@
   {:else}
     <!-- min-w is shared with ModelsTab (keep in sync) so both tabs render at the same content width
          and switching Providers↔Models doesn't jump. Sized just above the wider table's natural width. -->
-    <AdminTableShell stickyHead class={cn('min-w-[1540px]', ctrl.providersLoading && 'opacity-60 transition-opacity')}>
+    <TableShell stickyHead class={cn('min-w-[1540px]', ctrl.providersLoading && 'opacity-60 transition-opacity')}>
       <thead class={ADMIN_TABLE_HEAD}>
         <tr>
           <AdminTableHeaderCell column="online" sort={ctrl.providerSort} class="w-12 text-center">
@@ -274,7 +274,7 @@
         {/each}
         {@render extraRows?.(activeOnly)}
       </tbody>
-    </AdminTableShell>
+    </TableShell>
   {/if}
 </section>
 

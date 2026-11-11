@@ -8,7 +8,7 @@
   import Loading from '$kit/ui/loading.svelte';
   import StickyBar from '$kit/ui/sticky-bar.svelte';
   import Segmented from '$kit/ui/segmented.svelte';
-  import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
+  import FilterBar from '$kit/ui/filter-bar.svelte';
   import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
   import MultiSelectFilter from '$lib/components/ui/multi-select-filter.svelte';
   import FieldHelp from '$lib/components/ui/field-help.svelte';
@@ -50,7 +50,7 @@
 <div class="flex min-w-0 flex-col gap-4">
   <StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
     <div class="grid gap-3">
-      <AdminFilterBar class="items-center">
+      <FilterBar class="items-center">
         <!-- The days shown: ‹ › step the picked range itself; the period buttons are shortcuts. -->
         <AiUsageRangePicker span={pg.span} now={pg.now} canLater={pg.canLater} onpick={pg.setSpan} onshift={pg.shift} />
         <Segmented label="Period" options={PERIODS} value={pg.period} onchange={(p: Period) => pg.setPeriod(p)} />
@@ -63,7 +63,7 @@
           clearable={false}
           onValueChange={(v) => (pg.groupBy = v as Dimension)}
         />
-      </AdminFilterBar>
+      </FilterBar>
 
       <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2">
         <span class="font-sans text-xs font-semibold text-muted-foreground">Only</span>

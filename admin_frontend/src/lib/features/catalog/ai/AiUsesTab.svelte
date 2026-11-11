@@ -8,8 +8,8 @@
    * (greyed out, choice read-only, Forget).
    */
   import { RefreshCw, X } from '@lucide/svelte';
-  import SectionCard from '$lib/components/page/SectionCard.svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import Panel from '$kit/ui/panel.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
@@ -56,7 +56,7 @@
   }
 </script>
 
-<SectionCard class="grid gap-4">
+<Panel class="grid gap-4">
   <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
     <div>
       <h3 class={ADMIN_SECTION_HEADING_LG}>Uses</h3>
@@ -117,7 +117,7 @@
           {refreshing ? 'Asking…' : 'Refresh'}
         </Button>
       </div>
-      <AdminTableShell layout="grid" minWidth={900} gridColumns={GRID}>
+      <TableShell layout="grid" minWidth={900} gridColumns={GRID}>
         {#snippet headRow()}
           <span>Use</span>
           <span>Needs</span>
@@ -172,10 +172,10 @@
             </div>
           {/each}
         {/snippet}
-      </AdminTableShell>
+      </TableShell>
     </div>
       <!-- Phase 7b: the extension's speaking (voice uses), real. -->
       <VoiceUsesTable {voice} extension={group.extension} />
   {/each}
   {/if}
-</SectionCard>
+</Panel>

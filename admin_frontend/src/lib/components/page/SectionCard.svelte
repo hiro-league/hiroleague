@@ -3,7 +3,7 @@
    * Solid section card used to group page-level sections.
    *
    * Visual variant `ADMIN_SECTION_CARD` (solid `bg-card`). See
-   * `<SectionCardMuted>` for the translucent nested-card variant —
+   * `<Section>` for the translucent nested-card variant —
    * `docs/admin-frontend-refactor-plan.md` §2.4.4.
    */
   import type { Snippet } from 'svelte';

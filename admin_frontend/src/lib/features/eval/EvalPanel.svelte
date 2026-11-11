@@ -12,8 +12,8 @@
   import { onMount } from 'svelte';
   import { afterNavigate } from '$app/navigation';
   import { FolderSearch, LoaderCircle, RefreshCw } from '@lucide/svelte';
-  import AdminSubtabStrip from '$lib/components/page/AdminSubtabStrip.svelte';
-  import type { AdminSubtabDescriptor } from '$lib/components/page/tab-types';
+  import Subtabs from '$kit/ui/subtabs.svelte';
+  import type { SubtabDescriptor } from '$kit/ui/subtabs-types';
   import { ADMIN_SHELL_STICKY_BLEED } from '$lib/styling/admin-tokens';
   import { setupStickyHeightVar } from '$lib/styling/sticky-height';
   import Notice from '$kit/ui/notice.svelte';
@@ -94,7 +94,7 @@
   const activeSubtab = $derived(subPrefs.activeTab);
   const selectSubtab = (id: EvalSubtabPreference) => void subPrefs.setActiveTab(id);
   afterNavigate(() => subPrefs.syncActiveTabFromUrl());
-  const subtabs = $derived<AdminSubtabDescriptor<EvalSubtabPreference>[]>([
+  const subtabs = $derived<SubtabDescriptor<EvalSubtabPreference>[]>([
     { id: 'execute', label: 'Execute' },
     ...(cfg.hasCorpusReview
       ? [{ id: 'corpus' as const, label: 'Corpus', count: eval_.selectedCorpus?.item_count }]
@@ -270,7 +270,7 @@
     class="sticky z-10 bg-background/95 py-1 backdrop-blur supports-[backdrop-filter]:bg-background/85 {ADMIN_SHELL_STICKY_BLEED}"
     style="top: calc(var(--app-top, 0px) + var(--page-header, 0px) + var(--sticky-bar, 0px));"
   >
-    <AdminSubtabStrip
+    <Subtabs
       ariaLabel="Eval section"
       tabs={subtabs}
       active={activeSubtab}
