@@ -2,29 +2,10 @@
   import type { Component, Snippet } from 'svelte';
   import { ArrowRight } from '@lucide/svelte';
   import { cn } from '$lib/utils';
+  import { catVar } from '$kit/ui/category';
 
-  type Accent = 'primary' | 'emerald' | 'cyan';
-
-  const accentStyles: Record<
-    Accent,
-    { card: string; icon: string; arrow: string }
-  > = {
-    primary: {
-      card: 'hover:border-primary/50 hover:bg-secondary/20',
-      icon: 'bg-primary/15 text-primary',
-      arrow: 'group-hover:text-primary'
-    },
-    emerald: {
-      card: 'hover:border-emerald-500/50 hover:bg-emerald-500/5',
-      icon: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
-      arrow: 'group-hover:text-emerald-700 dark:group-hover:text-emerald-300'
-    },
-    cyan: {
-      card: 'hover:border-cyan-500/50 hover:bg-cyan-500/5',
-      icon: 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300',
-      arrow: 'group-hover:text-cyan-700 dark:group-hover:text-cyan-300'
-    }
-  };
+  /** `primary`, or a category number (1 … 8) for a tile's own colour. */
+  type Accent = 'primary' | number;
 
   let {
     href,
@@ -42,19 +23,20 @@
     children?: Snippet;
   } = $props();
 
-  const styles = $derived(accentStyles[accent]);
+  const tone = $derived(accent === 'primary' ? 'var(--primary)' : catVar(accent));
 </script>
 
 <a
   class={cn(
-    'group grid min-h-36 gap-3 rounded-lg border bg-card p-4 shadow-sm transition-colors',
-    styles.card
+    'group grid min-h-36 gap-3 rounded-lg border bg-card p-4 shadow-sm transition-colors hover:border-(--tile)/50',
+    accent === 'primary' ? 'hover:bg-secondary/20' : 'hover:bg-(--tile)/5'
   )}
+  style:--tile={tone}
   {href}
 >
   <div class="flex items-start justify-between gap-3">
     <div class="flex items-center gap-3">
-      <span class={cn('rounded-full p-2.5', styles.icon)}>
+      <span class="rounded-full bg-(--tile)/15 p-2.5 text-(--tile)">
         <Icon size={20} />
       </span>
       <div>
@@ -63,7 +45,7 @@
       </div>
     </div>
     <ArrowRight
-      class={cn('mt-1 text-muted-foreground transition-transform group-hover:translate-x-0.5', styles.arrow)}
+      class="mt-1 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-(--tile)"
       size={18}
     />
   </div>

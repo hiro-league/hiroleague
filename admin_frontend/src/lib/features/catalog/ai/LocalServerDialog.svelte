@@ -48,7 +48,7 @@
       {#if server}
         <dl class="grid grid-cols-[8rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
           <dt class="text-muted-foreground">Status</dt>
-          <dd class={cn(status?.tone === 'warn' && 'text-amber-700 dark:text-amber-300')}>
+          <dd class={cn(status?.tone === 'warn' && 'text-warning')}>
             {server.state === 'up' ? 'Up' : (server.error ?? status?.word)}
           </dd>
           <dt class="text-muted-foreground">Checked</dt>

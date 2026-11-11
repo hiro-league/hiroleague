@@ -53,7 +53,7 @@
         </Button>
       </div>
       {#if model && !model.pictures}
-        <p class="text-xs text-amber-700 dark:text-amber-300">{model.name} can't see pictures: it gets the text only.</p>
+        <p class="text-xs text-warning">{model.name} can't see pictures: it gets the text only.</p>
       {/if}
     {:else}
       <Button size="sm" variant="outline" class="w-fit" onclick={() => fileInput?.click()}>
@@ -75,7 +75,7 @@
         {r.model} · {r.seconds.toFixed(1)} s · {r.tokensIn} tokens in, {r.tokensOut} out · {r.cost}
       </p>
       {#each r.notes as note (note)}
-        <p class="text-xs text-amber-700 dark:text-amber-300">{note}</p>
+        <p class="text-xs text-warning">{note}</p>
       {/each}
     </div>
   {:else if ai.tryError}

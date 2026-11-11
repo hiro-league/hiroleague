@@ -10,7 +10,7 @@
    */
   import { Copy, Pencil, Plus, RotateCcw, Trash2 } from '@lucide/svelte';
   import FieldHelp from '$lib/components/ui/field-help.svelte';
-  import SourceFilter, { type SourceOption } from '$lib/components/page/SourceFilter.svelte';
+  import Segmented from '$kit/ui/segmented.svelte';
   import SectionCard from '$lib/components/page/SectionCard.svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
@@ -54,11 +54,11 @@
   const extensions = $derived(ai.useGroups.map((g) => g.extension).filter((e) => e !== HIRO));
   const isUnused = (id: string) => !ai.usedBy(id).length && !ai.jobsUsing(id).length;
   const unused = $derived(ai.profiles.filter((p) => isUnused(p.id)));
-  const sourceOptions = $derived<SourceOption[]>([
-    { id: 'all', label: 'All', count: ai.profiles.length },
-    { id: HIRO, label: 'Hiro', count: ai.profiles.filter((p) => sourcesOf(p.id).has(HIRO)).length },
-    ...extensions.map((e) => ({ id: e, label: e, count: ai.profiles.filter((p) => sourcesOf(p.id).has(e)).length })),
-    { id: 'unused', label: 'Unused', count: unused.length }
+  const sourceOptions = $derived([
+    { value: 'all', label: 'All', count: ai.profiles.length },
+    { value: HIRO, label: 'Hiro', count: ai.profiles.filter((p) => sourcesOf(p.id).has(HIRO)).length },
+    ...extensions.map((e) => ({ value: e, label: e, count: ai.profiles.filter((p) => sourcesOf(p.id).has(e)).length })),
+    { value: 'unused', label: 'Unused', count: unused.length }
   ]);
   const shownProfiles = $derived(
     source === 'all' ? ai.profiles : source === 'unused' ? unused : ai.profiles.filter((p) => sourcesOf(p.id).has(source))
@@ -87,7 +87,7 @@
     </div>
     <div class="flex flex-wrap items-center gap-2">
       <!-- Hiro's profiles, each extension's, or the unused ones — never all mixed unless asked. -->
-      <SourceFilter options={sourceOptions} value={source} onchange={(id) => (source = id)} />
+      <Segmented class="flex-wrap" label="Show profiles for" options={sourceOptions} value={source} onchange={(id) => (source = id)} />
       <Button onclick={() => ai.newProfile()}><Plus size={15} /> New profile</Button>
     </div>
   </div>
@@ -144,7 +144,7 @@
               </span>
               <span class="truncate text-xs text-muted-foreground">{profile.server?.providerLabel || found.provider?.label || 'Unknown provider'}</span>
               {#if notReady}
-                <span class="text-xs text-amber-700 dark:text-amber-300">{notReady}</span>
+                <span class="text-xs text-warning">{notReady}</span>
               {/if}
             </span>
             <span class="text-sm">{thinkingWords(profile.thinking)}</span>
@@ -154,7 +154,7 @@
               {#if share !== null}
                 <span class="h-1.5 w-full max-w-48 overflow-hidden rounded-full bg-muted" aria-hidden="true">
                   <span
-                    class="block h-full rounded-full {share >= 0.9 ? 'bg-destructive' : share >= 0.6 ? 'bg-amber-500' : 'bg-primary'}"
+                    class="block h-full rounded-full {share >= 0.9 ? 'bg-destructive' : share >= 0.6 ? 'bg-warning' : 'bg-primary'}"
                     style:width="{Math.round(share * 100)}%"
                   ></span>
                 </span>

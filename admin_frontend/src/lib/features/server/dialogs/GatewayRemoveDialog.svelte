@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Checkbox } from '$kit/components/ui/checkbox/index.js';
   import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
   import type { createGatewayStore } from '../state/gateway-store.svelte';
 
@@ -18,7 +19,7 @@
 >
   {#snippet children()}
     <label class="flex items-center gap-2 font-sans text-sm">
-      <input type="checkbox" bind:checked={gateway.removeForm.purge} />
+      <Checkbox bind:checked={gateway.removeForm.purge} />
       Also delete instance files from disk
     </label>
   {/snippet}

@@ -17,6 +17,7 @@
   import Notice from '$kit/ui/notice.svelte';
   import EmptyState from '$kit/ui/empty-state.svelte';
   import Loading from '$kit/ui/loading.svelte';
+  import StatusDot from '$kit/ui/status-dot.svelte';
   import { ADMIN_SECTION_CARD, ADMIN_SECTION_HEADING_LG, ADMIN_TABLE_HEAD } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
 
@@ -84,23 +85,19 @@
           <tr class="border-t">
             <td class="px-2 py-3 text-center">
               {#if available}
-                <span
-                  class="inline-block size-2 rounded-full bg-green-600 dark:bg-green-500"
-                  title={isLocal
+                <StatusDot
+                  tone="ok"
+                  label={isLocal
                     ? 'Downloaded — available in this workspace'
                     : 'Online — provider configured in this workspace'}
-                  aria-hidden="true"
-                ></span>
-                <span class="sr-only">{isLocal ? 'Downloaded. ' : 'Online. '}</span>
+                />
               {:else}
-                <span
-                  class="inline-block size-2 rounded-full bg-muted-foreground/40"
-                  title={isLocal
+                <StatusDot
+                  tone="off"
+                  label={isLocal
                     ? `Not downloaded — ${model.manage_hint ?? 'manage in Settings'}`
                     : 'Offline — provider not configured in this workspace'}
-                  aria-hidden="true"
-                ></span>
-                <span class="sr-only">{isLocal ? 'Not downloaded. ' : 'Offline. '}</span>
+                />
               {/if}
             </td>
             <td class="px-3 py-3">
@@ -112,7 +109,7 @@
               <strong class="flex min-w-0 items-baseline gap-1 font-sans text-sm">
                 {#if ctrl.recommendedCatalogModelIds.has(model.id)}
                   <span
-                    class="shrink-0 text-amber-500 dark:text-amber-400"
+                    class="shrink-0 text-brand"
                     title="Recommended default in catalog for this provider and kind"
                     aria-hidden="true"
                   >★</span>

@@ -20,8 +20,8 @@
     d === null || d === 0 || up === 'neutral'
       ? 'text-muted-foreground'
       : (d > 0) === (up === 'bad')
-        ? 'text-amber-600 dark:text-amber-400'
-        : 'text-emerald-600 dark:text-emerald-400';
+        ? 'text-warning'
+        : 'text-success';
 </script>
 
 <div class="grid gap-2 sm:grid-cols-3 xl:grid-cols-6">

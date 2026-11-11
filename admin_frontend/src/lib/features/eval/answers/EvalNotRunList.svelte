@@ -5,6 +5,7 @@
 -->
 <script lang="ts">
   import { ChevronDown, ChevronRight } from '@lucide/svelte';
+  import { Checkbox } from '$kit/components/ui/checkbox/index.js';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import { difficultyMeta } from '$lib/features/eval/shared/eval-display';
   import type { EvalQuestionItem } from '$lib/api/eval';
@@ -56,11 +57,10 @@
             {#each questions as q (q.id)}
               <tr class="border-t align-top {eval_.isSelected(q.id) ? 'bg-primary/5' : ''}">
                 <td class="px-3 py-1.5 text-center">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     class="size-3.5"
                     checked={eval_.isSelected(q.id)}
-                    onchange={() => eval_.toggleQuestion(q.id)}
+                    onCheckedChange={() => eval_.toggleQuestion(q.id)}
                     title="Select for run"
                     aria-label="Select question for run"
                   />

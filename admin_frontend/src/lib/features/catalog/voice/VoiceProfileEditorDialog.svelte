@@ -16,9 +16,9 @@
   import FormField from '$lib/components/ui/form-field.svelte';
   import SingleModelPicker from '$lib/features/preferences/SingleModelPicker.svelte';
   import Notice from '$kit/ui/notice.svelte';
+  import PickSelect from '$kit/ui/pick-select.svelte';
+  import SliderField from '$kit/ui/slider-field.svelte';
   import type { VoiceProfileFields, VoiceProfileRow } from '$lib/api/voice';
-  import { ADMIN_SELECT } from '$lib/styling/admin-tokens';
-  import { cn } from '$lib/utils';
   import GeminiVoicePicker from './GeminiVoicePicker.svelte';
   import VoiceTryIt from './VoiceTryIt.svelte';
   import { fieldsOf, type VoiceController } from './voice-controller.svelte';
@@ -165,16 +165,16 @@
             </p>
           {/if}
           {#if isOpenAi}
-            <select
-              class={cn(ADMIN_SELECT, 'sm:w-1/2')}
+            <PickSelect
+              class="h-8 w-full text-sm sm:w-1/2"
+              label="Voice"
               value={d.voice}
-              onchange={(e) => {
-                d.voice = e.currentTarget.value;
-                d.voice_label = e.currentTarget.value;
+              options={openAiVoices.map((v) => ({ value: v, label: v }))}
+              onchange={(v) => {
+                d.voice = v;
+                d.voice_label = v;
               }}
-            >
-              {#each openAiVoices as v (v)}<option>{v}</option>{/each}
-            </select>
+            />
           {:else}
             {#key base}
               <GeminiVoicePicker
@@ -194,19 +194,17 @@
         </FormField>
 
         {#if isOpenAi}
-          <FormField label="Speed">
-            <span class="grid gap-1">
-              <span class="flex items-center gap-3">
-                <input type="range" min="0.25" max="4" step="0.05" bind:value={d.speed} class="h-1.5 w-full cursor-pointer accent-primary" />
-                <span class="w-16 shrink-0 text-right font-mono text-sm tabular-nums">{d.speed.toFixed(2)}×</span>
-              </span>
-              <span class="flex justify-between pr-[4.75rem] text-xs text-muted-foreground">
-                <span>0.25×</span>
-                <button type="button" class="underline" onclick={() => (d.speed = 1)}>reset to 1×</button>
-                <span>4×</span>
-              </span>
-            </span>
-          </FormField>
+          <SliderField
+            label="Speed"
+            hint="0.25× to 4×."
+            value={d.speed}
+            onchange={(v) => (d.speed = v)}
+            min={0.25}
+            max={4}
+            step={0.05}
+            reset={1}
+            format={(v) => `${v.toFixed(2)}×`}
+          />
         {/if}
       </div>
 

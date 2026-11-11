@@ -13,6 +13,8 @@
     sortCatalogProvidersOnlineFirst
   } from '$lib/catalog/catalog-picker-utils';
   import { cn } from '$lib/utils';
+  import StatusDot from '$kit/ui/status-dot.svelte';
+  import { CAT } from '$kit/ui/category';
 
   let {
     label,
@@ -156,25 +158,22 @@
     <div
       class={cn(
         'flex items-center gap-3 rounded-md border bg-card/65 p-3',
-        issue ? 'border-amber-500/50' : 'border-input'
+        issue ? 'border-warning/50' : 'border-input'
       )}
     >
-      <span
-        class={cn(
-          'size-2 shrink-0 rounded-full shadow-sm ring-2 ring-background',
-          missing || (workspaceActiveProvidersResolved && inactive)
-            ? 'bg-red-500'
-            : workspaceActiveProvidersResolved
-              ? 'bg-emerald-500'
-              : 'bg-muted-foreground/40'
-        )}
-        title={missing
+      <StatusDot
+        class="rounded-full shadow-sm ring-2 ring-background"
+        tone={missing || (workspaceActiveProvidersResolved && inactive)
+          ? 'error'
+          : workspaceActiveProvidersResolved
+            ? 'ok'
+            : 'off'}
+        label={missing
           ? 'Model is no longer in the catalog.'
           : inactive
             ? 'Provider is not configured in Active Providers.'
             : 'Provider is configured.'}
-        aria-hidden="true"
-      ></span>
+      />
       <span class="min-w-0 flex-1 grid gap-0.5">
         <code class="break-all font-mono text-sm font-medium leading-snug text-foreground">
           {selectedId}
@@ -185,7 +184,7 @@
             {#if isThinkingCatalogModel(selectedRow)}
               <Brain
                 size={13}
-                class="shrink-0 text-violet-600 dark:text-violet-400"
+                class={cn('shrink-0', CAT.text[5])}
                 aria-label="Reasoning model"
                 title="Reasoning / thinking model"
               />
@@ -318,17 +317,10 @@
                 pickProviderId = provider.id;
               }}
             >
-              <span
-                class={cn(
-                  'size-2 shrink-0 rounded-full shadow-sm ring-2 ring-background',
-                  workspaceActiveProvidersResolved
-                    ? providerOk
-                      ? 'bg-emerald-500'
-                      : 'bg-red-500'
-                    : 'bg-muted-foreground/40'
-                )}
-                aria-hidden="true"
-              ></span>
+              <StatusDot
+                class="rounded-full shadow-sm ring-2 ring-background"
+                tone={workspaceActiveProvidersResolved ? (providerOk ? 'ok' : 'error') : 'off'}
+              />
               <span class="min-w-0 flex-1 truncate">{provider.display_name}</span>
             </button>
           {:else}
@@ -354,7 +346,7 @@
                     {#if isThinkingCatalogModel(model)}
                       <Brain
                         size={14}
-                        class="shrink-0 text-violet-600 dark:text-violet-400"
+                        class={cn('shrink-0', CAT.text[5])}
                         aria-label="Reasoning model"
                         title="Reasoning / thinking model"
                       />

@@ -3,6 +3,7 @@
   import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
   import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
+  import { Checkbox } from '$kit/components/ui/checkbox/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
   import CreatableCategorySelect from '$lib/features/knowledge/shared/CreatableCategorySelect.svelte';
   import CreatableTagsSelect from '$lib/features/knowledge/shared/CreatableTagsSelect.svelte';
@@ -120,14 +121,14 @@
     class="flex shrink-0 cursor-pointer select-none items-center gap-2 self-end pb-2"
     title="Rewrite the query with an LLM before retrieval: normalize wording and extract literal keywords (one extra model call)"
   >
-    <input type="checkbox" class="size-4" bind:checked={ask.askRewrite} />
+    <Checkbox bind:checked={ask.askRewrite} />
     <span class="text-sm text-muted-foreground">Rewrite</span>
   </label>
   <label
     class="flex shrink-0 cursor-pointer select-none items-center gap-2 self-end pb-2"
     title="Show match type, per-branch cosine/BM25 scores, and matched terms for each result (extra query work)"
   >
-    <input type="checkbox" class="size-4" bind:checked={ask.askExplain} />
+    <Checkbox bind:checked={ask.askExplain} />
     <span class="text-sm text-muted-foreground">Explain</span>
   </label>
   <!-- L3 (Phase 5d) — Graph retrieval mode. off = flat (today). on = graph_expand focuses

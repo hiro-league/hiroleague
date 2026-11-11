@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Checkbox } from '$kit/components/ui/checkbox/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
@@ -39,15 +40,15 @@
           {/snippet}
         </FormField>
         <label class="flex items-center gap-2 font-sans text-sm">
-          <input type="checkbox" bind:checked={gateway.createForm.makeDefault} />
+          <Checkbox bind:checked={gateway.createForm.makeDefault} />
           Set as default gateway instance
         </label>
         <label class="flex items-center gap-2 font-sans text-sm">
-          <input type="checkbox" bind:checked={gateway.createForm.skipAutostart} />
+          <Checkbox bind:checked={gateway.createForm.skipAutostart} />
           Skip auto-start registration
         </label>
         <label class="flex items-center gap-2 font-sans text-sm">
-          <input type="checkbox" bind:checked={gateway.createForm.elevatedTask} />
+          <Checkbox bind:checked={gateway.createForm.elevatedTask} />
           Request elevated Task Scheduler entry
         </label>
       </details>

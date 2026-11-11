@@ -7,11 +7,11 @@
   import Notice from '$kit/ui/notice.svelte';
   import Loading from '$kit/ui/loading.svelte';
   import StickyBar from '$kit/ui/sticky-bar.svelte';
+  import Segmented from '$kit/ui/segmented.svelte';
   import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
   import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
   import MultiSelectFilter from '$lib/components/ui/multi-select-filter.svelte';
   import FieldHelp from '$lib/components/ui/field-help.svelte';
-  import { cn } from '$lib/utils';
   import AiUsageChart from './AiUsageChart.svelte';
   import AiUsageRangePicker from './AiUsageRangePicker.svelte';
   import AiUsageTable from './AiUsageTable.svelte';
@@ -37,11 +37,6 @@
   });
 
   const groupOptions = DIMENSIONS.map((d) => ({ value: d.value, label: d.label }));
-  const pill = (on: boolean) =>
-    cn(
-      'rounded-md px-2.5 py-1 font-sans text-xs font-medium transition-colors',
-      on ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-    );
 
   // The filter dropdown checks every value when nothing is filtered ("all"); the page keeps [] for "everything".
   const checked = (d: Dimension) => {
@@ -58,13 +53,7 @@
       <AdminFilterBar class="items-center">
         <!-- The days shown: ‹ › step the picked range itself; the period buttons are shortcuts. -->
         <AiUsageRangePicker span={pg.span} now={pg.now} canLater={pg.canLater} onpick={pg.setSpan} onshift={pg.shift} />
-        <span class="inline-flex gap-1 rounded-lg border bg-card p-1" role="group" aria-label="Period">
-          {#each PERIODS as p (p.value)}
-            <button type="button" class={pill(pg.period === p.value)} onclick={() => pg.setPeriod(p.value as Period)}
-              >{p.label}</button
-            >
-          {/each}
-        </span>
+        <Segmented label="Period" options={PERIODS} value={pg.period} onchange={(p: Period) => pg.setPeriod(p)} />
 
         <AdminFilterBarSelect
           label="Group by"
@@ -111,25 +100,18 @@
   <div class="grid gap-3 rounded-md border bg-card p-4 shadow-sm">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <span class="inline-flex items-center gap-2">
-        <span class="inline-flex gap-1 rounded-lg border bg-background p-1" role="group" aria-label="Measure">
-          {#each METRICS as m (m.value)}
-            <button type="button" class={pill(pg.metric === m.value)} onclick={() => (pg.metric = m.value as Metric)}
-              >{m.label}</button
-            >
-          {/each}
-        </span>
+        <Segmented label="Measure" options={METRICS} value={pg.metric} onchange={(m: Metric) => (pg.metric = m)} />
         {#if pg.metric === 'cost'}
           <FieldHelp text="Cost here is what was billed plus what your plans' questions would cost on an API key (an estimate)." label="About cost" />
         {/if}
       </span>
       {#if pg.steps.length > 1}
-        <span class="inline-flex gap-1 rounded-lg border bg-background p-1" role="group" aria-label="Bars">
-          {#each STEPS.filter((s) => pg.steps.includes(s.value)) as s (s.value)}
-            <button type="button" class={pill(pg.step === s.value)} onclick={() => (pg.stepPicked = s.value as Step)}
-              >{s.label}</button
-            >
-          {/each}
-        </span>
+        <Segmented
+          label="Bars"
+          options={STEPS.filter((s) => pg.steps.includes(s.value))}
+          value={pg.step}
+          onchange={(s: Step) => (pg.stepPicked = s)}
+        />
       {/if}
     </div>
     <AiUsageChart data={pg.bars} range={pg.range} metric={pg.metric} now={pg.now} />

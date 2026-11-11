@@ -26,6 +26,7 @@
     Spline,
     User
   } from '@lucide/svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import SearchInput from '$lib/search/SearchInput.svelte';
   import { cn } from '$lib/utils';
   import {
@@ -273,13 +274,14 @@
     <div class={cn('rounded-md bg-muted/40 p-2 text-xs text-muted-foreground', edge && 'italic')}>
       {#if edge}“{/if}<Highlight text={shown} query={search} />{#if edge}”{/if}
       {#if long}
-        <button
-          type="button"
+        <Button
+          variant="link"
+          size="inline"
           onclick={() => (summaryExpanded = !summaryShowFull)}
-          class="ml-1 font-medium text-primary not-italic hover:underline"
+          class="ml-1 text-xs not-italic"
         >
           {summaryShowFull ? 'Show less' : 'Show more'}
-        </button>
+        </Button>
       {/if}
     </div>
   {:else if aggregateEdge}

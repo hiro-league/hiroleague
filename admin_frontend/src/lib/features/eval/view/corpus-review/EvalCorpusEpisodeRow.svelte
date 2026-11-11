@@ -1,5 +1,7 @@
 <script lang="ts">
   import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import { CAT } from '$kit/ui/category';
   import MarkdownPreview from '$lib/components/ui/markdown/MarkdownPreview.svelte';
   import { Microscope, Share2 } from '@lucide/svelte';
   import type { CorpusEpisodeExtraction, EvalEpisode } from '$lib/api/eval';
@@ -68,21 +70,18 @@
       {#if x === undefined}
         <span class="font-sans text-muted-foreground/70">no trace</span>
       {:else if x.entity_count === 0 && x.fact_count === 0}
-        <Badge
-          variant="outline"
-          class="border-amber-400/60 font-sans normal-case text-amber-600 dark:text-amber-400"
-        >no extraction</Badge>
+        <Badge variant="warning" class="font-sans normal-case">no extraction</Badge>
       {:else}
         <span class="font-mono tabular-nums">
-          <span class="font-medium text-emerald-600 dark:text-emerald-400">{x.entity_count} entities</span>
+          <span class="font-medium {CAT.text[2]}">{x.entity_count} entities</span>
           <span class="text-muted-foreground/60"> · </span>
-          <span class="font-medium text-violet-600 dark:text-violet-400">{x.fact_count} facts</span>
+          <span class="font-medium {CAT.text[5]}">{x.fact_count} facts</span>
         </span>
       {/if}
       {#if x !== undefined && x.run_id && onOpenPipeline}
         <button
           type="button"
-          class="inline-flex items-center gap-1 rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 font-sans text-[10px] font-medium text-emerald-700 transition-colors hover:bg-emerald-500/20 dark:text-emerald-400"
+          class="inline-flex items-center gap-1 rounded border px-2 py-0.5 font-sans text-[10px] font-medium transition-colors hover:bg-cat-2/20 {CAT.chip[2]}"
           title="Open the ingestion pipeline trace for this episode"
           onclick={() => onOpenPipeline?.({ id: ep.id, runId: x.run_id, stepIndex: x.step_index })}
         >
@@ -113,12 +112,8 @@
     {/if}
   </div>
   {#if showExpandToggle}
-    <button
-      type="button"
-      class="mt-1 font-sans text-xs font-medium text-primary hover:underline"
-      onclick={onToggleExpand}
-    >
+    <Button variant="link" size="sm" class="mt-1 h-auto px-0 py-0 font-sans text-xs" onclick={onToggleExpand}>
       {expanded ? 'Show less' : 'Show more'}
-    </button>
+    </Button>
   {/if}
 </div>

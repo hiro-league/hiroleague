@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Checkbox } from '$kit/components/ui/checkbox/index.js';
   import { CircleHelp } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
@@ -37,17 +38,17 @@
           {/snippet}
         </FormField>
         <label class="flex items-center gap-2 font-sans text-sm">
-          <input type="checkbox" bind:checked={workspace.setupForm.skipAutostart} />
+          <Checkbox bind:checked={workspace.setupForm.skipAutostart} />
           Skip auto-start registration
           <CircleHelp size={14} title="By default, the server is registered to start automatically on login." />
         </label>
         <label class="flex items-center gap-2 font-sans text-sm">
-          <input type="checkbox" bind:checked={workspace.setupForm.startServer} />
+          <Checkbox bind:checked={workspace.setupForm.startServer} />
           Start server immediately after setup
           <CircleHelp size={14} title="Start this workspace as soon as setup saves the gateway URL and keys." />
         </label>
         <label class="flex items-center gap-2 font-sans text-sm">
-          <input type="checkbox" bind:checked={workspace.setupForm.elevatedTask} />
+          <Checkbox bind:checked={workspace.setupForm.elevatedTask} />
           Request elevated Task Scheduler entry
           <CircleHelp
             size={14}

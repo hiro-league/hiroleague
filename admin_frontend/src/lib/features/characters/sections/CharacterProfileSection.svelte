@@ -1,6 +1,7 @@
 <script lang="ts">
   import { ImageIcon, Upload } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
+  import { Checkbox } from '$kit/components/ui/checkbox/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
   import CharacterSectionCard from '$lib/features/characters/sections/CharacterSectionCard.svelte';
   import type { CharacterDetail } from '$lib/api/characters';
@@ -78,12 +79,7 @@
       </FormField>
 
       <label class="flex cursor-pointer items-center gap-2 font-sans text-sm font-semibold text-foreground">
-        <input
-          class="size-4 accent-primary"
-          type="checkbox"
-          bind:checked={form.emotions_enabled}
-          onchange={markDirty}
-        />
+        <Checkbox bind:checked={form.emotions_enabled} onCheckedChange={markDirty} />
         Emotions enabled (reserved)
       </label>
     </div>

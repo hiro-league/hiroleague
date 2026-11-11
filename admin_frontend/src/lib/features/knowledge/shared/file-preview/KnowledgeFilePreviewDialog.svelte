@@ -88,7 +88,7 @@
         <Notice message={error} />
       {:else if preview}
         {#if preview.truncated}
-          <p class="mb-3 font-sans text-xs text-amber-700 dark:text-amber-300">
+          <p class="mb-3 font-sans text-xs text-warning">
             Preview truncated to the first 2 MB of this file.
           </p>
         {/if}

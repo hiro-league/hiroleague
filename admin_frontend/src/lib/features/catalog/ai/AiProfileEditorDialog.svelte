@@ -8,6 +8,8 @@
   import * as Dialog from '$kit/components/ui/dialog/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
   import Notice from '$kit/ui/notice.svelte';
+  import PickSelect from '$kit/ui/pick-select.svelte';
+  import { Slider } from '$kit/components/ui/slider/index.js';
   import SingleModelPicker from '$lib/features/preferences/SingleModelPicker.svelte';
   import AiProfileTryIt from './AiProfileTryIt.svelte';
   import type { AiController } from './ai-controller.svelte';
@@ -27,6 +29,7 @@
     local: "Free, and nothing leaves the home. The server's PC must be on.",
     plan: 'Counts against your plan, shared with your own use of it.'
   } as const;
+  const NOBODY = '__nobody';
 </script>
 
 <Dialog.Root
@@ -73,7 +76,7 @@
             <p class="text-xs text-muted-foreground">{KIND_WORDS[kind]}</p>
           {/if}
           {#if provider?.notReady}
-            <p class="text-xs text-amber-700 dark:text-amber-300">{provider.notReady} Its fallback asks meanwhile.</p>
+            <p class="text-xs text-warning">{provider.notReady} Its fallback asks meanwhile.</p>
           {/if}
         </SectionCardMuted>
 
@@ -107,15 +110,16 @@
             hint={ai.draftTemperatureNote ?? 'Lower answers the same way each time; higher varies more.'}
           >
             <span class="flex items-center gap-3">
-              <input
-                type="range"
-                min="0"
-                max="2"
-                step="0.1"
-                class="h-1.5 w-full cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-50"
+              <Slider
+                type="single"
+                min={0}
+                max={2}
+                step={0.1}
+                class="w-full"
+                aria-label="Temperature"
                 value={d.temperature ?? 1}
                 disabled={temperatureOff}
-                oninput={(event) => (ai.draft.temperature = Number(event.currentTarget.value))}
+                onValueChange={(v: number) => (ai.draft.temperature = v)}
               />
               <span class="w-16 shrink-0 text-right font-mono text-sm tabular-nums">
                 {temperatureOff ? '—' : (d.temperature?.toFixed(1) ?? 'Default')}
@@ -149,11 +153,13 @@
               </FormField>
             {/if}
             <FormField label="At once" hint="Questions it works on together; past it they wait their turn.">
-              <select bind:value={ai.draft.budget.atOnce}>
-                {#each AT_ONCE_OPTIONS as n (n)}
-                  <option value={n}>{n}</option>
-                {/each}
-              </select>
+              <PickSelect
+                value={String(ai.draft.budget.atOnce)}
+                options={AT_ONCE_OPTIONS.map((n) => ({ value: String(n), label: String(n) }))}
+                onchange={(v) => (ai.draft.budget.atOnce = Number(v) as typeof ai.draft.budget.atOnce)}
+                label="At once"
+                class="h-8 w-full text-sm"
+              />
             </FormField>
           </div>
         </SectionCardMuted>
@@ -163,15 +169,13 @@
             label="When it can't answer, ask"
             hint="Used when a budget is reached, the provider fails, or the ask must stay local."
           >
-            <select
-              value={d.fallbackId ?? ''}
-              onchange={(event) => (ai.draft.fallbackId = event.currentTarget.value || null)}
-            >
-              <option value="">Nobody: the ask fails</option>
-              {#each fallbackOptions as p (p.id)}
-                <option value={p.id}>{p.name}</option>
-              {/each}
-            </select>
+            <PickSelect
+              value={d.fallbackId ?? NOBODY}
+              options={[{ value: NOBODY, label: 'Nobody: the ask fails' }, ...fallbackOptions.map((p) => ({ value: p.id, label: p.name }))]}
+              onchange={(v) => (ai.draft.fallbackId = v === NOBODY ? null : v)}
+              label="Fallback"
+              class="h-8 w-full text-sm"
+            />
           </FormField>
           {#if d.fallbackId}
             <p class="text-sm">

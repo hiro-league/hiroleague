@@ -8,8 +8,7 @@
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import Notice from '$kit/ui/notice.svelte';
-  import { ADMIN_SELECT } from '$lib/styling/admin-tokens';
-  import { cn } from '$lib/utils';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import type { VoiceController } from './voice-controller.svelte';
 
   let { voice, extension }: { voice: VoiceController; extension: string } = $props();
@@ -17,6 +16,8 @@
   const GRID = 'minmax(200px,1.1fr) minmax(170px,0.9fr) minmax(200px,1fr) minmax(240px,1.4fr)';
   const rows = $derived(voice.uses.extensions.find((e) => e.extension === extension)?.uses ?? []);
   let error = $state<string | null>(null);
+
+  const NONE = '__none';
 
   async function pick(key: string, profileId: string) {
     error = await voice.setUse(key, profileId || null);
@@ -49,10 +50,13 @@
             </span>
             <span><Badge variant="secondary">a voice clip</Badge></span>
             <span>
-              <select class={cn(ADMIN_SELECT, 'w-full')} aria-label="Voice for {u.name}" value={u.profile_id ?? ''} onchange={(e) => pick(u.key, e.currentTarget.value)}>
-                <option value="">No voice picked</option>
-                {#each voice.profiles as vp (vp.id)}<option value={vp.id}>{vp.label}</option>{/each}
-              </select>
+              <PickSelect
+                class="h-8 w-full text-sm"
+                label="Voice for {u.name}"
+                value={u.profile_id || NONE}
+                options={[{ value: NONE, label: 'No voice picked' }, ...voice.profiles.map((vp) => ({ value: vp.id, label: vp.label }))]}
+                onchange={(v) => pick(u.key, v === NONE ? '' : v)}
+              />
             </span>
             <span class="text-sm text-muted-foreground">
               {#if p}{p.line}{:else if u.status === 'removed'}No longer declared.{:else}Nothing is said until a voice is picked.{/if}

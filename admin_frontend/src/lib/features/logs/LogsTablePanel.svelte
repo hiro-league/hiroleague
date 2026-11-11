@@ -8,6 +8,7 @@
   import LogLevelIcon from './shared/LogLevelIcon.svelte';
   import LogRowSourceIcon from './shared/LogRowSourceIcon.svelte';
   import Loading from '$kit/ui/loading.svelte';
+  import * as Table from '$kit/components/ui/table/index.js';
   import type { LogsPageController } from './state/logs-controller.svelte';
   import { logLevelAccentClass, logModuleTextClass } from './shared/logs-classes';
   import {
@@ -95,25 +96,25 @@
   {:else}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
     <div
-      class="outline-none"
+      class="logs-table-scroll outline-none"
       tabindex="0"
       role="application"
       aria-label="Log rows"
       bind:this={scroller}
       onkeydown={onTableKeydown}
     >
-      <table
+      <Table.Root
         class={cn(
           'w-full table-fixed border-collapse font-sans text-xs',
           detailPanelOpen ? 'min-w-[1180px]' : 'min-w-[1280px]'
         )}
       >
-        <thead
+        <Table.Header
           class="sticky z-10 border-b border-border/60 bg-muted/85 text-left text-foreground shadow-sm"
-          style:top={stickyHeadTop}
+          style="top: {stickyHeadTop}"
         >
           {#each table.getHeaderGroups() as headerGroup (headerGroup.id)}
-            <tr>
+            <Table.Row class="hover:bg-transparent">
               {#each headerGroup.headers as header (header.id)}
                 {@const sortKey = SORTABLE[header.id]}
                 {@const label = String(header.column.columnDef.header ?? header.id)}
@@ -122,9 +123,9 @@
                   header.id === 'date_display' ||
                   header.id === 'timestamp_display' ||
                   header.id === 'level'}
-                <th
+                <Table.Head
                   class={cn(
-                    'px-2 py-2.5 text-[0.68rem] font-bold tracking-wide',
+                    'h-auto px-2 py-2.5 text-[0.68rem] font-bold tracking-wide',
                     header.id === '_msg_scope' && 'w-[3.25rem] min-w-[3.25rem] px-0 text-center',
                     header.id === 'date_display' && 'w-[58px] text-center',
                     header.id === 'timestamp_display' && 'w-[76px] text-center',
@@ -171,15 +172,15 @@
                   {:else}
                     {label}
                   {/if}
-                </th>
+                </Table.Head>
               {/each}
-            </tr>
+            </Table.Row>
           {/each}
-        </thead>
-        <tbody>
+        </Table.Header>
+        <Table.Body>
           {#each table.getRowModel().rows as tableRow (tableRow.id)}
             {@const row = tableRow.original as RenderLogRow}
-            <tr
+            <Table.Row
               class={cn(
                 'cursor-default border-b border-border/60 transition-colors hover:bg-secondary/30',
                 row.is_startup && '[&>td]:bg-primary/10',
@@ -190,21 +191,21 @@
               onclick={() => onSelectRow(row)}
               ondblclick={() => onOpenRowDetails(row)}
             >
-              <td class="w-[3.25rem] min-w-[3.25rem] px-0 py-1 text-center align-middle">
+              <Table.Cell class="w-[3.25rem] min-w-[3.25rem] px-0 py-1 text-center align-middle">
                 <LogsTableMessageScopeCell
                   {row}
                   msgOrd={ctrl.getScopeMsgOrdinal(row.scope_msg_id)}
                   chipAlt={ctrl.getScopeMsgChipStripeAlt(row._rowKey)}
                   {onFilterToMessage}
                 />
-              </td>
-              <td class="truncate px-2 py-1.5 text-center text-muted-foreground">
+              </Table.Cell>
+              <Table.Cell class="truncate px-2 py-1.5 text-center text-muted-foreground">
                 {row.date_display}
-              </td>
-              <td class="truncate px-2 py-1.5 text-center text-muted-foreground">
+              </Table.Cell>
+              <Table.Cell class="truncate px-2 py-1.5 text-center text-muted-foreground">
                 {row.timestamp_display}
-              </td>
-              <td
+              </Table.Cell>
+              <Table.Cell
                 class="w-[34px] min-w-[34px] px-0 py-1.5 text-center align-middle"
                 title={row.level}
               >
@@ -213,8 +214,8 @@
                   size={14}
                   class={cn('inline-block', logLevelAccentClass(row.level))}
                 />
-              </td>
-              <td
+              </Table.Cell>
+              <Table.Cell
                 class="truncate px-2 py-1.5"
                 title={logRowSourceLabel(row.source) !== row.source ? row.source : undefined}
               >
@@ -228,11 +229,11 @@
                     {logRowSourceLabel(row.source)}
                   </span>
                 </span>
-              </td>
-              <td class="truncate px-2 py-1.5">
+              </Table.Cell>
+              <Table.Cell class="truncate px-2 py-1.5">
                 <span class={logModuleTextClass(row.module)}>{row.module}</span>
-              </td>
-              <td class="truncate px-2 py-1.5">
+              </Table.Cell>
+              <Table.Cell class="truncate px-2 py-1.5">
                 {#if row.scope_traffic_class}
                   <span
                     class={cn(
@@ -244,39 +245,46 @@
                     <span class="truncate">{row.scope_traffic_class}</span>
                   </span>
                 {/if}
-              </td>
-              <td class="truncate px-2 py-1.5" title={row.scope_traffic_subclass}>
+              </Table.Cell>
+              <Table.Cell class="truncate px-2 py-1.5" title={row.scope_traffic_subclass}>
                 {#if row.scope_traffic_subclass}
                   <span
                     class="font-mono text-[0.7rem] text-muted-foreground"
                   >{row.scope_traffic_subclass}</span>
                 {/if}
-              </td>
-              <td class="truncate px-2 py-1.5" title={row.message}>
+              </Table.Cell>
+              <Table.Cell class="truncate px-2 py-1.5" title={row.message}>
                 {#if row.is_startup}
                   <span class="font-bold">{row.message}</span>
                 {:else}
                   {row.message}
                 {/if}
-              </td>
+              </Table.Cell>
               {#if !detailPanelOpen}
-                <td class="group relative truncate px-2 py-1.5" title={row.extra}>
+                <Table.Cell class="group relative truncate px-2 py-1.5" title={row.extra}>
                   <LogExtraSegments segments={row.extra_segments} variant="table" />
-                </td>
+                </Table.Cell>
               {/if}
-            </tr>
+            </Table.Row>
           {:else}
-            <tr>
-              <td
+            <Table.Row class="hover:bg-transparent">
+              <Table.Cell
                 colspan={detailPanelOpen ? 9 : 10}
                 class="px-3 py-10 text-center text-muted-foreground"
               >
                 No log rows match the current filters.
-              </td>
-            </tr>
+              </Table.Cell>
+            </Table.Row>
           {/each}
-        </tbody>
-      </table>
+        </Table.Body>
+      </Table.Root>
     </div>
   {/if}
 </div>
+
+<style>
+  /* The kit table's container scrolls sideways, which would stop the head pinning to the page. */
+  .logs-table-scroll :global([data-slot='table-container']) {
+    overflow: visible;
+  }
+</style>

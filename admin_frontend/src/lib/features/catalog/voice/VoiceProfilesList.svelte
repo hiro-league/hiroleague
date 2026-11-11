@@ -15,7 +15,7 @@
   import Loading from '$kit/ui/loading.svelte';
   import type { VoiceProfileRow } from '$lib/api/voice';
   import { ADMIN_SECTION_HEADING_LG } from '$lib/styling/admin-tokens';
-  import SourceFilter, { type SourceOption } from '$lib/components/page/SourceFilter.svelte';
+  import Segmented from '$kit/ui/segmented.svelte';
   import { sourceOf } from './voice-format';
   import type { VoiceController } from './voice-controller.svelte';
 
@@ -44,10 +44,10 @@
       a === HIRO ? -1 : b === HIRO ? 1 : a.localeCompare(b)
     )
   );
-  const options: SourceOption[] = $derived([
-    { id: 'all', label: 'All', count: ctrl.profiles.length },
-    ...sources.map((s) => ({ id: s, label: s, count: ctrl.profiles.filter((r) => sourcesOf(r).has(s)).length })),
-    { id: 'unused', label: 'Unused', count: ctrl.profiles.filter(isUnused).length }
+  const options = $derived([
+    { value: 'all', label: 'All', count: ctrl.profiles.length },
+    ...sources.map((s) => ({ value: s, label: s, count: ctrl.profiles.filter((r) => sourcesOf(r).has(s)).length })),
+    { value: 'unused', label: 'Unused', count: ctrl.profiles.filter(isUnused).length }
   ]);
   let source = $state('all');
   const rows = $derived(
@@ -78,7 +78,7 @@
       </p>
     </div>
     <div class="flex flex-wrap items-center gap-2">
-      <SourceFilter {options} value={source} onchange={(id) => (source = id)} />
+      <Segmented class="flex-wrap" label="Show profiles for" {options} value={source} onchange={(id) => (source = id)} />
       <Button onclick={() => onedit(null)}><Plus size={15} /> New voice profile</Button>
     </div>
   </div>

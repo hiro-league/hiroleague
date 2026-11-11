@@ -13,6 +13,7 @@
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import Notice from '$kit/ui/notice.svelte';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import type { Person } from '$lib/api/people';
   import {
     sendVoiceClip,
@@ -23,7 +24,6 @@
     type VoiceProfileFields,
     type VoiceProfileRow
   } from '$lib/api/voice';
-  import { ADMIN_SELECT } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
   import { hasTags, money, withTag } from './voice-format';
 
@@ -43,6 +43,7 @@
   type Take = { clip: VoiceClip; profile: string; provider: string; text: string; note?: string; sending?: boolean };
 
   let tryWith = $state(''); // '' = the editor's profile
+  const EDITING = '__editing';
   let text = $state('Someone is at the front door. <short pause> It looks like the delivery guy.');
   let allTags = $state(false);
   let sendTo = $state('');
@@ -115,10 +116,13 @@
   <div class="grid gap-3">
     <label class="grid gap-1 text-xs text-muted-foreground">
       Speak with
-      <select class={ADMIN_SELECT} bind:value={tryWith}>
-        <option value="">{editingLabel}</option>
-        {#each others as p (p.id)}<option value={p.id}>{p.label}</option>{/each}
-      </select>
+      <PickSelect
+        class="h-8 w-full text-sm"
+        label="Speak with"
+        value={tryWith || EDITING}
+        options={[{ value: EDITING, label: editingLabel }, ...others.map((p) => ({ value: p.id, label: p.label }))]}
+        onchange={(v) => (tryWith = v === EDITING ? '' : v)}
+      />
     </label>
     <p class="-mt-2 text-xs text-muted-foreground">{speaker.provider} · {speaker.voice || 'no voice picked'}</p>
 
@@ -130,11 +134,8 @@
         {#each shownTags as t (t)}
           <button type="button" class={tagBtn} disabled={!gemini} onclick={() => insertTag(t)}>{t}</button>
         {/each}
-        <button
-          type="button"
-          class="px-1 text-xs text-primary hover:underline disabled:opacity-50"
-          disabled={!gemini}
-          onclick={() => (allTags = !allTags)}>{allTags ? 'Fewer' : 'All tags…'}</button
+        <Button variant="link" size="sm" class="h-auto px-1 text-xs" disabled={!gemini} onclick={() => (allTags = !allTags)}
+          >{allTags ? 'Fewer' : 'All tags…'}</Button
         >
       </div>
       {#if allTags && gemini}
@@ -166,9 +167,13 @@
       {#if people.length}
         <label class="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
           WhatsApp to
-          <select class={cn(ADMIN_SELECT, 'h-8 w-32')} value={recipient?.person_id ?? ''} onchange={(e) => (sendTo = e.currentTarget.value)}>
-            {#each people as p (p.person_id)}<option value={p.person_id}>{p.name}</option>{/each}
-          </select>
+          <PickSelect
+            class="h-8 w-32 text-sm"
+            label="WhatsApp to"
+            value={recipient?.person_id ?? ''}
+            options={people.map((p) => ({ value: p.person_id, label: p.name }))}
+            onchange={(v) => (sendTo = v)}
+          />
         </label>
       {/if}
     </div>

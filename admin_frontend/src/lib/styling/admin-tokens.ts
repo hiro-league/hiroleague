@@ -159,12 +159,6 @@ export const ADMIN_SELECT = ADMIN_INPUT;
 
 export const ADMIN_SELECT_LG = ADMIN_INPUT_LG;
 
-/** Compact filter selects (Logs filter toolbar). */
-export const ADMIN_SELECT_SM = cn(
-  'h-8 min-w-0 rounded-md border border-input bg-background px-2 font-sans text-sm text-foreground shadow-xs outline-none',
-  'focus:border-ring focus:ring-2 focus:ring-inset focus:ring-ring'
-);
-
 /** Destructive icon button for clearing a single filter (AdminFilterBarSelect + LogsFiltersPanel). */
 export const FILTER_CLEAR_ICON_BTN =
   'size-8 shrink-0 text-destructive hover:bg-destructive/15 hover:text-destructive';
@@ -188,8 +182,6 @@ export const ADMIN_TABLE = 'w-full text-left font-sans text-sm';
 
 export const ADMIN_TABLE_HEAD = 'bg-muted text-xs uppercase text-muted-foreground';
 
-export const ADMIN_TABLE_ROW = 'border-t transition-[background-color,box-shadow]';
-
 /** Sticky `<thead>` offset beneath shell header + optional sticky toolbar. */
 export const ADMIN_TABLE_STICKY_TOP =
   'calc(var(--app-top, 0px) + var(--page-header, 0px) + var(--sticky-bar, 0px))';
@@ -198,12 +190,3 @@ export const ADMIN_TABLE_GRID_HEAD =
   'grid gap-3 bg-muted px-3 py-2 font-sans text-xs font-bold uppercase text-muted-foreground';
 
 export const ADMIN_TABLE_GRID_ROW = 'grid min-h-16 gap-3 border-t px-3 py-3';
-
-/** Row styling for clickable list rows with a hover/selected accent. */
-export function cnAdminTableRow(selected: boolean) {
-  return cn(
-    'cursor-pointer border-t transition-[background-color,box-shadow]',
-    'hover:bg-primary/10 hover:shadow-[inset_0_0_0_2px] hover:shadow-brand',
-    selected && 'bg-primary/10 shadow-[inset_0_0_0_2px] shadow-primary'
-  );
-}

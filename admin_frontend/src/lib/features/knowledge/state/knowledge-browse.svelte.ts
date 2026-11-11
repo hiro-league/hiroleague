@@ -118,8 +118,7 @@ export function createKnowledgeBrowseModel(deps: {
     selectedDocuments = {};
   }
 
-  function toggleSelectAllDocuments(event: Event) {
-    const checked = (event.currentTarget as HTMLInputElement).checked;
+  function toggleSelectAllDocuments(checked: boolean) {
     if (checked) selectAllDocuments();
     else deselectAllDocuments();
   }

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import * as Table from '$kit/components/ui/table/index.js';
   import { cn } from '$lib/utils';
   import {
     ADMIN_TABLE,
@@ -60,7 +61,7 @@
 
 <div
   class={cn(
-    'rounded-md border',
+    'admin-table-shell rounded-md border',
     density === 'default' && 'bg-card',
     // overflow-x on the shell breaks page-level sticky; only use it when the head is not page-pinned.
     density === 'default' && !pageStickyHead && 'overflow-x-auto',
@@ -99,14 +100,19 @@
       class={cn(maxBodyHeight && 'overflow-auto', !pageStickyHead && 'overflow-x-auto')}
       style:max-height={maxBodyHeight}
     >
-      <table class={ADMIN_TABLE}>
+      <Table.Root class={ADMIN_TABLE}>
         {@render children?.()}
-      </table>
+      </Table.Root>
     </div>
   {/if}
 </div>
 
 <style>
+  /* The shell owns scrolling: the kit table's own overflow box would trap the sticky head. */
+  .admin-table-shell :global([data-slot='table-container']) {
+    overflow: visible;
+  }
+
   /* Page scroll: pin beneath shell bar + sticky page header + sticky toolbar.
      `--admin-table-sticky-top` is set inline by the shell; v-bind cannot bind a
      plain JS constant, so we publish the value via a CSS variable instead. */

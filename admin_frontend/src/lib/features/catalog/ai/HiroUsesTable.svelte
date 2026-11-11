@@ -109,7 +109,7 @@
               {#if !known}<option value={job.profileId}>{job.profileId} (missing)</option>{/if}
             </select>
           </span>
-          <span class={cn('text-sm', n.warn ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground')}>
+          <span class={cn('text-sm', n.warn ? 'text-warning' : 'text-muted-foreground')}>
             {n.text}
           </span>
         </div>

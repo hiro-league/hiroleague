@@ -23,7 +23,7 @@
   <span class="flex min-w-0 items-center gap-1.5">
     {#if row.is_default}
       <Star
-        class="shrink-0 text-amber-500"
+        class="shrink-0 text-brand"
         fill="currentColor"
         size={15}
         title={`Default gateway: ${row.name}`}

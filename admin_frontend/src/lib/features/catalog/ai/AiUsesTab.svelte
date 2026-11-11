@@ -22,7 +22,7 @@
   import type { AiController } from './ai-controller.svelte';
   import { chainLabel, fallbackChain, needsMismatch } from './ai-profile-rules';
   import type { AiUse } from './ai-types';
-  import SourceFilter from '$lib/components/page/SourceFilter.svelte';
+  import Segmented from '$kit/ui/segmented.svelte';
   import VoiceUsesTable from '$lib/features/catalog/voice/VoiceUsesTable.svelte';
   import type { VoiceController } from '$lib/features/catalog/voice/voice-controller.svelte';
   import HiroUsesTable from './HiroUsesTable.svelte';
@@ -34,10 +34,10 @@
   let source = $state(HIRO);
   const sourceTabs = $derived([
     // Hiro's jobs plus its one speaking use (Hiro's voice).
-    { id: HIRO, label: 'Hiro', count: ai.jobs.length + 1 },
-    ...ai.useGroups.map((g) => ({ id: g.extension, label: g.extension, count: ai.uses.filter((u) => u.extension === g.extension && u.status !== 'removed').length }))
+    { value: HIRO, label: 'Hiro', count: ai.jobs.length + 1 },
+    ...ai.useGroups.map((g) => ({ value: g.extension, label: g.extension, count: ai.uses.filter((u) => u.extension === g.extension && u.status !== 'removed').length }))
   ]);
-  const activeSource = $derived(sourceTabs.some((t) => t.id === source) ? source : (sourceTabs[0]?.id ?? ''));
+  const activeSource = $derived(sourceTabs.some((t) => t.value === source) ? source : (sourceTabs[0]?.value ?? ''));
 
   const GRID = 'minmax(200px,1.1fr) minmax(170px,0.9fr) minmax(200px,1fr) minmax(240px,1.4fr)';
 
@@ -65,7 +65,7 @@
     </div>
     <!-- One source at a time — Hiro's own jobs, then each extension. The same pills as the profile lists
          (Uses is itself a sub-tab of Profiles, so no second tab strip). -->
-    <SourceFilter options={sourceTabs} value={activeSource} onchange={(id) => (source = id)} />
+    <Segmented class="flex-wrap" label="Show uses for" options={sourceTabs} value={activeSource} onchange={(id) => (source = id)} />
   </div>
 
   {#if activeSource === HIRO}
@@ -163,7 +163,7 @@
                 </select>
               </span>
               <span class="flex flex-wrap items-start justify-between gap-2">
-                <span class={cn('text-sm', n.warn ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground')}>
+                <span class={cn('text-sm', n.warn ? 'text-warning' : 'text-muted-foreground')}>
                   {n.text}
                 </span>
                 {#if removed}

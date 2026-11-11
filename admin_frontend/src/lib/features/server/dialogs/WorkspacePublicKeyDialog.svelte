@@ -16,7 +16,7 @@
       <Dialog.Title>Public key - '{workspace.selected?.name ?? ''}'</Dialog.Title>
       <Dialog.Description>Regenerating invalidates existing gateway trust.</Dialog.Description>
     </Dialog.Header>
-    <p class="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
+    <p class="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
       This key must be registered in every gateway instance that trusts this workspace. Regenerating it invalidates all existing gateway trust relationships.
     </p>
     <PublicKeyCopyField

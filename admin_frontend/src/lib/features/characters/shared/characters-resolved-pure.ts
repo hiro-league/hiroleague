@@ -7,6 +7,7 @@ import type {
   CharacterResolvedPayload,
   CharacterResolvedVoiceRow
 } from '$lib/api/characters';
+import type { DotTone } from '$kit/ui/status-dot.svelte';
 
 export type ResolvedRowStatus = CharacterResolvedAiRow['status'] | CharacterResolvedVoiceRow['status'];
 
@@ -51,17 +52,17 @@ export function resolvedRowTooltip(status: ResolvedRowStatus): string {
   }
 }
 
-export function resolvedRowDotClass(status: ResolvedRowStatus): string {
+export function resolvedRowDotTone(status: ResolvedRowStatus): DotTone {
   switch (status) {
     case 'available':
-      return 'bg-emerald-500';
+      return 'ok';
     case 'unavailable':
     case 'no_key':
     case 'missing':
-      return 'bg-red-500';
+      return 'error';
     case 'plan':
-      return 'bg-amber-500';
+      return 'warn';
     default:
-      return 'bg-muted-foreground/50';
+      return 'off';
   }
 }

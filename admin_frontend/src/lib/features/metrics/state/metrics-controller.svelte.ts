@@ -114,13 +114,13 @@ export function createMetricsController(opts: { notify: Notify }) {
     }
   }
 
-  function onEnabledChange(event: Event) {
-    enabled = (event.currentTarget as HTMLInputElement).checked;
+  function onEnabledChange(next: boolean) {
+    enabled = next;
     void applyConfig(enabled, intervalValue);
   }
 
-  function onIntervalInput(event: Event) {
-    intervalValue = Number((event.currentTarget as HTMLInputElement).value);
+  function onIntervalInput(next: number) {
+    intervalValue = next;
   }
 
   function onIntervalChange() {

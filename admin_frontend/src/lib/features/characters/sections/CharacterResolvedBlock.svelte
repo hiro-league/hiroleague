@@ -14,12 +14,14 @@
   import {
     appliedTuningLine,
     llmCollapsedSummary,
-    resolvedRowDotClass,
+    resolvedRowDotTone,
     resolvedRowTooltip,
     voiceCollapsedSummary
   } from '$lib/features/characters/shared/characters-resolved-pure';
   import { resolvedDetailsId } from '$lib/features/characters/shared/characters-a11y';
   import { cn } from '$lib/utils';
+  import StatusDot from '$kit/ui/status-dot.svelte';
+  import { CAT } from '$kit/ui/category';
 
   let {
     resolved,
@@ -72,26 +74,23 @@
     >
       <div class="flex items-start justify-between gap-2">
         <span class="flex min-w-0 flex-wrap items-center gap-2">
-          <span
-            class={cn(
-              'size-2 shrink-0 rounded-full shadow-sm ring-2 ring-background',
-              resolvedRowDotClass(row.status)
-            )}
-            title={resolvedRowTooltip(row.status)}
-            aria-label={resolvedRowTooltip(row.status)}
-          ></span>
+          <StatusDot
+            class="rounded-full shadow-sm ring-2 ring-background"
+            tone={resolvedRowDotTone(row.status)}
+            label={resolvedRowTooltip(row.status)}
+          />
           <span class="font-sans text-sm font-semibold">{row.label ?? row.profile_id}</span>
         </span>
         {#if origin === 'character'}
           <span
-            class="shrink-0 rounded-md border border-emerald-600/35 bg-emerald-500/[0.12] px-2 py-0.5 font-sans text-[10px] font-bold uppercase tracking-wide text-emerald-900 dark:text-emerald-100"
+            class={cn('shrink-0 rounded-md border px-2 py-0.5 font-sans text-[10px] font-bold uppercase tracking-wide', CAT.chip[2])}
             title="From this character’s list (ordered)."
           >
             Character
           </span>
         {:else}
           <span
-            class="shrink-0 rounded-md border border-slate-500/40 bg-slate-500/[0.12] px-2 py-0.5 font-sans text-[10px] font-bold uppercase tracking-wide text-slate-800 dark:text-slate-100"
+            class="shrink-0 rounded-md border border-border bg-muted px-2 py-0.5 font-sans text-[10px] font-bold uppercase tracking-wide text-foreground"
             title="Hiro's own (Settings → General) — used when no profile of the character can."
           >
             Hiro
@@ -104,7 +103,7 @@
         >
       {/if}
       {#if row.status !== 'available'}
-        <span class="text-xs text-amber-800 dark:text-amber-200">{resolvedRowTooltip(row.status)}</span>
+        <span class="text-xs text-warning">{resolvedRowTooltip(row.status)}</span>
       {/if}
     </li>
   {/snippet}
@@ -112,9 +111,9 @@
   <!-- Single applied panel shared by the LLM and TTS columns; only the labels/footers differ. -->
   {#snippet appliedPanel(args: AppliedPanelArgs)}
     <div
-      class="flex max-w-lg gap-3 rounded-md border border-emerald-600/25 bg-emerald-500/[0.06] p-3 text-sm dark:bg-emerald-950/25"
+      class="flex max-w-lg gap-3 rounded-md border border-success/25 bg-success/5 p-3 text-sm"
     >
-      <span class="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" title="Selected">
+      <span class="mt-0.5 shrink-0 text-success" title="Selected">
         <CircleCheck size={22} strokeWidth={2.25} aria-hidden="true" />
       </span>
       <span class="sr-only">Selected</span>
@@ -123,14 +122,14 @@
           <span class="break-all font-sans text-sm font-semibold">{args.title}</span>
           {#if args.fromCharacter}
             <span
-              class="rounded-md border border-emerald-600/35 bg-emerald-500/[0.15] px-2 py-0.5 font-sans text-[10px] font-bold uppercase tracking-wide text-emerald-900 dark:text-emerald-100"
+              class={cn('rounded-md border px-2 py-0.5 font-sans text-[10px] font-bold uppercase tracking-wide', CAT.chip[2])}
               title="Comes from this character’s list."
             >
               Character
             </span>
           {:else}
             <span
-              class="rounded-md border border-slate-500/40 bg-slate-500/[0.12] px-2 py-0.5 font-sans text-[10px] font-bold uppercase tracking-wide text-slate-800 dark:text-slate-100"
+              class="rounded-md border border-border bg-muted px-2 py-0.5 font-sans text-[10px] font-bold uppercase tracking-wide text-foreground"
               title={args.hiroBadgeTitle}
             >
               Hiro
@@ -312,7 +311,7 @@
   {/if}
 
   {#if staleHint}
-    <p class="rounded-md bg-amber-500/10 px-3 py-2 font-sans text-xs text-amber-800 dark:text-amber-200">
+    <p class="rounded-md bg-warning/10 px-3 py-2 font-sans text-xs text-warning">
       Lists above are unsaved. This panel still reflects the last saved character — save to refresh
       resolution.
     </p>

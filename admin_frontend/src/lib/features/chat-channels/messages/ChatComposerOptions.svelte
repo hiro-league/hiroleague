@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ChatChannelsPageController } from '$lib/features/chat-channels/state/chat-channels-controller.svelte';
   import { cn } from '$lib/utils';
+  import { Checkbox } from '$kit/components/ui/checkbox/index.js';
 
   type Props = {
     ctrl: ChatChannelsPageController;
@@ -30,26 +31,21 @@
       title={ctrl.voiceReplyCheckboxHint ||
         'Ask the agent to reply with synthesized speech (same as mobile routing flag).'}
     >
-      <input
-        type="checkbox"
-        bind:checked={ctrl.requestVoiceReplyUi}
-        disabled={ctrl.voiceReplyCheckboxDisabled}
-        class="accent-primary h-4 w-4 shrink-0 disabled:cursor-not-allowed"
-      />
+      <Checkbox bind:checked={ctrl.requestVoiceReplyUi} disabled={ctrl.voiceReplyCheckboxDisabled} />
       Get voice reply
     </label>
     <label
       class="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground"
       title="Augment this message's reply with relevant workspace knowledge (sent per-message)."
     >
-      <input type="checkbox" bind:checked={ctrl.useKnowledgeUi} class="accent-primary h-4 w-4 shrink-0" />
+      <Checkbox bind:checked={ctrl.useKnowledgeUi} />
       Use knowledge
     </label>
     <label
       class="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground"
       title="Disable agent tools for this message (overrides the global chat tools preference)."
     >
-      <input type="checkbox" bind:checked={ctrl.disableToolsUi} class="accent-primary h-4 w-4 shrink-0" />
+      <Checkbox bind:checked={ctrl.disableToolsUi} />
       Disable tools
     </label>
   </div>

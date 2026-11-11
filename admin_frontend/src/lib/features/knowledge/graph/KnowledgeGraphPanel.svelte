@@ -2,6 +2,7 @@
   import { onDestroy, onMount } from 'svelte';
   import { createGraphFullscreenLifecycle } from '../shared/graph-fullscreen';
   import EmptyState from '$kit/ui/empty-state.svelte';
+  import StatusDot from '$kit/ui/status-dot.svelte';
   import { cn } from '$lib/utils';
   import { Button } from '$kit/components/ui/button/index.js';
   import { chatOverlay } from '$lib/features/chat-channels/overlay/chat-overlay-store.svelte';
@@ -372,15 +373,15 @@
           {zoomLevel.toFixed(2)}×
         </span>
         {#if graph.live()}
-          <span class="inline-flex items-center gap-1.5 text-emerald-500">
-            <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span> live
+          <span class="inline-flex items-center gap-1.5 text-success">
+            <StatusDot tone="ok" size="xs" /> live
           </span>
         {/if}
         {#if graph.progress()}
           <span>ingesting chunk {graph.progress()?.chunk_index}/{graph.progress()?.chunk_total}…</span>
         {/if}
         {#if graph.truncated()}
-          <span class="text-amber-500">showing a capped subset</span>
+          <span class="text-warning">showing a capped subset</span>
         {/if}
       </div>
     {/if}

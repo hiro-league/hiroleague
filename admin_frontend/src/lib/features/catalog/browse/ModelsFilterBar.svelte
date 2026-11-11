@@ -55,7 +55,7 @@
     AVAILABILITY_FILTER_IDS.map((availability) => ({
       value: availability,
       label: AVAILABILITY_FILTER_UI[availability].title,
-      dotClass: AVAILABILITY_FILTER_UI[availability].circleClass
+      dotTone: AVAILABILITY_FILTER_UI[availability].tone
     }))
   );
 </script>

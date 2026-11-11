@@ -3,6 +3,7 @@
   import { cn } from '$lib/utils';
   import FieldHelp from '$lib/components/ui/field-help.svelte';
   import ResetDot from '$lib/components/ui/reset-dot.svelte';
+  import { Checkbox } from '$kit/components/ui/checkbox/index.js';
 
   type Props = {
     label: string;
@@ -43,13 +44,7 @@
     className
   )}
 >
-  <input
-    type="checkbox"
-    class={details ? 'mt-0.5' : undefined}
-    bind:checked
-    {disabled}
-    onchange={() => onchange?.()}
-  />
+  <Checkbox class={details ? 'mt-0.5' : undefined} bind:checked {disabled} onCheckedChange={() => onchange?.()} />
   {#snippet labelRow()}
     <span class="inline-flex items-center gap-1.5 font-sans text-sm font-medium">
 <!-- title shows the dotted preference path on hover. -->

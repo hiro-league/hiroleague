@@ -12,6 +12,7 @@
   import { Scissors } from '@lucide/svelte';
   import SearchInput from '$lib/search/SearchInput.svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
+  import * as Table from '$kit/components/ui/table/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
   import Highlight from '$lib/search/Highlight.svelte';
@@ -334,7 +335,7 @@
         <div class="flex flex-wrap gap-2">
           <span class="min-w-[64px] text-muted-foreground">Evidence</span>
           {#if leg.evidence}
-            <span class="flex-1 whitespace-pre-wrap border-l-2 border-sky-400 bg-muted/40 px-2 py-1 font-mono text-[11px] leading-5 dark:border-sky-500"><Highlight text={leg.evidence} query={overviewTerm} /></span>
+            <span class="flex-1 whitespace-pre-wrap border-l-2 border-primary/60 bg-muted/40 px-2 py-1 font-mono text-[11px] leading-5"><Highlight text={leg.evidence} query={overviewTerm} /></span>
           {:else}
             <span class="italic text-muted-foreground">— none quoted</span>
           {/if}
@@ -359,31 +360,31 @@
      Sticky sortable header; filtered + highlighted by the dialog search (no cap/trim — evidence is
      gold-vs-recall, not items sent to the answerer). -->
 {#snippet evTh(key: string, label: string, align: 'left' | 'right', title: string)}
-  <th
-    class="sticky top-0 z-10 cursor-pointer select-none bg-muted px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground {align === 'right' ? 'text-right' : 'text-left'}"
+  <Table.Head
+    class="sticky top-0 z-10 h-auto cursor-pointer select-none bg-muted px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground {align === 'right' ? 'text-right' : 'text-left'}"
     aria-sort={ariaSort(evidenceSort, key)}
     title={title || 'Click to sort'}
     onclick={() => (evidenceSort = nextSort(evidenceSort, key, EVIDENCE_DEFAULT_SORT))}
   >
     {label}<span class="ml-1 text-[9px] text-primary">{sortArrow(evidenceSort, key)}</span>
-  </th>
+  </Table.Head>
 {/snippet}
 
 {#snippet evidencePane(ev: EvidenceRecall)}
-  <div class="max-h-[60vh] overflow-auto rounded-md border">
-    <table class="w-full border-collapse font-sans text-xs">
-      <thead>
-        <tr>
+  <div class="evidence-scroll max-h-[60vh] overflow-auto rounded-md border">
+    <Table.Root class="border-collapse font-sans text-xs">
+      <Table.Header>
+        <Table.Row class="hover:bg-transparent">
           {@render evTh('status', 'Status', 'left', '')}
           {@render evTh('evidence', 'Evidence', 'left', '')}
           {@render evTh('when', 'When', 'left', '')}
           {@render evTh('via', 'Via', 'left', '')}
           {@render evTh('score', 'Score', 'right', '')}
-        </tr>
-      </thead>
-      <tbody>
+        </Table.Row>
+      </Table.Header>
+      <Table.Body>
         {#each evidenceRows(ev) as it, i (it.episode_id || i)}
-          <tr class="border-t align-top">
+          <Table.Row class="align-top">
             <td class="whitespace-nowrap px-2 py-1">
               {#if it.matched}
                 <Badge variant="success">matched</Badge>
@@ -404,12 +405,18 @@
               {#if it.matched_via}<Badge variant="outline" class="font-sans normal-case">{it.matched_via}</Badge>{:else}<span class="text-muted-foreground">—</span>{/if}
             </td>
             <td class="px-2 py-1 text-right font-mono text-[11px] tabular-nums">{it.score != null ? it.score.toFixed(3) : '—'}</td>
-          </tr>
+          </Table.Row>
         {/each}
         {#if evidenceRows(ev).length === 0}
-          <tr><td class="px-2 py-3 text-center text-muted-foreground" colspan="5">No evidence matches “{q}”.</td></tr>
+          <Table.Row class="hover:bg-transparent"><td class="px-2 py-3 text-center text-muted-foreground" colspan="5">No evidence matches “{q}”.</td></Table.Row>
         {/if}
-      </tbody>
-    </table>
+      </Table.Body>
+    </Table.Root>
   </div>
 {/snippet}
+
+<style>
+  .evidence-scroll :global([data-slot='table-container']) {
+    overflow: visible;
+  }
+</style>

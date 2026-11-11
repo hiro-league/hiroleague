@@ -1,5 +1,7 @@
 <script lang="ts">
   import { Button } from '$kit/components/ui/button/index.js';
+  import { Checkbox } from '$kit/components/ui/checkbox/index.js';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import FormField from '$lib/components/ui/form-field.svelte';
   import type { FieldSpec } from '../../shared/schema-form';
 
@@ -22,7 +24,7 @@
   {#each fields as field (field.key)}
     {#if field.type === 'boolean'}
       <label class="flex items-center gap-2 text-sm">
-        <input type="checkbox" bind:checked={draft[field.key]} />
+        <Checkbox checked={Boolean(draft[field.key])} onCheckedChange={(v) => (draft[field.key] = v)} />
         <span>{field.title}</span>
       </label>
       {#if field.description}
@@ -30,11 +32,13 @@
       {/if}
     {:else if field.type === 'enum'}
       <FormField label={field.title} hint={field.description}>
-        <select bind:value={draft[field.key]}>
-          {#each field.enumValues ?? [] as option (option)}
-            <option value={option}>{option}</option>
-          {/each}
-        </select>
+        <PickSelect
+          class="h-8 w-full text-sm"
+          label={field.title}
+          value={String(draft[field.key] ?? '')}
+          options={(field.enumValues ?? []).map((option) => ({ value: option, label: option }))}
+          onchange={(v) => (draft[field.key] = v)}
+        />
       </FormField>
     {:else if field.secret}
       <FormField

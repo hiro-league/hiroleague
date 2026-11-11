@@ -15,6 +15,7 @@
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Checkbox } from '$kit/components/ui/checkbox/index.js';
   import type { KnowledgeScannedFile } from '$lib/api/knowledge';
   import type { KnowledgeIngestModel } from '$lib/features/knowledge/state/knowledge-ingest.svelte';
   import { fileName, formatBytes, relativeFolderPath } from '$lib/features/knowledge/shared/knowledge-pure';
@@ -34,8 +35,6 @@
 
   let { ingest, onPreviewFile }: Props = $props();
 
-  let selectAllCheckboxEl = $state<HTMLInputElement | null>(null);
-
   const selectAllCheckboxTooltip = $derived(
     ingest.supportedFiles.length === 0
       ? 'No selectable files'
@@ -45,12 +44,6 @@
           ? 'Select ready and indexed files'
           : 'Select all ready files'
   );
-
-  $effect(() => {
-    if (selectAllCheckboxEl) {
-      selectAllCheckboxEl.indeterminate = ingest.someSupportedSelected;
-    }
-  });
 
   const fileSort = $derived(ingest.fileSort);
 </script>
@@ -149,17 +142,12 @@
         <thead class={KNOWLEDGE_TABLE_HEAD}>
           <tr>
             <th class="w-10 px-3 py-2">
-              <input
-                bind:this={selectAllCheckboxEl}
-                type="checkbox"
+              <Checkbox
                 aria-label={selectAllCheckboxTooltip}
                 title={selectAllCheckboxTooltip}
                 disabled={ingest.supportedFiles.length === 0}
-                checked={ingest.allSupportedSelected}
-                onclick={(event) => {
-                  event.preventDefault();
-                  ingest.cycleSelectAll();
-                }}
+                bind:checked={() => ingest.allSupportedSelected, () => ingest.cycleSelectAll()}
+                bind:indeterminate={() => ingest.someSupportedSelected, () => {}}
               />
             </th>
             <AdminTableHeaderCell column="filename" sort={fileSort}>Filename</AdminTableHeaderCell>
@@ -173,14 +161,11 @@
           {#each ingest.sortedVisibleFiles as file (file.path)}
             <tr class="border-t" title={!file.supported ? 'Not yet supported' : file.path}>
               <td class="px-3 py-2">
-                <input
-                  type="checkbox"
+                <Checkbox
                   aria-label={`Select ${file.relative_path}`}
                   disabled={!file.supported}
                   checked={!!ingest.selected[file.path]}
-                  onchange={(event) => {
-                    ingest.toggleFileSelection(file.path, event.currentTarget.checked);
-                  }}
+                  onCheckedChange={(checked) => ingest.toggleFileSelection(file.path, checked)}
                 />
               </td>
               <td class="max-w-[220px] truncate px-3 py-2 font-medium">
@@ -206,9 +191,9 @@
               <td class="px-3 py-2">
                 <span class="inline-flex items-center gap-1.5">
                   {#if file.already_ingested}
-                    <CircleCheck size={14} class="shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                    <CircleCheck size={14} class="shrink-0 text-success" aria-hidden="true" />
                   {:else if file.supported}
-                    <FileCheck size={14} class="shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                    <FileCheck size={14} class="shrink-0 text-success" aria-hidden="true" />
                   {:else}
                     <Ban size={14} class="shrink-0 text-destructive" aria-hidden="true" />
                   {/if}

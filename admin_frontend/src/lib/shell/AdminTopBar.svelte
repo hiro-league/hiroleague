@@ -12,6 +12,7 @@
   import { liveStatus, type WorkspaceStatusState } from '$lib/live/status.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import { cn } from '$kit/utils';
+  import StatusDot, { type DotTone } from '$kit/ui/status-dot.svelte';
 
   const chatEngine = getChatEngine();
   let adminConfig = $state<AdminConfig>(DEFAULT_ADMIN_CONFIG);
@@ -22,11 +23,10 @@
   const dotLabel = $derived(
     liveDegraded ? 'Live updates disconnected — close extra Hiro Admin tabs or wait for reconnect.' : statusLabel
   );
-  // the kit's status colours: all is well, look at this, something is wrong
-  const DOT: Record<WorkspaceStatusState, string> = {
-    connected: 'bg-success',
-    running_disconnected: 'bg-warning',
-    stopped: 'bg-destructive'
+  const DOT: Record<WorkspaceStatusState, DotTone> = {
+    connected: 'ok',
+    running_disconnected: 'warn',
+    stopped: 'error'
   };
 
   onMount(() => {
@@ -37,11 +37,13 @@
 </script>
 
 <h1 class="accent-text-gradient min-w-0 truncate text-lg font-semibold">Control Room</h1>
-<span
-  class={cn('size-2.5 shrink-0 rounded-full', DOT[status], liveDegraded && 'animate-pulse ring-2 ring-warning ring-offset-1 ring-offset-background')}
-  title={dotLabel}
-  aria-label={dotLabel}
-></span>
+<StatusDot
+  size="md"
+  tone={DOT[status]}
+  pulse={liveDegraded}
+  label={dotLabel}
+  class={cn(liveDegraded && 'rounded-full ring-2 ring-warning ring-offset-1 ring-offset-background')}
+/>
 <span class="hidden truncate text-xs text-muted-foreground lg:inline" title="Hiro {adminConfig.hiro_package_version}">
   {adminConfig.workspace_name ?? ''}
 </span>
@@ -60,7 +62,7 @@
     <MessagesSquare />
     <!-- Pulse when the agent is replying and the overlay is closed (unread affordance). -->
     {#if chatEngine.agentTyping && !chatOverlay.open}
-      <span class="absolute -top-0.5 -right-0.5 size-2.5 animate-pulse rounded-full bg-success ring-2 ring-background" aria-hidden="true"></span>
+      <StatusDot size="md" pulse class="absolute -top-0.5 -right-0.5 rounded-full ring-2 ring-background" />
     {/if}
   </Button>
   <!-- Quick access to workspace Settings, mirroring the menu's entry. -->

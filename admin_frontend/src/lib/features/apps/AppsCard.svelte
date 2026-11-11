@@ -8,6 +8,7 @@
   import { AppWindow, ChartColumn, ExternalLink, House } from '@lucide/svelte';
   import SectionCard from '$lib/components/page/SectionCard.svelte';
   import Notice from '$kit/ui/notice.svelte';
+  import StatusDot from '$kit/ui/status-dot.svelte';
   import { listApps, type AppSite } from '$lib/api/auth';
 
   // The icons extensions may name (offers.shows "icon"); anything else gets a plain app icon.
@@ -56,7 +57,7 @@
           </div>
           <strong class="font-sans text-sm font-semibold">{app.title}</strong>
           <span class="flex items-center gap-1.5 font-sans text-xs text-muted-foreground">
-            <span class="size-2 rounded-full {app.online ? 'bg-emerald-500' : 'bg-muted-foreground/40'}"></span>
+            <StatusDot tone={app.online ? 'ok' : 'off'} />
             {app.online ? 'Online' : 'Offline'} · {app.url.replace(/^https?:\/\//, '')}
           </span>
         </a>

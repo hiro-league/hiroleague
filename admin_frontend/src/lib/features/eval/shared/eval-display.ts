@@ -4,6 +4,7 @@
  * ingestion-status dot. Side-effect-free (value in → display value out) so they can be unit-tested
  * and shared across the eval panels without pulling in component state.
  */
+import { CAT } from '$kit/ui/category';
 import type { EvalCorpus } from '$lib/api/eval';
 import type { EvalCategoryStat } from '$lib/features/eval/shared/eval-events';
 import { EVAL_LEG_LABEL } from '$lib/features/eval/shared/eval-legs';
@@ -40,11 +41,11 @@ export function orderedDifficulty(
 export function difficultyMeta(d: string): { label: string; cls: string } | null {
   switch (d) {
     case 'medium':
-      return { label: 'medium', cls: 'bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300' };
+      return { label: 'medium', cls: `${CAT.soft[1]} ${CAT.text[1]}` };
     case 'hard':
-      return { label: 'hard', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300' };
+      return { label: 'hard', cls: `${CAT.soft[3]} ${CAT.text[3]}` };
     case 'very_hard':
-      return { label: 'very hard', cls: 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300' };
+      return { label: 'very hard', cls: `${CAT.soft[4]} ${CAT.text[4]}` };
     default:
       return null;
   }

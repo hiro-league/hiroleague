@@ -106,7 +106,7 @@
         {#if count !== undefined || busy}
           <span
             class="tabular-nums text-[10px] font-medium {(count ?? 0) > 0
-              ? 'text-amber-600 dark:text-amber-400'
+              ? 'text-brand'
               : 'text-muted-foreground'}"
             title={`${count ?? 0} match${count === 1 ? '' : 'es'}${busy ? ' (searching…)' : ''}`}
           >

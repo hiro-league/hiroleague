@@ -48,10 +48,10 @@
           <span class="font-sans text-sm font-semibold">{option?.label ?? id}</span>
           {#if option}
             <span class="truncate text-xs text-muted-foreground" title={option.line}>{option.line}</span>
-            {#if option.note}<span class="text-xs text-amber-700 dark:text-amber-300">{option.note}</span>{/if}
+            {#if option.note}<span class="text-xs text-warning">{option.note}</span>{/if}
           {:else}
             <!-- Deleted in Catalog → Profiles since: skipped when it's this one's turn; remove it here. -->
-            <span class="text-xs text-amber-700 dark:text-amber-300">No {noun} "{id}" any more: it is skipped.</span>
+            <span class="text-xs text-warning">No {noun} "{id}" any more: it is skipped.</span>
           {/if}
         </span>
         <Button

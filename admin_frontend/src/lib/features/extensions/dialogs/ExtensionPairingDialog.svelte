@@ -37,7 +37,7 @@
     <Dialog.Footer>
       <Button variant="outline" onclick={() => void ctrl.copyPairing()}>
         {#if ctrl.copied}
-          <Check class="text-emerald-500" size={15} />
+          <Check class="text-success" size={15} />
         {:else}
           <Copy size={15} />
         {/if}

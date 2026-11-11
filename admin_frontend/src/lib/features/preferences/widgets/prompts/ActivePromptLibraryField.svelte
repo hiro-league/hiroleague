@@ -17,7 +17,7 @@
     getPreferenceByPath,
     setPreferenceByPath
   } from '$lib/features/preferences/state/preferences-edits';
-  import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import {
     preferenceFieldMeta,
     preferenceHint,
@@ -118,11 +118,13 @@
     hintTooltip
     class="min-w-[16rem] flex-1"
   >
-    <select class={ADMIN_SELECT_LG} value={activeId} onchange={(e) => setActive(e.currentTarget.value)}>
-      {#each entries as [id, p] (id)}
-        <option value={id}>{p.label}{p.locked ? ' 🔒' : ''}</option>
-      {/each}
-    </select>
+    <PickSelect
+      class="h-8 w-full text-sm"
+      label={resolvedLabel}
+      value={activeId}
+      options={entries.map(([id, p]) => ({ value: id, label: `${p.label}${p.locked ? ' 🔒' : ''}` }))}
+      onchange={setActive}
+    />
   </FormField>
   <div class="flex gap-2 pb-px">
     <Button variant="outline" size="icon" aria-label="New prompt profile" title="New profile" onclick={() => openDialog('create')}>

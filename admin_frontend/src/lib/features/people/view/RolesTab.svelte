@@ -11,9 +11,11 @@
   import { Lock, Plus, Trash2 } from '@lucide/svelte';
   import AdminSubtabStrip from '$lib/components/page/AdminSubtabStrip.svelte';
   import SectionCard from '$lib/components/page/SectionCard.svelte';
-  import SourceFilter from '$lib/components/page/SourceFilter.svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
+  import { Checkbox } from '$kit/components/ui/checkbox/index.js';
+  import * as Table from '$kit/components/ui/table/index.js';
+  import Segmented from '$kit/ui/segmented.svelte';
   import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
   import type { AccessFeature, AccessSource, Person, RoleAccess } from '$lib/api/people';
@@ -36,8 +38,8 @@
 
   const countFor = (s: AccessSource) => (role ? (role.rights[s.id] ?? []).length : s.features.length);
   const sourceOptions = $derived([
-    { id: ALL_SOURCES, label: 'All', count: ctrl.sources.reduce((n, s) => n + countFor(s), 0) },
-    ...ctrl.sources.map((s) => ({ id: s.id, label: s.name, count: countFor(s) }))
+    { value: ALL_SOURCES, label: 'All', count: ctrl.sources.reduce((n, s) => n + countFor(s), 0) },
+    ...ctrl.sources.map((s) => ({ value: s.id, label: s.name, count: countFor(s) }))
   ]);
 
   const apps = $derived(ctrl.sources.filter((s) => s.kind === 'extension'));
@@ -80,40 +82,40 @@
   {/if}
 
   <div class="flex flex-wrap items-center justify-between gap-3">
-    <SourceFilter options={sourceOptions} value={ctrl.sourceId} onchange={(id) => (ctrl.sourceId = id)} />
+    <Segmented class="flex-wrap" label="Show rights for" options={sourceOptions} value={ctrl.sourceId} onchange={(id) => (ctrl.sourceId = id)} />
     <span class="font-sans text-xs text-muted-foreground">{sourceLine}</span>
   </div>
 
   {#if ctrl.tab === ALL_ROLES}
     <div class="overflow-x-auto rounded-lg border">
-      <table class="w-full font-sans text-sm">
-        <thead>
-          <tr class="border-b text-left text-xs text-muted-foreground">
-            <th class="px-3 py-2 font-medium">Feature</th>
+      <Table.Root class="font-sans">
+        <Table.Header>
+          <Table.Row class="hover:bg-transparent">
+            <Table.Head class="h-auto px-3 py-2 text-xs text-muted-foreground">Feature</Table.Head>
             {#each ctrl.roles as r (r.role_id)}
-              <th class="px-3 py-2 font-medium">
-                <button type="button" class="underline decoration-dotted underline-offset-4 hover:text-foreground" onclick={() => (ctrl.tab = r.role_id)}>{r.name}</button>
-              </th>
+              <Table.Head class="h-auto px-3 py-2 text-xs text-muted-foreground">
+                <Button variant="link" size="inline" class="text-xs" onclick={() => (ctrl.tab = r.role_id)}>{r.name}</Button>
+              </Table.Head>
             {/each}
-          </tr>
-        </thead>
-        <tbody>
+          </Table.Row>
+        </Table.Header>
+        <Table.Body>
           {#each rows as { s, f } (`${s.id}.${f.id}`)}
-            <tr class="border-b last:border-0">
-              <td class="px-3 py-2">
+            <Table.Row>
+              <Table.Cell class="px-3 py-2 whitespace-normal">
                 <span class="flex items-center gap-2">
                   {#if ctrl.sourceId === ALL_SOURCES}{@render sourcePill(s)}{/if}
                   {f.name}
                 </span>
-              </td>
+              </Table.Cell>
               {#each ctrl.roles as r (r.role_id)}
                 {@const text = cellText(r, s, f)}
-                <td class={cn('px-3 py-2 text-xs', text === '—' && 'text-muted-foreground/50')}>{text}</td>
+                <Table.Cell class={cn('px-3 py-2 text-xs whitespace-normal', text === '—' && 'text-muted-foreground/50')}>{text}</Table.Cell>
               {/each}
-            </tr>
+            </Table.Row>
           {/each}
-        </tbody>
-      </table>
+        </Table.Body>
+      </Table.Root>
     </div>
   {:else if role}
     {@const locked = role.role_id === OWNER}
@@ -180,11 +182,10 @@
               {#each f.rights as r (r.id)}
                 {@const k = rightKey(f.id, r.id)}
                 <label class={cn('flex items-center gap-1.5 font-sans text-sm', locked && 'text-muted-foreground')} title={r.says}>
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={g.has(k)}
                     disabled={locked || ctrl.busy}
-                    onchange={(e) => ctrl.toggle(role, s, f, r.id, e.currentTarget.checked)}
+                    onCheckedChange={(v) => ctrl.toggle(role, s, f, r.id, v)}
                   />
                   {r.name}
                 </label>

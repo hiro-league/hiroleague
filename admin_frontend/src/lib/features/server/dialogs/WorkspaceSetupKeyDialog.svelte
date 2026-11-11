@@ -16,7 +16,7 @@
       <Dialog.Title>Workspace '{workspace.selected?.name ?? ''}' configured</Dialog.Title>
       <Dialog.Description>Save this public key before closing.</Dialog.Description>
     </Dialog.Header>
-    <p class="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-300">
+    <p class="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
       Save this key. It will not be shown again after setup. Paste it into the Desktop public key field when creating a gateway instance for this workspace.
     </p>
     <PublicKeyCopyField

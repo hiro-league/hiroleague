@@ -9,7 +9,7 @@
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import FieldHelp from '$lib/components/ui/field-help.svelte';
-  import { AVAILABILITY_FILTER_UI } from '$lib/features/catalog/shared/catalog-filter-ui';
+  import StatusDot from '$kit/ui/status-dot.svelte';
   import { cn } from '$lib/utils';
   import type { ProviderRowStatus } from './ai-types';
 
@@ -32,20 +32,15 @@
   let { name, id, status, hosting, auth, models, kinds, recommended, updated, info, actionLabel, onAction }: Props =
     $props();
 
-  const DOT = {
-    ok: AVAILABILITY_FILTER_UI.online.circleClass,
-    warn: 'bg-amber-500',
-    off: AVAILABILITY_FILTER_UI.offline.circleClass
-  } as const;
 </script>
 
 <tr class="border-t">
   <td class="px-2 py-3 text-center" title={status.title}>
-    <span class={cn('inline-block size-2 rounded-full', DOT[status.tone])} aria-hidden="true"></span>
+    <StatusDot tone={status.tone} />
     <small
       class={cn(
         'block whitespace-nowrap text-[10px] leading-tight',
-        status.tone === 'warn' ? 'text-amber-600 dark:text-amber-500' : 'text-muted-foreground'
+        status.tone === 'warn' ? 'text-warning' : 'text-muted-foreground'
       )}
     >
       {status.word}

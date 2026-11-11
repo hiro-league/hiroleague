@@ -3,6 +3,7 @@
   import FormField from '$lib/components/ui/form-field.svelte';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
   import Loading from '$kit/ui/loading.svelte';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import type { AddableProviderRow } from '$lib/api/catalog';
 
   import type { ProviderCheckResult } from '$lib/api/catalog';
@@ -77,14 +78,13 @@
       <div class="grid gap-4">
         <FormField label="Provider">
           {#snippet children()}
-            <select
+            <PickSelect
               value={providerId}
-              onchange={(event) => onProviderIdChange((event.currentTarget as HTMLSelectElement).value)}
-            >
-              {#each addableProviders as provider}
-                <option value={provider.id}>{provider.display_name} ({provider.id})</option>
-              {/each}
-            </select>
+              options={addableProviders.map((provider) => ({ value: provider.id, label: `${provider.display_name} (${provider.id})` }))}
+              onchange={onProviderIdChange}
+              label="Provider"
+              class="h-8 w-full text-sm"
+            />
           {/snippet}
         </FormField>
         {#if isLocal}
@@ -112,7 +112,7 @@
             </Button>
             {#if checkResult}
               {#if checkResult.online}
-                <p class="text-sm text-green-700 dark:text-green-500">
+                <p class="text-sm text-success">
                   ✅ Online — {checkResult.installed.length} model{checkResult.installed.length === 1
                     ? ''
                     : 's'} installed{checkResult.latency_ms != null
@@ -120,8 +120,8 @@
                     : ''}
                 </p>
                 {#if missingModels.length > 0}
-                  <div class="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs dark:border-amber-800 dark:bg-amber-950/40">
-                    <p class="mb-1 font-medium text-amber-800 dark:text-amber-300">
+                  <div class="rounded-md border border-warning/30 bg-warning/10 p-2 text-xs">
+                    <p class="mb-1 font-medium text-warning">
                       Cataloged models not pulled yet:
                     </p>
                     <ul class="grid gap-1">

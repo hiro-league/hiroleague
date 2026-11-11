@@ -10,6 +10,7 @@ import {
   Volume2
 } from '@lucide/svelte';
 import type { CatalogModelRow } from '$lib/api/catalog';
+import type { DotTone } from '$kit/ui/status-dot.svelte';
 
 export const MODEL_KIND_FILTER_IDS = ['chat', 'tts', 'stt', 'embedding', 'image_gen', 'rerank'] as const;
 export type ModelKindFilterId = (typeof MODEL_KIND_FILTER_IDS)[number];
@@ -42,15 +43,15 @@ export const HOSTING_FILTER_UI: Record<
 
 export const AVAILABILITY_FILTER_UI: Record<
   AvailabilityFilterId,
-  { title: string; circleClass: string }
+  { title: string; tone: DotTone }
 > = {
   online: {
     title: 'Online — provider configured in this workspace',
-    circleClass: 'bg-green-600 dark:bg-green-500'
+    tone: 'ok'
   },
   offline: {
     title: 'Offline — provider not configured in this workspace',
-    circleClass: 'bg-muted-foreground/40'
+    tone: 'off'
   }
 };
 

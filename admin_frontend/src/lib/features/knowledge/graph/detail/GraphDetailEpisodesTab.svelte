@@ -1,5 +1,6 @@
 <script lang="ts">
   import { CalendarDays, FileText } from '@lucide/svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import type { GraphChunkDetail, GraphEdgeDTO } from '$lib/api/knowledge';
   import Highlight from '$lib/search/Highlight.svelte';
   import { fullDateTime, shortDate } from '$lib/format/time';
@@ -51,7 +52,7 @@
       <span title={validFrom?.title}>From: {validFrom ? validFrom.label : '—'}</span>
       {#if validUntil}<span title={validUntil.title}>Until: {validUntil.label}</span>{/if}
       {#if retired}
-        <span class="text-amber-500" title={`Superseded · ${retired.title}`}>Retired: {retired.label}</span>
+        <span class="text-warning" title={`Superseded · ${retired.title}`}>Retired: {retired.label}</span>
       {/if}
     </div>
   </div>
@@ -107,13 +108,14 @@
                 <Highlight text={body} query={search} />
               </p>
               {#if long}
-                <button
-                  type="button"
+                <Button
+                  variant="link"
+                  size="sm"
                   onclick={() => onToggleChunk(c.id)}
-                  class="mt-1 text-[11px] font-medium text-primary hover:underline"
+                  class="mt-1 h-auto px-0 py-0 text-[11px]"
                 >
                   {expanded ? 'Show less' : 'Show more'}
-                </button>
+                </Button>
               {/if}
             </div>
           {/each}

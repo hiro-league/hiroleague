@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Sparkles, Star } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import FormField from '$lib/components/ui/form-field.svelte';
   import SectionCard from '$lib/components/page/SectionCard.svelte';
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
@@ -30,7 +31,7 @@
     {/snippet}
   </FormField>
   {#if !ctl.modelReady && ctl.selectedModel}
-    <p class="font-sans text-xs text-amber-600 dark:text-amber-300">
+    <p class="font-sans text-xs text-warning">
       {ctl.selectedModel.provider_display_name} is not ready — add its API key
       {ctl.selectedModel.provider_id === 'cloudflare' ? ' and account id ' : ' '}
       on the <a class="underline" href="/catalog">Providers/Models</a> page.
@@ -46,14 +47,16 @@
     hint="Loads a saved recipe (model, steps, seed, style scaffolding) into this form — generation always runs with exactly what the form shows."
   >
     {#snippet children()}
-      <select
+      <PickSelect
+        class="h-8 w-full text-sm"
+        label="Recipe"
         value={ctl.profileId}
-        onchange={(event) => ctl.applyProfile((event.currentTarget as HTMLSelectElement).value)}
-      >
-        {#each Object.entries(ctl.profiles) as [id, profile] (id)}
-          <option value={id}>{profile.label || id}{profile.locked ? ' (built-in)' : ''}</option>
-        {/each}
-      </select>
+        options={Object.entries(ctl.profiles).map(([id, profile]) => ({
+          value: id,
+          label: `${profile.label || id}${profile.locked ? ' (built-in)' : ''}`
+        }))}
+        onchange={(v) => ctl.applyProfile(v)}
+      />
     {/snippet}
   </FormField>
 

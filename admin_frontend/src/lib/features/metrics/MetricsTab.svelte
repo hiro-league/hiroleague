@@ -5,6 +5,8 @@
   import FormField from '$lib/components/ui/form-field.svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
+  import { Checkbox } from '$kit/components/ui/checkbox/index.js';
+  import { Slider } from '$kit/components/ui/slider/index.js';
   import { setupMetricsTabRuntime } from '$lib/features/metrics/shared/metrics-page-lifecycle';
   import { createMetricsController } from '$lib/features/metrics/state/metrics-controller.svelte';
   import MetricsPanel from '$lib/features/metrics/view/MetricsPanel.svelte';
@@ -23,26 +25,25 @@
 <StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
   <div class="flex flex-wrap items-end gap-4">
     <FormField label="Enable metrics">
-      <input
-        class="size-4 accent-primary"
-        type="checkbox"
+      <Checkbox
         checked={ctrl.enabled}
         disabled={!ctrl.available || ctrl.applying}
-        onchange={ctrl.onEnabledChange}
+        onCheckedChange={ctrl.onEnabledChange}
       />
     </FormField>
     <FormField label="Interval" class="min-w-60">
       <div class="flex items-center gap-3">
-        <input
-          class="min-w-36 flex-1 accent-primary"
-          type="range"
-          min="1"
-          max="10"
-          step="0.5"
+        <Slider
+          class="min-w-36 flex-1"
+          type="single"
+          min={1}
+          max={10}
+          step={0.5}
           value={ctrl.intervalValue}
           disabled={!ctrl.available || ctrl.applying}
-          oninput={ctrl.onIntervalInput}
-          onchange={ctrl.onIntervalChange}
+          onValueChange={ctrl.onIntervalInput}
+          onValueCommit={() => ctrl.onIntervalChange()}
+          aria-label="Interval"
         />
         <span class="w-12 text-right font-sans text-sm tabular-nums text-muted-foreground">
           {ctrl.intervalValue.toFixed(1)}s

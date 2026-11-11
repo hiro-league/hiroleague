@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Checkbox } from '$kit/components/ui/checkbox/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
@@ -27,7 +28,7 @@
         {/snippet}
       </FormField>
       <label class="flex items-center gap-2 font-sans text-sm">
-        <input type="checkbox" bind:checked={workspace.editForm.setDefault} />
+        <Checkbox bind:checked={workspace.editForm.setDefault} />
         Set as default workspace
       </label>
     </div>

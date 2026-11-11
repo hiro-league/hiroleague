@@ -63,7 +63,7 @@
     {/if}
 
     {#if !adminSession.anyoneSignsIn}
-      <div class="grid gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 text-sm">
+      <div class="grid gap-2 rounded-lg border border-warning/30 bg-warning/5 p-4 text-sm">
         <p class="font-semibold">Nobody can sign in yet.</p>
         <p class="text-muted-foreground">On the computer that runs Hiro, set the owner's sign-in:</p>
         <code class="rounded bg-muted px-2 py-1 font-mono text-xs">hiro people owner</code>

@@ -1,13 +1,13 @@
 <script lang="ts">
-  import { RefreshCw, Trash2 } from '@lucide/svelte';
+  import { RefreshCw, Trash2, X } from '@lucide/svelte';
   import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
   import SearchInput from '$lib/search/SearchInput.svelte';
   import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
   import StickyBar from '$kit/ui/sticky-bar.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
-  import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
-  import { cn } from '$lib/utils';
+  import DateField from '$kit/ui/date-field.svelte';
+  import { FILTER_CLEAR_ICON_BTN } from '$lib/styling/admin-tokens';
   import type { MemoryFilterKey } from './shared/memory-pure';
 
   let {
@@ -72,20 +72,24 @@
         options={sourcesForMemoryFilterDropdown}
       />
       <FormField label="From" class="min-w-[9rem]">
-        <input
-          type="date"
-          class={cn(ADMIN_INPUT, 'w-full')}
-          value={filters.mem_from}
-          oninput={(e) => setFilter('mem_from', e.currentTarget.value)}
-        />
+        <div class="flex items-center gap-0.5">
+          <DateField value={filters.mem_from} onchange={(v) => setFilter('mem_from', v)} />
+          {#if filters.mem_from}
+            <Button variant="ghost" size="icon" class={FILTER_CLEAR_ICON_BTN} onclick={() => setFilter('mem_from', '')} title="Clear filter" aria-label="Clear From date">
+              <X size={15} strokeWidth={2} />
+            </Button>
+          {/if}
+        </div>
       </FormField>
       <FormField label="To" class="min-w-[9rem]">
-        <input
-          type="date"
-          class={cn(ADMIN_INPUT, 'w-full')}
-          value={filters.mem_to}
-          oninput={(e) => setFilter('mem_to', e.currentTarget.value)}
-        />
+        <div class="flex items-center gap-0.5">
+          <DateField value={filters.mem_to} onchange={(v) => setFilter('mem_to', v)} />
+          {#if filters.mem_to}
+            <Button variant="ghost" size="icon" class={FILTER_CLEAR_ICON_BTN} onclick={() => setFilter('mem_to', '')} title="Clear filter" aria-label="Clear To date">
+              <X size={15} strokeWidth={2} />
+            </Button>
+          {/if}
+        </div>
       </FormField>
       <SearchInput
         label="Search"

@@ -54,7 +54,7 @@
         <dt class="text-muted-foreground">Plan</dt>
         <dd>{planAccountWords(tool) ?? '—'}</dd>
         <dt class="text-muted-foreground">Sign-in</dt>
-        <dd class={cn(status.tone === 'warn' && 'text-amber-700 dark:text-amber-300')}>{signInExpiryWords(tool)}</dd>
+        <dd class={cn(status.tone === 'warn' && 'text-warning')}>{signInExpiryWords(tool)}</dd>
         <dt class="text-muted-foreground">Version</dt>
         <dd class="font-mono text-xs leading-5">{tool.version ?? '—'}</dd>
         <dt class="text-muted-foreground">Last update</dt>

@@ -2,6 +2,7 @@
   import { Button } from '$kit/components/ui/button/index.js';
   import SectionCard from '$lib/components/page/SectionCard.svelte';
   import Notice from '$kit/ui/notice.svelte';
+  import StatusDot from '$kit/ui/status-dot.svelte';
   import { ADMIN_SECTION_TITLE } from '$lib/styling/admin-tokens';
   import type { ChannelDetailController } from '../../state/channel-detail-controller.svelte';
   import ChannelPairingPane from './ChannelPairingPane.svelte';
@@ -20,13 +21,7 @@
   <h2 class={ADMIN_SECTION_TITLE}>Connection</h2>
 
   <div class="flex items-center gap-2 text-sm">
-    <span
-      class="inline-flex h-2.5 w-2.5 rounded-full {ctrl.connected
-        ? 'bg-emerald-500'
-        : ctrl.needsRepair
-          ? 'bg-red-500'
-          : 'bg-amber-500'}"
-    ></span>
+    <StatusDot size="md" tone={ctrl.connected ? 'ok' : ctrl.needsRepair ? 'error' : 'warn'} />
     <span class="font-medium capitalize">{ctrl.status?.state ?? 'unknown'}</span>
     {#if ctrl.status?.account}
       <span class="text-muted-foreground">· {ctrl.status.account}</span>

@@ -2,7 +2,8 @@
   import { X } from '@lucide/svelte';
   import FormField from '$lib/components/ui/form-field.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
-  import { ADMIN_SELECT, ADMIN_SELECT_SM, FILTER_CLEAR_ICON_BTN } from '$lib/styling/admin-tokens';
+  import PickSelect from '$kit/ui/pick-select.svelte';
+  import { FILTER_CLEAR_ICON_BTN } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
 
   type Option = { value: string; label: string };
@@ -36,6 +37,15 @@
     title
   }: Props = $props();
 
+  /** The placeholder choice ("All …") stands for ''; PickSelect cannot pick an empty value. */
+  const ANY = '__any';
+  const choices = $derived(placeholder ? [{ value: ANY, label: placeholder }, ...options] : options);
+
+  function pick(v: string) {
+    value = v === ANY ? '' : v;
+    onValueChange?.(value);
+  }
+
   function clearValue() {
     if (onClear) {
       onClear();
@@ -51,19 +61,16 @@
     <span class="font-sans text-sm font-semibold text-muted-foreground">{label}</span>
   {/if}
   <div class={cn('flex items-center gap-0.5', className)}>
-    <select
-      class={cn(ADMIN_SELECT_SM, selectClass)}
-      bind:value
-      {title}
-      onchange={() => onValueChange?.(value)}
-    >
-      {#if placeholder}
-        <option value="">{placeholder}</option>
-      {/if}
-      {#each options as option (option.value)}
-        <option value={option.value}>{option.label}</option>
-      {/each}
-    </select>
+    <span class="inline-flex min-w-0" {title}>
+      <PickSelect
+        value={value || (placeholder ? ANY : '')}
+        options={choices}
+        onchange={pick}
+        {placeholder}
+        label={label ?? placeholder}
+        class={cn('h-8 min-w-0 text-sm', selectClass)}
+      />
+    </span>
     <div class="inline-flex size-8 shrink-0 items-center justify-center">
       {#if clearable && value.trim()}
         <Button
@@ -82,19 +89,16 @@
 {:else}
   <FormField {label} class={cn('min-w-[10rem]', className)}>
     <div class="flex items-center gap-0.5">
-      <select
-        class={cn(ADMIN_SELECT, 'w-full', selectClass)}
-        bind:value
-        {title}
-        onchange={() => onValueChange?.(value)}
-      >
-        {#if placeholder}
-          <option value="">{placeholder}</option>
-        {/if}
-        {#each options as option (option.value)}
-          <option value={option.value}>{option.label}</option>
-        {/each}
-      </select>
+      <span class="flex min-w-0 flex-1" {title}>
+        <PickSelect
+          value={value || (placeholder ? ANY : '')}
+          options={choices}
+          onchange={pick}
+          {placeholder}
+          label={label ?? placeholder}
+          class={cn('h-8 w-full text-sm', selectClass)}
+        />
+      </span>
       {#if clearable && value.trim()}
         <Button
           variant="ghost"

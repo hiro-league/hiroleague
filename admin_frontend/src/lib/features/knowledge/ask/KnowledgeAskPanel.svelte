@@ -77,7 +77,7 @@
   // rank-based, so they're colored relative to the strongest result in the *current* set.
   type ScoreTone = 'strong' | 'ok' | 'weak';
 
-  // Reuse the design-system Badge variants (emerald / amber / neutral fill) for chip color.
+  // Reuse the design-system Badge variants (success / warning / neutral fill) for chip color.
   const TONE_VARIANT: Record<ScoreTone, 'success' | 'warning' | 'secondary'> = {
     strong: 'success',
     ok: 'warning',
@@ -85,8 +85,8 @@
   };
   // Bar-fill color for the RRF strength slider (a plain div, not a Badge).
   const TONE_BAR: Record<ScoreTone, string> = {
-    strong: 'bg-emerald-500',
-    ok: 'bg-amber-500',
+    strong: 'bg-success',
+    ok: 'bg-warning',
     weak: 'bg-muted-foreground/40'
   };
 

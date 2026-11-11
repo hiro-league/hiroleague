@@ -5,6 +5,8 @@
   import GraphOptionsButtonGroup from './GraphOptionsButtonGroup.svelte';
   import GraphOptionsDateRangeField from './GraphOptionsDateRangeField.svelte';
   import GraphOptionsResetDot from './GraphOptionsResetDot.svelte';
+  import { Checkbox } from '$kit/components/ui/checkbox/index.js';
+  import Segmented from '$kit/ui/segmented.svelte';
   import GraphOptionsScalarField from './GraphOptionsScalarField.svelte';
   import {
     LOW_CONN_THRESHOLD_MIN,
@@ -99,23 +101,12 @@
               onReset={() => graph.setLowConnThreshold(0)}
             />
           </span>
-          <div class="grid grid-cols-2 gap-0.5 rounded-md border bg-muted/40 p-0.5" role="group" aria-label="How to treat sparse nodes">
-            {#each LOW_CONN_TREATMENTS as t (t.value)}
-              {@const active = graph.lowConnTreatment() === t.value}
-              <button
-                type="button"
-                onclick={() => graph.setLowConnTreatment(t.value)}
-                class={cn(
-                  'rounded px-2 py-0.5 text-xs font-medium transition-colors',
-                  active ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                )}
-                aria-pressed={active}
-                title={t.title}
-              >
-                {t.label}
-              </button>
-            {/each}
-          </div>
+          <Segmented
+            options={LOW_CONN_TREATMENTS}
+            value={graph.lowConnTreatment()}
+            onchange={(v) => graph.setLowConnTreatment(v)}
+            label="How to treat sparse nodes"
+          />
         </div>
         <div class="flex items-center gap-1.5 text-xs">
           <span class="text-muted-foreground">Fewer than</span>
@@ -160,11 +151,10 @@
       />
 
       <label class="flex items-center gap-2 text-xs">
-        <input
-          type="checkbox"
+        <Checkbox
+          class="size-3.5"
           checked={graph.includeUndatedEdges()}
-          onchange={(e) => graph.setIncludeUndatedEdges(e.currentTarget.checked)}
-          class="size-3.5 cursor-pointer accent-primary"
+          onCheckedChange={(checked) => graph.setIncludeUndatedEdges(checked)}
         />
         <span class="flex items-center font-medium">
           Include edges without a date
@@ -198,7 +188,6 @@
         value={graph.maxConnBy()}
         onChange={(v) => graph.setMaxConnBy(v as MaxConnBy)}
         ariaLabel="Which connections to keep when capping"
-        cols={2}
       />
 
       <GraphOptionsScalarField

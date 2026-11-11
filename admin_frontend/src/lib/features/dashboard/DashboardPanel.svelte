@@ -76,7 +76,7 @@
       title="Workspaces"
       subtitle="Registered and connected"
       icon={Server}
-      accent="emerald"
+      accent={2}
     >
       {#snippet children()}
         <div class="flex flex-wrap gap-2">
@@ -84,7 +84,7 @@
             {ctrl.workspaces.length} registered
           </span>
           <span
-            class="rounded-full bg-emerald-500/15 px-3 py-1 font-sans text-xs font-bold text-emerald-700 dark:text-emerald-300"
+            class="rounded-full bg-success/15 px-3 py-1 font-sans text-xs font-bold text-success"
           >
             {ctrl.runningWorkspaces.length} connected
           </span>
@@ -100,7 +100,7 @@
         {#if ctrl.gatewayActive}
           {#if ctrl.gatewayLink}
             <span
-              class="inline-flex max-w-full items-center gap-2 rounded-full bg-gradient-to-r from-emerald-500/20 via-brand/20 to-cyan-500/20 px-3 py-1 font-sans text-xs font-extrabold text-foreground"
+              class="inline-flex max-w-full items-center gap-2 rounded-full bg-gradient-to-r from-cat-2/20 via-brand/20 to-cat-1/20 px-3 py-1 font-sans text-xs font-extrabold text-foreground"
             >
               <span class="truncate">{ctrl.gatewayLink.workspace}</span>
               <Cable size={13} />
@@ -123,7 +123,7 @@
         title="Gateways"
         subtitle="Registered and running"
         icon={Router}
-        accent="cyan"
+        accent={1}
       >
         {#snippet children()}
           <div class="flex flex-wrap gap-2">
@@ -131,7 +131,7 @@
               {ctrl.gateways.length} registered
             </span>
             <span
-              class="rounded-full bg-cyan-500/15 px-3 py-1 font-sans text-xs font-bold text-cyan-700 dark:text-cyan-300"
+              class="rounded-full bg-success/15 px-3 py-1 font-sans text-xs font-bold text-success"
             >
               {ctrl.runningGateways.length} running
             </span>

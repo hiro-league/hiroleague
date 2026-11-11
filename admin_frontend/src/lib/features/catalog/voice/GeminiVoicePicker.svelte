@@ -16,6 +16,8 @@
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import Notice from '$kit/ui/notice.svelte';
+  import PickSelect from '$kit/ui/pick-select.svelte';
+  import Segmented from '$kit/ui/segmented.svelte';
   import {
     addVoice,
     deleteVoice,
@@ -26,7 +28,7 @@
     type GeminiVoice,
     type VoiceSource
   } from '$lib/api/voice';
-  import { ADMIN_INPUT, ADMIN_SELECT } from '$lib/styling/admin-tokens';
+  import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
   import { keptUntil, langName, sourceOf } from './voice-format';
 
@@ -190,8 +192,12 @@
     { value: 'library', label: 'Voice library' },
     { value: 'mine', label: 'My voices' }
   ];
-  const pill = (on: boolean) =>
-    cn('rounded-md px-2.5 py-1 font-sans text-xs font-medium', on ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent');
+  const ANY = '__any';
+  const GENDERS = [
+    { value: ANY, label: 'Any gender' },
+    { value: 'female', label: 'female' },
+    { value: 'male', label: 'male' }
+  ];
 </script>
 
 {#snippet sample(id: string)}
@@ -229,26 +235,22 @@
 {/snippet}
 
 <div class="grid gap-3 rounded-md border bg-background p-3">
-  <span class="inline-flex w-fit gap-1 rounded-lg border bg-card p-1" role="group" aria-label="Where the voice is from">
-    {#each TABS as t (t.value)}
-      <button type="button" class={pill(tab === t.value)} onclick={() => (tab = t.value)}>{t.label}</button>
-    {/each}
-  </span>
+  <Segmented options={TABS} value={tab} onchange={(v) => (tab = v)} label="Where the voice is from" />
 
   {#if error}<Notice message={error} />{/if}
 
   {#if tab === 'studio'}
-    <select
-      class={cn(ADMIN_SELECT, 'sm:w-2/3')}
+    <PickSelect
+      class="h-8 w-full text-sm sm:w-2/3"
+      label="Studio voice"
       value={selectedStudio?.id ?? ''}
-      onchange={(e) => {
-        const v = studio.find((x) => x.id === e.currentTarget.value);
+      placeholder={loading ? 'Reading the voices…' : `Pick one of ${studio.length} studio voices`}
+      options={studio.map((v) => ({ value: v.id, label: `${v.name} · ${hint(v)}${v.gender ? ` · ${v.gender}` : ''}` }))}
+      onchange={(id) => {
+        const v = studio.find((x) => x.id === id);
         if (v) pick(v);
       }}
-    >
-      {#if !selectedStudio}<option value="" disabled>{loading ? 'Reading the voices…' : `Pick one of ${studio.length} studio voices`}</option>{/if}
-      {#each studio as v (v.id)}<option value={v.id}>{v.name} · {hint(v)}{v.gender ? ` · ${v.gender}` : ''}</option>{/each}
-    </select>
+    />
     {#if selectedStudio}
       <div class="flex items-center gap-2">
         <p class="flex-1 text-xs text-muted-foreground">{selectedStudio.description}</p>
@@ -257,13 +259,14 @@
     {/if}
   {:else if tab === 'library'}
     <div class="grid gap-2 sm:grid-cols-[1fr_8rem_1fr]">
-      <select class={ADMIN_SELECT} bind:value={language}>
-        <option value="">Any language</option>
-        {#each languages as l (l.code)}<option value={l.code}>{langName(l.code)} ({l.count})</option>{/each}
-      </select>
-      <select class={ADMIN_SELECT} bind:value={gender}>
-        <option value="">Any gender</option><option value="female">female</option><option value="male">male</option>
-      </select>
+      <PickSelect
+        class="h-8 w-full text-sm"
+        label="Language"
+        value={language || ANY}
+        options={[{ value: ANY, label: 'Any language' }, ...languages.map((l) => ({ value: l.code, label: `${langName(l.code)} (${l.count})` }))]}
+        onchange={(v) => (language = v === ANY ? '' : v)}
+      />
+      <PickSelect class="h-8 w-full text-sm" label="Gender" value={gender || ANY} options={GENDERS} onchange={(v) => (gender = v === ANY ? '' : v)} />
       <input class={ADMIN_INPUT} bind:value={query} placeholder="Search: warm, narrator, Egyptian…" />
     </div>
     <div class="grid max-h-72 gap-0.5 overflow-y-auto">
@@ -299,11 +302,14 @@
         </label>
         <div class="grid gap-2 sm:grid-cols-3">
           <input class={ADMIN_INPUT} bind:value={form.name} placeholder="Name, e.g. Hiro" maxlength="80" />
-          <select class={ADMIN_SELECT} bind:value={form.language}>
-            <option value="">Any language</option>
-            {#each designLanguages as l (l)}<option value={l}>{langName(l)}</option>{/each}
-          </select>
-          <select class={ADMIN_SELECT} bind:value={form.gender}><option value="">Any gender</option><option value="female">female</option><option value="male">male</option></select>
+          <PickSelect
+            class="h-8 w-full text-sm"
+            label="Language"
+            value={form.language || ANY}
+            options={[{ value: ANY, label: 'Any language' }, ...designLanguages.map((l) => ({ value: l, label: langName(l) }))]}
+            onchange={(v) => (form.language = v === ANY ? '' : v)}
+          />
+          <PickSelect class="h-8 w-full text-sm" label="Gender" value={form.gender || ANY} options={GENDERS} onchange={(v) => (form.gender = v === ANY ? '' : v)} />
         </div>
         <div class="flex flex-wrap items-center gap-3">
           <Button onclick={design} disabled={!canDesign}>

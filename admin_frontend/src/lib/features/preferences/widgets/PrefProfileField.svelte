@@ -15,7 +15,7 @@
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { usePrefField } from '$lib/features/preferences/shared/preferences-field.svelte';
   import type { PreferencePath } from '$lib/features/preferences/shared/preferences-schema';
-  import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import {
     aiProfileLine,
     hiroJobByPath,
@@ -80,6 +80,8 @@
     return `/catalog?tab=${tab}${known}`;
   });
 
+  const NOT_SET = '__not_set';
+
   function onPick(value: string) {
     // '' = not set (null): the job borrows its fallback's profile / Hiro doesn't speak.
     field.value = value || null;
@@ -89,13 +91,17 @@
 {#if field.visible}
   <div class="grid gap-1.5">
     <FormField label={field.label} hint={field.hint} hintTooltip anchor={path}>
-      <select class={ADMIN_SELECT_LG} value={picked} onchange={(e) => onPick(e.currentTarget.value)}>
-        <option value="">{kind === 'ai' ? 'Not set' : 'None'}</option>
-        {#each options as option (option.id)}
-          <option value={option.id}>{option.name}</option>
-        {/each}
-        {#if missing}<option value={picked}>{picked} (missing)</option>{/if}
-      </select>
+      <PickSelect
+        class="h-8 w-full text-sm"
+        label={field.label}
+        value={picked || NOT_SET}
+        options={[
+          { value: NOT_SET, label: kind === 'ai' ? 'Not set' : 'None' },
+          ...options.map((option) => ({ value: option.id, label: option.name })),
+          ...(missing ? [{ value: picked, label: `${picked} (missing)` }] : [])
+        ]}
+        onchange={(v) => onPick(v === NOT_SET ? '' : v)}
+      />
     </FormField>
     <p class="font-sans text-xs leading-snug text-muted-foreground">{line}</p>
     <a class="inline-flex w-fit items-center gap-1 font-sans text-xs text-primary hover:underline" href={editHref}>

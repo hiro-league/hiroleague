@@ -6,6 +6,7 @@
   import * as Dialog from '$kit/components/ui/dialog/index.js';
   import { dialogCloseAllowed } from '$lib/ui/dialog-close-guard';
   import Notice from '$kit/ui/notice.svelte';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import type { ChatChannelFormFields } from '$lib/features/chat-channels/shared/chat-channel-form';
 
   type Props = {
@@ -123,11 +124,13 @@
 
         <FormField label="Character">
           {#snippet children()}
-            <select bind:value={form.characterId}>
-              {#each characters as c (c.id)}
-                <option value={c.id}>{characterLabel(c.id)}</option>
-              {/each}
-            </select>
+            <PickSelect
+              class="h-8 w-full text-sm"
+              label="Character"
+              value={form.characterId}
+              options={characters.map((c) => ({ value: c.id, label: characterLabel(c.id) }))}
+              onchange={(v) => (form.characterId = v)}
+            />
           {/snippet}
         </FormField>
 

@@ -7,7 +7,7 @@
   import type { AnswerPromptProfile } from '$lib/api/preferences';
   import { Button } from '$kit/components/ui/button/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
-  import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
+  import PickSelect from '$kit/ui/pick-select.svelte';
 
   type Props = {
     /** `[id, profile]` pairs in display order (default first). */
@@ -32,11 +32,13 @@
 
 <div class="flex flex-wrap items-end gap-3">
   <FormField label="Version" class="min-w-[16rem] flex-1" hint="">
-    <select class={ADMIN_SELECT_LG} bind:value={selectedId}>
-      {#each entries as [id, p] (id)}
-        <option value={id}>{p.label}{p.locked ? ' 🔒' : ''}</option>
-      {/each}
-    </select>
+    <PickSelect
+      class="h-8 w-full text-sm"
+      label="Version"
+      value={selectedId}
+      options={entries.map(([id, p]) => ({ value: id, label: `${p.label}${p.locked ? ' 🔒' : ''}` }))}
+      onchange={(v) => (selectedId = v)}
+    />
   </FormField>
   <div class="flex flex-wrap gap-2 pb-1">
     <Button variant="outline" size="sm" onclick={onCreate}>+ New</Button>

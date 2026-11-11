@@ -3,6 +3,7 @@
   import * as Dialog from '$kit/components/ui/dialog/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
   import { Input } from '$kit/components/ui/input/index.js';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import type { PeopleController } from '../state/people-controller.svelte';
 
   let { ctrl }: { ctrl: PeopleController } = $props();
@@ -32,11 +33,13 @@
           <Input bind:value={ctrl.form.calls_them} placeholder={ctrl.form.name} />
         </FormField>
         <FormField label="Role" hint="What each role may do in Home is set in HomeHiro.">
-          <select class="h-9 rounded-md border border-input bg-background px-2 text-sm" bind:value={ctrl.form.role_id}>
-            {#each ctrl.roles as role (role.role_id)}
-              <option value={role.role_id}>{role.name}</option>
-            {/each}
-          </select>
+          <PickSelect
+            class="h-8 w-full text-sm"
+            label="Role"
+            value={ctrl.form.role_id}
+            options={ctrl.roles.map((role) => ({ value: role.role_id, label: role.name }))}
+            onchange={(v) => ctrl.form && (ctrl.form.role_id = v)}
+          />
         </FormField>
         <FormField label="WhatsApp number" hint="With the country code, e.g. +20 100 123 4567. Empty = none.">
           <Input bind:value={ctrl.form.whatsapp} inputmode="tel" autocomplete="off" />

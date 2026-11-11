@@ -9,7 +9,7 @@
   import { Button } from '$kit/components/ui/button/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
   import { getPreferenceByPath } from '$lib/features/preferences/state/preferences-edits';
-  import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import {
     preferenceFieldMeta,
     preferenceTitle,
@@ -93,11 +93,13 @@
 
 <div data-pref-path={dictPath} class="flex flex-wrap items-end gap-3">
   <FormField label="Version to edit" class="min-w-[16rem] flex-1" {hint} hintTooltip>
-    <select class={ADMIN_SELECT_LG} bind:value={selectedId}>
-      {#each entries as [id, p] (id)}
-        <option value={id}>{p.label}{p.locked ? ' 🔒' : ''}</option>
-      {/each}
-    </select>
+    <PickSelect
+      class="h-8 w-full text-sm"
+      label="Version to edit"
+      value={selectedId}
+      options={entries.map(([id, p]) => ({ value: id, label: `${p.label}${p.locked ? ' 🔒' : ''}` }))}
+      onchange={(v) => (selectedId = v)}
+    />
   </FormField>
   <Button variant="outline" size="sm" class="mb-1" onclick={() => (open = true)}>
     Edit versions

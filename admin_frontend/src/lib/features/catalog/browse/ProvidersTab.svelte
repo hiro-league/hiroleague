@@ -13,6 +13,7 @@
   import EmptyState from '$kit/ui/empty-state.svelte';
   import ProviderFreeOffersBadge from '$lib/features/catalog/shared/ProviderFreeOffersBadge.svelte';
   import Loading from '$kit/ui/loading.svelte';
+  import StatusDot from '$kit/ui/status-dot.svelte';
   import { AVAILABILITY_FILTER_UI, formatProviderKindsLabel } from '$lib/features/catalog/shared/catalog-filter-ui';
   import { ADMIN_SECTION_CARD, ADMIN_SECTION_HEADING_LG, ADMIN_TABLE_HEAD } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
@@ -139,31 +140,22 @@
           <tr class="border-t">
             <td class="px-2 py-3 text-center">
               {#if isOnline}
-                <span
-                  class="inline-block size-2 rounded-full {AVAILABILITY_FILTER_UI.online.circleClass}"
-                  title={AVAILABILITY_FILTER_UI.online.title}
-                  aria-hidden="true"
-                ></span>
-                <span class="sr-only">Online. </span>
+                <StatusDot tone={AVAILABILITY_FILTER_UI.online.tone} label={AVAILABILITY_FILTER_UI.online.title} />
               {:else}
-                <span
-                  class="inline-block size-2 rounded-full {AVAILABILITY_FILTER_UI.offline.circleClass}"
-                  title={AVAILABILITY_FILTER_UI.offline.title}
-                  aria-hidden="true"
-                ></span>
-                <span class="sr-only">Offline. </span>
+                <StatusDot tone={AVAILABILITY_FILTER_UI.offline.tone} label={AVAILABILITY_FILTER_UI.offline.title} />
               {/if}
             </td>
             <td class="min-w-0 px-3 py-3">
               <div class="inline-flex max-w-full items-center gap-1">
-                <button
-                  class="min-w-0 truncate text-left font-sans text-sm font-semibold text-primary hover:underline"
-                  type="button"
+                <Button
+                  variant="link"
+                  size="inline"
+                  class="min-w-0 justify-start font-sans text-sm font-semibold"
                   onclick={() => void ctrl.openModelsForProvider(provider.id)}
                   title={`View models for ${provider.display_name}`}
                 >
-                  {provider.display_name}
-                </button>
+                  <span class="truncate">{provider.display_name}</span>
+                </Button>
                 <ProviderFreeOffersBadge
                   providerDisplayName={provider.display_name}
                   offers={provider.free_offers ?? []}
@@ -177,12 +169,12 @@
                     <span class="text-muted-foreground">Checking…</span>
                   {:else if st?.result?.online}
                     {@const pulled = st.result.catalog_status.filter((m) => m.pulled).length}
-                    <span class="text-green-700 dark:text-green-500">● online</span>
+                    <span class="text-success">● online</span>
                     <span class="text-muted-foreground">
                       · {pulled}/{st.result.catalog_status.length} models pulled
                     </span>
                   {:else if st?.result}
-                    <span class="text-amber-600 dark:text-amber-500" title={st.result.error ?? ''}>
+                    <span class="text-warning" title={st.result.error ?? ''}>
                       ● offline
                     </span>
                   {:else}
@@ -223,14 +215,15 @@
                   {/each}
                 </ul>
                 {#if entries.length > 1}
-                  <button
-                    type="button"
-                    class="mt-1 text-xs font-medium text-primary hover:underline"
+                  <Button
+                    variant="link"
+                    size="sm"
+                    class="mt-1 h-auto px-0 text-xs"
                     onclick={() =>
                       (expandedRecommended = { ...expandedRecommended, [provider.id]: !expanded })}
                   >
                     {expanded ? 'Show less' : `+${entries.length - 1} more`}
-                  </button>
+                  </Button>
                 {/if}
               {:else}
                 <span class="text-xs text-muted-foreground">-</span>
