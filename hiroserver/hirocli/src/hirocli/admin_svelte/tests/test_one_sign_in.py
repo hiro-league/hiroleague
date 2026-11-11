@@ -65,8 +65,8 @@ def _app(workspace: Path, extensions: FakeExtensions) -> FastAPI:
     api.include_router(auth_router)
 
     @api.get("/secret")
-    async def secret() -> dict:
-        return {"ok": True, "error": None, "data": "settings"}
+    async def secret() -> str:
+        return "settings"
 
     app.include_router(api)
     return app
@@ -100,18 +100,18 @@ def test_a_kid_signs_in_for_the_apps_only(family: dict[str, Any]) -> None:
     client = family["client"]
     _sign_in(client, "mark", "kid password")
     refused = client.get("/api/secret")
-    assert refused.status_code == 403 and refused.json()["error"] == "Your role doesn't open HiroLeague's settings."
-    me = client.get("/api/auth/me").json()["data"]
+    assert refused.status_code == 403 and refused.json()["detail"] == "Your role doesn't open HiroLeague's settings."
+    me = client.get("/api/auth/me").json()
     assert me["can_open_settings"] is False and me["role_name"] == "Kid"
-    apps = client.get("/api/apps").json()["data"]["apps"]
+    apps = client.get("/api/apps").json()["apps"]
     assert apps == [{"extension": "home", "title": "Home", "icon": "house", "url": "http://homehiro.local", "online": True}]
 
     set_role_admin(family["path"], "kid", True)
-    assert client.get("/api/secret").json()["data"] == "settings"
+    assert client.get("/api/secret").json() == "settings"
 
 
 def test_the_sign_in_page_lists_the_offered_sign_ins(family: dict[str, Any]) -> None:
-    me = family["client"].get("/api/auth/me").json()["data"]
+    me = family["client"].get("/api/auth/me").json()
     assert me["sign_in_offers"] == [{"id": "home_assistant", "label": "Home Assistant", "extension": "home"}]
 
 
@@ -166,7 +166,7 @@ def test_signing_in_with_home_assistant_through_the_extension(family: dict[str, 
     done = client.get("/api/auth/with/callback", params={"code": "ha-code", "state": params["state"]})
     assert done.status_code == 303 and done.headers["location"] == "/api/auth/for/home?next=%2Fpeople"
     assert ext.asked[-1][1] == METHOD_SIGN_IN_FINISH and ext.asked[-1][2]["code"] == "ha-code"
-    assert client.get("/api/auth/me").json()["data"]["person"]["name"] == "Mark"
+    assert client.get("/api/auth/me").json()["person"]["name"] == "Mark"
 
     again = client.get("/api/auth/with/callback", params={"code": "ha-code", "state": params["state"]})
     assert "signin_error" in again.headers["location"]  # a state works once
@@ -181,7 +181,7 @@ def test_an_unlinked_home_assistant_user_is_told_why(family: dict[str, Any]) -> 
     assert parse_qs(urlsplit(r.headers["location"]).query)["signin_error"] == [
         "Your Home Assistant user isn't linked to anyone."
     ]
-    assert client.get("/api/auth/me").json()["data"]["signed_in"] is False
+    assert client.get("/api/auth/me").json()["signed_in"] is False
 
 
 def _run(coro: Any) -> Any:
@@ -193,9 +193,9 @@ def _run(coro: Any) -> Any:
 def test_signing_out_here_passes_through_the_apps(family: dict[str, Any]) -> None:
     client = family["client"]
     _sign_in(client, "michel", "correct horse")
-    then = client.post("/api/auth/sign-out").json()["data"]["then"]
+    then = client.post("/api/auth/sign-out").json()["then"]
     assert then == "http://homehiro.local/api/auth/signout?next=http%3A%2F%2Ftestserver%2Fsign-in"
-    assert client.get("/api/auth/me").json()["data"]["signed_in"] is False
+    assert client.get("/api/auth/me").json()["signed_in"] is False
 
 
 def test_an_apps_sign_out_ends_the_session_here_and_comes_back_to_sign_in(family: dict[str, Any]) -> None:
@@ -203,4 +203,4 @@ def test_an_apps_sign_out_ends_the_session_here_and_comes_back_to_sign_in(family
     _sign_in(client, "michel", "correct horse")
     r = client.get("/api/auth/sign-out", params={"for": "home"})
     assert r.status_code == 303 and r.headers["location"] == "http://testserver/sign-in?for=home"  # home skipped
-    assert client.get("/api/auth/me").json()["data"]["signed_in"] is False
+    assert client.get("/api/auth/me").json()["signed_in"] is False

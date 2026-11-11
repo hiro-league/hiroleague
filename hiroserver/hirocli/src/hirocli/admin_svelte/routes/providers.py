@@ -10,7 +10,7 @@ from starlette.concurrency import run_in_threadpool
 
 from hirocli.admin.features.providers.service import ProvidersPageService
 from hirocli.admin_svelte.deps import SelectedWorkspaceIdDep
-from hirocli.admin_svelte.result_payload import _api_from_result
+from hirocli.admin_svelte.result_payload import _api_data, _api_list
 from hirocli.admin_svelte.schemas import (
     ProviderAddApiKeyRequest,
     ProviderCheckRequest,
@@ -48,34 +48,32 @@ def _local_active_provider(workspace_id: str | None) -> dict[str, Any]:
 
 
 @providers_router.get("/providers")
-async def list_active_providers(workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+async def list_active_providers(workspace_id: SelectedWorkspaceIdDep) -> Any:
     result = await run_in_threadpool(
         ProvidersPageService().list_configured,
         workspace_id,
     )
-    payload = _api_from_result(result)
-    data = list(payload["data"] or [])
+    if not result.ok:
+        return _api_data(result)
+    data = list(result.data or [])
     data.append(await run_in_threadpool(_local_active_provider, workspace_id))
-    payload["data"] = data
-    return payload
+    return data
 
 
 @providers_router.get("/providers/addable")
-async def list_addable_providers(workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+async def list_addable_providers(workspace_id: SelectedWorkspaceIdDep) -> Any:
     result = await run_in_threadpool(
         ProvidersPageService().list_addable_providers,
         workspace_id,
     )
-    payload = _api_from_result(result)
-    payload["data"] = payload["data"] or []
-    return payload
+    return _api_list(result)
 
 
 @providers_router.post("/providers")
 async def add_provider_api_key(
     body: ProviderAddApiKeyRequest,
     workspace_id: SelectedWorkspaceIdDep,
-) -> dict[str, Any]:
+) -> Any:
     result = await run_in_threadpool(
         ProvidersPageService().add_api_key,
         workspace_id,
@@ -83,54 +81,54 @@ async def add_provider_api_key(
         body.api_key,
         body.account_id,
     )
-    return _api_from_result(result)
+    return _api_data(result)
 
 
 @providers_router.post("/providers/local")
 async def set_provider_local_endpoint(
     body: ProviderSetEndpointRequest,
     workspace_id: SelectedWorkspaceIdDep,
-) -> dict[str, Any]:
+) -> Any:
     result = await run_in_threadpool(
         ProvidersPageService().set_local_endpoint,
         workspace_id,
         body.provider_id,
         body.base_url,
     )
-    return _api_from_result(result)
+    return _api_data(result)
 
 
 @providers_router.post("/providers/check")
 async def check_provider_endpoint(
     body: ProviderCheckRequest,
     workspace_id: SelectedWorkspaceIdDep,
-) -> dict[str, Any]:
+) -> Any:
     result = await run_in_threadpool(
         ProvidersPageService().check_endpoint,
         workspace_id,
         body.provider_id,
         body.base_url,
     )
-    return _api_from_result(result)
+    return _api_data(result)
 
 
 @providers_router.post("/providers/scan-env")
-async def scan_provider_environment(workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+async def scan_provider_environment(workspace_id: SelectedWorkspaceIdDep) -> Any:
     result = await run_in_threadpool(
         ProvidersPageService().scan_environment_for_keys,
         workspace_id,
     )
-    return _api_from_result(result)
+    return _api_data(result)
 
 
 @providers_router.delete("/providers/{provider_id}")
 async def remove_provider(
     provider_id: str,
     workspace_id: SelectedWorkspaceIdDep,
-) -> dict[str, Any]:
+) -> Any:
     result = await run_in_threadpool(
         ProvidersPageService().remove_provider,
         workspace_id,
         provider_id,
     )
-    return _api_from_result(result)
+    return _api_data(result)

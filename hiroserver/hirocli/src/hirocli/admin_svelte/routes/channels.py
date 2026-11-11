@@ -26,7 +26,7 @@ from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
 from hiro_commons.process import find_workspace_root
 from hirocli.admin.features.channels.service import ChannelService
 from hirocli.admin_svelte.deps import SelectedWorkspaceIdDep
-from hirocli.admin_svelte.result_payload import _api_from_result, envelope_failure
+from hirocli.admin_svelte.result_payload import _api_data, api_failure
 from hirocli.domain.channel_catalog import available_channels, catalog_channel
 from hirocli.domain.channel_config import load_channel_config
 from hirocli.domain.channel_descriptor import load_channel_descriptor
@@ -68,18 +68,14 @@ def _status_for(request: Request, name: str) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 
 @channels_router.get("/channels")
-async def list_channels(workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+async def list_channels(workspace_id: SelectedWorkspaceIdDep) -> Any:
     result = await run_in_threadpool(ChannelService().list_channels, workspace_id)
     if not result.ok:
-        return _api_from_result(result)
+        return _api_data(result)
     return {
-        "ok": True,
-        "error": None,
-        "data": {
             "channels": result.data or [],
             "mandatory_channel_name": MANDATORY_CHANNEL_NAME,
-        },
-    }
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -87,17 +83,14 @@ async def list_channels(workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 @channels_router.get("/channels/{name}/status")
-async def channel_status(name: str, request: Request) -> dict[str, Any]:
+async def channel_status(name: str, request: Request) -> Any:
     ctx = _ctx(request)
     if ctx is None:
-        return envelope_failure("Admin app has no ServerContext attached.")
+        return api_failure("Admin app has no ServerContext attached.")
     st = dict(getattr(ctx, "channel_status", {}).get(name, {}))
     cfg = await run_in_threadpool(load_channel_config, ctx.workspace_path, name)
     descriptor = await run_in_threadpool(load_channel_descriptor, ctx.workspace_path, name)
     return {
-        "ok": True,
-        "error": None,
-        "data": {
             "state": st.get("state", "unknown"),
             "account": st.get("account", ""),
             "has_qr": bool(st.get("qr")),
@@ -107,40 +100,31 @@ async def channel_status(name: str, request: Request) -> dict[str, Any]:
             "detail": st.get("detail", {}),
             # §5.2 — capability descriptor drives the pairing pane / action buttons.
             "capabilities": descriptor.capabilities if descriptor is not None else None,
-        },
-    }
+        }
 
 
 @channels_router.get("/channels/{name}/pairing")
-async def channel_pairing(name: str, request: Request) -> dict[str, Any]:
+async def channel_pairing(name: str, request: Request) -> Any:
     st = _status_for(request, name)
     if st is None:
-        return envelope_failure("Admin app has no ServerContext attached.")
+        return api_failure("Admin app has no ServerContext attached.")
     # Render the raw pairing string to an SVG server-side (same helper the device
     # pairing dialog uses); token/oauth channels carry no code and render nothing.
     raw = st.get("qr", "")
     qr_svg = render_qr_svg(raw) if raw else ""
-    return {
-        "ok": True,
-        "error": None,
-        "data": {"kind": st.get("pairing_kind", "qr"), "qr_svg": qr_svg, "qr_at": st.get("qr_at")},
-    }
+    return {"kind": st.get("pairing_kind", "qr"), "qr_svg": qr_svg, "qr_at": st.get("qr_at")}
 
 
 @channels_router.get("/channels/{name}/descriptor")
-async def channel_descriptor(name: str, request: Request) -> dict[str, Any]:
+async def channel_descriptor(name: str, request: Request) -> Any:
     ctx = _ctx(request)
     if ctx is None:
-        return envelope_failure("Admin app has no ServerContext attached.")
+        return api_failure("Admin app has no ServerContext attached.")
     d = await run_in_threadpool(load_channel_descriptor, ctx.workspace_path, name)
     if d is None:
         # Channel never registered → no declared schema/capabilities yet.
-        return {"ok": True, "error": None, "data": {"config_schema": None, "capabilities": None, "version": ""}}
-    return {
-        "ok": True,
-        "error": None,
-        "data": {"config_schema": d.config_schema, "capabilities": d.capabilities, "version": d.version},
-    }
+        return {"config_schema": None, "capabilities": None, "version": ""}
+    return {"config_schema": d.config_schema, "capabilities": d.capabilities, "version": d.version}
 
 
 # ---------------------------------------------------------------------------
@@ -148,12 +132,12 @@ async def channel_descriptor(name: str, request: Request) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 @channels_router.get("/channels/{name}/config")
-async def channel_config_show(name: str, workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+async def channel_config_show(name: str, workspace_id: SelectedWorkspaceIdDep) -> Any:
     try:
         result = await run_in_threadpool(ChannelConfigShowTool().execute, name, workspace_id)
     except ValueError as exc:
-        return envelope_failure(str(exc))
-    return {"ok": True, "error": None, "data": {"config": result.config}}
+        return api_failure(str(exc))
+    return {"config": result.config}
 
 
 class ConfigSetRequest(BaseModel):
@@ -164,7 +148,7 @@ class ConfigSetRequest(BaseModel):
 @channels_router.post("/channels/{name}/config")
 async def channel_config_set(
     name: str, body: ConfigSetRequest, request: Request, workspace_id: SelectedWorkspaceIdDep
-) -> dict[str, Any]:
+) -> Any:
     # The Tool takes a string and JSON-parses it; serialize non-string values so
     # lists/bools round-trip (a plain string is passed through as-is).
     if body.value is None:
@@ -180,7 +164,7 @@ async def channel_config_set(
     except (ValueError, RuntimeError) as exc:
         # ValueError: schema-validation failures (unknown key / wrong type, §5.1) or a
         # secret write on a non-registry workspace. RuntimeError: keyring unavailable (§5.6).
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
     # Live-apply: re-push the saved config to the running plugin (secrets resolved) so
     # changes like the allow-list take effect immediately, no restart. No-op if the
     # channel isn't running; failure here must not fail the save.
@@ -196,7 +180,7 @@ async def channel_config_set(
                 channel=name,
                 error=str(exc),
             )
-    return {"ok": True, "error": None, "data": {"config": result.config, "applied": applied}}
+    return {"config": result.config, "applied": applied}
 
 
 # ---------------------------------------------------------------------------
@@ -209,18 +193,18 @@ class InstallRequest(BaseModel):
 
 
 @channels_router.get("/channels/available")
-async def list_available_channels(workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+async def list_available_channels(workspace_id: SelectedWorkspaceIdDep) -> Any:
     # Catalog channels the UI can install without prior CLI setup, minus any already
     # configured (so the "Install a channel" picker never offers a duplicate).
     listing = await run_in_threadpool(ChannelService().list_channels, workspace_id)
     if not listing.ok:
-        return _api_from_result(listing)
+        return _api_data(listing)
     configured = {str(row.get("name", "")) for row in (listing.data or [])}
     channels = [
         {"name": c.name, "label": c.label, "description": c.description, "package": c.package}
         for c in available_channels(configured)
     ]
-    return {"ok": True, "error": None, "data": {"channels": channels}}
+    return {"channels": channels}
 
 
 def _install_source(name: str, override: str | None) -> str:
@@ -239,7 +223,7 @@ def _install_source(name: str, override: str | None) -> str:
 
 
 @channels_router.post("/channels/{name}/install")
-async def channel_install(name: str, body: InstallRequest, workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+async def channel_install(name: str, body: InstallRequest, workspace_id: SelectedWorkspaceIdDep) -> Any:
     # Install = provision the channel in one step (there is no separate "add"):
     #   1. `uv tool install` the plugin package (isolated tool env), then
     #   2. write its config row (DISABLED) so it joins the managed list.
@@ -254,7 +238,7 @@ async def channel_install(name: str, body: InstallRequest, workspace_id: Selecte
             ChannelInstallTool().execute, name, source, body.editable
         )
     except RuntimeError as exc:
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
     entry = catalog_channel(name)
     fallback = entry.command if entry is not None else f"hiro-channel-{name}"
     command = await run_in_threadpool(installed_channel_command, name) or fallback
@@ -263,51 +247,47 @@ async def channel_install(name: str, body: InstallRequest, workspace_id: Selecte
             ChannelSetupTool().execute, name, command, False, workspace_id, ""
         )
     except (ValueError, RuntimeError) as exc:
-        return envelope_failure(str(exc))
-    return {
-        "ok": True,
-        "error": None,
-        "data": {"package": install.package, "name": setup.name, "enabled": setup.enabled},
-    }
+        return api_failure(str(exc))
+    return {"package": install.package, "name": setup.name, "enabled": setup.enabled}
 
 
 @channels_router.post("/channels/{name}/enable")
 async def enable_channel(
     name: str, request: Request, workspace_id: SelectedWorkspaceIdDep
-) -> dict[str, Any]:
+) -> Any:
     # Persist enabled=True (survives restart), then hot-spawn the plugin live (§5.5).
     try:
         await run_in_threadpool(ChannelEnableTool().execute, name, workspace_id)
     except (ValueError, RuntimeError) as exc:
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
     cm = _channel_manager(request)
     if cm is not None:
         await cm.activate(name)
-    return {"ok": True, "error": None, "data": {"enabled": True}}
+    return {"enabled": True}
 
 
 @channels_router.post("/channels/{name}/disable")
 async def disable_channel(
     name: str, request: Request, workspace_id: SelectedWorkspaceIdDep
-) -> dict[str, Any]:
+) -> Any:
     # Persist enabled=False, then stop the running plugin live.
     try:
         await run_in_threadpool(ChannelDisableTool().execute, name, workspace_id)
     except (ValueError, RuntimeError) as exc:
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
     cm = _channel_manager(request)
     if cm is not None:
         await cm.deactivate(name)
     ctx = _ctx(request)
     if ctx is not None:
         ctx.channel_status.setdefault(name, {})["state"] = "disabled"
-    return {"ok": True, "error": None, "data": {"enabled": False}}
+    return {"enabled": False}
 
 
 @channels_router.post("/channels/{name}/uninstall")
 async def uninstall_channel(
     name: str, request: Request, workspace_id: SelectedWorkspaceIdDep
-) -> dict[str, Any]:
+) -> Any:
     # Uninstall is the exact inverse of Install: stop the running plugin, delete its
     # config so it leaves the managed list (returns to the "Install a channel" picker),
     # then `uv tool uninstall` the package. Package uninstall is best-effort — the
@@ -319,7 +299,7 @@ async def uninstall_channel(
         await run_in_threadpool(ChannelRemoveTool().execute, name, workspace_id)
     except (ValueError, RuntimeError) as exc:
         # e.g. a mandatory channel can't be uninstalled.
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
     uninstalled = False
     try:
         await run_in_threadpool(ChannelUninstallTool().execute, name)
@@ -333,22 +313,22 @@ async def uninstall_channel(
     ctx = _ctx(request)
     if ctx is not None:
         getattr(ctx, "channel_status", {}).pop(name, None)
-    return {"ok": True, "error": None, "data": {"uninstalled": uninstalled}}
+    return {"uninstalled": uninstalled}
 
 
 @channels_router.post("/channels/{name}/action/{action}")
-async def channel_action(name: str, action: str, request: Request) -> dict[str, Any]:
+async def channel_action(name: str, action: str, request: Request) -> Any:
     # Generic admin action (§5.2/§5.4): forwarded to the plugin as a channel.<action>
     # event (e.g. logout, reconnect). Rejected if the channel declares an action set
     # that doesn't include it.
     cm = _channel_manager(request)
     if cm is None:
-        return envelope_failure("Channel manager not available (is the server running?).")
+        return api_failure("Channel manager not available (is the server running?).")
     ctx = _ctx(request)
     if ctx is not None:
         d = await run_in_threadpool(load_channel_descriptor, ctx.workspace_path, name)
         declared = (d.capabilities or {}).get("actions") if d is not None and d.capabilities else None
         if declared is not None and action not in declared:
-            return envelope_failure(f"Channel '{name}' does not support action '{action}'.")
+            return api_failure(f"Channel '{name}' does not support action '{action}'.")
     await cm.send_event_to_channel(name, f"channel.{action}", {})
-    return {"ok": True, "error": None, "data": {"requested": True, "action": action}}
+    return {"requested": True, "action": action}

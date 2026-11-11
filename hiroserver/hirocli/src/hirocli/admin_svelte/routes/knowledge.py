@@ -17,7 +17,7 @@ from starlette.responses import StreamingResponse
 from hiro_commons.log import Logger
 
 from hirocli.admin_svelte.deps import SelectedWorkspaceIdDep
-from hirocli.admin_svelte.result_payload import envelope_failure
+from hirocli.admin_svelte.result_payload import api_failure
 from hirocli.admin_svelte.workspace_ctx import _selected_workspace_id
 from hirocli.domain.character import list_characters_detailed
 from hirocli.domain.data_store import data_db_path, ensure_data_db
@@ -69,8 +69,8 @@ knowledge_shared_router = APIRouter()
 _active_sse_streams = 0
 
 
-def _success(data: Any) -> dict[str, Any]:
-    return {"ok": True, "error": None, "data": data}
+def _success(data: Any) -> Any:
+    return data
 
 
 def _publish_graph_event(
@@ -252,7 +252,7 @@ async def scan_folder(
     body: ScanFolderBody,
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     try:
         service, owned = await _resolve_service(request, workspace_id)
         try:
@@ -261,7 +261,7 @@ async def scan_folder(
             await _close_if_owned(service, owned)
     except Exception as exc:
         log.error("knowledge scan failed", error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @knowledge_router.post("/knowledge/preview-file")
@@ -269,7 +269,7 @@ async def preview_file(
     body: PreviewFileBody,
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     try:
         service, owned = await _resolve_service(request, workspace_id)
         try:
@@ -279,14 +279,14 @@ async def preview_file(
             await _close_if_owned(service, owned)
     except Exception as exc:
         log.error("knowledge file preview failed", error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @knowledge_router.get("/knowledge/options")
 async def options(
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     try:
         entry, _ = resolve_workspace(workspace_id)
         workspace_path = Path(entry.path)
@@ -315,14 +315,14 @@ async def options(
             await _close_if_owned(service, owned)
     except Exception as exc:
         log.error("knowledge options failed", error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @knowledge_shared_router.get("/knowledge/rerankers")
 async def list_rerankers(
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     """Local reranker registry rows with per-model download status.
 
     Cloud rerankers come from the catalog (``/catalog/models?model_kind=rerank``); the admin
@@ -336,7 +336,7 @@ async def list_rerankers(
             await _close_if_owned(service, owned)
     except Exception as exc:
         log.error("knowledge list rerankers failed", error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @knowledge_shared_router.post("/knowledge/rerankers/download")
@@ -344,7 +344,7 @@ async def download_reranker(
     body: DownloadRerankerBody,
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     """Download a local reranker's weights (no model is fetched silently).
 
     On the live workspace the download runs in the background and returns immediately with
@@ -367,7 +367,7 @@ async def download_reranker(
             error=str(exc),
             exc_info=True,
         )
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @knowledge_shared_router.post("/knowledge/rerankers/cancel")
@@ -375,7 +375,7 @@ async def cancel_reranker_download(
     body: DownloadRerankerBody,
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     """Cancel an in-flight local-reranker download (terminates the download process)."""
     try:
         service, owned = await _resolve_service(request, workspace_id)
@@ -392,14 +392,14 @@ async def cancel_reranker_download(
             error=str(exc),
             exc_info=True,
         )
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @knowledge_shared_router.get("/knowledge/embedders")
 async def list_embedders(
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     """Local embedder registry rows with per-model download status.
 
     Cloud embedders come from the catalog (``/catalog/models?model_kind=embedding``); the admin
@@ -413,7 +413,7 @@ async def list_embedders(
             await _close_if_owned(service, owned)
     except Exception as exc:
         log.error("knowledge list embedders failed", error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @knowledge_shared_router.post("/knowledge/embedders/download")
@@ -421,7 +421,7 @@ async def download_embedder(
     body: DownloadEmbedderBody,
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     """Download a local embedder's weights. Background on the live workspace (UI polls
     ``GET /knowledge/embedders``); blocking for a short-lived (owned) service."""
     try:
@@ -439,7 +439,7 @@ async def download_embedder(
             error=str(exc),
             exc_info=True,
         )
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @knowledge_shared_router.post("/knowledge/embedders/cancel")
@@ -447,7 +447,7 @@ async def cancel_embedder_download(
     body: DownloadEmbedderBody,
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     """Cancel an in-flight local-embedder download (terminates the download process)."""
     try:
         service, owned = await _resolve_service(request, workspace_id)
@@ -464,17 +464,17 @@ async def cancel_embedder_download(
             error=str(exc),
             exc_info=True,
         )
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @knowledge_router.post("/knowledge/pick-folder")
-async def pick_folder(body: dict[str, str | None]) -> dict[str, Any]:
+async def pick_folder(body: dict[str, str | None]) -> Any:
     try:
         folder = await run_in_threadpool(_pick_folder_dialog, body.get("initial_folder"))
         return _success({"folder": folder})
     except Exception as exc:
         log.error("knowledge folder picker failed", error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @knowledge_router.post("/knowledge/ingest")
@@ -482,7 +482,7 @@ async def ingest(
     body: IngestBody,
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     try:
         service, owned = await _resolve_service(request, workspace_id)
         try:
@@ -506,7 +506,7 @@ async def ingest(
                 await _close_if_owned(service, owned)
     except Exception as exc:
         log.error("knowledge ingest failed", error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @knowledge_router.post("/knowledge/categories")
@@ -514,7 +514,7 @@ async def create_category(
     body: CreateCategoryBody,
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     try:
         service, owned = await _resolve_service(request, workspace_id)
         try:
@@ -523,7 +523,7 @@ async def create_category(
             await _close_if_owned(service, owned)
     except Exception as exc:
         log.error("knowledge create category failed", error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @knowledge_router.post("/knowledge/tags")
@@ -531,7 +531,7 @@ async def create_tag(
     body: CreateTagBody,
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     try:
         service, owned = await _resolve_service(request, workspace_id)
         try:
@@ -540,7 +540,7 @@ async def create_tag(
             await _close_if_owned(service, owned)
     except Exception as exc:
         log.error("knowledge create tag failed", error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @knowledge_router.get("/knowledge/jobs")
@@ -548,7 +548,7 @@ async def list_jobs(
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
     limit: int = 20,
-) -> dict[str, Any]:
+) -> Any:
     try:
         service, owned = await _resolve_service(request, workspace_id)
         try:
@@ -557,7 +557,7 @@ async def list_jobs(
             await _close_if_owned(service, owned)
     except Exception as exc:
         log.error("knowledge list jobs failed", error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @knowledge_router.get("/knowledge/jobs/{job_id}")
@@ -565,7 +565,7 @@ async def job_status(
     job_id: str,
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     try:
         service, owned = await _resolve_service(request, workspace_id)
         try:
@@ -574,7 +574,7 @@ async def job_status(
             await _close_if_owned(service, owned)
     except Exception as exc:
         log.error("knowledge job status failed", job_id=job_id, error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @knowledge_shared_router.get("/knowledge/events")
@@ -674,7 +674,7 @@ async def search(
     body: SearchBody,
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     try:
         service, owned = await _resolve_service(request, workspace_id)
         try:
@@ -691,7 +691,7 @@ async def search(
             await _close_if_owned(service, owned)
     except Exception as exc:
         log.error("knowledge search failed", error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @knowledge_router.post("/knowledge/answer")
@@ -699,7 +699,7 @@ async def answer(
     body: AnswerBody,
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     # Two response shapes:
     #  * graph_mode=off/on  → KnowledgeAnswerResult (today's shape)
     #  * graph_mode=compare → KnowledgeAnswerComparison { query, flat, graph,
@@ -752,7 +752,7 @@ async def answer(
             await _close_if_owned(service, owned)
     except Exception as exc:
         log.error("knowledge answer failed", error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @knowledge_router.post("/knowledge/graph/ingest_batch")
@@ -760,7 +760,7 @@ async def graph_ingest_batch(
     body: GraphIngestBatchBody,
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     """L3 (Phase 5f) — graph-ingest N already-Qdrant-ingested documents.
 
     Used by Tab 1's "Also build entity graph (L3)" checkbox: after a regular
@@ -813,7 +813,7 @@ async def graph_ingest_batch(
                 await _close_if_owned(service, owned)
     except Exception as exc:
         log.error("knowledge graph ingest batch failed", error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 class GraphExportBody(BaseModel):
@@ -847,7 +847,7 @@ async def graph_export(
     body: GraphExportBody,
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     """Graph viz — whole-graph export, the Graph tab's load path.
 
     Read-only and independent of Qdrant: resolves the workspace path and returns
@@ -871,7 +871,7 @@ async def graph_export(
                     validate_group_id(g) for g in body.group_ids
                 ]
             except GroupPolicyError as exc:
-                return envelope_failure(f"Invalid graph group: {exc}")
+                return api_failure(f"Invalid graph group: {exc}")
         else:
             validated_groups = None
         payload = await graph_snapshot_payload(
@@ -889,19 +889,19 @@ async def graph_export(
 
         if is_kuzu_lock_error(exc):
             log.warning("⚠️ knowledge graph export — graph DB busy (external lock held)")
-            return envelope_failure(
+            return api_failure(
                 "Graph database is busy (a build may be running in another process) — "
                 "try again shortly."
             )
         log.error("knowledge graph export failed", error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @knowledge_shared_router.get("/knowledge/graph/groups")
 async def graph_groups(
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     """List the graph's partitions for the Graph tab's group selector — "Knowledge" plus
     each ``mem_{user}_{character}`` conversation-memory graph. Read-only; empty when no
     graph is built yet."""
@@ -917,12 +917,12 @@ async def graph_groups(
 
         if is_kuzu_lock_error(exc):
             log.warning("⚠️ knowledge graph groups — graph DB busy (external lock held)")
-            return envelope_failure(
+            return api_failure(
                 "Graph database is busy (a build may be running in another process) — "
                 "try again shortly."
             )
         log.error("knowledge graph groups failed", error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 class GraphEpisodesBody(BaseModel):
@@ -936,7 +936,7 @@ class GraphEpisodesBody(BaseModel):
 async def graph_episodes(
     body: GraphEpisodesBody,
     workspace_id: SelectedWorkspaceIdDep,
-) -> dict[str, Any]:
+) -> Any:
     """List a graph partition's episodes (id + snippet + valid_at) for the Graph tab's
     episode multi-select filter. Each id is a chunk_id, so the client filters the graph to
     an episode's entities/facts by matching node/edge ``chunk_ids``. Ordered by id (corpus
@@ -957,7 +957,7 @@ async def graph_episodes(
         try:
             validated = validate_group_id(group_id)
         except GroupPolicyError as exc:
-            return envelope_failure(f"Invalid graph group: {exc}")
+            return api_failure(f"Invalid graph group: {exc}")
         limit = max(1, min(int(body.limit or 2000), 5000))
         payload = await graph_episodes_payload(workspace_path, validated, limit=limit)
         return _success(payload)
@@ -966,12 +966,12 @@ async def graph_episodes(
 
         if is_kuzu_lock_error(exc):
             log.warning("⚠️ knowledge graph episodes — graph DB busy (external lock held)")
-            return envelope_failure(
+            return api_failure(
                 "Graph database is busy (a build may be running in another process) — "
                 "try again shortly."
             )
         log.error("knowledge graph episodes failed", error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 class GraphRemoveDocumentBody(BaseModel):
@@ -984,7 +984,7 @@ class GraphRemoveDocumentBody(BaseModel):
 async def graph_clear(
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     """Delete the ENTIRE knowledge graph (all entities + facts) for the workspace.
 
     Qdrant chunks/documents are untouched, so the graph can be rebuilt from them.
@@ -1002,12 +1002,12 @@ async def graph_clear(
 
         if is_kuzu_lock_error(exc):
             log.warning("⚠️ knowledge graph clear — graph DB busy (external lock held)")
-            return envelope_failure(
+            return api_failure(
                 "Graph database is busy (a build may be running in another process) — "
                 "try again shortly."
             )
         log.error("knowledge graph clear failed", error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @knowledge_router.post("/knowledge/graph/remove-document")
@@ -1015,7 +1015,7 @@ async def graph_remove_document(
     body: GraphRemoveDocumentBody,
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     """Delete one document's episodes (+ exclusively-owned entities/facts) from the
     knowledge graph, keeping its Qdrant chunks. Closes the orphan-on-document-delete gap;
     backs the Browse tab's per-document "Remove from graph" action.
@@ -1034,12 +1034,12 @@ async def graph_remove_document(
             log.warning(
                 "⚠️ knowledge graph remove-document — graph DB busy (external lock held)"
             )
-            return envelope_failure(
+            return api_failure(
                 "Graph database is busy (a build may be running in another process) — "
                 "try again shortly."
             )
         log.error("knowledge graph remove-document failed", error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @knowledge_shared_router.post("/knowledge/graph/chunks-detail")
@@ -1047,7 +1047,7 @@ async def graph_chunks_detail(
     body: GraphChunksDetailBody,
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     """Graph viz — chunk text + document titles for a selected node/edge's chunk_ids.
 
     Lazy provenance lookup (Qdrant-backed): the Graph tab calls this when a node or
@@ -1066,7 +1066,7 @@ async def graph_chunks_detail(
             await _close_if_owned(service, owned)
     except Exception as exc:
         log.error("knowledge graph chunks-detail failed", error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @knowledge_shared_router.post("/knowledge/graph/search-chunks")
@@ -1074,7 +1074,7 @@ async def graph_search_chunks(
     body: GraphSearchChunksBody,
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     """Graph viz — chunk-text search → matching Qdrant point_ids (== graph chunk_ids).
 
     Literal case-insensitive substring scan over chunk payloads. The Graph tab maps the
@@ -1095,7 +1095,7 @@ async def graph_search_chunks(
             await _close_if_owned(service, owned)
     except Exception as exc:
         log.error("knowledge graph search-chunks failed", error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @knowledge_router.get("/knowledge/documents")
@@ -1112,7 +1112,7 @@ async def list_documents(
     title: str | None = None,
     limit: int = 50,
     offset: int = 0,
-) -> dict[str, Any]:
+) -> Any:
     try:
         service, owned = await _resolve_service(request, workspace_id)
         try:
@@ -1134,7 +1134,7 @@ async def list_documents(
             await _close_if_owned(service, owned)
     except Exception as exc:
         log.error("knowledge list documents failed", error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @knowledge_router.delete("/knowledge/documents/{document_id}")
@@ -1142,7 +1142,7 @@ async def delete_document(
     document_id: str,
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     try:
         service, owned = await _resolve_service(request, workspace_id)
         try:
@@ -1151,7 +1151,7 @@ async def delete_document(
             await _close_if_owned(service, owned)
     except Exception as exc:
         log.error("knowledge delete document failed", document_id=document_id, error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @knowledge_router.post("/knowledge/documents/{document_id}/reingest")
@@ -1159,7 +1159,7 @@ async def reingest_document(
     document_id: str,
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     try:
         service, owned = await _resolve_service(request, workspace_id)
         try:
@@ -1168,7 +1168,7 @@ async def reingest_document(
             await _close_if_owned(service, owned)
     except Exception as exc:
         log.error("knowledge reingest document failed", document_id=document_id, error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @knowledge_router.patch("/knowledge/documents/{document_id}/metadata")
@@ -1177,7 +1177,7 @@ async def update_document_metadata(
     body: UpdateMetadataBody,
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     try:
         service, owned = await _resolve_service(request, workspace_id)
         try:
@@ -1195,7 +1195,7 @@ async def update_document_metadata(
             await _close_if_owned(service, owned)
     except Exception as exc:
         log.error("knowledge update metadata failed", document_id=document_id, error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @knowledge_router.get("/knowledge/documents/{document_id}")
@@ -1205,7 +1205,7 @@ async def get_document(
     request: Request,
     chunk_limit: int = 100,
     chunk_offset: str | None = None,
-) -> dict[str, Any]:
+) -> Any:
     try:
         service, owned = await _resolve_service(request, workspace_id)
         try:
@@ -1220,4 +1220,4 @@ async def get_document(
             await _close_if_owned(service, owned)
     except Exception as exc:
         log.error("knowledge get document failed", document_id=document_id, error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))

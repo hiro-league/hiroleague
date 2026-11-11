@@ -10,6 +10,7 @@ from fastapi import APIRouter, Request
 from pydantic import ValidationError
 
 from hirocli.admin_svelte.deps import SelectedWorkspaceIdDep
+from hirocli.admin_svelte.result_payload import api_failure
 from hirocli.admin_svelte.schemas import PreferencesPatchRequest
 from hirocli.domain.preferences import (
     PREFERENCE_SECTIONS,
@@ -74,23 +75,19 @@ def _sections_payload() -> list[dict[str, Any]]:
 
 
 @preferences_router.get("/preferences/schema")
-async def get_preferences_schema() -> dict[str, Any]:
+async def get_preferences_schema() -> Any:
     """Static field metadata for the admin preferences UI (bounds, defaults, hints)."""
     try:
-        return {
-            "ok": True,
-            "error": None,
-            "data": workspace_preferences_schema_payload(),
-        }
+        return workspace_preferences_schema_payload()
     except Exception as exc:
-        return {"ok": False, "error": str(exc), "data": None}
+        return api_failure(str(exc))
 
 
 @preferences_router.get("/preferences")
 async def get_preferences(
     request: Request,
     workspace_id: SelectedWorkspaceIdDep,
-) -> dict[str, Any]:
+) -> Any:
     try:
         runtime = _preferences_runtime(request, workspace_id)
         # Reconcile the graph-embedder lock with LIVE graph data before reading it: backfills a
@@ -99,19 +96,15 @@ async def get_preferences(
 
         await sync_graph_indexed_marker(runtime._workspace_path)
         return {
-            "ok": True,
-            "error": None,
-            "data": {
                 "preferences": _prefs_payload(runtime, workspace_id=workspace_id),
                 "sections": _sections_payload(),
                 # Built-in default texts for the editable system prompts, so the UI can offer
                 # "Restore default" (a cleared prompt persists "" and the pydantic default never
                 # re-applies — the default text is otherwise unrecoverable from the admin UI).
                 "prompt_defaults": dict(PROMPT_DEFAULTS),
-            },
-        }
+            }
     except Exception as exc:
-        return {"ok": False, "error": str(exc), "data": None}
+        return api_failure(str(exc))
 
 
 @preferences_router.patch("/preferences")
@@ -119,7 +112,7 @@ async def patch_preferences(
     body: PreferencesPatchRequest,
     request: Request,
     workspace_id: SelectedWorkspaceIdDep,
-) -> dict[str, Any]:
+) -> Any:
     # Human-first breadcrumb: prefs edits change runtime behavior, so log who changed which paths on
     # every PATCH. Computed before the try so the failure branches can report the attempted paths too.
     changed = sorted(str(path).strip() for path in body.edits)
@@ -137,16 +130,12 @@ async def patch_preferences(
             extra={"changed": changed, "workspace_id": workspace_id},
         )
         return {
-            "ok": True,
-            "error": None,
-            "data": {
                 "changed": changed,
                 "preferences": _prefs_payload(runtime, workspace_id=workspace_id),
                 "sections": _sections_payload(),
                 # Same map as GET — the controller refreshes its state from the PATCH response.
                 "prompt_defaults": dict(PROMPT_DEFAULTS),
-            },
-        }
+            }
     except (PreferencePathError, ValidationError) as exc:
         # Expected user-facing rejections (unknown path / failed bounds) — WARNING, not a stack trace.
         logger.warning(
@@ -155,8 +144,8 @@ async def patch_preferences(
             ", ".join(changed) if changed else "(none)",
             extra={"error": str(exc), "changed": changed, "workspace_id": workspace_id},
         )
-        return {"ok": False, "error": str(exc), "data": None}
+        return api_failure(str(exc))
     except Exception as exc:
         # Unexpected failure — log with traceback instead of swallowing it silently.
         logger.exception("❌ Preferences update failed — %s", workspace_id or "?")
-        return {"ok": False, "error": str(exc), "data": None}
+        return api_failure(str(exc))

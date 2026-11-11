@@ -9,7 +9,7 @@ from fastapi import APIRouter
 from starlette.concurrency import run_in_threadpool
 
 from hirocli.admin.features.workspaces.service import WorkspaceService
-from hirocli.admin_svelte.result_payload import _api_from_result
+from hirocli.admin_svelte.result_payload import _api_data
 from hirocli.admin_svelte.workspace_ctx import _hosting_workspace_id
 from hirocli.admin_svelte.schemas import (
     OpenFolderRequest,
@@ -24,24 +24,24 @@ workspaces_router = APIRouter()
 
 
 @workspaces_router.get("/workspaces")
-async def list_workspaces() -> dict[str, Any]:
+async def list_workspaces() -> Any:
     """Return workspace rows for the admin UI."""
     hosting_workspace_id = _hosting_workspace_id()
     result = await run_in_threadpool(WorkspaceService().list_rows, hosting_workspace_id)
-    payload = _api_from_result(result)
-    payload["data"] = payload["data"] or []
-    payload["hosting_workspace_id"] = hosting_workspace_id
-    return payload
+    if not result.ok:
+        return _api_data(result)
+    # Step 1d: the hosting workspace rode beside the old wrapper's data; it is part of the answer now.
+    return {"workspaces": list(result.data or []), "hosting_workspace_id": hosting_workspace_id}
 
 
 @workspaces_router.post("/workspaces")
-async def create_workspace(body: WorkspaceCreateRequest) -> dict[str, Any]:
+async def create_workspace(body: WorkspaceCreateRequest) -> Any:
     result = await run_in_threadpool(WorkspaceService().create, body.name, body.path)
-    return _api_from_result(result)
+    return _api_data(result)
 
 
 @workspaces_router.patch("/workspaces/{workspace_id}")
-async def update_workspace(workspace_id: str, body: WorkspaceUpdateRequest) -> dict[str, Any]:
+async def update_workspace(workspace_id: str, body: WorkspaceUpdateRequest) -> Any:
     result = await run_in_threadpool(
         partial(
             WorkspaceService().update,
@@ -52,53 +52,49 @@ async def update_workspace(workspace_id: str, body: WorkspaceUpdateRequest) -> d
             previous_display_name=body.previous_display_name,
         )
     )
-    return _api_from_result(result)
+    return _api_data(result)
 
 
 @workspaces_router.delete("/workspaces/{workspace_id}")
-async def remove_workspace(workspace_id: str, body: WorkspaceRemoveRequest) -> dict[str, Any]:
+async def remove_workspace(workspace_id: str, body: WorkspaceRemoveRequest) -> Any:
     result = await run_in_threadpool(
         WorkspaceService().remove,
         workspace_id,
         body.purge,
         _hosting_workspace_id(),
     )
-    return _api_from_result(result)
+    return _api_data(result)
 
 
 @workspaces_router.post("/workspaces/{workspace_id}/start")
-async def start_workspace(workspace_id: str) -> dict[str, Any]:
+async def start_workspace(workspace_id: str) -> Any:
     result = await run_in_threadpool(WorkspaceService().start, workspace_id)
     if not result.ok or result.data is None:
-        return _api_from_result(result)
+        return _api_data(result)
     name, already_running, pid = result.data
-    return {
-        "ok": True,
-        "error": None,
-        "data": {"name": name, "already_running": already_running, "pid": pid},
-    }
+    return {"name": name, "already_running": already_running, "pid": pid}
 
 
 @workspaces_router.post("/workspaces/{workspace_id}/stop")
-async def stop_workspace(workspace_id: str) -> dict[str, Any]:
+async def stop_workspace(workspace_id: str) -> Any:
     result = await run_in_threadpool(
         WorkspaceService().stop,
         workspace_id,
         _hosting_workspace_id(),
     )
-    return _api_from_result(result)
+    return _api_data(result)
 
 
 @workspaces_router.post("/workspaces/{workspace_id}/restart")
-async def restart_workspace(workspace_id: str, body: WorkspaceRestartRequest) -> dict[str, Any]:
+async def restart_workspace(workspace_id: str, body: WorkspaceRestartRequest) -> Any:
     result = await run_in_threadpool(
         partial(WorkspaceService().restart, workspace_id, admin=body.admin)
     )
-    return _api_from_result(result)
+    return _api_data(result)
 
 
 @workspaces_router.post("/workspaces/{workspace_id}/setup")
-async def setup_workspace(workspace_id: str, body: WorkspaceSetupRequest) -> dict[str, Any]:
+async def setup_workspace(workspace_id: str, body: WorkspaceSetupRequest) -> Any:
     result = await run_in_threadpool(
         partial(
             WorkspaceService().setup,
@@ -111,37 +107,33 @@ async def setup_workspace(workspace_id: str, body: WorkspaceSetupRequest) -> dic
         )
     )
     if not result.ok or result.data is None:
-        return _api_from_result(result)
+        return _api_data(result)
     setup_result = result.data
     return {
-        "ok": True,
-        "error": None,
-        "data": {
             "workspace": getattr(setup_result, "workspace", ""),
             "desktop_pub": getattr(setup_result, "desktop_pub", ""),
-        },
-    }
+        }
 
 
 @workspaces_router.get("/workspaces/{workspace_id}/public-key")
-async def get_workspace_public_key(workspace_id: str) -> dict[str, Any]:
+async def get_workspace_public_key(workspace_id: str) -> Any:
     result = await run_in_threadpool(WorkspaceService().get_public_key, workspace_id)
-    return _api_from_result(result)
+    return _api_data(result)
 
 
 @workspaces_router.post("/workspaces/{workspace_id}/regenerate-key")
-async def regenerate_workspace_key(workspace_id: str) -> dict[str, Any]:
+async def regenerate_workspace_key(workspace_id: str) -> Any:
     result = await run_in_threadpool(WorkspaceService().regenerate_key, workspace_id)
-    return _api_from_result(result)
+    return _api_data(result)
 
 
 @workspaces_router.post("/workspaces/open-folder")
-async def open_workspace_folder(body: OpenFolderRequest) -> dict[str, Any]:
+async def open_workspace_folder(body: OpenFolderRequest) -> Any:
     result = await run_in_threadpool(WorkspaceService().open_folder, body.path)
-    return _api_from_result(result)
+    return _api_data(result)
 
 
 @workspaces_router.post("/open-path")
-async def open_path(body: OpenFolderRequest) -> dict[str, Any]:
+async def open_path(body: OpenFolderRequest) -> Any:
     result = await run_in_threadpool(WorkspaceService().open_folder, body.path)
-    return _api_from_result(result)
+    return _api_data(result)

@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from hirocli.admin_svelte.deps import SelectedWorkspaceIdDep
-from hirocli.admin_svelte.result_payload import envelope_failure
+from hirocli.admin_svelte.result_payload import api_failure
 from hirocli.admin_svelte.routes.ai import _ok, _workspace_path
 from hirocli.domain.people import get_person
 from hirocli.domain.workspace import WorkspaceError
@@ -71,16 +71,16 @@ class ClipSendBody(BaseModel):
     person_id: str
 
 
-def _failure(exc: Exception) -> dict[str, Any]:
+def _failure(exc: Exception) -> Any:
     message = exc.message if isinstance(exc, VoiceError) else str(exc)
-    return envelope_failure(message)
+    return api_failure(message)
 
 
 _ERRORS = (VoiceError, WorkspaceError, ValueError, OSError)
 
 
 @voice_router.get("/voice/profiles")
-async def voice_profiles(workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+async def voice_profiles(workspace_id: SelectedWorkspaceIdDep) -> Any:
     try:
         return _ok(asdict(await VoiceProfilesListTool().execute_async(workspace=workspace_id)))
     except _ERRORS as exc:
@@ -88,7 +88,7 @@ async def voice_profiles(workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]
 
 
 @voice_router.get("/voice/catalog")
-async def voice_catalog(workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+async def voice_catalog(workspace_id: SelectedWorkspaceIdDep) -> Any:
     try:
         return _ok(asdict(await run_in_threadpool(VoiceCatalogTool().execute, workspace=workspace_id)))
     except _ERRORS as exc:
@@ -104,7 +104,7 @@ async def voice_voices(
     q: str | None = None,
     limit: int = 60,
     refresh: bool = False,
-) -> dict[str, Any]:
+) -> Any:
     try:
         result = await VoiceVoicesTool().execute_async(
             source=source, language=language, gender=gender, q=q, limit=limit, refresh=refresh, workspace=workspace_id
@@ -137,7 +137,7 @@ async def voice_sample(voice_id: str, workspace_id: SelectedWorkspaceIdDep) -> R
 
 
 @voice_router.post("/voice/voices")
-async def voice_design(body: VoiceDesignBody, workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+async def voice_design(body: VoiceDesignBody, workspace_id: SelectedWorkspaceIdDep) -> Any:
     try:
         result = await VoiceDesignTool().execute_async(
             name=body.name, description=body.description, language=body.language, gender=body.gender,
@@ -149,7 +149,7 @@ async def voice_design(body: VoiceDesignBody, workspace_id: SelectedWorkspaceIdD
 
 
 @voice_router.post("/voice/voices/add")
-async def voice_add(body: VoiceIdBody, workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+async def voice_add(body: VoiceIdBody, workspace_id: SelectedWorkspaceIdDep) -> Any:
     try:
         return _ok(asdict(await VoiceAddTool().execute_async(voice_id=body.voice_id, workspace=workspace_id)))
     except _ERRORS as exc:
@@ -157,7 +157,7 @@ async def voice_add(body: VoiceIdBody, workspace_id: SelectedWorkspaceIdDep) -> 
 
 
 @voice_router.delete("/voice/voices/{voice_id}")
-async def voice_delete(voice_id: str, workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+async def voice_delete(voice_id: str, workspace_id: SelectedWorkspaceIdDep) -> Any:
     try:
         return _ok(asdict(await VoiceDeleteTool().execute_async(voice_id=voice_id, workspace=workspace_id)))
     except _ERRORS as exc:
@@ -165,7 +165,7 @@ async def voice_delete(voice_id: str, workspace_id: SelectedWorkspaceIdDep) -> d
 
 
 @voice_router.post("/voice/try")
-async def voice_try(body: VoiceTryBody, workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+async def voice_try(body: VoiceTryBody, workspace_id: SelectedWorkspaceIdDep) -> Any:
     try:
         result = await VoiceTryTool().execute_async(
             text=body.text, profile_id=body.profile_id, draft=body.draft, workspace=workspace_id
@@ -189,19 +189,19 @@ async def voice_clip(clip_id: str, download: bool = False) -> Response:
 @voice_router.post("/voice/clips/{clip_id}/send")
 async def voice_clip_send(
     clip_id: str, body: ClipSendBody, request: Request, workspace_id: SelectedWorkspaceIdDep
-) -> dict[str, Any]:
+) -> Any:
     """Send a Try it take to a family member as a WhatsApp voice note (through the core's WhatsApp)."""
     path = _workspace_path(workspace_id)
     clip = kept(clip_id)
     if path is None or clip is None:
-        return envelope_failure("This take is gone (only the last 30 are kept).")
+        return api_failure("This take is gone (only the last 30 are kept).")
     person = await run_in_threadpool(get_person, path, body.person_id)
     if person is None or not person.whatsapp:
-        return envelope_failure("That person has no WhatsApp number in the family list.")
+        return api_failure("That person has no WhatsApp number in the family list.")
     ctx = getattr(request.app.state, "ctx", None)
     channels = getattr(ctx, "channel_manager", None) if ctx is not None else None
     if channels is None:
-        return envelope_failure("WhatsApp isn't running in HiroLeague.")
+        return api_failure("WhatsApp isn't running in HiroLeague.")
     send = {
         "to": person.whatsapp,
         "voice_b64": base64.b64encode(clip.ogg).decode("ascii"),
@@ -212,13 +212,13 @@ async def voice_clip_send(
         await channels.call_channel(WHATSAPP_CHANNEL, WHATSAPP_CALL_SEND, send, timeout=SEND_TIMEOUT_S)
     except Exception as exc:  # the plugin's refusal or a dropped call: shown as is
         log.warning(f"⚠️ Voice note not sent — {person.name}", error=str(exc))
-        return envelope_failure(f"Not sent: {exc}")
+        return api_failure(f"Not sent: {exc}")
     log.info(f"⬆️ Voice note sent — {person.name} · Try it take", seconds=round(clip.seconds, 1))
     return _ok({"sent": True, "name": person.name})
 
 
 @voice_router.get("/voice/uses")
-async def voice_uses(workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+async def voice_uses(workspace_id: SelectedWorkspaceIdDep) -> Any:
     try:
         return _ok(asdict(await run_in_threadpool(VoiceUsesListTool().execute, workspace=workspace_id)))
     except _ERRORS as exc:
@@ -226,7 +226,7 @@ async def voice_uses(workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
 
 
 @voice_router.put("/voice/uses/{key}")
-async def voice_use_set(key: str, body: VoiceUseBody, workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+async def voice_use_set(key: str, body: VoiceUseBody, workspace_id: SelectedWorkspaceIdDep) -> Any:
     try:
         result = await run_in_threadpool(
             VoiceUsesSetTool().execute, key=key, profile_id=body.profile_id, workspace=workspace_id
@@ -237,7 +237,7 @@ async def voice_use_set(key: str, body: VoiceUseBody, workspace_id: SelectedWork
 
 
 @voice_router.get("/voice/clip-cache")
-async def voice_clip_cache(workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+async def voice_clip_cache(workspace_id: SelectedWorkspaceIdDep) -> Any:
     try:
         return _ok(asdict(await run_in_threadpool(VoiceClipCacheTool().execute, workspace=workspace_id)))
     except _ERRORS as exc:

@@ -21,7 +21,7 @@ from hiro_channel_sdk.extension import ExtensionRequestError
 
 from hirocli.admin.features.extensions.service import ExtensionService
 from hirocli.admin_svelte.deps import SelectedWorkspaceIdDep
-from hirocli.admin_svelte.result_payload import _api_from_result, envelope_failure
+from hirocli.admin_svelte.result_payload import _api_data, api_failure
 
 extensions_router = APIRouter()
 
@@ -44,11 +44,11 @@ def _live_manager(request: Request, workspace_path: Path | None) -> Any:
 
 
 @extensions_router.get("/extensions")
-async def list_extensions(request: Request, workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+async def list_extensions(request: Request, workspace_id: SelectedWorkspaceIdDep) -> Any:
     service = ExtensionService()
     listed = await run_in_threadpool(service.list_extensions, workspace_id)
     if not listed.ok:
-        return _api_from_result(listed)
+        return _api_data(listed)
     address = await run_in_threadpool(service.address, workspace_id)
     workspace_path = await run_in_threadpool(service.workspace_path, workspace_id)
     manager = _live_manager(request, workspace_path)
@@ -73,21 +73,21 @@ async def list_extensions(request: Request, workspace_id: SelectedWorkspaceIdDep
         listen.update({"listening": state["listening"], "error": state["error"], "live_host": state["host"]})
     else:
         listen.update({"listening": None, "error": None, "live_host": None})
-    return {"ok": True, "error": None, "data": {"listen": listen, "extensions": extensions}}
+    return {"listen": listen, "extensions": extensions}
 
 
 @extensions_router.post("/extensions/pairing-code")
-async def generate_extension_pairing_code(workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+async def generate_extension_pairing_code(workspace_id: SelectedWorkspaceIdDep) -> Any:
     result = await run_in_threadpool(ExtensionService().generate_pairing_code, workspace_id)
     if not result.ok or result.data is None:
-        return _api_from_result(result)
-    return {"ok": True, "error": None, "data": asdict(result.data)}
+        return _api_data(result)
+    return asdict(result.data)
 
 
 @extensions_router.delete("/extensions/{extension_id}")
 async def remove_extension(
     extension_id: str, request: Request, workspace_id: SelectedWorkspaceIdDep
-) -> dict[str, Any]:
+) -> Any:
     service = ExtensionService()
     result = await run_in_threadpool(service.remove_extension, extension_id, workspace_id)
     if result.ok:
@@ -96,33 +96,29 @@ async def remove_extension(
         if manager is not None:
             # Close it now; it is refused when it tries again.
             await manager.disconnect(extension_id)
-    return _api_from_result(result)
+    return _api_data(result)
 
 
 @extensions_router.put("/extensions/address")
-async def set_extension_address(body: AddressBody, workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+async def set_extension_address(body: AddressBody, workspace_id: SelectedWorkspaceIdDep) -> Any:
     result = await run_in_threadpool(ExtensionService().address, workspace_id, body.host)
     if not result.ok or result.data is None:
-        return _api_from_result(result)
-    return {"ok": True, "error": None, "data": asdict(result.data)}
+        return _api_data(result)
+    return asdict(result.data)
 
 
 @extensions_router.post("/extensions/{extension_id}/info")
 async def ask_extension_info(
     extension_id: str, request: Request, workspace_id: SelectedWorkspaceIdDep
-) -> dict[str, Any]:
+) -> Any:
     """The core's test call: ask a connected extension for its name and version."""
     workspace_path = await run_in_threadpool(ExtensionService().workspace_path, workspace_id)
     manager = _live_manager(request, workspace_path)
     if manager is None:
-        return envelope_failure("The server for this workspace isn't running here.")
+        return api_failure("The server for this workspace isn't running here.")
     started = time.perf_counter()
     try:
         data = await manager.request(extension_id, METHOD_EXTENSION_INFO)
     except ExtensionRequestError as exc:
-        return envelope_failure(exc.message)
-    return {
-        "ok": True,
-        "error": None,
-        "data": {"info": data, "elapsed_ms": round((time.perf_counter() - started) * 1000)},
-    }
+        return api_failure(exc.message)
+    return {"info": data, "elapsed_ms": round((time.perf_counter() - started) * 1000)}

@@ -12,7 +12,7 @@ from starlette.concurrency import run_in_threadpool
 
 from hirocli.admin.features.catalog.service import CatalogBrowserService
 from hirocli.admin_svelte.deps import SelectedWorkspaceIdDep
-from hirocli.admin_svelte.result_payload import _api_from_result, envelope_failure
+from hirocli.admin_svelte.result_payload import _api_data, api_failure
 from hirocli.domain.local_models import list_local_model_rows, list_local_providers
 from hirocli.domain.workspace import resolve_workspace
 
@@ -20,15 +20,15 @@ catalog_router = APIRouter()
 
 
 @catalog_router.get("/catalog/providers")
-async def list_catalog_providers(hosting: str | None = None) -> dict[str, Any]:
+async def list_catalog_providers(hosting: str | None = None) -> Any:
     result = await run_in_threadpool(CatalogBrowserService().list_providers, hosting)
-    payload = _api_from_result(result)
-    data = list(payload["data"] or [])
+    if not result.ok:
+        return _api_data(result)
+    data = list(result.data or [])
     # Surface the synthetic local provider so Models rows never reference an invisible provider.
     if hosting in (None, "local"):
         data.extend(dataclasses.asdict(p) for p in list_local_providers())
-    payload["data"] = data
-    return payload
+    return data
 
 
 @catalog_router.get("/catalog/models")
@@ -37,7 +37,7 @@ async def list_catalog_models(
     model_kind: str | None = None,
     model_class: str | None = None,
     hosting: str | None = None,
-) -> dict[str, Any]:
+) -> Any:
     result = await run_in_threadpool(
         partial(
             CatalogBrowserService().list_models,
@@ -48,20 +48,16 @@ async def list_catalog_models(
         )
     )
     if not result.ok or result.data is None:
-        return _api_from_result(result)
+        return _api_data(result)
     catalog_version, models = result.data
-    return {
-        "ok": True,
-        "error": None,
-        "data": {"catalog_version": catalog_version, "models": models},
-    }
+    return {"catalog_version": catalog_version, "models": models}
 
 
 @catalog_router.get("/catalog/local-models")
 async def list_local_models(
     workspace_id: SelectedWorkspaceIdDep,
     model_kind: str | None = None,
-) -> dict[str, Any]:
+) -> Any:
     """Local in-process downloadable models (read-only browse rows + per-workspace download status).
 
     Separate from ``/catalog/models`` so the static, workspace-agnostic catalog stays decoupled
@@ -72,13 +68,13 @@ async def list_local_models(
         rows = await run_in_threadpool(
             list_local_model_rows, Path(entry.path), model_kind=model_kind
         )
-        return {"ok": True, "error": None, "data": {"models": [dataclasses.asdict(r) for r in rows]}}
+        return {"models": [dataclasses.asdict(r) for r in rows]}
     except Exception as exc:
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @catalog_router.post("/catalog/reload")
-async def reload_catalog() -> dict[str, Any]:
+async def reload_catalog() -> Any:
     """Clear in-process catalog cache and reload bundled ``catalog.yaml``."""
     result = await run_in_threadpool(CatalogBrowserService().reload_from_disk)
-    return _api_from_result(result)
+    return _api_data(result)

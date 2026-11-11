@@ -14,7 +14,7 @@ from starlette.concurrency import run_in_threadpool
 from hirocli.admin.features.chat_channels.service import ChatChannelsService
 from hirocli.admin_svelte.deps import SelectedWorkspaceIdDep
 from hirocli.admin_svelte.photo_decode import _decode_photo_data_url
-from hirocli.admin_svelte.result_payload import _api_from_result, envelope_failure
+from hirocli.admin_svelte.result_payload import _api_data, _api_list, api_failure
 from hirocli.admin_svelte.schemas import ChatChannelMessageSendRequest, ChatChannelPhotoUploadRequest, ChatChannelSaveRequest
 
 chat_channels_router = APIRouter()
@@ -23,21 +23,19 @@ _MAX_MESSAGE_PK_RESYNC = 16
 
 
 @chat_channels_router.get("/chat-channels")
-async def list_chat_channels(workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+async def list_chat_channels(workspace_id: SelectedWorkspaceIdDep) -> Any:
     result = await run_in_threadpool(
         ChatChannelsService().list_channels,
         workspace_id,
     )
-    payload = _api_from_result(result)
-    payload["data"] = payload["data"] or []
-    return payload
+    return _api_list(result)
 
 
 @chat_channels_router.post("/chat-channels")
 async def create_chat_channel(
     body: ChatChannelSaveRequest,
     workspace_id: SelectedWorkspaceIdDep,
-) -> dict[str, Any]:
+) -> Any:
     result = await run_in_threadpool(
         partial(
             ChatChannelsService().create_channel,
@@ -47,7 +45,7 @@ async def create_chat_channel(
             description=body.description,
         )
     )
-    return _api_from_result(result)
+    return _api_data(result)
 
 
 @chat_channels_router.patch("/chat-channels/{channel_id}")
@@ -55,7 +53,7 @@ async def update_chat_channel(
     channel_id: int,
     body: ChatChannelSaveRequest,
     workspace_id: SelectedWorkspaceIdDep,
-) -> dict[str, Any]:
+) -> Any:
     result = await run_in_threadpool(
         partial(
             ChatChannelsService().update_channel,
@@ -66,33 +64,33 @@ async def update_chat_channel(
             description=body.description,
         )
     )
-    return _api_from_result(result)
+    return _api_data(result)
 
 
 @chat_channels_router.delete("/chat-channels/{channel_id}")
 async def delete_chat_channel(
     channel_id: int,
     workspace_id: SelectedWorkspaceIdDep,
-) -> dict[str, Any]:
+) -> Any:
     result = await run_in_threadpool(
         ChatChannelsService().delete_channel,
         workspace_id,
         channel_id,
     )
-    return _api_from_result(result)
+    return _api_data(result)
 
 
 @chat_channels_router.post("/chat-channels/{channel_id}/messages/clear")
 async def clear_chat_channel_messages(
     channel_id: int,
     workspace_id: SelectedWorkspaceIdDep,
-) -> dict[str, Any]:
+) -> Any:
     result = await run_in_threadpool(
         ChatChannelsService().clear_messages,
         workspace_id,
         channel_id,
     )
-    return _api_from_result(result)
+    return _api_data(result)
 
 
 @chat_channels_router.post("/chat-channels/{channel_id}/messages/send")
@@ -100,7 +98,7 @@ async def send_chat_channel_message(
     channel_id: int,
     body: ChatChannelMessageSendRequest,
     workspace_id: SelectedWorkspaceIdDep,
-) -> dict[str, Any]:
+) -> Any:
     """Proxy to workspace Hiro ``POST /invoke`` → ``message_send`` (live server)."""
     result = await run_in_threadpool(
         partial(
@@ -116,7 +114,7 @@ async def send_chat_channel_message(
             disable_tools=body.disable_tools,
         )
     )
-    return _api_from_result(result)
+    return _api_data(result)
 
 
 @chat_channels_router.get("/chat-channels/{channel_id}/messages")
@@ -127,7 +125,7 @@ async def list_chat_channel_messages(
     after_id: str | None = None,
     limit: int | None = None,
     message_pk: list[int] | None = Query(default=None),
-) -> dict[str, Any]:
+) -> Any:
     has_cursor_param = after is not None or after_id is not None
     has_message_pk = message_pk is not None and len(message_pk) > 0
     if has_message_pk and (has_cursor_param or limit is not None):
@@ -169,9 +167,7 @@ async def list_chat_channel_messages(
             message_pks=message_pk if has_message_pk else None,
         )
     )
-    payload = _api_from_result(result)
-    payload["data"] = payload["data"] or []
-    return payload
+    return _api_list(result)
 
 
 @chat_channels_router.get(
@@ -209,11 +205,11 @@ async def upload_chat_channel_photo(
     channel_id: int,
     body: ChatChannelPhotoUploadRequest,
     workspace_id: SelectedWorkspaceIdDep,
-) -> dict[str, Any]:
+) -> Any:
     try:
         raw = _decode_photo_data_url(body.data_url)
     except ValueError as exc:
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
     with NamedTemporaryFile(delete=False, suffix=".png") as tmp:
         tmp.write(raw)
         tmp_path = tmp.name
@@ -226,4 +222,4 @@ async def upload_chat_channel_photo(
         )
     finally:
         Path(tmp_path).unlink(missing_ok=True)
-    return _api_from_result(result)
+    return _api_data(result)
