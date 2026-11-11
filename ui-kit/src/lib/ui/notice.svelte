@@ -13,10 +13,12 @@
 		title?: string;
 		message?: string; // the words, when they are plain text; else `children`
 		class?: string;
+		/** sm: one tight line, a smaller icon (a note inside a form or a row). UI kit, step 5. */
+		size?: 'default' | 'sm';
 		children?: Snippet;
 		actions?: Snippet;
 	}
-	let { tone = 'error', title, message, class: className, children, actions }: Props = $props();
+	let { tone = 'error', title, message, class: className, size = 'default', children, actions }: Props = $props();
 
 	const TONE = {
 		error: 'border-destructive/40 bg-destructive/10 [&_[data-icon]]:text-destructive',
@@ -27,8 +29,8 @@
 	const Icon = $derived(tone === 'success' ? CircleCheck : tone === 'info' ? Info : TriangleAlert);
 </script>
 
-<div class={cn('flex items-start gap-2.5 rounded-lg border p-3 text-sm', TONE[tone], className)} role={tone === 'error' ? 'alert' : 'status'}>
-	<Icon data-icon class="mt-0.5 size-4 shrink-0" />
+<div class={cn('flex items-start rounded-lg border', size === 'sm' ? 'gap-2 px-2.5 py-1.5 text-xs' : 'gap-2.5 p-3 text-sm', TONE[tone], className)} role={tone === 'error' ? 'alert' : 'status'}>
+	<Icon data-icon class={size === 'sm' ? 'mt-px size-3.5 shrink-0' : 'mt-0.5 size-4 shrink-0'} />
 	<div class="min-w-0 flex-1">
 		{#if title}<div class="font-medium">{title}</div>{/if}
 		<div class={['break-words', title && 'text-muted-foreground']}>{#if children}{@render children()}{:else}{message}{/if}</div>
