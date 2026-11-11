@@ -152,7 +152,7 @@ export function createChatMessagesEngine(opts: ChatMessagesEngineOptions) {
         try {
           const payload = await listChatMessages(channelId);
           if (getSelectedChannelId() !== rawChannelId || !liveUpdatesEligible) return;
-          applyIncoming(payload.data);
+          applyIncoming(payload);
           resetPollErrors();
         } catch {
           pollErrorStreak += 1;
@@ -177,8 +177,8 @@ export function createChatMessagesEngine(opts: ChatMessagesEngineOptions) {
         limit: TAIL_LIMIT
       });
       if (getSelectedChannelId() !== rawChannelId || !liveUpdatesEligible) return;
-      if (tailPayload.data.length > 0) {
-        applyIncoming(tailPayload.data);
+      if (tailPayload.length > 0) {
+        applyIncoming(tailPayload);
       }
 
       if (!liveUpdatesEligible) return;
@@ -186,11 +186,11 @@ export function createChatMessagesEngine(opts: ChatMessagesEngineOptions) {
       if (messagePks.length > 0) {
         const resyncPayload = await listChatMessages(channelId, { messagePks });
         if (getSelectedChannelId() !== rawChannelId || !liveUpdatesEligible) return;
-        if (resyncPayload.data.length > 0) {
-          if (incomingResolvesVoicePending(resyncPayload.data, agentVoicePendingSince)) {
+        if (resyncPayload.length > 0) {
+          if (incomingResolvesVoicePending(resyncPayload, agentVoicePendingSince)) {
             agentVoicePendingSince = null;
           }
-          messages = mergeChatHistoryMessages(messages, resyncPayload.data);
+          messages = mergeChatHistoryMessages(messages, resyncPayload);
           updateTailCursor();
         }
       }
@@ -232,13 +232,13 @@ export function createChatMessagesEngine(opts: ChatMessagesEngineOptions) {
     tailCursor = null;
     try {
       const payload = await listChatMessages(channelId);
-      if (payload.data.at(-1)?.sender_type !== 'user') {
+      if (payload.at(-1)?.sender_type !== 'user') {
         agentTyping = false;
       }
-      if (incomingResolvesVoicePending(payload.data, agentVoicePendingSince)) {
+      if (incomingResolvesVoicePending(payload, agentVoicePendingSince)) {
         agentVoicePendingSince = null;
       }
-      messages = sortChatHistoryMessages(payload.data);
+      messages = sortChatHistoryMessages(payload);
       updateTailCursor();
       resetPollErrors();
     } catch (err) {

@@ -1,4 +1,4 @@
-import { apiRequest, type ApiResponse } from './client';
+import { apiRequest } from './client';
 import type { RetrievalLoop } from '$lib/features/eval/shared/retrieval-loop';
 import type { RecalledFact, EvalRecallRender } from '$lib/features/eval/shared/eval-events';
 
@@ -55,7 +55,7 @@ export async function tailGraphRuns(body: {
   since_seconds_ago?: number | null;
   skip_from_end?: number | null;
   filters?: Record<string, string>;
-}): Promise<ApiResponse<GraphRunsTailResponse>> {
+}): Promise<GraphRunsTailResponse> {
   return apiRequest<GraphRunsTailResponse>('/graph-runs/tail', {
     method: 'POST',
     body
@@ -162,7 +162,7 @@ export const GRAPH_RUN_NODE_TABLE_FIELDS = [
   'error_code'
 ] as const satisfies ReadonlyArray<keyof GraphLedgerRow>;
 
-export async function getGraphRun(runId: string): Promise<ApiResponse<GraphRunInspectResponse>> {
+export async function getGraphRun(runId: string): Promise<GraphRunInspectResponse> {
   return apiRequest<GraphRunInspectResponse>(`/graph-runs/${encodeURIComponent(runId)}`);
 }
 
@@ -170,7 +170,7 @@ export async function getGraphRun(runId: string): Promise<ApiResponse<GraphRunIn
 
 export async function getGraphRunLangsmithUrl(
   runId: string
-): Promise<ApiResponse<GraphRunLangsmithUrlResponse>> {
+): Promise<GraphRunLangsmithUrlResponse> {
   return apiRequest<GraphRunLangsmithUrlResponse>(
     `/graph-runs/${encodeURIComponent(runId)}/langsmith-url`
   );
@@ -246,7 +246,7 @@ export type GraphRunRetrievalTraceResponse = {
 /** Per-stage fact-search traces for a run (empty when tracing wasn't enabled). */
 export async function getGraphRunRetrievalTrace(
   runId: string
-): Promise<ApiResponse<GraphRunRetrievalTraceResponse>> {
+): Promise<GraphRunRetrievalTraceResponse> {
   return apiRequest<GraphRunRetrievalTraceResponse>(
     `/graph-runs/${encodeURIComponent(runId)}/retrieval-trace`
   );
@@ -268,7 +268,7 @@ export type GraphRunRetrievalLoopResponse = {
  *  renders). All null/empty when tracing wasn't enabled. Sourced live from the agent sidecars. */
 export async function getGraphRunRetrievalLoop(
   runId: string
-): Promise<ApiResponse<GraphRunRetrievalLoopResponse>> {
+): Promise<GraphRunRetrievalLoopResponse> {
   return apiRequest<GraphRunRetrievalLoopResponse>(
     `/graph-runs/${encodeURIComponent(runId)}/retrieval-loop`
   );
@@ -361,7 +361,7 @@ export type GraphRunIngestTraceResponse = {
 /** Per-stage add_episode traces for a run (empty when tracing wasn't enabled). */
 export async function getGraphRunIngestTrace(
   runId: string
-): Promise<ApiResponse<GraphRunIngestTraceResponse>> {
+): Promise<GraphRunIngestTraceResponse> {
   return apiRequest<GraphRunIngestTraceResponse>(
     `/graph-runs/${encodeURIComponent(runId)}/ingest-trace`
   );

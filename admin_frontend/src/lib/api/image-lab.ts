@@ -1,4 +1,4 @@
-import { apiRequest, type ApiResponse } from './client';
+import { apiRequest } from './client';
 
 export type ImageLabModelRow = {
   id: string;
@@ -54,13 +54,13 @@ export type ImageLabGenerateResult = {
   estimated_cost_usd: number | null;
 };
 
-export async function getImageLabOptions(): Promise<ApiResponse<ImageLabOptions>> {
+export async function getImageLabOptions(): Promise<ImageLabOptions> {
   return apiRequest<ImageLabOptions>('/image-lab/options');
 }
 
 export async function generateImage(
   body: ImageLabGenerateRequest
-): Promise<ApiResponse<ImageLabGenerateResult>> {
+): Promise<ImageLabGenerateResult> {
   // Diffusion + retries can take a while; well past the default 20s API timeout.
   return apiRequest<ImageLabGenerateResult>('/image-lab/generate', {
     method: 'POST',

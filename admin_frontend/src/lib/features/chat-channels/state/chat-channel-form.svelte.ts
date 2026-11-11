@@ -134,7 +134,7 @@ export function createChatChannelForm(opts: ChatChannelFormOptions) {
         notify('success', 'Channel updated.');
       } else {
         const res = await createChatChannel(payload);
-        channelIdSaved = res.data.id;
+        channelIdSaved = res.id;
         notify('success', 'Channel created.');
       }
       if (pendingPhotoDataUrl) {

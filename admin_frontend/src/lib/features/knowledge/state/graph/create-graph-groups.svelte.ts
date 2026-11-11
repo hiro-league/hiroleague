@@ -9,9 +9,10 @@ export function createGraphGroups(deps: {
   let activeGroupId = $state<string | null>(null);
 
   async function loadGroups(): Promise<void> {
-    const res = await listKnowledgeGraphGroups();
-    if (!res.ok || !res.data) return;
-    groups = res.data.groups;
+    // Step 1d: a failed read throws; it leaves the groups as they were, as the old {ok} check did.
+    const res = await listKnowledgeGraphGroups().catch(() => null);
+    if (!res) return;
+    groups = res.groups;
     const ids = new Set(groups.map((g) => g.id));
     if (activeGroupId && ids.has(activeGroupId)) return;
     const remembered = readActiveGroup();

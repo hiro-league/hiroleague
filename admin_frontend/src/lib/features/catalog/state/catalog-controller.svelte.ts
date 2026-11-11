@@ -107,7 +107,7 @@ export function createCatalogController(notify: Notify) {
   let catalogModelStatsByProvider = $state<Record<string, CatalogProviderModelStats>>({});
 
   const providersResource = createResource(
-    async () => (await listCatalogProviders()).data,
+    async () => (await listCatalogProviders()),
     {
       initial: [] as CatalogProviderRow[],
       errorPrefix: 'Failed to load catalog providers.',
@@ -140,8 +140,8 @@ export function createCatalogController(notify: Notify) {
       listCatalogModels(fetchFilters),
       loadLocalModels()
     ]);
-    catalogVersion = payload.data.catalog_version;
-    let list = payload.data.models;
+    catalogVersion = payload.catalog_version;
+    let list = payload.models;
     if (kinds.length > 1) {
       list = list.filter((m) => kinds.some((k) => modelSupportsCatalogKind(m, k)));
     }
@@ -296,11 +296,11 @@ export function createCatalogController(notify: Notify) {
   async function loadCatalogModelIndex() {
     try {
       const payload = await listCatalogModels();
-      const rows = payload.data?.models ?? [];
+      const rows = payload?.models ?? [];
       catalogModelDisplayNames = catalogModelDisplayNameMap(rows);
       catalogModelStatsByProvider = catalogProviderModelStats(rows);
-      if (payload.data?.catalog_version) {
-        catalogVersion = payload.data.catalog_version;
+      if (payload?.catalog_version) {
+        catalogVersion = payload.catalog_version;
       }
     } catch {
       catalogModelDisplayNames = {};

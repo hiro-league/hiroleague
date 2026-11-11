@@ -7,16 +7,19 @@
   import { onMount } from 'svelte';
   import { getClipCache, type ClipCacheStats } from '$lib/api/voice';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
-  import { humanDateTime } from '$lib/format/human-datetime';
+  import { dateTime } from '$lib/format/time';
 
   let { ctrl }: { ctrl: PreferencesController } = $props();
 
   let stats = $state<ClipCacheStats | null>(null);
   let error = $state<string | null>(null);
   onMount(async () => {
-    const res = await getClipCache();
-    if (res.ok && res.data) stats = res.data;
-    else error = res.error ?? 'The clip cache could not be read.';
+    // Step 1d: a failed request throws (answers are the data itself; there is no {ok, error} to test).
+    try {
+      stats = await getClipCache();
+    } catch (err) {
+      error = err instanceof Error ? err.message : 'The clip cache could not be read.';
+    }
   });
 
   const maxMb = $derived(Number((ctrl.draft as { voice?: { clip_cache_mb?: number } }).voice?.clip_cache_mb ?? 0));
@@ -34,7 +37,7 @@
     >
     <span class="text-xs text-muted-foreground">
       {usedMb.toFixed(1)} MB, {stats.clips} clips · said again {stats.hits} times, saved ${stats.saved_usd.toFixed(2)}{stats.since
-        ? ` since ${humanDateTime(stats.since)}`
+        ? ` since ${dateTime(stats.since)}`
         : ''}
     </span>
   {:else}

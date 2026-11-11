@@ -40,9 +40,9 @@ export function createExtensionsController(notify: Notify) {
     error = null;
     try {
       const payload = await listExtensions();
-      rows = payload.data.extensions;
-      listen = payload.data.listen;
-      hostDraft = payload.data.listen.host;
+      rows = payload.extensions;
+      listen = payload.listen;
+      hostDraft = payload.listen.host;
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to load extensions.';
     } finally {
@@ -54,7 +54,7 @@ export function createExtensionsController(notify: Notify) {
     busy = true;
     try {
       const result = await generateExtensionPairingCode();
-      pairing = result.data;
+      pairing = result;
     } catch (err) {
       notify('error', err instanceof Error ? err.message : 'Failed to make a pairing code.');
     } finally {
@@ -95,7 +95,7 @@ export function createExtensionsController(notify: Notify) {
     busy = true;
     try {
       const result = await removeExtension(removeTarget.extension_id);
-      notify('success', result.data ?? 'Extension removed.');
+      notify('success', result ?? 'Extension removed.');
       removeTarget = null;
       await load();
     } catch (err) {
@@ -109,7 +109,7 @@ export function createExtensionsController(notify: Notify) {
     busy = true;
     try {
       const result = await askExtensionInfo(row.extension_id);
-      const { info, elapsed_ms } = result.data;
+      const { info, elapsed_ms } = result;
       testResults = { ...testResults, [row.extension_id]: `${info.name} ${info.version} answered in ${elapsed_ms} ms` };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'No answer.';
@@ -125,7 +125,7 @@ export function createExtensionsController(notify: Notify) {
       const result = await setExtensionAddress(hostDraft.trim());
       notify(
         'success',
-        result.data.restart_required
+        result.restart_required
           ? 'Saved. Restart the server for the new address to take effect.'
           : 'No change.'
       );

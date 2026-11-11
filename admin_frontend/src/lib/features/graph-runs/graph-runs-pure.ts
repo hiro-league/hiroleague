@@ -194,8 +194,8 @@ export function graphRunTabId(runId: string): string {
 /** Deep-link into Graph runs (now the Logs page's second tab) with a run open. */
 export function graphRunPageUrl(runId: string): string {
   const trimmed = String(runId ?? '').trim();
-  if (!trimmed) return '/logs/?tab=runs';
-  return `/logs/?tab=runs&run=${encodeURIComponent(trimmed)}`;
+  if (!trimmed) return '/logs?tab=runs';
+  return `/logs?tab=runs&run=${encodeURIComponent(trimmed)}`;
 }
 
 /** Run-detail panes only — not the ledger list. */

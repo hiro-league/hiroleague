@@ -35,9 +35,7 @@ function make() {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(isFeatureActive).mockReturnValue(true);
-  vi.mocked(api.listChannels).mockResolvedValue({
-    data: { channels: [], mandatory_channel_name: 'devices' }
-  } as never);
+  vi.mocked(api.listChannels).mockResolvedValue({ channels: [], mandatory_channel_name: 'devices' } as never);
 });
 
 describe('createChannelsController — defaults', () => {
@@ -55,11 +53,9 @@ describe('load', () => {
   it('populates rows, mandatory channel, and clears loading on success', async () => {
     const { ctrl } = make();
     vi.mocked(api.listChannels).mockResolvedValue({
-      data: {
         channels: [channelRow({ name: 'a', enabled: true }), channelRow({ name: 'b', enabled: false })],
         mandatory_channel_name: 'a'
-      }
-    } as never);
+      } as never);
     await ctrl.load();
     expect(ctrl.rows.map((r) => r.name)).toEqual(['a', 'b']);
     expect(ctrl.mandatoryChannelName).toBe('a');
@@ -72,11 +68,9 @@ describe('load', () => {
     vi.mocked(isFeatureActive).mockReturnValue(false);
     const { ctrl } = make();
     vi.mocked(api.listChannels).mockResolvedValue({
-      data: {
         channels: [channelRow({ name: 'a', enabled: true }), channelRow({ name: 'b', enabled: false })],
         mandatory_channel_name: 'a'
-      }
-    } as never);
+      } as never);
     await ctrl.load();
     expect(ctrl.rows.map((r) => r.name)).toEqual(['b']);
     expect(ctrl.enabledCount).toBe(0);
@@ -95,11 +89,9 @@ describe('isMandatory / isBusy', () => {
   it('flags the mandatory channel name from the last load', async () => {
     const { ctrl } = make();
     vi.mocked(api.listChannels).mockResolvedValue({
-      data: {
         channels: [channelRow({ name: 'devices' }), channelRow({ name: 'telegram' })],
         mandatory_channel_name: 'devices'
-      }
-    } as never);
+      } as never);
     await ctrl.load();
     expect(ctrl.isMandatory(ctrl.rows[0]!)).toBe(true);
     expect(ctrl.isMandatory(ctrl.rows[1]!)).toBe(false);
@@ -110,10 +102,8 @@ describe('toggle', () => {
   it('disables an enabled channel, notifies, and reloads', async () => {
     const { ctrl, notify } = make();
     const row = channelRow({ name: 'telegram', enabled: true });
-    vi.mocked(api.disableChannel).mockResolvedValue({ data: { enabled: false } } as never);
-    vi.mocked(api.listChannels).mockResolvedValue({
-      data: { channels: [row], mandatory_channel_name: 'devices' }
-    } as never);
+    vi.mocked(api.disableChannel).mockResolvedValue({ enabled: false } as never);
+    vi.mocked(api.listChannels).mockResolvedValue({ channels: [row], mandatory_channel_name: 'devices' } as never);
 
     await ctrl.toggle(row);
 
@@ -126,10 +116,8 @@ describe('toggle', () => {
   it('enables a disabled channel', async () => {
     const { ctrl, notify } = make();
     const row = channelRow({ name: 'telegram', enabled: false });
-    vi.mocked(api.enableChannel).mockResolvedValue({ data: null } as never);
-    vi.mocked(api.listChannels).mockResolvedValue({
-      data: { channels: [row], mandatory_channel_name: 'devices' }
-    } as never);
+    vi.mocked(api.enableChannel).mockResolvedValue(null as never);
+    vi.mocked(api.listChannels).mockResolvedValue({ channels: [row], mandatory_channel_name: 'devices' } as never);
 
     await ctrl.toggle(row);
 
@@ -154,11 +142,9 @@ describe('toggle', () => {
     let busyDuringCall = false;
     vi.mocked(api.disableChannel).mockImplementation(async () => {
       busyDuringCall = ctrl.isBusy(row);
-      return { data: 'ok' } as never;
+      return 'ok' as never;
     });
-    vi.mocked(api.listChannels).mockResolvedValue({
-      data: { channels: [row], mandatory_channel_name: 'devices' }
-    } as never);
+    vi.mocked(api.listChannels).mockResolvedValue({ channels: [row], mandatory_channel_name: 'devices' } as never);
 
     await ctrl.toggle(row);
 

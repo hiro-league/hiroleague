@@ -51,7 +51,7 @@ export function createPeopleController(notify: Notify) {
     loading = true;
     error = null;
     try {
-      const data = (await listPeople()).data;
+      const data = (await listPeople());
       people = data.people;
       roles = data.roles;
     } catch (err) {

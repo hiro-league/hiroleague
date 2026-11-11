@@ -98,7 +98,7 @@
     <Button size="sm" variant="outline" disabled={disabled || !adding} onclick={add}><Plus size={13} /> Add</Button>
     <a
       class="inline-flex items-center gap-1 font-sans text-xs text-primary hover:underline"
-      href={kind === 'ai' ? '/catalog/?tab=profiles' : '/catalog/?tab=voices'}
+      href={kind === 'ai' ? '/catalog?tab=profiles' : '/catalog?tab=voices'}
       >Edit in Catalog → Profiles <ExternalLink size={11} aria-hidden="true" /></a
     >
   </div>

@@ -49,7 +49,7 @@ export function createLocalModelDownloads(notify: Notify) {
       // Each poll refreshes the registry rows so percent/status stay live in the UI.
       for (let i = 0; i < 1200; i++) {
         const refreshed = await listKnowledgeRerankers();
-        localRerankers = refreshed.data.local ?? localRerankers;
+        localRerankers = refreshed.local ?? localRerankers;
         const row = localRerankers.find((m) => m.id === modelId);
         if (!row || row.downloaded || row.status === 'ready') {
           if (notifyOnDone) notify('success', 'Reranker downloaded.');
@@ -95,7 +95,7 @@ export function createLocalModelDownloads(notify: Notify) {
     try {
       await cancelKnowledgeReranker(modelId);
       const refreshed = await listKnowledgeRerankers();
-      localRerankers = refreshed.data.local ?? localRerankers;
+      localRerankers = refreshed.local ?? localRerankers;
       notify('info', 'Download cancelled.');
     } catch (err) {
       notify('error', err instanceof Error ? err.message : 'Cancel failed.');
@@ -109,7 +109,7 @@ export function createLocalModelDownloads(notify: Notify) {
     try {
       for (let i = 0; i < 1200; i++) {
         const refreshed = await listKnowledgeEmbedders();
-        localEmbedders = refreshed.data.local ?? localEmbedders;
+        localEmbedders = refreshed.local ?? localEmbedders;
         const row = localEmbedders.find((m) => m.id === modelId);
         if (!row || row.downloaded || row.status === 'ready') {
           if (notifyOnDone) notify('success', 'Embedder downloaded.');
@@ -152,7 +152,7 @@ export function createLocalModelDownloads(notify: Notify) {
     try {
       await cancelKnowledgeEmbedder(modelId);
       const refreshed = await listKnowledgeEmbedders();
-      localEmbedders = refreshed.data.local ?? localEmbedders;
+      localEmbedders = refreshed.local ?? localEmbedders;
       notify('info', 'Download cancelled.');
     } catch (err) {
       notify('error', err instanceof Error ? err.message : 'Cancel failed.');
@@ -173,7 +173,7 @@ export function createLocalModelDownloads(notify: Notify) {
       listKnowledgeRerankers(),
       listKnowledgeEmbedders()
     ]);
-    seedFromLoad(rerankPayload.data.local ?? [], embedderPayload.data.local ?? []);
+    seedFromLoad(rerankPayload.local ?? [], embedderPayload.local ?? []);
   }
 
   return {

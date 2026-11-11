@@ -213,7 +213,7 @@ export function createMemoriesPageController() {
 
   async function loadChatChannels() {
     try {
-      chatChannels = (await listChatChannels()).data;
+      chatChannels = (await listChatChannels());
     } catch {
       // apiRequest throws on failure; leave the last loaded channels visible.
     }
@@ -221,7 +221,7 @@ export function createMemoriesPageController() {
 
   async function loadCharacters() {
     try {
-      characters = (await listCharacters()).data;
+      characters = (await listCharacters());
     } catch {
       // apiRequest throws on failure; leave the last loaded characters visible.
     }
@@ -246,7 +246,7 @@ export function createMemoriesPageController() {
   // "All memory" option; the list itself is unaffected.
   async function loadMemoryGroups() {
     try {
-      const data = (await listKnowledgeGraphGroups()).data;
+      const data = (await listKnowledgeGraphGroups());
       memoryGroups = data.groups;
       memoryDefaultGroupId = data.default_group_id;
     } catch {

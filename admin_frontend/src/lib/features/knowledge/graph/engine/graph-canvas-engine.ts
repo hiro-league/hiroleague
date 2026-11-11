@@ -193,7 +193,8 @@ export class GraphCanvasEngine {
       });
       this.themeObserver.observe(document.documentElement, {
         attributes: true,
-        attributeFilter: ['data-theme']
+        // Step 1d: the mode is the `dark` class on <html> now, not a data-theme attribute.
+        attributeFilter: ['class']
       });
     }
     this.resize();

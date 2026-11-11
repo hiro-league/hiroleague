@@ -73,17 +73,19 @@ export class AiUsagePage {
     if (key === this.loadedFor) return;
     this.loadedFor = key;
     this.loading = true;
-    const res = await fetchAiUsage(from, to);
+    // Step 1d: a failed request throws (answers are the data itself; there is no {ok, error} to test).
+    let rows: UsageRow[] = [];
+    let failure: string | null = null;
+    try {
+      rows = (await fetchAiUsage(from, to)).rows;
+    } catch (err) {
+      failure = err instanceof Error ? err.message : 'AI usage could not be read.';
+    }
     // A later range picked while this one loaded wins.
     if (this.loadedFor !== key) return;
     this.loading = false;
-    if (res.ok && res.data) {
-      this.all = res.data.rows;
-      this.error = null;
-    } else {
-      this.error = res.error ?? 'AI usage could not be read.';
-      this.all = [];
-    }
+    this.all = rows;
+    this.error = failure;
   };
 
   setPeriod = (p: Period) => this.setSpan(spanOf(p, this.now));

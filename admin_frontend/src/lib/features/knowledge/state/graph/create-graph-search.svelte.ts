@@ -32,7 +32,7 @@ export function createGraphSearch(deps: {
     try {
       const res = await searchGraphChunks(term, ctrl.signal);
       if (ctrl.signal.aborted) return;
-      matchedChunkIds = new Set(res.data?.point_ids ?? []);
+      matchedChunkIds = new Set(res?.point_ids ?? []);
     } catch (err) {
       if (ctrl.signal.aborted) return;
       console.error('graph chunk-text search failed', err);
@@ -77,7 +77,7 @@ export function createGraphSearch(deps: {
     episodesBusy = true;
     try {
       const res = await listKnowledgeGraphEpisodes(gid);
-      episodes = res.ok && res.data ? res.data.episodes : [];
+      episodes = res.episodes;
       const present = new Set(episodes.map((e) => e.id));
       const restored = readEpisodeSel(gid).filter((id) => present.has(id));
       episodeChunkIds = new Set(restored);

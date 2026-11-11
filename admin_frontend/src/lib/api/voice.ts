@@ -5,7 +5,7 @@
  * Try a profile (takes play from `/voice/clips/<id>.ogg`) and manage `voice.uses`.
  */
 import { base } from '$app/paths';
-import { apiRequest, type ApiResponse } from './client';
+import { apiRequest } from './client';
 
 export type VoiceSource = 'studio' | 'library' | 'mine';
 
@@ -71,7 +71,7 @@ export function listVoices(q: {
   q?: string;
   limit?: number;
   refresh?: boolean;
-}): Promise<ApiResponse<VoiceVoices>> {
+}): Promise<VoiceVoices> {
   const params = new URLSearchParams();
   for (const [k, v] of Object.entries(q)) if (v !== undefined && v !== '' && v !== false) params.set(k, String(v));
   return apiRequest<VoiceVoices>(`/voice/voices?${params}`, { timeoutMs: 60_000 });

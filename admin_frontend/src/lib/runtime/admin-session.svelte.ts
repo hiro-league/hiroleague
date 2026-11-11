@@ -12,6 +12,7 @@ import {
   type SignedInPerson,
   type SignInOffer
 } from '$lib/api/auth';
+import type { PageRight } from '$lib/shell/nav';
 import { registerSignedOutHandler } from './sign-in-signal';
 
 type SessionState = 'checking' | 'signed-out' | 'signed-in' | 'unreachable';
@@ -28,7 +29,7 @@ function createAdminSession() {
 
   async function check() {
     try {
-      const me = (await getAuthMe()).data;
+      const me = (await getAuthMe());
       person = me.person;
       anyoneSignsIn = me.anyone_signs_in;
       canOpenSettings = me.can_open_settings;
@@ -56,7 +57,7 @@ function createAdminSession() {
   async function signOut() {
     try {
       // Phase 8: signing out here signs this browser out of the apps' sites too (HomeHiro), passing through them.
-      const then = (await apiSignOut()).data?.then;
+      const then = (await apiSignOut())?.then;
       if (then) {
         window.location.assign(then);
         return;
@@ -87,6 +88,10 @@ function createAdminSession() {
     },
     get canOpenSettings() {
       return canOpenSettings;
+    },
+    /** Whether the person's role has a page's right (step 1d); `/auth/me` reports the one there is. */
+    hasRight(right: PageRight): boolean {
+      return right === 'open_settings' && canOpenSettings;
     },
     get roleName() {
       return roleName;

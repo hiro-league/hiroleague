@@ -1,6 +1,7 @@
 <script lang="ts">
   import { ChevronDown } from '@lucide/svelte';
   import { cn } from '$lib/utils';
+  import { shortDate } from '$lib/format/time';
   import GraphOptionsButtonGroup from './GraphOptionsButtonGroup.svelte';
   import GraphOptionsDateRangeField from './GraphOptionsDateRangeField.svelte';
   import GraphOptionsResetDot from './GraphOptionsResetDot.svelte';
@@ -58,8 +59,8 @@
   // puts a grid stop precisely on both endpoints (lo + 100*step === hi).
   const rangeStep = (s: { lo: number; hi: number } | null): number =>
     s && s.hi > s.lo ? (s.hi - s.lo) / 100 : 1;
-  const fmtDate = (v: number): string =>
-    new Date(v).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  // Step 1d: the one formatter, not the browser's locale.
+  const fmtDate = (v: number): string => shortDate(v, true);
   const maxConnUnlimited = $derived(graph.maxConnPerNode() >= MAX_CONN_PER_NODE_CAP);
   const visibleEdgesUnlimited = $derived(graph.visibleEdgesPerPair() >= VISIBLE_EDGES_CAP);
 </script>

@@ -10,7 +10,7 @@
   import Button from '$lib/components/ui/button.svelte';
   import * as Dialog from '$lib/components/ui/dialog';
   import FormField from '$lib/components/ui/form-field.svelte';
-  import { humanDateTime } from '$lib/format/human-datetime';
+  import { dateTime } from '$lib/format/time';
   import { cn } from '$lib/utils';
   import type { AiController } from './ai-controller.svelte';
   import { LOCAL_SERVER_IDS, LOCAL_SERVER_KIND_LABELS, serverStatus } from './ai-profile-rules';
@@ -52,7 +52,7 @@
             {server.state === 'up' ? 'Up' : (server.error ?? status?.word)}
           </dd>
           <dt class="text-muted-foreground">Checked</dt>
-          <dd>{humanDateTime(server.checked_at)}</dd>
+          <dd>{server.checked_at ? dateTime(server.checked_at) : '—'}</dd>
           <dt class="text-muted-foreground">Used by</dt>
           <dd class="text-muted-foreground">{usedBy.length ? usedBy.join(', ') : 'No profile'}</dd>
           <dt class="text-muted-foreground">Models</dt>

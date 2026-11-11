@@ -46,9 +46,9 @@ export function createChatCharacterResolved(opts: ChatCharacterResolvedOptions) 
     try {
       const res = await getCharacterResolved(cid);
       if (seq !== fetchSeq) return;
-      payload = res.data;
+      payload = res;
       error = null;
-      if (!characterResolvedAllowsVoiceRequest(res.data)) {
+      if (!characterResolvedAllowsVoiceRequest(res)) {
         uiPrefs.clearVoiceReplyTransient();
       }
     } catch (e) {

@@ -43,7 +43,7 @@ export function createRolesController(notify: Notify, onRolesChanged: () => Prom
     loading = true;
     error = null;
     try {
-      const data = (await listAccess()).data;
+      const data = (await listAccess());
       sources = data.sources;
       roles = data.roles;
       if (tab !== ALL_ROLES && !roles.some((r) => r.role_id === tab)) tab = ALL_ROLES;
@@ -102,7 +102,7 @@ export function createRolesController(notify: Notify, onRolesChanged: () => Prom
     const name = newName;
     busy = true;
     try {
-      const role = (await addRole(name)).data.role;
+      const role = (await addRole(name)).role;
       notify('success', `Added the role ${role.name}.`);
       newName = null;
       await load();

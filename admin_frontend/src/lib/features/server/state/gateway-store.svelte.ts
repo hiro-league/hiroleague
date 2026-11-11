@@ -16,7 +16,7 @@ export function createGatewayStore(notify: Notify) {
   const listResource = createResource(
     async (): Promise<GatewayRow[]> => {
       const payload = await listGateways();
-      return payload.data;
+      return payload;
     },
     {
       initial: [],
@@ -115,7 +115,7 @@ export function createGatewayStore(notify: Notify) {
           }),
         {
           notify,
-          successMsg: (result) => result.data ?? 'Gateway created.',
+          successMsg: (result) => result ?? 'Gateway created.',
           errorPrefix: 'Create gateway failed.',
           onDone: async () => {
             resetDialog();
@@ -134,12 +134,12 @@ export function createGatewayStore(notify: Notify) {
       await createMutation(() => startGateway(row.name), {
         notify,
         successMsg: (result) =>
-          result.data.already_running
+          result.already_running
             ? undefined
-            : `Gateway '${row.name}' started (PID ${result.data.pid}).`,
+            : `Gateway '${row.name}' started (PID ${result.pid}).`,
         errorPrefix: 'Start gateway failed.',
         onDone: async (result) => {
-          if (result.data.already_running) {
+          if (result.already_running) {
             notify('warning', `Gateway '${row.name}' is already running.`);
           }
           await load();
@@ -157,10 +157,10 @@ export function createGatewayStore(notify: Notify) {
       await createMutation(() => stopGateway(selected!.name), {
         notify,
         successMsg: (result) =>
-          result.data ? `Gateway '${selected!.name}' stopped.` : undefined,
+          result ? `Gateway '${selected!.name}' stopped.` : undefined,
         errorPrefix: 'Stop gateway failed.',
         onDone: async (result) => {
-          if (!result.data) {
+          if (!result) {
             notify('warning', `Gateway '${selected!.name}' was not running.`);
           }
           resetDialog();
@@ -178,7 +178,7 @@ export function createGatewayStore(notify: Notify) {
     try {
       await createMutation(() => removeGateway(selected!.name, removeForm.purge), {
         notify,
-        successMsg: (result) => result.data ?? 'Gateway removed.',
+        successMsg: (result) => result ?? 'Gateway removed.',
         errorPrefix: 'Remove gateway failed.',
         onDone: async () => {
           resetDialog();

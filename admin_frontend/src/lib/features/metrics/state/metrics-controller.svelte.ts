@@ -69,7 +69,7 @@ export function createMetricsController(opts: { notify: Notify }) {
     polling = true;
     try {
       const payload = await getMetricsTick();
-      const data = payload.data;
+      const data = payload;
       tickData = data;
       pollError = null;
       if (syncControls || !initialized) {
@@ -99,8 +99,8 @@ export function createMetricsController(opts: { notify: Notify }) {
         enabled: nextEnabled,
         interval: nextInterval
       });
-      enabled = payload.data.enabled;
-      intervalValue = payload.data.interval;
+      enabled = payload.enabled;
+      intervalValue = payload.interval;
       await loadTick(true);
     } catch (err) {
       const message =

@@ -60,7 +60,7 @@
   async function loadPrefs() {
     try {
       const res = await getPreferences();
-      prefs = res.data.preferences;
+      prefs = res.preferences;
     } catch {
       prefs = null; // non-fatal — the panes still work without the params strip
     }

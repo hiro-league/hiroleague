@@ -2,7 +2,8 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
-@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+/* UI kit step 1d: dark mode is the `.dark` class on <html> (mode-watcher), as in the kit. */
+@custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --font-sans: var(--font-title);
@@ -32,40 +33,12 @@
   --color-brand-pink: var(--brand-pink);
 }
 
+/* Light values are the base; `.dark` (the default mode) overrides them. */
 :root {
-  color-scheme: dark;
+  color-scheme: light;
   --font-text: "Lora", Georgia, serif;
   --font-title: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
     "Segoe UI", sans-serif;
-  --background: #15100f;
-  --foreground: #f5eceb;
-  --card: #1c1817;
-  --card-foreground: #f5eceb;
-  --popover: #150f0e;
-  --popover-foreground: #f5eceb;
-  --primary: #1687b8;
-  --primary-foreground: #faf8f0;
-  --secondary: #21323a;
-  --secondary-foreground: #f5eceb;
-  --muted: #1a1414;
-  --muted-foreground: #a59d9c;
-  --accent: #127b72;
-  --accent-foreground: #f5eceb;
-  --destructive: #db0000;
-  --border: #393232;
-  --input: var(--border);
-  --ring: #1687b8;
-  --brand: #fbbf24;
-  --brand-mid: #fb913b;
-  --brand-deep: #f87171;
-  --brand-rose: #fb7185;
-  --brand-pink: #f975d2;
-  --brand-blue: #1687b8;
-  --brand-green: #00a889;
-}
-
-:root[data-theme="light"] {
-  color-scheme: light;
   --background: #fff6f5;
   --foreground: #3c0608;
   --card: #fceae8;
@@ -90,6 +63,35 @@
   --brand-rose: #e11d48;
   --brand-pink: #ec4ab0;
   --brand-blue: #006bb3;
+  --brand-green: #00a889;
+}
+
+.dark {
+  color-scheme: dark;
+  --background: #15100f;
+  --foreground: #f5eceb;
+  --card: #1c1817;
+  --card-foreground: #f5eceb;
+  --popover: #150f0e;
+  --popover-foreground: #f5eceb;
+  --primary: #1687b8;
+  --primary-foreground: #faf8f0;
+  --secondary: #21323a;
+  --secondary-foreground: #f5eceb;
+  --muted: #1a1414;
+  --muted-foreground: #a59d9c;
+  --accent: #127b72;
+  --accent-foreground: #f5eceb;
+  --destructive: #db0000;
+  --border: #393232;
+  --input: var(--border);
+  --ring: #1687b8;
+  --brand: #fbbf24;
+  --brand-mid: #fb913b;
+  --brand-deep: #f87171;
+  --brand-rose: #fb7185;
+  --brand-pink: #f975d2;
+  --brand-blue: #1687b8;
   --brand-green: #00a889;
 }
 

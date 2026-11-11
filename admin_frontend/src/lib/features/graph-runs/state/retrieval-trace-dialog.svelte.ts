@@ -35,7 +35,7 @@ export function createRetrievalTraceDialogController(
     traceLoadingRunId = runId;
     try {
       const res = await getGraphRunRetrievalTrace(runId);
-      const traces = res.ok && res.data ? (res.data.traces ?? []) : [];
+      const traces = res.traces ?? [];
       if (traces.length > 0) {
         const q = question.trim();
         const matched = q ? traces.find((t) => (t.query ?? '').trim() === q) : undefined;
@@ -63,7 +63,7 @@ export function createRetrievalTraceDialogController(
     traceLoadingSid = sid;
     try {
       const res = await getGraphRunRetrievalTrace(runId);
-      const traces = res.ok && res.data ? (res.data.traces ?? []) : [];
+      const traces = res.traces ?? [];
       const matched = traces.find((t) => t.sid === sid);
       if (matched) {
         activeTrace = matched;

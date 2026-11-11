@@ -1,4 +1,4 @@
-import { apiRequest, type ApiResponse } from './client';
+import { apiRequest } from './client';
 import type {
   EvalCompletedPayload,
   EvalQuestionPayload,
@@ -36,7 +36,7 @@ export type EvalRunRequest = {
   run_id?: string;
 };
 
-export function runKnowledgeEval(req: EvalRunRequest = {}): Promise<ApiResponse<{ run_id: string }>> {
+export function runKnowledgeEval(req: EvalRunRequest = {}): Promise<{ run_id: string }> {
   return apiRequest<{ run_id: string }>('/eval/run', {
     method: 'POST',
     body: req,
@@ -47,7 +47,7 @@ export function runKnowledgeEval(req: EvalRunRequest = {}): Promise<ApiResponse<
 /** L3 — replay the latest eval run's live state for the workspace (server-side
  *  store). The panel calls this on mount so navigation + cross-origin (Vite vs
  *  packaged UI) both show the same run. ``data`` is null when no run exists. */
-export function getKnowledgeEvalState(): Promise<ApiResponse<EvalRunStateData | null>> {
+export function getKnowledgeEvalState(): Promise<EvalRunStateData | null> {
   return apiRequest<EvalRunStateData | null>('/eval/state', {
     method: 'GET',
     timeoutMs: 15000
@@ -58,7 +58,7 @@ export function getKnowledgeEvalState(): Promise<ApiResponse<EvalRunStateData | 
  *  terminal ``eval.cancelled`` event once it stops. */
 export function cancelKnowledgeEval(
   runId?: string | null
-): Promise<ApiResponse<{ cancelled: boolean; run_id: string | null }>> {
+): Promise<{ cancelled: boolean; run_id: string | null }> {
   return apiRequest<{ cancelled: boolean; run_id: string | null }>('/eval/cancel', {
     method: 'POST',
     body: { run_id: runId ?? null },
@@ -91,7 +91,7 @@ export function listEvalCorpuses(
   // ``log_dir`` is the workspace's absolute ``logs/`` dir (the ledger sidecar root) — used by
   // the eval "Copy for AI" brief to point an agent at retrieval_trace/ingest_trace/graph.log.
   // Empty when the workspace can't be resolved (brief then falls back to relative paths).
-): Promise<ApiResponse<{ track: string; folder: string; corpuses: EvalCorpus[]; log_dir?: string }>> {
+): Promise<{ track: string; folder: string; corpuses: EvalCorpus[]; log_dir?: string }> {
   const qs = new URLSearchParams({ track });
   if (folder) qs.set('folder', folder);
   return apiRequest<{ track: string; folder: string; corpuses: EvalCorpus[]; log_dir?: string }>(
@@ -130,7 +130,7 @@ export type EvalCorpusData = {
 };
 
 /** Load a memory corpus's episodes by its <id>.episodes.jsonl path (the Corpus review source). */
-export function getEvalCorpus(path: string): Promise<ApiResponse<EvalCorpusData>> {
+export function getEvalCorpus(path: string): Promise<EvalCorpusData> {
   return apiRequest<EvalCorpusData>(
     `/eval/corpus?path=${encodeURIComponent(path)}`,
     { method: 'GET', timeoutMs: 15000 }
@@ -161,7 +161,7 @@ export type CorpusExtractionData = {
  *  extracted/not badge + "ingest pipeline" button. */
 export function getCorpusIngestExtraction(
   corpusId: string
-): Promise<ApiResponse<CorpusExtractionData>> {
+): Promise<CorpusExtractionData> {
   return apiRequest<CorpusExtractionData>(
     `/eval/corpus-extraction?corpus_id=${encodeURIComponent(corpusId)}`,
     { method: 'GET', timeoutMs: 15000 }
@@ -171,7 +171,7 @@ export function getCorpusIngestExtraction(
 /** List a corpus's question bank by its <id>.questions.yaml path (the checklist source). */
 export function listEvalQuestions(
   path: string
-): Promise<ApiResponse<{ path: string; questions: EvalQuestionItem[] }>> {
+): Promise<{ path: string; questions: EvalQuestionItem[] }> {
   return apiRequest<{ path: string; questions: EvalQuestionItem[] }>(
     `/eval/questions?path=${encodeURIComponent(path)}`,
     { method: 'GET', timeoutMs: 15000 }
@@ -215,7 +215,7 @@ export function listEvalResults(
   track: 'memory' | 'knowledge',
   corpusId: string,
   questionsPath = ''
-): Promise<ApiResponse<EvalResultsData>> {
+): Promise<EvalResultsData> {
   const qs = new URLSearchParams({ track, corpus_id: corpusId });
   if (questionsPath) qs.set('questions_path', questionsPath);
   return apiRequest<EvalResultsData>(`/eval/results?${qs.toString()}`, {
@@ -229,7 +229,7 @@ export function listEvalResults(
  *  when no saved row ran under that id (e.g. results cleared, or graph tracing only). */
 export function getEvalRowByRunId(
   runId: string
-): Promise<ApiResponse<{ row: EvalQuestionPayload | null }>> {
+): Promise<{ row: EvalQuestionPayload | null }> {
   const qs = new URLSearchParams({ run_id: runId });
   return apiRequest<{ row: EvalQuestionPayload | null }>(`/eval/row?${qs.toString()}`, {
     method: 'GET',
@@ -260,7 +260,7 @@ export type BenchmarkResultsData = {
 export function listEvalBenchmarkResults(
   benchmark: string,
   folder = ''
-): Promise<ApiResponse<BenchmarkResultsData>> {
+): Promise<BenchmarkResultsData> {
   const qs = new URLSearchParams({ benchmark });
   if (folder) qs.set('folder', folder);
   return apiRequest<BenchmarkResultsData>(`/eval/results/by-benchmark?${qs.toString()}`, {
@@ -274,7 +274,7 @@ export function listEvalBenchmarkResults(
 export function clearEvalResults(
   track: 'memory' | 'knowledge',
   corpusId: string
-): Promise<ApiResponse<{ removed: number }>> {
+): Promise<{ removed: number }> {
   return apiRequest<{ removed: number }>('/eval/results/clear', {
     method: 'POST',
     body: { track, corpus_id: corpusId },
@@ -287,7 +287,7 @@ export function exportEvalResultsLocomo(
   corpusId: string,
   questionsPath: string,
   predictionKey = 'hiro_memory_prediction'
-): Promise<ApiResponse<EvalLocomoExportData>> {
+): Promise<EvalLocomoExportData> {
   const qs = new URLSearchParams({
     corpus_id: corpusId,
     questions_path: questionsPath,

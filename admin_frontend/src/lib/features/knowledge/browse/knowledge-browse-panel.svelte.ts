@@ -88,9 +88,13 @@ export function createKnowledgeBrowsePanelUi(deps: { ctl: KnowledgePageControlle
     let removedEpisodes = 0;
     let failed = 0;
     for (const document of removeGraphTargets) {
-      const res = await removeDocumentFromKnowledgeGraph(document.id);
-      if (res.ok && res.data) removedEpisodes += res.data.removed_episodes;
-      else failed += 1;
+      // Step 1d: a failed request throws (answers are the data itself; there is no {ok, error} to test).
+      try {
+        const res = await removeDocumentFromKnowledgeGraph(document.id);
+        removedEpisodes += res.removed_episodes;
+      } catch {
+        failed += 1;
+      }
     }
     removingGraph = false;
     const docCount = removeGraphTargets.length;

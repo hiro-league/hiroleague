@@ -19,7 +19,7 @@
 
   onMount(async () => {
     try {
-      apps = (await listApps()).data.apps;
+      apps = (await listApps()).apps;
     } catch (err) {
       error = err instanceof Error ? err.message : "The apps couldn't be read.";
     } finally {

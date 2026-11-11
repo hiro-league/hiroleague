@@ -56,7 +56,7 @@ export function createCharactersPageController(opts: {
     resolvedError = null;
     try {
       const payload = await getCharacterResolved(id);
-      resolved = payload.data;
+      resolved = payload;
     } catch (err) {
       resolved = null;
       resolvedError =
@@ -69,7 +69,7 @@ export function createCharactersPageController(opts: {
     listError = null;
     try {
       const payload = await listCharacters();
-      rows = payload.data;
+      rows = payload;
     } catch (err) {
       rows = [];
       listError = err instanceof Error ? err.message : 'Failed to load characters.';
@@ -89,8 +89,8 @@ export function createCharactersPageController(opts: {
       listCatalogProviders(),
       getPreferences()
     ]);
-    const namer = catalogModelNamer([...chat.data.models, ...tts.data.models], providers.data);
-    const saved = preferences.data.preferences;
+    const namer = catalogModelNamer([...chat.models, ...tts.models], providers);
+    const saved = preferences.preferences;
     const byLabel = (a: ProfileOption, b: ProfileOption) => a.label.localeCompare(b.label);
     aiProfileOptions = Object.entries(saved.ai?.profiles ?? {})
       .map(([id, p]) => ({
@@ -112,9 +112,9 @@ export function createCharactersPageController(opts: {
     try {
       if (mode === 'edit') await loadProfileOptions();
       const payload = await getCharacter(id);
-      selected = payload.data;
+      selected = payload;
       if (mode === 'edit') {
-        formApi.form = formFromCharacter(payload.data);
+        formApi.form = formFromCharacter(payload);
         formApi.dirty = false;
       }
       await loadResolvedConfig(id);
@@ -184,8 +184,8 @@ export function createCharactersPageController(opts: {
       const id = prefs.characterId;
       const body = characterSaveBody(prefs.characterId, formApi.form);
       const payload = id ? await updateCharacter(id, body) : await createCharacter(body);
-      for (const warning of payload.data.warnings) notify('warning', warning);
-      const savedId = payload.data.character.id;
+      for (const warning of payload.warnings) notify('warning', warning);
+      const savedId = payload.character.id;
       notify('success', 'Character saved.');
       formApi.dirty = false;
       await prefs.setState('detail', 'edit', savedId);
@@ -219,7 +219,8 @@ export function createCharactersPageController(opts: {
   }
 
   function isCharactersPath(pathname: string): boolean {
-    return pathname.endsWith('/characters') || pathname.endsWith('/characters/');
+    // Step 1d: pages have no trailing slash.
+    return pathname.endsWith('/characters');
   }
 
   /** Apply URL + prefs to remote state + optional edit form. */

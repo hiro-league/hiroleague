@@ -40,12 +40,12 @@ export const KNOWLEDGE_TABS: { id: KnowledgeTabId; label: string }[] = [
 /** Deep link to workspace Knowledge preferences (embedding, retrieval, chunking, answering). */
 export const KNOWLEDGE_PREFERENCES_SECTION_HREF = preferenceTabHref('knowledge');
 
-/** Deep link to Knowledge admin Browse tab (`/knowledge/` — default tab omits `?tab=`). */
+/** Deep link to Knowledge admin Browse tab (`/knowledge` — default tab omits `?tab=`). */
 export function knowledgeTabHref(tab: KnowledgeTabId, basePath = ''): string {
   if (tab === 'browse') {
-    return `${basePath}/knowledge/`;
+    return `${basePath}/knowledge`;
   }
-  return `${basePath}/knowledge/?tab=${tab}`;
+  return `${basePath}/knowledge?tab=${tab}`;
 }
 
 export const KNOWLEDGE_BROWSE_HREF = knowledgeTabHref('browse');

@@ -98,14 +98,15 @@ export function createGraphRunTraceModel(opts: { getActivePane: () => ActivePane
   const ingestTraceNavTotal = $derived.by((): number => ingestTraceStepsSorted.length);
 
   async function resolveRetrievalTrace(runId: string) {
-    const res = await getGraphRunRetrievalTrace(runId);
-    retrievalTraceByRun[runId] = res.ok && res.data ? (res.data.traces ?? []) : [];
+    // Step 1d: a failed read throws; it leaves the cache empty, as the old {ok} check did.
+    const res = await getGraphRunRetrievalTrace(runId).catch(() => null);
+    retrievalTraceByRun[runId] = res?.traces ?? [];
     retrievalTraceByRun = { ...retrievalTraceByRun };
   }
 
   async function resolveIngestTrace(runId: string) {
-    const res = await getGraphRunIngestTrace(runId);
-    ingestTraceByRun[runId] = res.ok && res.data ? (res.data.traces ?? []) : [];
+    const res = await getGraphRunIngestTrace(runId).catch(() => null);
+    ingestTraceByRun[runId] = res?.traces ?? [];
     ingestTraceByRun = { ...ingestTraceByRun };
   }
 

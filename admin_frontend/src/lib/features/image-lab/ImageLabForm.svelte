@@ -33,7 +33,7 @@
     <p class="font-sans text-xs text-amber-600 dark:text-amber-300">
       {ctl.selectedModel.provider_display_name} is not ready — add its API key
       {ctl.selectedModel.provider_id === 'cloudflare' ? ' and account id ' : ' '}
-      on the <a class="underline" href="/catalog/">Providers/Models</a> page.
+      on the <a class="underline" href="/catalog">Providers/Models</a> page.
     </p>
   {:else if ctl.model && !isDefaultModel}
     <Button size="sm" variant="outline" class="justify-self-start" onclick={() => void ctl.setDefaultModel(toasts.notify)}>

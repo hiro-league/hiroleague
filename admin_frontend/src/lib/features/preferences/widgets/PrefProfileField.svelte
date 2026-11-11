@@ -77,7 +77,7 @@
   const editHref = $derived.by(() => {
     const tab = kind === 'ai' ? 'profiles' : 'voices';
     const known = picked && !missing ? `&edit=${encodeURIComponent(picked)}` : '';
-    return `/catalog/?tab=${tab}${known}`;
+    return `/catalog?tab=${tab}${known}`;
   });
 
   function onPick(value: string) {

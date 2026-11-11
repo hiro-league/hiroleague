@@ -1,18 +1,9 @@
 /**
- * Feature-neutral compact date/time formatting for dense admin tables.
- *
- * Produces a two-line `{ date, time }` cell plus a full `title` for hover. Shared
- * by the Graph Runs ledger list and the Memories table (both render an epoch or
- * ISO timestamp as a tight stacked cell).
+ * A timestamp as a tight two-line table cell (`{ date, time }` plus a full `title` for hover), from an
+ * epoch or ISO value. Shared by the Graph Runs ledger list and the Memories table. The words come from
+ * the one formatter, `$lib/format/time` (UI kit step 1d).
  */
-
-const compactDate = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' });
-const compactTime12h = new Intl.DateTimeFormat(undefined, {
-  hour: 'numeric',
-  minute: '2-digit',
-  second: '2-digit',
-  hour12: true
-});
+import { clock, fullDateTime, shortDate } from './time';
 
 /**
  * Parse a flexible timestamp into a `Date` (or `null`). Accepts epoch numbers
@@ -35,13 +26,9 @@ export function parseFlexibleDate(value: unknown): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-/** Stacked date + time strings (plus a full locale string for `title`); `—` when unparseable. */
+/** Stacked date + time strings (plus the full date for `title`); `—` when unparseable. */
 export function formatCompactDateTime(value: unknown): { date: string; time: string; title: string } {
   const d = parseFlexibleDate(value);
   if (!d) return { date: '—', time: '—', title: '' };
-  return {
-    date: compactDate.format(d),
-    time: compactTime12h.format(d),
-    title: d.toLocaleString()
-  };
+  return { date: shortDate(d), time: clock(d, true), title: fullDateTime(d) };
 }

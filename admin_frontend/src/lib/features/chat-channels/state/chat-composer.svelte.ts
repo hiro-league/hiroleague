@@ -49,7 +49,7 @@ export function createChatComposer(opts: ChatComposerOptions) {
       const sentAt = new Date().toISOString();
       draftMessage = '';
       engine.addOptimisticMessage({
-        id: sent.data.message_id,
+        id: sent.message_id,
         message_pk: engine.nextOptimisticPk(),
         channel_id: id,
         sender_type: 'user',
@@ -125,7 +125,7 @@ export function createChatComposer(opts: ChatComposerOptions) {
       });
       const sentAt = new Date().toISOString();
       engine.addOptimisticMessage({
-        id: sent.data.message_id,
+        id: sent.message_id,
         message_pk: engine.nextOptimisticPk(),
         channel_id: id,
         sender_type: 'user',
@@ -134,7 +134,7 @@ export function createChatComposer(opts: ChatComposerOptions) {
         content: [
           {
             content_type: 'audio',
-            body: `optimistic_audio:${sent.data.message_id}`,
+            body: `optimistic_audio:${sent.message_id}`,
             metadata: {
               duration_ms,
               media_type: effectiveMime,

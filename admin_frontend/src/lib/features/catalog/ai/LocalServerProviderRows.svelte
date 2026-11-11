@@ -5,7 +5,7 @@
    * live status (`GET /api/ai/local-servers`). The action opens the server dialog.
    */
   import type { CatalogProviderRow } from '$lib/api/catalog';
-  import { humanDateTime } from '$lib/format/human-datetime';
+  import { dateTime } from '$lib/format/time';
   import AiProviderRow from './AiProviderRow.svelte';
   import type { AiController } from './ai-controller.svelte';
   import { LOCAL_SERVER_IDS, LOCAL_SERVER_KIND_LABELS, serverInfo, serverStatus } from './ai-profile-rules';
@@ -42,7 +42,7 @@
     models={server?.models.length ?? 0}
     kinds="chat"
     recommended={loaded ? { kind: 'loaded', name: loaded.display_name || loaded.name, id: loaded.id } : null}
-    updated={server ? humanDateTime(server.checked_at) : '-'}
+    updated={server ? (server.checked_at ? dateTime(server.checked_at) : '—') : '-'}
     info={server ? serverInfo(server, ai.profilesOnProvider(row.id)) : (ai.serversError ?? 'Checking the server…')}
     actionLabel="Server"
     onAction={() => ai.openProviderDialog(row.id)}

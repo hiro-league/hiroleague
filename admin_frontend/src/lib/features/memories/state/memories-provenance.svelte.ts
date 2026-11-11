@@ -31,7 +31,7 @@ export function createMemoryProvenance() {
     try {
       const res = await fetchGraphChunksDetail(ids, ctrl.signal);
       if (ctrl.signal.aborted) return;
-      chunks = res.data?.chunks ?? [];
+      chunks = res?.chunks ?? [];
     } catch (e) {
       if (ctrl.signal.aborted) return; // expected when superseded / closed
       error = e instanceof Error ? e.message : 'Failed to load source turns.';

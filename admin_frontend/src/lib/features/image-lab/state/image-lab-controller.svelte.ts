@@ -63,10 +63,10 @@ export function createImageLabController() {
     error = null;
     try {
       const payload = await getImageLabOptions();
-      options = payload.data;
-      const firstAvailable = payload.data.models.find((m) => m.available);
-      model = payload.data.default_model ?? firstAvailable?.id ?? payload.data.models[0]?.id ?? '';
-      applyProfile(payload.data.default_profile);
+      options = payload;
+      const firstAvailable = payload.models.find((m) => m.available);
+      model = payload.default_model ?? firstAvailable?.id ?? payload.models[0]?.id ?? '';
+      applyProfile(payload.default_profile);
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to load Image Lab options.';
       options = null;
@@ -102,7 +102,7 @@ export function createImageLabController() {
         steps,
         seed
       });
-      result = payload.data;
+      result = payload;
     } catch (err) {
       generateError = err instanceof Error ? err.message : 'Image generation failed.';
     } finally {

@@ -71,7 +71,7 @@ export function createEvalRunController(ctx: EvalRunCtx, opts: { initialModes: s
   async function hydrateFromServer() {
     try {
       const res = await getKnowledgeEvalState();
-      const state = res.data;
+      const state = res;
       if (!state) {
         // No run on the server (idle, or server restarted) — only reset if we're
         // not mid-start locally (don't clobber a run we just kicked off).

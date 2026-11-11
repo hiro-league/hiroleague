@@ -6,7 +6,7 @@
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import RefreshableSectionCard from '$lib/features/channels-devices/shared/RefreshableSectionCard.svelte';
-  import { humanDateTime } from '$lib/format/human-datetime';
+  import { dateTime } from '$lib/format/time';
   import type { ExtensionsController } from '../state/extensions-controller.svelte';
 
   let { ctrl }: { ctrl: ExtensionsController } = $props();
@@ -60,12 +60,12 @@
               {#if row.connected}
                 <Badge variant="success">Connected</Badge>
                 <span class="truncate text-xs text-muted-foreground" title={row.remote ?? ''}>
-                  since {humanDateTime(row.connected_at)}
+                  since {row.connected_at ? dateTime(row.connected_at) : '—'}
                 </span>
               {:else}
                 <Badge variant="secondary">Not connected</Badge>
                 <span class="truncate text-xs text-muted-foreground">
-                  last seen {humanDateTime(row.last_seen)}
+                  last seen {row.last_seen ? dateTime(row.last_seen) : '—'}
                 </span>
               {/if}
             </span>
@@ -73,7 +73,7 @@
               <span class="truncate text-xs text-muted-foreground">{ctrl.testResults[row.extension_id]}</span>
             {/if}
           </span>
-          <span class="truncate text-xs text-muted-foreground">{humanDateTime(row.paired_at)}</span>
+          <span class="truncate text-xs text-muted-foreground">{row.paired_at ? dateTime(row.paired_at) : '—'}</span>
           <span class="flex justify-end gap-2">
             <Button
               size="sm"

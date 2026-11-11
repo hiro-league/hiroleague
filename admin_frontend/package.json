@@ -26,6 +26,7 @@
     "@tailwindcss/vite": "^4.2.4",
     "@types/node": "^25.6.0",
     "json-schema-to-typescript": "^15.0.4",
+    "mode-watcher": "^1.1.0",
     "shadcn-svelte": "^1.2.7",
     "svelte": "^5.43.14",
     "svelte-check": "^4.3.3",

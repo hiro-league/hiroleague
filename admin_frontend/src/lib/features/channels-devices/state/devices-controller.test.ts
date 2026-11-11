@@ -35,7 +35,7 @@ function make() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(api.listDevices).mockResolvedValue({ data: [] } as never);
+  vi.mocked(api.listDevices).mockResolvedValue([] as never);
   vi.stubGlobal('navigator', {
     clipboard: { writeText: vi.fn().mockResolvedValue(undefined) }
   });
@@ -62,7 +62,7 @@ describe('createDevicesController — defaults', () => {
 describe('load', () => {
   it('populates rows and clears loading on success', async () => {
     const { ctrl } = make();
-    vi.mocked(api.listDevices).mockResolvedValue({ data: [deviceRow()] } as never);
+    vi.mocked(api.listDevices).mockResolvedValue([deviceRow()] as never);
     await ctrl.load();
     expect(ctrl.rows).toHaveLength(1);
     expect(ctrl.loading).toBe(false);
@@ -82,8 +82,8 @@ describe('generatePairingCode', () => {
   it('opens pairing dialog data and reloads the list', async () => {
     const { ctrl } = make();
     const pairing = pairingData();
-    vi.mocked(api.generateDevicePairingCode).mockResolvedValue({ data: pairing } as never);
-    vi.mocked(api.listDevices).mockResolvedValue({ data: [deviceRow()] } as never);
+    vi.mocked(api.generateDevicePairingCode).mockResolvedValue(pairing as never);
+    vi.mocked(api.listDevices).mockResolvedValue([deviceRow()] as never);
 
     await ctrl.generatePairingCode();
 
@@ -114,8 +114,8 @@ describe('revoke flow', () => {
     const { ctrl, notify } = make();
     const row = deviceRow();
     ctrl.openRevoke(row);
-    vi.mocked(api.revokeDevice).mockResolvedValue({ data: 'revoked' } as never);
-    vi.mocked(api.listDevices).mockResolvedValue({ data: [] } as never);
+    vi.mocked(api.revokeDevice).mockResolvedValue('revoked' as never);
+    vi.mocked(api.listDevices).mockResolvedValue([] as never);
 
     await ctrl.submitRevoke();
 
@@ -143,9 +143,7 @@ describe('revoke flow', () => {
 describe('copyPairingPayload', () => {
   it('copies qr_payload and notifies on success', async () => {
     const { ctrl, notify } = make();
-    vi.mocked(api.generateDevicePairingCode).mockResolvedValue({
-      data: pairingData({ qr_payload: 'payload-xyz' })
-    } as never);
+    vi.mocked(api.generateDevicePairingCode).mockResolvedValue(pairingData({ qr_payload: 'payload-xyz' }) as never);
     await ctrl.generatePairingCode();
     await ctrl.copyPairingPayload();
 
@@ -163,9 +161,7 @@ describe('copyPairingPayload', () => {
 
   it('notifies on clipboard failure', async () => {
     const { ctrl, notify } = make();
-    vi.mocked(api.generateDevicePairingCode).mockResolvedValue({
-      data: pairingData()
-    } as never);
+    vi.mocked(api.generateDevicePairingCode).mockResolvedValue(pairingData() as never);
     await ctrl.generatePairingCode();
     vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('denied'));
     await ctrl.copyPairingPayload();
@@ -176,9 +172,7 @@ describe('copyPairingPayload', () => {
 describe('closePairing', () => {
   it('clears pairing and copy feedback when not busy', async () => {
     const { ctrl } = make();
-    vi.mocked(api.generateDevicePairingCode).mockResolvedValue({
-      data: pairingData()
-    } as never);
+    vi.mocked(api.generateDevicePairingCode).mockResolvedValue(pairingData() as never);
     await ctrl.generatePairingCode();
     await ctrl.copyPairingPayload();
     expect(ctrl.copied).toBe(true);

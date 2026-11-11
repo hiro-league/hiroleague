@@ -19,7 +19,7 @@ export type ActiveProviderDialog = 'add' | 'remove' | null;
 
 export function createActiveProvidersStore(notify: Notify = () => {}) {
   const listResource = createResource(
-    async () => (await listActiveProviders()).data ?? [],
+    async () => (await listActiveProviders()) ?? [],
     { initial: [] as ActiveProviderRow[], errorPrefix: 'Failed to load active providers.' }
   );
 
@@ -126,7 +126,7 @@ export function createActiveProvidersStore(notify: Notify = () => {}) {
     }
   );
 
-  const scanMutation = createMutation(async () => (await scanProviderEnvironment()).data, {
+  const scanMutation = createMutation(async () => (await scanProviderEnvironment()), {
     notify,
     successMsg: (count) =>
       count > 0
@@ -140,7 +140,7 @@ export function createActiveProvidersStore(notify: Notify = () => {}) {
   });
 
   const removeMutation = createMutation(
-    async () => (await removeProvider(selectedProvider!.provider_id)).data,
+    async () => (await removeProvider(selectedProvider!.provider_id)),
     {
       notify,
       successMsg: (removed) =>
@@ -174,7 +174,7 @@ export function createActiveProvidersStore(notify: Notify = () => {}) {
     addableProvidersLoading = true;
     try {
       const payload = await listAddableProviders();
-      addableProviders = payload.data;
+      addableProviders = payload;
       checkResult = null;
       checking = false;
       // Per-row "Add" passes the clicked provider so the dialog opens preselected to it;
@@ -219,7 +219,7 @@ export function createActiveProvidersStore(notify: Notify = () => {}) {
     checkResult = null;
     try {
       const payload = await checkProviderEndpoint(providerId, addForm.base_url);
-      checkResult = payload.data;
+      checkResult = payload;
     } catch (err) {
       notify('error', err instanceof Error ? err.message : 'Connection test failed.');
     } finally {
@@ -234,7 +234,7 @@ export function createActiveProvidersStore(notify: Notify = () => {}) {
     };
     try {
       const payload = await checkProviderEndpoint(providerId);
-      localStatus = { ...localStatus, [providerId]: { checking: false, result: payload.data } };
+      localStatus = { ...localStatus, [providerId]: { checking: false, result: payload } };
     } catch {
       // Treat a failed probe request as "unknown" (no result) rather than surfacing a toast on load.
       localStatus = { ...localStatus, [providerId]: { checking: false, result: null } };
