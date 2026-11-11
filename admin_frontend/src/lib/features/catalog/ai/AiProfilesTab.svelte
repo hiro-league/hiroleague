@@ -16,7 +16,8 @@
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
-  import * as Dialog from '$lib/components/ui/dialog';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
+  import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
@@ -192,7 +193,7 @@
 
 <AiProfileEditorDialog {ai} />
 
-<Dialog.ConfirmDialog
+<ConfirmDialog
   open={!!deleting}
   onOpenChange={(next) => {
     if (!next) ai.cancelDelete();
@@ -204,7 +205,7 @@
   onConfirm={() => ai.confirmDelete()}
 />
 
-<Dialog.ConfirmDialog
+<ConfirmDialog
   open={!!restoringProfile}
   onOpenChange={(next) => {
     if (!next) ai.cancelRestore();

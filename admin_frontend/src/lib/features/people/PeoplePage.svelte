@@ -9,7 +9,7 @@
   import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
   import SectionCard from '$lib/components/page/SectionCard.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
-  import ConfirmDialog from '$lib/components/ui/dialog/ConfirmDialog.svelte';
+  import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
   import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
   import ToastHost from '$lib/ui/ToastHost.svelte';
   import PersonDialog from './dialogs/PersonDialog.svelte';

@@ -7,7 +7,7 @@
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
-  import ConfirmDialog from '$lib/components/ui/dialog/ConfirmDialog.svelte';
+  import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
   import type { Notify } from '$lib/ui/toast-types';
   import { createChannelDetailController } from '../state/channel-detail-controller.svelte';
   import ChannelConnectionCard from './channel-detail/ChannelConnectionCard.svelte';

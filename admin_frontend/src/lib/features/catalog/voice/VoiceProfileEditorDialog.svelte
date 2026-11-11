@@ -12,7 +12,7 @@
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
-  import * as Dialog from '$lib/components/ui/dialog';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
   import SingleModelPicker from '$lib/features/preferences/SingleModelPicker.svelte';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';

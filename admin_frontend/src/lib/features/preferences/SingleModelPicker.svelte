@@ -3,7 +3,7 @@
   import { Brain, Check, Pencil, Plus, Trash2 } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import FieldHelp from '$lib/components/ui/field-help.svelte';
-  import * as Dialog from '$lib/components/ui/dialog';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
   import InlineWarningAlert from '$lib/ui/InlineWarningAlert.svelte';
   import { selectedModelIssue } from '$lib/catalog/selected-model-issue';
   import type { CatalogModelRow, CatalogProviderRow } from '$lib/api/catalog';

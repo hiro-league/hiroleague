@@ -2,8 +2,8 @@
   import { tick } from 'svelte';
   import { ChevronsUpDown, LoaderCircle, Plus } from '@lucide/svelte';
   import * as Command from '$lib/components/ui/command/index.js';
-  import * as Popover from '$lib/components/ui/popover/index.js';
-  import { Button } from '$lib/components/ui/button/index.js';
+  import * as Popover from '$kit/components/ui/popover/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
   import type { KnowledgeCategory } from '$lib/api/knowledge';
 
   let {

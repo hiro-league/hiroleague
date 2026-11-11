@@ -3,8 +3,8 @@
   import type { CharacterRow } from '$lib/api/characters';
   import FormField from '$lib/components/ui/form-field.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
-  import * as Dialog from '$lib/components/ui/dialog';
-  import { dialogCloseAllowed } from '$lib/components/ui/dialog/dialog-close-guard';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
+  import { dialogCloseAllowed } from '$lib/ui/dialog-close-guard';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import type { ChatChannelFormFields } from '$lib/features/chat-channels/shared/chat-channel-form';
 

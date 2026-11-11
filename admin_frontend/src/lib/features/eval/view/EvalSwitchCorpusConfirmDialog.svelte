@@ -3,8 +3,8 @@
   in-view results would be discarded (memory track persists per corpus, so no prompt there).
 -->
 <script lang="ts">
-  import ConfirmDialog from '$lib/components/ui/dialog/ConfirmDialog.svelte';
-  import * as Dialog from '$lib/components/ui/dialog';
+  import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
 
   type Props = {
     open: boolean;

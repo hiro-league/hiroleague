@@ -9,7 +9,7 @@
   import ChatChannelsMessagesPanel from '$lib/features/chat-channels/messages/ChatChannelsMessagesPanel.svelte';
   import ChatChannelDeleteModal from '$lib/features/chat-channels/modals/ChatChannelDeleteModal.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
-  import * as Dialog from '$lib/components/ui/dialog';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
   import { getChatEngine } from '$lib/features/chat-channels/state/chat-engine-singleton.svelte';
   import {
     CHAT_CHANNELS_PANEL_IDS,

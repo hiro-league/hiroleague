@@ -1,8 +1,8 @@
 <script lang="ts">
   import { Button } from '$kit/components/ui/button/index.js';
-  import * as Dialog from '$lib/components/ui/dialog';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
-  import { Input } from '$lib/components/ui/input';
+  import { Input } from '$kit/components/ui/input/index.js';
   import type { PeopleController } from '../state/people-controller.svelte';
 
   let { ctrl }: { ctrl: PeopleController } = $props();

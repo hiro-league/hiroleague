@@ -1,5 +1,5 @@
 <script lang="ts">
-  import * as Dialog from '$lib/components/ui/dialog';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
   import { previewKnowledgeFile, type KnowledgeScannedFile } from '$lib/api/knowledge';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import InlineLoading from '$lib/ui/InlineLoading.svelte';

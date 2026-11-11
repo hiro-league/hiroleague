@@ -1,5 +1,5 @@
 <script lang="ts">
-  import ConfirmDialog from '$lib/components/ui/dialog/ConfirmDialog.svelte';
+  import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
 
   type Props = {
     open: boolean;

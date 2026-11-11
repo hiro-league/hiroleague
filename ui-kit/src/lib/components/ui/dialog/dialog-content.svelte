@@ -14,16 +14,20 @@
 		portalProps,
 		children,
 		showCloseButton = true,
+		overlayClass,
 		...restProps
 	}: WithoutChildrenOrChild<DialogPrimitive.ContentProps> & {
 		portalProps?: WithoutChildrenOrChild<ComponentProps<typeof DialogPortal>>;
 		children: Snippet;
 		showCloseButton?: boolean;
+		// The Hiro kit: classes for the backdrop (a lighter or blurred one). Kept when shadcn's CLI rewrites this
+		// file: check the diff.
+		overlayClass?: string;
 	} = $props();
 </script>
 
 <DialogPortal {...portalProps}>
-	<DialogOverlay />
+	<DialogOverlay class={overlayClass} />
 	<DialogPrimitive.Content
 		bind:ref
 		data-slot="dialog-content"

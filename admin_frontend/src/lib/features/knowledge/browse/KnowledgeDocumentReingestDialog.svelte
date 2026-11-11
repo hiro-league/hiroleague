@@ -3,7 +3,7 @@
   import type { KnowledgeDocument, KnowledgeJobData } from '$lib/api/knowledge';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
-  import * as Dialog from '$lib/components/ui/dialog';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
   import KnowledgeAffectedDocumentsList from '$lib/features/knowledge/browse/KnowledgeAffectedDocumentsList.svelte';
   import type { KnowledgeIngestModel } from '$lib/features/knowledge/state/knowledge-ingest.svelte';
   import { jobElapsed } from '$lib/features/knowledge/shared/knowledge-pure';

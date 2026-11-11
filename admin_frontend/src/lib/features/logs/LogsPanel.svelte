@@ -4,7 +4,7 @@
   import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
   import AdminMasterDetail from '$lib/components/page/table/AdminMasterDetail.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
-  import * as Dialog from '$lib/components/ui/dialog';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import InlineWarningAlert from '$lib/ui/InlineWarningAlert.svelte';
   import type { ToastNotifier } from '$lib/ui/create-toast-notifier.svelte';

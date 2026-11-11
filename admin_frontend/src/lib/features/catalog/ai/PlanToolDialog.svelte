@@ -8,7 +8,7 @@
   import { ExternalLink, LogIn, LogOut, MessageSquare, RefreshCw, X } from '@lucide/svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
-  import * as Dialog from '$lib/components/ui/dialog';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
   import { dateTime } from '$lib/format/time';
   import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';

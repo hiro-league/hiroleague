@@ -13,7 +13,7 @@
   import { House, LogIn, TriangleAlert } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
-  import { Input } from '$lib/components/ui/input';
+  import { Input } from '$kit/components/ui/input/index.js';
   import { backToAppUrl, offeredSignInUrl } from '$lib/api/auth';
   import { adminSession } from '$lib/runtime/admin-session.svelte';
 

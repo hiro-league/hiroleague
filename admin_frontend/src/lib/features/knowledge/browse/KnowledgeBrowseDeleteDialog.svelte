@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { KnowledgeDocument } from '$lib/api/knowledge';
-  import ConfirmDialog from '$lib/components/ui/dialog/ConfirmDialog.svelte';
+  import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
   import KnowledgeAffectedDocumentsList from '$lib/features/knowledge/browse/KnowledgeAffectedDocumentsList.svelte';
   import {
     KNOWLEDGE_BROWSE_BULK_DIALOG,

@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { Button } from '$kit/components/ui/button/index.js';
-  import * as Dialog from '$lib/components/ui/dialog';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
 
   // Shared Dialog.Root → Content → Header (title + actions) → body → Footer scaffold for
   // both ingest and retrieval trace dialogs. Callers supply snippets for the parts that differ.

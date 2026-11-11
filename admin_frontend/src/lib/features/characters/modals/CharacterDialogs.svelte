@@ -1,5 +1,5 @@
 <script lang="ts">
-  import * as Dialog from '$lib/components/ui/dialog';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import CharacterPhotoCropModal from '$lib/features/characters/modals/CharacterPhotoCropModal.svelte';
   import type { createCharactersPageController } from '$lib/features/characters/state/characters-controller.svelte';

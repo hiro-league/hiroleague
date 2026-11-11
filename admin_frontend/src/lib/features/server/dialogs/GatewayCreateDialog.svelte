@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Button } from '$kit/components/ui/button/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
-  import * as Dialog from '$lib/components/ui/dialog';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
   import type { createGatewayStore } from '../state/gateway-store.svelte';
 
   let { gateway }: { gateway: ReturnType<typeof createGatewayStore> } = $props();

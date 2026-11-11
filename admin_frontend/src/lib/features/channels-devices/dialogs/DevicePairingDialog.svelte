@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Check, Copy, Link2 } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
-  import * as Dialog from '$lib/components/ui/dialog';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
   import type { DevicesController } from '../state/devices-controller.svelte';
   import { formatDeviceTimestamp } from '../shared/channels-devices-format';
   import { sanitizePairingQrSvg } from '../shared/sanitize-pairing-qr-svg';

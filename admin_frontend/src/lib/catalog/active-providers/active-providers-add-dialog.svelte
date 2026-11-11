@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Button } from '$kit/components/ui/button/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
-  import * as Dialog from '$lib/components/ui/dialog';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
   import type { AddableProviderRow } from '$lib/api/catalog';
 

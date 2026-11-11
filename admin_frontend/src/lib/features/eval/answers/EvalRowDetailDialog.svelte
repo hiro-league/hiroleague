@@ -13,7 +13,7 @@
   import SearchInput from '$lib/search/SearchInput.svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
-  import * as Dialog from '$lib/components/ui/dialog';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
   import Highlight from '$lib/search/Highlight.svelte';
   import EvalLegActions from '$lib/features/eval/answers/EvalLegActions.svelte';
   import EvalRecalledTable from '$lib/features/eval/answers/EvalRecalledTable.svelte';
