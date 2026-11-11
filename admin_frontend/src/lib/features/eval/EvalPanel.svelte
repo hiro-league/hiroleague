@@ -19,7 +19,7 @@
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import { createEvalSubtabPreferences } from '$lib/preferences/eval-preferences.svelte';
   import type { EvalSubtabPreference } from '$lib/preferences/keys';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import EvalCorpusReview from '$lib/features/eval/view/EvalCorpusReview.svelte';
   import EvalClearResultsConfirmDialog from '$lib/features/eval/view/EvalClearResultsConfirmDialog.svelte';
   import EvalSwitchCorpusConfirmDialog from '$lib/features/eval/view/EvalSwitchCorpusConfirmDialog.svelte';

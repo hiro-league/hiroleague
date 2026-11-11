@@ -14,8 +14,8 @@
   import SectionCard from '$lib/components/page/SectionCard.svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
-  import Badge from '$lib/components/ui/badge.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$lib/components/ui/dialog';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
@@ -178,7 +178,7 @@
                   <RotateCcw size={13} /> Restore default
                 </Button>
               {:else}
-                <Button size="sm" variant="destructive-outline" onclick={() => ai.askDelete(profile.id)}>
+                <Button size="sm" variant="destructive" onclick={() => ai.askDelete(profile.id)}>
                   <Trash2 size={13} /> Delete
                 </Button>
               {/if}

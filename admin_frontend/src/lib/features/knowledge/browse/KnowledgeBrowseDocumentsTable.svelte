@@ -2,7 +2,7 @@
   import { Search } from '@lucide/svelte';
   import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
   import type { KnowledgeDocument } from '$lib/api/knowledge';
   import { formatChatTimestamp } from '$lib/features/chat-channels/chat-datetime';
   import type { KnowledgeBrowseModel } from '$lib/features/knowledge/state/knowledge-browse.svelte';

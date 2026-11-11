@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Upload } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
   import * as Dialog from '$lib/components/ui/dialog';
   import { untrack } from 'svelte';

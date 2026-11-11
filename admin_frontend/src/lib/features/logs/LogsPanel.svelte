@@ -3,7 +3,7 @@
   import { page } from '$app/state';
   import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
   import AdminMasterDetail from '$lib/components/page/table/AdminMasterDetail.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$lib/components/ui/dialog';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import InlineWarningAlert from '$lib/ui/InlineWarningAlert.svelte';

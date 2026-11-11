@@ -11,7 +11,7 @@
   import { base } from '$app/paths';
   import { page } from '$app/state';
   import { House, LogIn, TriangleAlert } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
   import { Input } from '$lib/components/ui/input';
   import { backToAppUrl, offeredSignInUrl } from '$lib/api/auth';

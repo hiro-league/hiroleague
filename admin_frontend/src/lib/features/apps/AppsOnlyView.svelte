@@ -6,7 +6,7 @@
    */
   import { base } from '$app/paths';
   import { LogOut } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import { adminSession } from '$lib/runtime/admin-session.svelte';
   import AppsCard from './AppsCard.svelte';
 

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Check, Copy } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$lib/components/ui/dialog';
   import { dateTime } from '$lib/format/time';
   import type { ExtensionsController } from '../state/extensions-controller.svelte';

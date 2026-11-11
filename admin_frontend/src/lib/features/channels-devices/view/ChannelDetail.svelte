@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { ArrowLeft } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import SectionCard from '$lib/components/page/SectionCard.svelte';
   import { ADMIN_SECTION_TITLE } from '$lib/styling/admin-tokens';
   import InlineLoading from '$lib/ui/InlineLoading.svelte';

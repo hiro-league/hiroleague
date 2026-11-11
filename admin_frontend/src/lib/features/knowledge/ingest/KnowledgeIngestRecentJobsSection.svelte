@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ChevronRight } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import { Badge } from '$kit/components/ui/badge/index.js';
   import { formatChatTimestamp } from '$lib/features/chat-channels/chat-datetime';
   import type { KnowledgeIngestModel } from '$lib/features/knowledge/state/knowledge-ingest.svelte';
   import { formatJobTotalsSummary } from '$lib/features/knowledge/shared/knowledge-pure';

@@ -6,8 +6,8 @@
    * action button that opens the provider's dialog.
    */
   import { Settings2 } from '@lucide/svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
   import FieldHelp from '$lib/components/ui/field-help.svelte';
   import { AVAILABILITY_FILTER_UI } from '$lib/features/catalog/shared/catalog-filter-ui';
   import { cn } from '$lib/utils';

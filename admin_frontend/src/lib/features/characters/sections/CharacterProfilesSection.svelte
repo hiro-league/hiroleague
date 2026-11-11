@@ -5,7 +5,7 @@
    * as `ai_profiles_json` / `voice_profiles_json`; the saved character's resolution shows below.
    */
   import { RefreshCw } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import CharacterResolvedBlock from '$lib/features/characters/sections/CharacterResolvedBlock.svelte';
   import CharacterSectionCard from '$lib/features/characters/sections/CharacterSectionCard.svelte';
   import OrderedProfileList from '$lib/features/characters/sections/OrderedProfileList.svelte';

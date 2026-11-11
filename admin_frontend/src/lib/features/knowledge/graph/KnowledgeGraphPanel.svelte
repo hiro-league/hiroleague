@@ -3,7 +3,7 @@
   import { createGraphFullscreenLifecycle } from '../shared/graph-fullscreen';
   import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
   import { cn } from '$lib/utils';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import { chatOverlay } from '$lib/features/chat-channels/overlay/chat-overlay-store.svelte';
   import type { KnowledgeGraphModel } from '../state/knowledge-graph.svelte';
   import { createGraphEngineBridge } from '../state/graph/graph-engine-bridge.svelte';

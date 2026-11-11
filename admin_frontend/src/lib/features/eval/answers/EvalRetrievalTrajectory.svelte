@@ -6,7 +6,7 @@
 -->
 <script lang="ts">
   import { FileSearch, LoaderCircle } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import type { RecalledFact } from '$lib/features/eval/shared/eval-events';
   import type { RetrievalLoop } from '$lib/features/eval/shared/retrieval-loop';
   import { trajectoryStats } from './eval-trajectory-controller.svelte';

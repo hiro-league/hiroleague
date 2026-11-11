@@ -9,6 +9,10 @@
 				secondary: "bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80",
 				destructive: "bg-destructive/10 [a]:hover:bg-destructive/20 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 text-destructive dark:bg-destructive/20",
 				outline: "border-border text-foreground [a]:hover:bg-muted [a]:hover:text-muted-foreground",
+				// The Hiro kit's two status colours beside destructive: all is well, look at this (UI kit step 3; the apps
+				// recoloured a Badge by hand for these, and the HiroLeague admin's own Badge had them).
+				success: "bg-success/15 text-success [a]:hover:bg-success/25",
+				warning: "bg-warning/15 text-warning [a]:hover:bg-warning/25",
 				ghost: "hover:bg-muted hover:text-muted-foreground dark:hover:bg-muted/50",
 				link: "text-primary underline-offset-4 hover:underline",
 			},

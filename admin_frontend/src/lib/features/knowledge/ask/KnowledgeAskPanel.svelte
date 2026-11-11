@@ -1,8 +1,8 @@
 <script lang="ts">
   import { BookText, Code, ExternalLink, LoaderCircle, Search } from '@lucide/svelte';
   import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import { Badge } from '$kit/components/ui/badge/index.js';
   import KnowledgeAskFilterBar from '$lib/features/knowledge/ask/KnowledgeAskFilterBar.svelte';
   import KnowledgeAskCompareView from '$lib/features/knowledge/ask/KnowledgeAskCompareView.svelte';
   import KnowledgeCollapsibleSectionCard from '$lib/features/knowledge/shared/KnowledgeCollapsibleSectionCard.svelte';

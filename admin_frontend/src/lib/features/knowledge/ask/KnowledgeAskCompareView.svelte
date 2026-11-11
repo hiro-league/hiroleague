@@ -14,7 +14,7 @@
 -->
 <script lang="ts">
   import { ExternalLink } from '@lucide/svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
   import { graphRunPageUrl } from '$lib/features/graph-runs/graph-runs-pure';
   import type { KnowledgeAnswerCompareData, KnowledgeAnswerData } from '$lib/api/knowledge';
 

@@ -8,7 +8,7 @@
   import { Download, FoldVertical, ListChecks, ListX, LoaderCircle, UnfoldVertical } from '@lucide/svelte';
   import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
   import { useTableFilters } from '$lib/components/page/table/use-table-filters.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import { setupStickyHeightVar } from '$lib/styling/sticky-height';
   import { ADMIN_SELECT_SM } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';

@@ -5,7 +5,7 @@
    * working dict and the mutation handlers; this bar binds the active id and fires the actions.
    */
   import type { AnswerPromptProfile } from '$lib/api/preferences';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
   import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
 

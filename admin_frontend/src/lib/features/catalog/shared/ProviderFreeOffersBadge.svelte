@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ExternalLink, Gift } from '@lucide/svelte';
   import * as Dialog from '$lib/components/ui/dialog';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import type { CatalogProviderFreeOffer } from '$lib/api/catalog';
   import { catalogMultilineParagraphs } from '$lib/features/catalog/shared/format-catalog-multiline';
 

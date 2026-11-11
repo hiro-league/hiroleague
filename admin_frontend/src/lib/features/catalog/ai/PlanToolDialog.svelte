@@ -6,8 +6,8 @@
    * page shows; Codex shows a link and a code to type there; both are polled until done.
    */
   import { ExternalLink, LogIn, LogOut, MessageSquare, RefreshCw, X } from '@lucide/svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$lib/components/ui/dialog';
   import { dateTime } from '$lib/format/time';
   import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
@@ -156,7 +156,7 @@
           </Button>
         {/if}
         {#if tool.signed_in}
-          <Button variant="destructive-outline" disabled={!!busy} onclick={() => void ai.signOut(tool.id)}>
+          <Button variant="destructive" disabled={!!busy} onclick={() => void ai.signOut(tool.id)}>
             <LogOut size={15} /> Sign out
           </Button>
         {/if}

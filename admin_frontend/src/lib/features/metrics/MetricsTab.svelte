@@ -3,8 +3,8 @@
   import { RefreshCw } from '@lucide/svelte';
   import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
   import FormField from '$lib/components/ui/form-field.svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
   import { setupMetricsTabRuntime } from '$lib/features/metrics/shared/metrics-page-lifecycle';
   import { createMetricsController } from '$lib/features/metrics/state/metrics-controller.svelte';
   import MetricsPanel from '$lib/features/metrics/view/MetricsPanel.svelte';

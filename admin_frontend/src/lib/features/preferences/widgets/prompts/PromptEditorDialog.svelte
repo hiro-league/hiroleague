@@ -6,7 +6,7 @@
    * the backend immediately); Cancel / close discards the working copy (with a confirm when dirty).
    * The page only selects which version opens here — see PromptLibraryField.
    */
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$lib/components/ui/dialog';
   import FormField from '$lib/components/ui/form-field.svelte';
   import MarkdownEditorPreview from '$lib/components/ui/markdown/MarkdownEditorPreview.svelte';

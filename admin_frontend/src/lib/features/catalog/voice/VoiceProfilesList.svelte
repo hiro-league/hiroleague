@@ -8,8 +8,8 @@
   import SectionCard from '$lib/components/page/SectionCard.svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
-  import Badge from '$lib/components/ui/badge.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
@@ -126,14 +126,14 @@
               <span class="flex flex-wrap justify-end gap-2">
                 <Button size="sm" variant="outline" onclick={() => onedit(r)}><Pencil size={13} /> Edit</Button>
                 <Button size="sm" variant="outline" onclick={() => onduplicate(r)}><Copy size={13} /> Duplicate</Button>
-                <Button size="sm" variant="destructive-outline" onclick={() => (confirmDelete = r.id)}><Trash2 size={13} /> Delete</Button>
+                <Button size="sm" variant="destructive" onclick={() => (confirmDelete = r.id)}><Trash2 size={13} /> Delete</Button>
               </span>
               {#if confirmDelete === r.id}
                 <span class="flex flex-wrap items-center justify-end gap-2 text-xs">
                   Delete "{r.label}"?{r.used_by.length ? ' Its uses will have no voice.' : ''}{isHiroVoice(r)
                     ? " Hiro won't speak its replies until another voice is picked."
                     : ''}
-                  <Button size="sm" variant="destructive-outline" onclick={() => remove(r)}>Delete</Button>
+                  <Button size="sm" variant="destructive" onclick={() => remove(r)}>Delete</Button>
                   <Button size="sm" variant="ghost" onclick={() => (confirmDelete = null)}>Cancel</Button>
                 </span>
               {/if}

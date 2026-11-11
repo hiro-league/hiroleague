@@ -2,7 +2,7 @@
   import { base } from '$app/paths';
   import { goto, invalidateAll } from '$app/navigation';
   import { page } from '$app/state';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import { RefreshCw } from '@lucide/svelte';
 

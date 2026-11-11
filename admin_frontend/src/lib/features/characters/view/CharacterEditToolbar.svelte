@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Save, Trash2 } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import type { CharacterDetail } from '$lib/api/characters';
 
   let {

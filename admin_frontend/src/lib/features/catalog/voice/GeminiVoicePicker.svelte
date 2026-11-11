@@ -13,8 +13,8 @@
    */
   import { onDestroy } from 'svelte';
   import { Check, Loader, Play, Plus, RefreshCw, Square, Trash2, Wand, X } from '@lucide/svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import {
     addVoice,
@@ -222,7 +222,7 @@
     <!-- Asked here, on the row: no second dialog over the editor. -->
     <div class="flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 px-2 py-1.5 text-xs">
       <span class="flex-1">Delete "{v.name}" at Google? This cannot be undone. A voice profile still using it is refused.</span>
-      <Button size="sm" variant="destructive-outline" disabled={deleting} onclick={() => remove(v)}>Delete</Button>
+      <Button size="sm" variant="destructive" disabled={deleting} onclick={() => remove(v)}>Delete</Button>
       <Button size="sm" variant="ghost" onclick={() => (confirmDelete = null)}>Cancel</Button>
     </div>
   {/if}

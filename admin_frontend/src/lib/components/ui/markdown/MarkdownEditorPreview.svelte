@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import MarkdownPreview from '$lib/components/ui/markdown/MarkdownPreview.svelte';
   import { cn } from '$lib/utils';
 

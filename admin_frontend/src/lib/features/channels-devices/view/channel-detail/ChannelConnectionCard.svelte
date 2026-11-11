@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import SectionCard from '$lib/components/page/SectionCard.svelte';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import { ADMIN_SECTION_TITLE } from '$lib/styling/admin-tokens';
@@ -47,7 +47,7 @@
         </Button>
       {/each}
       <Button
-        variant="destructive-outline"
+        variant="destructive"
         size="sm"
         onclick={() => ctrl.disable()}
         disabled={ctrl.busy}
@@ -60,7 +60,7 @@
       </Button>
     {/if}
     <Button
-      variant="destructive-outline"
+      variant="destructive"
       size="sm"
       class="ml-auto"
       onclick={onRequestUninstall}

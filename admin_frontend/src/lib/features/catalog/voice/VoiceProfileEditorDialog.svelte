@@ -10,8 +10,8 @@
   import type { CatalogProviderRow } from '$lib/api/catalog';
   import { Copy, Trash2, TriangleAlert } from '@lucide/svelte';
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$lib/components/ui/dialog';
   import FormField from '$lib/components/ui/form-field.svelte';
   import SingleModelPicker from '$lib/features/preferences/SingleModelPicker.svelte';
@@ -221,13 +221,13 @@
         <span class="flex-1">
           Delete "{current.label}"?{usedBy.length ? ` ${usedBy.join(', ')} will have no voice until another is picked.` : ''}
         </span>
-        <Button size="sm" variant="destructive-outline" disabled={saving} onclick={remove}>Delete</Button>
+        <Button size="sm" variant="destructive" disabled={saving} onclick={remove}>Delete</Button>
         <Button size="sm" variant="ghost" onclick={() => (confirmDelete = false)}>Cancel</Button>
       </div>
     {/if}
 
     <Dialog.Footer class="sm:justify-between">
-      <Button variant="destructive-outline" disabled={!current || saving} onclick={() => (confirmDelete = true)}><Trash2 size={13} /> Delete</Button>
+      <Button variant="destructive" disabled={!current || saving} onclick={() => (confirmDelete = true)}><Trash2 size={13} /> Delete</Button>
       <span class="flex gap-2">
         <Button
           variant="outline"

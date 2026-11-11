@@ -12,7 +12,7 @@
     createCollapsibleSectionRegistry
   } from '$lib/components/page/collapsible-section-registry.svelte';
   import type { AdminSubtabDescriptor } from '$lib/components/page/tab-types';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import PrefManifestTab from '$lib/features/preferences/widgets/manifest/PrefManifestTab.svelte';
   import {
     PREFERENCE_TAB_IDS,

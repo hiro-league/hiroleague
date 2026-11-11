@@ -4,7 +4,7 @@
   import MultiSelectFilter, {
     type MultiSelectOption
   } from '$lib/components/ui/multi-select-filter.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import { X } from '@lucide/svelte';
   import type { LogsPageController } from './state/logs-controller.svelte';
   import type { LogsPreferences } from '$lib/preferences/logs-preferences.svelte';

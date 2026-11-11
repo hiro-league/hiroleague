@@ -6,7 +6,7 @@
   Cap/trim mechanics live in eval-recall-render.ts (kept in lockstep with services/eval/judge.py).
 -->
 <script lang="ts">
-  import Badge from '$lib/components/ui/badge.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
   import Highlight from '$lib/search/Highlight.svelte';
   import { fmtEpisodeDate } from '$lib/features/eval/shared/eval-format';
   import type { EvalRecallRender, RecalledFact } from '$lib/features/eval/shared/eval-events';

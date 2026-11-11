@@ -8,7 +8,7 @@
   import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import AdminAvatarNameCell from '$lib/components/page/table/AdminAvatarNameCell.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import { FileText } from '@lucide/svelte';
   import { formatCompactDateTime } from '$lib/format/timestamp-cell';
   import Highlight from '$lib/search/Highlight.svelte';

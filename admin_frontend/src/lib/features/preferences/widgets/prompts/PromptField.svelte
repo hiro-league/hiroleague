@@ -5,7 +5,7 @@
    * place; the dialog saves the value straight to the backend (ctrl.saveDialogEdits), so this field
    * never marks the page-level form dirty.
    */
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import FieldHelp from '$lib/components/ui/field-help.svelte';
   import { cn } from '$lib/utils';
   import { getPreferenceByPath } from '$lib/features/preferences/state/preferences-edits';

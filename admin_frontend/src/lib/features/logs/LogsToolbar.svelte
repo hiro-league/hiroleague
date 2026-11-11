@@ -2,7 +2,7 @@
   import { ChevronDown, ChevronUp, PanelRightClose, PanelRightOpen, Pause, Play, Trash2 } from '@lucide/svelte';
   import SearchInput from '$lib/search/SearchInput.svelte';
   import type { LogTimeRange } from '$lib/api/logs';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import AdminIconToggleGroup from '$lib/components/page/AdminIconToggleGroup.svelte';
   import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';

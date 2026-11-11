@@ -1,7 +1,7 @@
 <script lang="ts">
   import { BookText, Code, Database, Search } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import { Badge } from '$kit/components/ui/badge/index.js';
   import * as Dialog from '$lib/components/ui/dialog';
   import type { KnowledgeDocument } from '$lib/api/knowledge';
   import { formatChatTimestamp } from '$lib/features/chat-channels/chat-datetime';

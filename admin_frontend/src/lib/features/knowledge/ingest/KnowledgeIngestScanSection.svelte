@@ -13,8 +13,8 @@
   } from '@lucide/svelte';
   import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import { Badge } from '$kit/components/ui/badge/index.js';
   import type { KnowledgeScannedFile } from '$lib/api/knowledge';
   import type { KnowledgeIngestModel } from '$lib/features/knowledge/state/knowledge-ingest.svelte';
   import { fileName, formatBytes, relativeFolderPath } from '$lib/features/knowledge/shared/knowledge-pure';

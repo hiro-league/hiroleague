@@ -8,7 +8,7 @@
 <script lang="ts">
   import { base } from '$app/paths';
   import { Download, LoaderCircle, Play, Settings2, Square } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import KnowledgeCollapsibleSectionCard from '$lib/features/knowledge/shared/KnowledgeCollapsibleSectionCard.svelte';
   import EvalTerminal from '$lib/features/eval/view/EvalTerminal.svelte';
   import EvalRebuildConfirmDialog from '$lib/features/eval/view/EvalRebuildConfirmDialog.svelte';

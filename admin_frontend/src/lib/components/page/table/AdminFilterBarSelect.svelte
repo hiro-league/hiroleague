@@ -1,7 +1,7 @@
 <script lang="ts">
   import { X } from '@lucide/svelte';
   import FormField from '$lib/components/ui/form-field.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import { ADMIN_SELECT, ADMIN_SELECT_SM, FILTER_CLEAR_ICON_BTN } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
 

@@ -2,7 +2,7 @@
   import type { Snippet } from 'svelte';
   import { RefreshCw } from '@lucide/svelte';
   import SectionCard from '$lib/components/page/SectionCard.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
   import InlineLoading from '$lib/ui/InlineLoading.svelte';

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { BarChart3, FileX2, ImageIcon, RefreshCw, Wrench } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import {
     cycleChatAudioSpeed,
     formatChatAudioSpeedLabel,
@@ -74,7 +74,7 @@
       </select>
     {/if}
     <Button
-      variant="destructive-outline"
+      variant="destructive"
       size="icon"
       class="size-8"
       disabled={ctrl.busy || !ctrl.selectedChannelId || ctrl.channelsLoading}

@@ -11,8 +11,8 @@
     Star,
     Trash2
   } from '@lucide/svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import type { WorkspaceRow } from '$lib/api/server';
   import AutostartBadge from '../shared/AutostartBadge.svelte';

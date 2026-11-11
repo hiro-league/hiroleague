@@ -12,8 +12,8 @@
   import AdminSubtabStrip from '$lib/components/page/AdminSubtabStrip.svelte';
   import SectionCard from '$lib/components/page/SectionCard.svelte';
   import SourceFilter from '$lib/components/page/SourceFilter.svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
   import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
   import type { AccessFeature, AccessSource, Person, RoleAccess } from '$lib/api/people';

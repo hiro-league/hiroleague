@@ -5,7 +5,7 @@
    */
   import { ChevronDown, ChevronUp, RefreshCw, X } from '@lucide/svelte';
   import AdminSubtabStrip from '$lib/components/page/AdminSubtabStrip.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import { cn } from '$lib/utils';
   import {
     graphRunTabId,

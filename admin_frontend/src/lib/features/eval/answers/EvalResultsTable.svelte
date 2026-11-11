@@ -7,7 +7,7 @@
 <script lang="ts">
   import { ChevronRight, CircleSlash, Flag, LoaderCircle } from '@lucide/svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
   import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
   import type { TableSortController } from '$lib/components/page/table/use-table-sort.svelte';
   import Highlight from '$lib/search/Highlight.svelte';

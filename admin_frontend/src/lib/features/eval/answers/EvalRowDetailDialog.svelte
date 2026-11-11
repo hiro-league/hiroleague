@@ -11,8 +11,8 @@
 <script lang="ts">
   import { Scissors } from '@lucide/svelte';
   import SearchInput from '$lib/search/SearchInput.svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$lib/components/ui/dialog';
   import Highlight from '$lib/search/Highlight.svelte';
   import EvalLegActions from '$lib/features/eval/answers/EvalLegActions.svelte';

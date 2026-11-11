@@ -1,6 +1,6 @@
 <script lang="ts">
   /** People → Roles (Phase 9a): name a new role; its rights are given after, in its own tab. */
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$lib/components/ui/dialog';
   import FormField from '$lib/components/ui/form-field.svelte';
   import { Input } from '$lib/components/ui/input';

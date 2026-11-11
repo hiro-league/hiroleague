@@ -6,7 +6,7 @@
    * Empty means Hiro's own: its chat profile / its voice. Replaced the catalog model pickers.
    */
   import { ArrowDown, ArrowUp, ExternalLink, Plus, X } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import { ADMIN_SELECT } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
   import { moveInList } from '$lib/features/characters/shared/characters-pure';

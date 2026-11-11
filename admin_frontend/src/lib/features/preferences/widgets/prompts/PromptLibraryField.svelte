@@ -6,7 +6,7 @@
    * dict to the backend on Save (or discards on Cancel). The "active/used" version stays owned
    * elsewhere (eval panel / active_*_id selector); this is edit-only.
    */
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
   import { getPreferenceByPath } from '$lib/features/preferences/state/preferences-edits';
   import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';

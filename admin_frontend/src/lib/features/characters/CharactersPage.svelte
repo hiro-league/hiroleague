@@ -6,7 +6,7 @@
   import AdminRecordTabChip from '$lib/components/page/AdminRecordTabChip.svelte';
   import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
   import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import CharactersBrowseSection from '$lib/features/characters/browse/CharactersBrowseSection.svelte';
   import CharacterViewPanel from '$lib/features/characters/view/CharacterViewPanel.svelte';
   import CharacterEditPanel from '$lib/features/characters/view/CharacterEditPanel.svelte';

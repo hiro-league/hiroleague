@@ -1,6 +1,6 @@
 <script lang="ts">
   import * as Dialog from '$lib/components/ui/dialog';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import CharacterPhotoCropModal from '$lib/features/characters/modals/CharacterPhotoCropModal.svelte';
   import type { createCharactersPageController } from '$lib/features/characters/state/characters-controller.svelte';
   import type { createUnsavedGuard } from '$lib/navigation/unsaved-guard.svelte';

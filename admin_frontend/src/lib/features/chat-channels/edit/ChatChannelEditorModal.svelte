@@ -2,7 +2,7 @@
   import { ImageIcon, Upload } from '@lucide/svelte';
   import type { CharacterRow } from '$lib/api/characters';
   import FormField from '$lib/components/ui/form-field.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$lib/components/ui/dialog';
   import { dialogCloseAllowed } from '$lib/components/ui/dialog/dialog-close-guard';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';

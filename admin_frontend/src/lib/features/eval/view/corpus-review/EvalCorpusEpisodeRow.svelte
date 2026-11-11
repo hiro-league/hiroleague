@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Badge from '$lib/components/ui/badge.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
   import MarkdownPreview from '$lib/components/ui/markdown/MarkdownPreview.svelte';
   import { Microscope, Share2 } from '@lucide/svelte';
   import type { CorpusEpisodeExtraction, EvalEpisode } from '$lib/api/eval';

@@ -3,7 +3,7 @@
   import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
   import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
   import AdminIconToggleGroup from '$lib/components/page/AdminIconToggleGroup.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import type { CatalogController } from '$lib/features/catalog/state/catalog-controller.svelte';
   import {
     AVAILABILITY_FILTER_IDS,

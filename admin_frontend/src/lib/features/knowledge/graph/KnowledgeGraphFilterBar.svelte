@@ -1,6 +1,6 @@
 <script lang="ts">
   import { FilterX } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import KnowledgeGraphFilterDropdown from './KnowledgeGraphFilterDropdown.svelte';
   import { type GraphFilterOption } from './graph-filter-dropdown-helpers';
   import type { KnowledgeGraphModel } from '../state/knowledge-graph.svelte';

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$lib/components/ui/dialog';
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
   import type { GraphChunkDetail } from '$lib/api/knowledge';

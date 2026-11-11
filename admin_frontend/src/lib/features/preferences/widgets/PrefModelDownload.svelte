@@ -5,7 +5,7 @@
    * which controller state to read — one widget for both, shared by the model-picker download slot and
    * the embedder field.
    */
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import type { LocalEmbedderRow, LocalRerankerRow } from '$lib/api/knowledge';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
 

@@ -8,7 +8,7 @@
   import { page } from '$app/state';
   import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
   import SectionCard from '$lib/components/page/SectionCard.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import ConfirmDialog from '$lib/components/ui/dialog/ConfirmDialog.svelte';
   import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
   import ToastHost from '$lib/ui/ToastHost.svelte';

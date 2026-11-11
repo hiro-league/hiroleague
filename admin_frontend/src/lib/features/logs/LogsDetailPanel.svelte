@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Copy } from '@lucide/svelte';
   import DetailPanelShell from '$lib/components/page/DetailPanelShell.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import type { Notify } from '$lib/ui/toast-types';
   import LogExtraSegments from './LogExtraSegments.svelte';
   import { LOGS_DETAIL_PANEL_ID } from './shared/logs-a11y';

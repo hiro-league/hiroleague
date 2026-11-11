@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Check, Copy } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
 
   let {
     value,

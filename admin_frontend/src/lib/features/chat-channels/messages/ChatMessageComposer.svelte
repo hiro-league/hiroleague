@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { Mic, Send, Square } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import ChatComposerOptions from '$lib/features/chat-channels/messages/ChatComposerOptions.svelte';
   import type { ChatChannelsPageController } from '$lib/features/chat-channels/state/chat-channels-controller.svelte';
   import { serverReadiness } from '$lib/runtime/server-readiness.svelte';
@@ -134,7 +134,7 @@
         <Send size={20} />
       </Button>
       <Button
-        variant="destructive-outline"
+        variant="destructive"
         class="h-11 min-w-11 shrink-0 self-stretch px-0"
         title="Record voice message"
         disabled={ctrl.composingBusy}

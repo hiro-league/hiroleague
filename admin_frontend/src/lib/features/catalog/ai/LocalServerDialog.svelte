@@ -6,8 +6,8 @@
    * Studio the context and batch Hiro loads models with. Save (`PUT`) then checks; Check checks now.
    */
   import { RefreshCw } from '@lucide/svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$lib/components/ui/dialog';
   import FormField from '$lib/components/ui/form-field.svelte';
   import { dateTime } from '$lib/format/time';

@@ -10,8 +10,8 @@
   import { tick } from 'svelte';
   import { Download, Loader, Send } from '@lucide/svelte';
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import type { Person } from '$lib/api/people';
   import {

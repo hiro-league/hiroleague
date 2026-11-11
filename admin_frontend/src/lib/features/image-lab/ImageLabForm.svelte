@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Sparkles, Star } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
   import SectionCard from '$lib/components/page/SectionCard.svelte';
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';

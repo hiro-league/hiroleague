@@ -4,7 +4,7 @@
    * right. Inputs bind to `ai.draft`; Save writes `ai.profiles.<id>` through the preferences API.
    */
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$lib/components/ui/dialog';
   import FormField from '$lib/components/ui/form-field.svelte';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';

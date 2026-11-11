@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { Brain, Check, Pencil, Plus, Trash2 } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import FieldHelp from '$lib/components/ui/field-help.svelte';
   import * as Dialog from '$lib/components/ui/dialog';
   import InlineWarningAlert from '$lib/ui/InlineWarningAlert.svelte';

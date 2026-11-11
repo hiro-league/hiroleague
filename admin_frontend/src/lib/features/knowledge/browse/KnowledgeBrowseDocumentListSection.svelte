@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Edit, FilterX, Network, RefreshCw, Repeat2, Trash2 } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import type { KnowledgeDocument } from '$lib/api/knowledge';
   import KnowledgeBrowseDocumentsTable from '$lib/features/knowledge/browse/KnowledgeBrowseDocumentsTable.svelte';
   import type { KnowledgeBrowseModel } from '$lib/features/knowledge/state/knowledge-browse.svelte';

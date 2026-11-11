@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ImageIcon, Upload } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
   import CharacterSectionCard from '$lib/features/characters/sections/CharacterSectionCard.svelte';
   import type { CharacterDetail } from '$lib/api/characters';

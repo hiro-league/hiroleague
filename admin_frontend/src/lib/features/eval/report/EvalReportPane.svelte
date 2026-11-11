@@ -7,7 +7,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { ChevronDown, ChevronRight, Trash2 } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import { fmtCost, pct } from '$lib/features/eval/shared/eval-format';
   import { orderedDifficulty } from '$lib/features/eval/shared/eval-display';
