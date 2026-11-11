@@ -8,7 +8,7 @@ import ts from 'typescript-eslint';
 import { hiroRules } from './src/lib/eslint-rules.js';
 
 export default defineConfig(
-	{ ignores: ['build/', '.svelte-kit/', 'node_modules/', 'src/lib/components/ui/'] }, // shadcn's components: added with its CLI, kept as it writes them
+	{ ignores: ['build/', '.svelte-kit/', 'node_modules/', 'src/lib/components/ui/', 'scripts/'] }, // scripts/: plain Node and the new-app template, outside the TypeScript project; shadcn's components: added with its CLI, kept as it writes them
 	js.configs.recommended,
 	ts.configs.recommended,
 	svelte.configs.recommended,

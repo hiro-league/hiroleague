@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en" class="dark" style="color-scheme: dark">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="text-scale" content="scale" />
+		<script>
+			// Dark by default. Apply a saved light choice (mode-watcher's key) before the page paints,
+			// so there is no dark->light flash; mode-watcher takes over once the app loads.
+			// With nothing saved, mode-watcher stores "system" before it reads its defaultMode, so a first visit on
+			// a light-mode computer came up light: the dark default is written here, where it is read first
+			// (the fix the HiroLeague admin got in UI kit step 1d).
+			try {
+				var saved = localStorage.getItem('mode-watcher-mode');
+				if (!saved) localStorage.setItem('mode-watcher-mode', (saved = 'dark'));
+				if (saved === 'light' || (saved === 'system' && matchMedia('(prefers-color-scheme: light)').matches)) {
+					document.documentElement.classList.remove('dark');
+					document.documentElement.style.colorScheme = 'light';
+				}
+			} catch {}
+		</script>
+		%sveltekit.head%
+	</head>
+	<body data-sveltekit-preload-data="hover">
+		<div style="display: contents">%sveltekit.body%</div>
+	</body>
+</html>
