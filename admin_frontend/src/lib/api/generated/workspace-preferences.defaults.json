@@ -184,7 +184,8 @@
   "ai": {
     "profiles": {},
     "uses": {},
-    "local_servers": {}
+    "local_servers": {},
+    "folders": {}
   },
   "voice": {
     "profiles": {},

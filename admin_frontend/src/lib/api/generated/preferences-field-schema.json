@@ -1010,6 +1010,13 @@
     "title": "Local Servers",
     "preferencesSaveSkip": true
   },
+  "ai.folders": {
+    "path": "ai.folders",
+    "nullable": false,
+    "type": "object",
+    "title": "Folders",
+    "preferencesSaveSkip": true
+  },
   "voice.profiles": {
     "path": "voice.profiles",
     "nullable": false,

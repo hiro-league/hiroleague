@@ -103,13 +103,16 @@ class ExtensionOffers(BaseModel):
 
 class ExtensionUse(BaseModel):
     """One thing the extension asks the core's AI for (Phase 7a): the core's admin points
-    each use at an AI profile. ``pictures`` is the most pictures one ask carries (0 = none)."""
+    each use at an AI profile. ``pictures`` is the most pictures one ask carries (0 = none).
+    ``folder``: the ask names a folder on the core's machine for the tool to read (a code review); only a
+    Claude Code or Codex profile can answer it, and only inside the folders the admin allowed this extension."""
 
     id: str
     name: str
     pictures: int = 0
     sound: bool = False
     json_answer: bool = Field(default=True, alias="json")
+    folder: bool = False
 
     model_config = {"populate_by_name": True}
 

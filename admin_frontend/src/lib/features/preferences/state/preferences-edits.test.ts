@@ -94,7 +94,8 @@ function makePrefs(overrides?: Partial<WorkspacePreferences>): WorkspacePreferen
         }
       },
       uses: {},
-      local_servers: {}
+      local_servers: {},
+      folders: {}
     },
     voice: { profiles: {}, uses: {}, hiro_profile: null, clip_cache_mb: 200 }
   };

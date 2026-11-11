@@ -46,7 +46,11 @@ elif "-p" in args:
     schema = json.loads(args[args.index("--json-schema") + 1]) if "--json-schema" in args else None
     assert "OPENAI_API_KEY" not in os.environ and "HIRO_SECRET" not in os.environ, "core secrets leaked"
     pictures = sorted(f for f in os.listdir(".") if f.endswith(".jpg"))
-    print(json.dumps({"is_error": False, "result": "ok", "structured_output": {"saw": len(pictures), "said": prompt[:20]},
+    tools = args[args.index("--tools") + 1] if "--tools" in args else None
+    sources = args[args.index("--setting-sources") + 1] if "--setting-sources" in args else None
+    print(json.dumps({"is_error": False, "result": "ok",
+                      "structured_output": {"saw": len(pictures), "said": prompt[:20], "cwd": os.getcwd(), "tools": tools,
+                                            "sources": sources, "files": sorted(os.listdir("."))},
                       "usage": {"input_tokens": 10, "cache_read_input_tokens": 1000, "cache_creation_input_tokens": 0,
                                 "output_tokens": 20},
                       "modelUsage": {"claude-sonnet-5-5": {}}}))
@@ -180,6 +184,39 @@ def test_an_ask_on_claude_code_writes_pictures_in_its_own_folder_with_a_clean_en
     assert result.estimate is not None and result.estimate > 0  # Sonnet's catalog price, cache read at its rate
     assert list((cli.work_folder(fake_tools)).iterdir()) == []  # the ask's folder is gone
     assert provider.effort(fake_tools, "sonnet", "off") == "low"  # Claude Code has no "off"
+
+
+def test_an_ask_with_a_folder_runs_in_it_with_look_only_tools_and_leaves_it_untouched(fake_tools: Path, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "main.py").write_text("print('hi')", encoding="utf-8")
+    call = PlanCall(model="sonnet", prompt="Review this", pictures=[], schema={"type": "object"}, thinking=None,
+                    timeout=30, wait=True, workspace_path=fake_tools, folder=repo)
+    answer = json.loads(asyncio.run(PlanToolProvider(CLAUDE).answer(call)).text)
+    assert Path(answer["cwd"]).resolve() == repo.resolve()  # the tool starts in the folder…
+    assert answer["tools"] == "Read,Glob,Grep" and answer["sources"] == "user"  # …may only look, and ignores its settings
+    assert answer["files"] == ["main.py"] and sorted(p.name for p in repo.iterdir()) == ["main.py"]  # nothing added
+    assert list(cli.work_folder(fake_tools).iterdir()) == []  # the ask's own folder is gone
+    # Pictures and a folder never go together; a folder that is gone fails the ask so the walk moves on.
+    both = PlanCall(model="sonnet", prompt="q", pictures=[b"x"], schema=None, thinking=None, timeout=5, wait=True,
+                    workspace_path=fake_tools, folder=repo)
+    with pytest.raises(ProviderFailed):
+        asyncio.run(PlanToolProvider(CLAUDE).answer(both))
+    gone = PlanCall(model="sonnet", prompt="q", pictures=[], schema=None, thinking=None, timeout=5, wait=True,
+                    workspace_path=fake_tools, folder=tmp_path / "gone")
+    with pytest.raises(ProviderFailed):
+        asyncio.run(PlanToolProvider(CLAUDE).answer(gone))
+
+
+def test_codex_keeps_its_schema_file_out_of_the_folder_it_reads(tmp_path: Path) -> None:
+    ask, repo = tmp_path / "ask", tmp_path / "repo"
+    ask.mkdir()
+    repo.mkdir()
+    args, _ = CODEX.question(ask, "gpt-6.1-sol", None, "Review", [], {"type": "object"}, repo)
+    assert args[args.index("--output-schema") + 1] == str(ask / "schema.json") and (ask / "schema.json").exists()
+    assert args[args.index("--sandbox") + 1] == "read-only" and list(repo.iterdir()) == []
+    plain_args, _ = CODEX.question(ask, "gpt-6.1-sol", None, "Ask", [], {"type": "object"})
+    assert plain_args[plain_args.index("--output-schema") + 1] == "schema.json"  # unchanged without a folder
 
 
 def _missing_tool(ws: Path, kind: Any, args: Any) -> list[str]:

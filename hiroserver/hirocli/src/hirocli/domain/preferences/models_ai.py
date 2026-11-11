@@ -144,6 +144,9 @@ class AiPreferences(BaseModel):
     uses: dict[str, str | None] = pref_field(save_skip=True, default_factory=dict)
     # Part B: per local server kind (lm_studio / ollama); a kind not listed uses the defaults.
     local_servers: dict[str, LocalServerSettings] = pref_field(save_skip=True, default_factory=dict)
+    # "<extension name>" → the folders (absolute paths) its asks may name for a plan tool to read, with a use
+    # that declares ``folder``. An extension not listed may name none. Set in the preferences file for now.
+    folders: dict[str, list[str]] = pref_field(save_skip=True, default_factory=dict)
 
     def local_server(self, kind: str) -> LocalServerSettings:
         return self.local_servers.get(kind) or LocalServerSettings()

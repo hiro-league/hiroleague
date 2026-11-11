@@ -10,7 +10,8 @@ as the profile says (``at_once``). Past that, a waiting ask waits its turn, and 
 a busy plan never turns into paid calls on the fallback).
 
 Each ask gets a fresh folder under ``<workspace>/plans/work/`` holding only its pictures (and Codex's
-schema file), removed after. The answer's API-price ``estimate`` (what it would have cost on a key) comes
+schema file), removed after. An ask that names a folder (``PlanCall.folder``, a code review) runs the tool
+in that folder instead, with look-only tools; the ask's own folder still holds the schema file. The answer's API-price ``estimate`` (what it would have cost on a key) comes
 from the catalog price of the model that answered; Codex reports only a token total, so it has none.
 """
 
@@ -114,8 +115,11 @@ class PlanToolProvider:
             names = picture_names(len(call.pictures)) if call.pictures else []
             for name, jpeg in zip(names, call.pictures, strict=True):
                 (folder / name).write_bytes(jpeg)
-            args, stdin = self.kind.question(folder, call.model, effort, call.prompt, names, call.schema)
-            r = cli.run(call.workspace_path, self.kind, args, "an AI ask", call.timeout, cwd=folder, stdin=stdin)
+            if call.folder is not None and (names or not call.folder.is_dir()):
+                raise cli.PlanToolError("An ask that reads a folder needs an existing folder and carries no pictures")
+            args, stdin = self.kind.question(folder, call.model, effort, call.prompt, names, call.schema, call.folder)
+            # With a folder the tool starts in it; its own files (pictures, a schema) stay in the ask's folder.
+            r = cli.run(call.workspace_path, self.kind, args, "an AI ask", call.timeout, cwd=call.folder or folder, stdin=stdin)
             return self.kind.answered(r.code, r.out, r.err, call.model, call.schema)
         finally:
             shutil.rmtree(folder, ignore_errors=True)

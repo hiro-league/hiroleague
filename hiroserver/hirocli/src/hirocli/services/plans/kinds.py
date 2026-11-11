@@ -22,6 +22,7 @@ TEST_QUESTION = "Reply with exactly: Hiro test OK."
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 _VERSION = re.compile(r"\d+\.\d+\.\d+")
 PICTURE = "picture.jpg"  # one picture; several are picture-1.jpg, picture-2.jpg…
+READ_TOOLS = "Read,Glob,Grep"  # what Claude Code may use in a folder it is asked to read
 
 
 def plain(text: str) -> str:
@@ -119,9 +120,17 @@ class PlanKind(ABC):
 
     @abstractmethod
     def question(
-        self, folder: Path, model: str, effort: str | None, prompt: str, pictures: list[str], schema: dict[str, Any] | None
+        self,
+        folder: Path,
+        model: str,
+        effort: str | None,
+        prompt: str,
+        pictures: list[str],
+        schema: dict[str, Any] | None,
+        repo: Path | None = None,
     ) -> tuple[tuple[str, ...], str]:
-        """An AI ask's arguments and the text for its input. ``pictures``: files written in ``folder``, in order."""
+        """An AI ask's arguments and the text for its input. ``pictures``: files written in ``folder``, in order.
+        ``repo``: a folder the tool runs in and may read (never write); the run's own files stay in ``folder``."""
 
     @abstractmethod
     def answered(self, code: int, out: str, err: str, model: str, schema: dict[str, Any] | None) -> Answered:
@@ -165,15 +174,28 @@ class ClaudeCode(PlanKind):
         return TestAnswer(d["result"].strip(), models[0] if models else None)
 
     def question(
-        self, folder: Path, model: str, effort: str | None, prompt: str, pictures: list[str], schema: dict[str, Any] | None
+        self,
+        folder: Path,
+        model: str,
+        effort: str | None,
+        prompt: str,
+        pictures: list[str],
+        schema: dict[str, Any] | None,
+        repo: Path | None = None,
     ) -> tuple[tuple[str, ...], str]:
         args: list[str] = ["-p", "--model", model, "--output-format", "json"]
         if effort:
             args += ["--effort", effort]
         if schema is not None:
             args += ["--json-schema", json.dumps(schema)]
-        # Only the Read tool, and only when there are pictures to read; no MCP servers, no saved session.
-        args += ["--tools", "Read" if pictures else "", "--allowedTools", "Read", "--strict-mcp-config", "--no-session-persistence"]
+        if repo is not None:
+            # A folder to read: look-only tools (no Bash, Edit or Write), and not the folder's own project settings
+            # (hooks in a repo would run on the core's machine); the core's own settings folder is the only source.
+            args += ["--tools", READ_TOOLS, "--allowedTools", READ_TOOLS, "--setting-sources", "user"]
+        else:
+            # Only the Read tool, and only when there are pictures to read.
+            args += ["--tools", "Read" if pictures else "", "--allowedTools", "Read"]
+        args += ["--strict-mcp-config", "--no-session-persistence"]  # no MCP servers, no saved session
         return tuple(args), prompt + picture_note(pictures)
 
     def answered(self, code: int, out: str, err: str, model: str, schema: dict[str, Any] | None) -> Answered:
@@ -229,15 +251,24 @@ class Codex(PlanKind):
         return TestAnswer(text, model.group(1) if model else None)
 
     def question(
-        self, folder: Path, model: str, effort: str | None, prompt: str, pictures: list[str], schema: dict[str, Any] | None
+        self,
+        folder: Path,
+        model: str,
+        effort: str | None,
+        prompt: str,
+        pictures: list[str],
+        schema: dict[str, Any] | None,
+        repo: Path | None = None,
     ) -> tuple[tuple[str, ...], str]:
         args: list[str] = ["exec", "--skip-git-repo-check", "--sandbox", "read-only", "--ephemeral", "-m", model]
         if effort:
             args += ["-c", f"model_reasoning_effort={effort}"]
         if schema is not None:
-            # OpenAI's structured output wants every object closed, nested ones too (strict.py).
-            (folder / "schema.json").write_text(json.dumps(strict.closed(schema)), encoding="utf-8")
-            args += ["--output-schema", "schema.json"]
+            # OpenAI's structured output wants every object closed, nested ones too (strict.py). The file stays in the
+            # ask's own folder, by its full path: with a repo the tool runs elsewhere and the repo is never written to.
+            schema_file = folder / "schema.json"
+            schema_file.write_text(json.dumps(strict.closed(schema)), encoding="utf-8")
+            args += ["--output-schema", str(schema_file) if repo is not None else "schema.json"]
         for name in pictures:
             args += ["-i", name]
         args.append("-")  # "-": the prompt comes on the input

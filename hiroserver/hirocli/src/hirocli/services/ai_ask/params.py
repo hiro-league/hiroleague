@@ -65,6 +65,11 @@ def ask_request_from_params(params: dict[str, Any], *, use_key: str | None, who:
     label = params.get("label")
     if label is not None and (not isinstance(label, str) or len(label.strip()) > MAX_LABEL):
         raise AskError(AI_ERROR_INVALID, f"label must be text of at most {MAX_LABEL} characters.")
+    folder = params.get("folder")
+    if folder is not None and not isinstance(folder, str):
+        raise AskError(AI_ERROR_INVALID, "folder must be a path as text.")
+    if folder and (raw_pictures or sound is not None):
+        raise AskError(AI_ERROR_INVALID, "An ask that names a folder can't carry pictures or sound.")
     return AskRequest(
         prompt=prompt,
         use=use_key,
@@ -81,4 +86,5 @@ def ask_request_from_params(params: dict[str, Any], *, use_key: str | None, who:
         who=who,
         person_id=(person or "").strip(),
         label=(label or "").strip(),
+        folder=(folder or "").strip(),  # not yet checked: ai_for_extensions resolves it against what is allowed
     )
