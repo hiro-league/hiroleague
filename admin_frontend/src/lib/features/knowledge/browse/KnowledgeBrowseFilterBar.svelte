@@ -2,9 +2,9 @@
   import { FilterX } from '@lucide/svelte';
   import FilterBar from '$kit/ui/filter-bar.svelte';
   import SearchInput from '$lib/search/SearchInput.svelte';
-  import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
+  import FilterSelect from '$kit/ui/filter-select.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import Field from '$kit/ui/field.svelte';
   import CreatableCategorySelect from '$lib/features/knowledge/shared/CreatableCategorySelect.svelte';
   import CreatableTagsSelect from '$lib/features/knowledge/shared/CreatableTagsSelect.svelte';
   import type { KnowledgeBrowseModel } from '$lib/features/knowledge/state/knowledge-browse.svelte';
@@ -17,6 +17,7 @@
   };
 
   let { browse, options }: Props = $props();
+  const uid = $props.id();
 
   const characterFilterOptions = $derived(
     options.characters.map((character) => ({
@@ -40,7 +41,7 @@
     placeholder="Search title"
     class="w-[10rem] shrink-0"
   />
-  <AdminFilterBarSelect
+  <FilterSelect
     label="Status"
     bind:value={browse.browseStatus}
     placeholder="Any"
@@ -53,7 +54,7 @@
       { value: 'failed', label: 'Failed' }
     ]}
   />
-  <AdminFilterBarSelect
+  <FilterSelect
     label="Owner"
     bind:value={browse.browseOwnerKind}
     placeholder="Any"
@@ -66,22 +67,23 @@
     ]}
   />
   {#if browse.browseOwnerKind === 'character'}
-    <AdminFilterBarSelect
+    <FilterSelect
       label="Character"
       bind:value={browse.browseOwnerId}
       class="w-[11rem] shrink-0"
       options={characterFilterOptions}
     />
   {:else if browse.browseOwnerKind === 'user'}
-    <AdminFilterBarSelect
+    <FilterSelect
       label="User"
       bind:value={browse.browseOwnerId}
       class="w-[11rem] shrink-0"
       options={userFilterOptions}
     />
   {/if}
-  <FormField label="Category" class="w-[11rem] shrink-0">
+  <Field label="Category" for="{uid}-category" class="w-[11rem] shrink-0">
     <CreatableCategorySelect
+      id="{uid}-category"
       bind:value={browse.browseCategoryId}
       options={options.topCategories}
       placeholder="Any"
@@ -93,9 +95,10 @@
       }}
       onCreate={(name) => options.upsertCategoryByName(name, null)}
     />
-  </FormField>
-  <FormField label="Subcategory" class="w-[11rem] shrink-0">
+  </Field>
+  <Field label="Subcategory" for="{uid}-subcategory" class="w-[11rem] shrink-0">
     <CreatableCategorySelect
+      id="{uid}-subcategory"
       bind:value={browse.browseSubcategoryId}
       options={browse.browseSubcategories}
       placeholder="Any"
@@ -105,7 +108,7 @@
       class="w-full"
       onCreate={(name) => options.upsertCategoryByName(name, optionalInt(browse.browseCategoryId))}
     />
-  </FormField>
+  </Field>
   <label class="grid w-[12rem] shrink-0 gap-1.5 text-left">
     <span class="font-sans text-sm font-semibold leading-snug text-muted-foreground">Tags</span>
     <CreatableTagsSelect

@@ -2,10 +2,11 @@
   /**
    * Multi-line text preference, schema-driven via the shared `usePrefField` rune (label / hint /
    * advanced-visibility / reset / value all come from `path`). Replaces the hand-rolled
-   * `FormField` + `preferenceFieldMeta`/`preferenceTitle`/`preferenceHint` + reset-dot boilerplate
+   * `Field` + `preferenceFieldMeta`/`preferenceTitle`/`preferenceHint` + reset-dot boilerplate
    * that raw `<textarea>` cards (e.g. graph extraction instructions) used to repeat inline.
    */
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import { Textarea } from '$kit/components/ui/textarea/index.js';
+  import Field from '$kit/ui/field.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { usePrefField } from '$lib/features/preferences/shared/preferences-field.svelte';
   import { type PreferencePath } from '$lib/features/preferences/shared/preferences-schema';
@@ -36,32 +37,29 @@
     hint: hintOverride
   }: Props = $props();
 
+  const uid = $props.id();
   const field = usePrefField<string>(() => ctrl, () => path, {
     label: () => label,
     hint: () => hintOverride
   });
-
-  const TEXTAREA_CLASS =
-    'w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring';
 </script>
 
 {#if field.visible}
-  <FormField
+  <Field
     label={field.label}
-    hint={field.hint}
-    hintTooltip
+    for="{uid}-input"
+    help={field.hint}
     anchor={path}
-    showReset={field.canReset}
-    onReset={field.reset}
+    onreset={field.canReset ? field.reset : undefined}
     class={className}
   >
-    <textarea
-      class={TEXTAREA_CLASS}
+    <Textarea
+      id="{uid}-input"
       {rows}
       {maxlength}
       {placeholder}
       bind:value={field.value}
       {disabled}
-    ></textarea>
-  </FormField>
+    />
+  </Field>
 {/if}

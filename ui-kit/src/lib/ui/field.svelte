@@ -11,7 +11,7 @@
 	import { cn } from '$kit/utils';
 
 	interface Props {
-		label: string;
+		label?: string; // none: the field has no caption (a bare control with a hint or an error)
 		for?: string; // the control's id, so a click on the label goes to it
 		hint?: string;
 		help?: string;
@@ -21,23 +21,25 @@
 		class?: string;
 		children: Snippet;
 	}
-	let { label, for: htmlFor, hint, help, error, onreset, anchor, class: className, children }: Props = $props();
+	let { label = '', for: htmlFor, hint, help, error, onreset, anchor, class: className, children }: Props = $props();
 </script>
 
 <div class={cn('group/field grid gap-2', className)} data-field-anchor={anchor}>
-	<div class="flex items-center gap-1.5">
-		<Label for={htmlFor}>{label}</Label>
-		{#if help}<HelpTip {label} text={help} />{/if}
-		{#if onreset}
-			<button
-				type="button"
-				class="inline-flex text-muted-foreground opacity-0 transition-opacity group-focus-within/field:opacity-100 group-hover/field:opacity-100 hover:text-foreground focus-visible:opacity-100"
-				title="Back to the default"
-				aria-label="Set {label} back to its default"
-				onclick={onreset}><RotateCcw class="size-3.5" /></button
-			>
-		{/if}
-	</div>
+	{#if label}
+		<div class="flex items-center gap-1.5">
+			<Label for={htmlFor}>{label}</Label>
+			{#if help}<HelpTip {label} text={help} />{/if}
+			{#if onreset}
+				<button
+					type="button"
+					class="inline-flex text-muted-foreground opacity-0 transition-opacity group-focus-within/field:opacity-100 group-hover/field:opacity-100 hover:text-foreground focus-visible:opacity-100"
+					title="Back to the default"
+					aria-label="Set {label} back to its default"
+					onclick={onreset}><RotateCcw class="size-3.5" /></button
+				>
+			{/if}
+		</div>
+	{/if}
 	{@render children()}
 	{#if error}<p class="text-xs text-destructive" role="alert">{error}</p>
 	{:else if hint}<p class="text-xs text-muted-foreground">{hint}</p>{/if}

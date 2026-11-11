@@ -48,7 +48,7 @@ export function createCollapsibleSectionRegistry(): CollapsibleSectionRegistry {
   }
 
   const anyExpanded = $derived.by(() => {
-    revision;
+    void revision; // read it so the derived re-runs when it changes
     for (const entry of entries) {
       if (entry.getExpanded()) return true;
     }

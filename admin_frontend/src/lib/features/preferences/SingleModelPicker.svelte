@@ -65,7 +65,7 @@
     /** When true, omit outer card chrome — host `<Section>` owns title/collapse. */
     embedded?: boolean;
     /**
-     * When embedded, still render the `label`/`hint` as a FormField-style header.
+     * When embedded, still render the `label`/`hint` as a Field-style header.
      * Use when several embedded pickers share ONE host card (so the card title can't
      * stand in for each picker's label) — e.g. the Graphiti model pickers.
      */

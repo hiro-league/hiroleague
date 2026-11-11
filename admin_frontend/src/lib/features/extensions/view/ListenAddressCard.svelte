@@ -1,12 +1,13 @@
 <script lang="ts">
   import { Button } from '$kit/components/ui/button/index.js';
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import Field from '$kit/ui/field.svelte';
   import Panel from '$kit/ui/panel.svelte';
-  import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
+  import { Input } from '$kit/components/ui/input/index.js';
   import Notice from '$kit/ui/notice.svelte';
   import type { ExtensionsController } from '../state/extensions-controller.svelte';
 
   let { ctrl }: { ctrl: ExtensionsController } = $props();
+  const uid = $props.id();
 
   const listen = $derived(ctrl.listen);
   // The running server still listens on the old address until it restarts.
@@ -53,9 +54,9 @@
       void ctrl.saveAddress();
     }}
   >
-    <FormField label="Listen address" class="md:w-72">
-      <input class={ADMIN_INPUT} bind:value={ctrl.hostDraft} placeholder="127.0.0.1" spellcheck="false" />
-    </FormField>
+    <Field label="Listen address" for="{uid}-host" class="md:w-72">
+      <Input id="{uid}-host" bind:value={ctrl.hostDraft} placeholder="127.0.0.1" spellcheck="false" />
+    </Field>
     <Button type="submit" variant="outline" disabled={ctrl.busy || ctrl.hostDraft.trim() === listen?.host}>
       Save
     </Button>

@@ -11,7 +11,7 @@
    * not the job's default profile.
    */
   import { ExternalLink } from '@lucide/svelte';
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import Field from '$kit/ui/field.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { usePrefField } from '$lib/features/preferences/shared/preferences-field.svelte';
   import type { PreferencePath } from '$lib/features/preferences/shared/preferences-schema';
@@ -35,6 +35,7 @@
 
   let { ctrl, path, kind }: Props = $props();
 
+  const uid = $props.id();
   const field = usePrefField<string | null>(() => ctrl, () => path);
   const job = $derived(kind === 'ai' ? hiroJobByPath(path) : undefined);
 
@@ -89,8 +90,9 @@
 
 {#if field.visible}
   <div class="grid gap-1.5">
-    <FormField label={field.label} hint={field.hint} hintTooltip anchor={path}>
+    <Field label={field.label} for="{uid}-input" help={field.hint} anchor={path}>
       <PickSelect
+        id="{uid}-input"
         class="h-8 w-full text-sm"
         label={field.label}
         value={picked}
@@ -101,7 +103,7 @@
         ]}
         onchange={onPick}
       />
-    </FormField>
+    </Field>
     <p class="font-sans text-xs leading-snug text-muted-foreground">{line}</p>
     <a class="inline-flex w-fit items-center gap-1 font-sans text-xs text-primary hover:underline" href={editHref}>
       Edit in Catalog → Profiles <ExternalLink size={11} aria-hidden="true" />

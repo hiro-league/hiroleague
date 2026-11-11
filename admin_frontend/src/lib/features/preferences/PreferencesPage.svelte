@@ -142,8 +142,8 @@
     if (!browser) return;
     const paths = new Set(search.matches.map((m) => m.path));
     const active = search.activeMatch?.path ?? null;
-    for (const el of document.querySelectorAll<HTMLElement>('[data-pref-path]')) {
-      const path = el.getAttribute('data-pref-path');
+    for (const el of document.querySelectorAll<HTMLElement>('[data-field-anchor]')) {
+      const path = el.getAttribute('data-field-anchor');
       el.classList.toggle('pref-search-match', !!path && paths.has(path));
       el.classList.toggle('pref-search-active', path === active);
     }
@@ -173,7 +173,7 @@
     await tick(); // let the (possibly newly mounted) tab + its section cards render
     sectionRegistry.expandAll();
     await tick(); // let expanded sections + advanced fields paint before we look them up
-    const el = document.querySelector(`[data-pref-path="${match.path}"]`);
+    const el = document.querySelector(`[data-field-anchor="${match.path}"]`);
     if (!el) return; // a control without a single anchor — the tab switch is enough
     el.scrollIntoView({ block: 'center' });
     document
@@ -291,8 +291,9 @@
      each jump. Ordered so `active` wins over `match`. Yellow (#facc15/#eab308) reads as a highlight
      and works translucent over both light and dark themes. */
   /* Persistent marker: highlight only the field NAME (a yellow marker behind the label text),
-     not the whole field area. `.pref-field-label` wraps the label text in each Pref* widget. */
-  :global([data-pref-path].pref-search-match .pref-field-label) {
+     not the whole field area. The kit Field's label (`data-slot='label'`) and `.pref-field-label` (the
+     headings the model pickers and toggles draw themselves) are the field name. */
+  :global([data-field-anchor].pref-search-match :is(.pref-field-label, [data-slot='label'])) {
     border-radius: 0.25rem;
     padding: 0.0625rem 0.3rem;
     background-color: color-mix(in oklab, #facc15 65%, transparent);
@@ -301,13 +302,13 @@
     box-decoration-break: clone;
   }
   /* Current result: just a simple border around the field — no background fill. */
-  :global([data-pref-path].pref-search-active) {
+  :global([data-field-anchor].pref-search-active) {
     border-radius: 0.5rem;
     outline: 2px solid #eab308;
     outline-offset: 4px;
   }
   /* Jump pulse: a brief glow on the name. */
-  :global([data-pref-path].pref-search-hit .pref-field-label) {
+  :global([data-field-anchor].pref-search-hit :is(.pref-field-label, [data-slot='label'])) {
     animation: pref-search-pulse 1.1s ease-out;
   }
   @keyframes pref-search-pulse {

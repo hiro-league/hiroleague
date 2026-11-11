@@ -9,7 +9,7 @@
   import StickyBar from '$kit/ui/sticky-bar.svelte';
   import Segmented from '$kit/ui/segmented.svelte';
   import FilterBar from '$kit/ui/filter-bar.svelte';
-  import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
+  import FilterSelect from '$kit/ui/filter-select.svelte';
   import MultiSelectFilter from '$lib/components/ui/multi-select-filter.svelte';
   import FieldHelp from '$lib/components/ui/field-help.svelte';
   import AiUsageChart from './AiUsageChart.svelte';
@@ -55,7 +55,7 @@
         <AiUsageRangePicker span={pg.span} now={pg.now} canLater={pg.canLater} onpick={pg.setSpan} onshift={pg.shift} />
         <Segmented label="Period" options={PERIODS} value={pg.period} onchange={(p: Period) => pg.setPeriod(p)} />
 
-        <AdminFilterBarSelect
+        <FilterSelect
           label="Group by"
           layout="inline"
           value={pg.groupBy}

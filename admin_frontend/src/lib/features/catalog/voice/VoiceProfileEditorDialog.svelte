@@ -13,7 +13,9 @@
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import { Input } from '$kit/components/ui/input/index.js';
+  import { Textarea } from '$kit/components/ui/textarea/index.js';
+  import Field from '$kit/ui/field.svelte';
   import SingleModelPicker from '$lib/features/preferences/SingleModelPicker.svelte';
   import Notice from '$kit/ui/notice.svelte';
   import PickSelect from '$kit/ui/pick-select.svelte';
@@ -41,6 +43,8 @@
     activeProviderIds: Set<string>;
     onsaved?: (id: string) => void;
   } = $props();
+
+  const uid = $props.id();
 
   const NEW: VoiceProfileFields = {
     label: 'New voice profile',
@@ -124,7 +128,7 @@
 
     <div class="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
       <div class="grid content-start gap-4">
-        <FormField label="Name"><input bind:value={d.label} maxlength="80" placeholder="e.g. Door alert" /></FormField>
+        <Field label="Name" for="{uid}-name"><Input id="{uid}-name" bind:value={d.label} maxlength={80} placeholder="e.g. Door alert" /></Field>
 
         <Section title="Model">
           <SingleModelPicker
@@ -189,9 +193,9 @@
           {/if}
         </Section>
 
-        <FormField label="Speaking style" hint="Tone, pace, accent and emotion, in plain words. It is never read aloud.">
-          <textarea rows="3" bind:value={d.style} maxlength="2000" placeholder="e.g. Warm and calm, medium pace, a slight smile in the voice."></textarea>
-        </FormField>
+        <Field label="Speaking style" for="{uid}-style" hint="Tone, pace, accent and emotion, in plain words. It is never read aloud.">
+          <Textarea id="{uid}-style" rows={3} bind:value={d.style} maxlength={2000} placeholder="e.g. Warm and calm, medium pace, a slight smile in the voice." />
+        </Field>
 
         {#if isOpenAi}
           <SliderField

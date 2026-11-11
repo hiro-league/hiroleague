@@ -1,17 +1,16 @@
 <script lang="ts">
   import { FilterX } from '@lucide/svelte';
   import FilterBar from '$kit/ui/filter-bar.svelte';
-  import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
+  import FilterSelect from '$kit/ui/filter-select.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import { Checkbox } from '$kit/components/ui/checkbox/index.js';
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import Field from '$kit/ui/field.svelte';
+  import { Input } from '$kit/components/ui/input/index.js';
   import CreatableCategorySelect from '$lib/features/knowledge/shared/CreatableCategorySelect.svelte';
   import CreatableTagsSelect from '$lib/features/knowledge/shared/CreatableTagsSelect.svelte';
   import type { KnowledgeAskModel } from '$lib/features/knowledge/state/knowledge-ask.svelte';
   import type { KnowledgeOptionsModel } from '$lib/features/knowledge/state/knowledge-options.svelte';
   import { optionalInt } from '$lib/features/knowledge/shared/knowledge-pure';
-  import { KNOWLEDGE_INPUT } from '$lib/features/knowledge/shared/knowledge-ui';
-  import { cn } from '$lib/utils';
 
   type Props = {
     ask: KnowledgeAskModel;
@@ -19,6 +18,7 @@
   };
 
   let { ask, options }: Props = $props();
+  const uid = $props.id();
 
   const characterFilterOptions = $derived(
     options.characters.map((character) => ({
@@ -35,7 +35,7 @@
 </script>
 
 <FilterBar class="flex-wrap items-end">
-  <AdminFilterBarSelect
+  <FilterSelect
     label="Owner"
     bind:value={ask.askOwnerKind}
     placeholder="Any"
@@ -48,22 +48,23 @@
     ]}
   />
   {#if ask.askOwnerKind === 'character'}
-    <AdminFilterBarSelect
+    <FilterSelect
       label="Character"
       bind:value={ask.askOwnerId}
       class="w-[11rem] shrink-0"
       options={characterFilterOptions}
     />
   {:else if ask.askOwnerKind === 'user'}
-    <AdminFilterBarSelect
+    <FilterSelect
       label="User"
       bind:value={ask.askOwnerId}
       class="w-[11rem] shrink-0"
       options={userFilterOptions}
     />
   {/if}
-  <FormField label="Category" class="w-[11rem] shrink-0">
+  <Field label="Category" for="{uid}-category" class="w-[11rem] shrink-0">
     <CreatableCategorySelect
+      id="{uid}-category"
       bind:value={ask.askCategoryId}
       options={options.topCategories}
       placeholder="Any"
@@ -75,9 +76,10 @@
       }}
       onCreate={(name) => options.upsertCategoryByName(name, null)}
     />
-  </FormField>
-  <FormField label="Subcategory" class="w-[11rem] shrink-0">
+  </Field>
+  <Field label="Subcategory" for="{uid}-subcategory" class="w-[11rem] shrink-0">
     <CreatableCategorySelect
+      id="{uid}-subcategory"
       bind:value={ask.askSubcategoryId}
       options={ask.askSubcategories}
       placeholder="Any"
@@ -87,7 +89,7 @@
       class="w-full"
       onCreate={(name) => options.upsertCategoryByName(name, optionalInt(ask.askCategoryId))}
     />
-  </FormField>
+  </Field>
   <label class="grid w-[12rem] shrink-0 gap-1.5 text-left">
     <span class="font-sans text-sm font-semibold leading-snug text-muted-foreground">Tags</span>
     <CreatableTagsSelect
@@ -98,25 +100,25 @@
       onCreate={options.upsertTag}
     />
   </label>
-  <FormField label="Top K" class="w-[5.5rem] shrink-0">
-    <input
-      class={cn(KNOWLEDGE_INPUT, 'w-full')}
+  <Field label="Top K" for="{uid}-topk" class="w-[5.5rem] shrink-0">
+    <Input
+      id="{uid}-topk"
       type="number"
       min="1"
       max="100"
       bind:value={ask.askTopK}
     />
-  </FormField>
-  <FormField label="Min score" class="w-[6.5rem] shrink-0">
-    <input
-      class={cn(KNOWLEDGE_INPUT, 'w-full')}
+  </Field>
+  <Field label="Min score" for="{uid}-minscore" class="w-[6.5rem] shrink-0">
+    <Input
+      id="{uid}-minscore"
       type="number"
       min="0"
       max="1"
       step="0.05"
       bind:value={ask.askMinScore}
     />
-  </FormField>
+  </Field>
   <label
     class="flex shrink-0 cursor-pointer select-none items-center gap-2 self-end pb-2"
     title="Rewrite the query with an LLM before retrieval: normalize wording and extract literal keywords (one extra model call)"
@@ -135,7 +137,7 @@
        Qdrant on chunks linked to query entities. compare = both legs side-by-side.
        Persists across reloads via knowledgeAskGraphMode preference.
        Changed from a button group to a top-down label + dropdown to match the other filters. -->
-  <AdminFilterBarSelect
+  <FilterSelect
     label="Graph"
     value={ask.graphMode}
     class="w-[9rem] shrink-0"
@@ -149,7 +151,7 @@
   <!-- Per-query temporal override (§7): overrides the admin temporal_default for THIS
        query only. Relevant only when the graph leg runs (mode on/compare). -->
   {#if ask.graphMode !== 'off'}
-    <AdminFilterBarSelect
+    <FilterSelect
       label="Time"
       value={ask.graphTemporal}
       class="w-[9rem] shrink-0"

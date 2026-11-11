@@ -6,7 +6,7 @@
    */
   import type { AnswerPromptProfile } from '$lib/api/preferences';
   import { Button } from '$kit/components/ui/button/index.js';
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import Field from '$kit/ui/field.svelte';
   import PickSelect from '$kit/ui/pick-select.svelte';
 
   type Props = {
@@ -28,18 +28,20 @@
     onDuplicate,
     onDelete
   }: Props = $props();
+  const uid = $props.id();
 </script>
 
 <div class="flex flex-wrap items-end gap-3">
-  <FormField label="Version" class="min-w-[16rem] flex-1" hint="">
+  <Field label="Version" for="{uid}-version" class="min-w-[16rem] flex-1">
     <PickSelect
+      id="{uid}-version"
       class="h-8 w-full text-sm"
       label="Version"
       value={selectedId}
       options={entries.map(([id, p]) => ({ value: id, label: `${p.label}${p.locked ? ' 🔒' : ''}` }))}
       onchange={(v) => (selectedId = v)}
     />
-  </FormField>
+  </Field>
   <div class="flex flex-wrap gap-2 pb-1">
     <Button variant="outline" size="sm" onclick={onCreate}>+ New</Button>
     <Button variant="outline" size="sm" onclick={onDuplicate}>Duplicate</Button>

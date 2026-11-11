@@ -1,7 +1,7 @@
 <script lang="ts">
   import { FilterX } from '@lucide/svelte';
   import FilterBar from '$kit/ui/filter-bar.svelte';
-  import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
+  import FilterSelect from '$kit/ui/filter-select.svelte';
   import AdminIconToggleGroup from '$lib/components/page/AdminIconToggleGroup.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import type { CatalogController } from '$lib/features/catalog/state/catalog-controller.svelte';
@@ -61,7 +61,7 @@
 </script>
 
 <FilterBar class="items-end">
-  <AdminFilterBarSelect
+  <FilterSelect
     label="Provider"
     value={ctrl.modelFilters.filters.provider_id}
     placeholder="All providers"
@@ -80,7 +80,7 @@
     onToggle={(kind) => void ctrl.toggleModelKindFilter(kind as (typeof MODEL_KIND_FILTER_IDS)[number])}
     groupClass="min-w-[10rem]"
   />
-  <AdminFilterBarSelect
+  <FilterSelect
     label="Class"
     value={ctrl.modelFilters.filters.model_class}
     placeholder="All classes"

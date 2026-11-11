@@ -1,9 +1,11 @@
 <script lang="ts">
   import { ImageIcon, Upload } from '@lucide/svelte';
   import type { CharacterRow } from '$lib/api/characters';
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import Field from '$kit/ui/field.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
+  import { Input } from '$kit/components/ui/input/index.js';
+  import { Textarea } from '$kit/components/ui/textarea/index.js';
   import { dialogCloseAllowed } from '$lib/ui/dialog-close-guard';
   import Notice from '$kit/ui/notice.svelte';
   import PickSelect from '$kit/ui/pick-select.svelte';
@@ -42,6 +44,7 @@
     onCancelExplicit,
     onSubmit
   }: Props = $props();
+  const uid = $props.id();
 
   let channelPhotoInput = $state<HTMLInputElement | null>(null);
 
@@ -82,7 +85,7 @@
       <Dialog.Title>{title}</Dialog.Title>
     </Dialog.Header>
 
-    <div class="grid gap-6 lg:grid-cols-[160px_minmax(0,1fr)] lg:items-start [&_.admin-ui-form-field]:mb-0">
+    <div class="grid gap-6 lg:grid-cols-[160px_minmax(0,1fr)] lg:items-start">
       <div class="grid justify-items-start gap-3">
         <input
           class="hidden"
@@ -110,43 +113,37 @@
       </div>
 
       <div class="grid min-w-0 gap-4">
-        <FormField label="Display name" class="mb-4 w-full md:max-w-[33%] md:min-w-[12rem]">
-          {#snippet children()}
-            <input bind:value={form.name} autocomplete="off" />
-          {/snippet}
-        </FormField>
+        <Field label="Display name" for="{uid}-name" class="w-full md:max-w-[33%] md:min-w-[12rem]">
+          <Input id="{uid}-name" bind:value={form.name} autocomplete="off" />
+        </Field>
 
-        <FormField label="Description" class="mb-4">
-          {#snippet children()}
-            <textarea class="min-h-24" bind:value={form.description} autocomplete="off"></textarea>
-          {/snippet}
-        </FormField>
+        <Field label="Description" for="{uid}-description">
+          <Textarea id="{uid}-description" class="min-h-24" bind:value={form.description} autocomplete="off" />
+        </Field>
 
-        <FormField label="Character">
-          {#snippet children()}
-            <PickSelect
-              class="h-8 w-full text-sm"
-              label="Character"
-              value={form.characterId}
-              options={characters.map((c) => ({ value: c.id, label: characterLabel(c.id) }))}
-              onchange={(v) => (form.characterId = v)}
-            />
-          {/snippet}
-        </FormField>
+        <Field label="Character" for="{uid}-character">
+          <PickSelect
+            id="{uid}-character"
+            class="h-8 w-full text-sm"
+            label="Character"
+            value={form.characterId}
+            options={characters.map((c) => ({ value: c.id, label: characterLabel(c.id) }))}
+            onchange={(v) => (form.characterId = v)}
+          />
+        </Field>
 
-        <FormField label="Type">
-          {#snippet children()}
-            <PickSelect
-              class="h-9 w-full text-sm opacity-70"
-              label="Type"
-              value="direct"
-              disabled
-              title="Conversation type"
-              options={[{ value: 'direct', label: 'direct' }]}
-              onchange={() => {}}
-            />
-          {/snippet}
-        </FormField>
+        <Field label="Type" for="{uid}-type">
+          <PickSelect
+            id="{uid}-type"
+            class="h-9 w-full text-sm opacity-70"
+            label="Type"
+            value="direct"
+            disabled
+            title="Conversation type"
+            options={[{ value: 'direct', label: 'direct' }]}
+            onchange={() => {}}
+          />
+        </Field>
       </div>
     </div>
 

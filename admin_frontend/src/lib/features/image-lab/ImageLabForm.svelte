@@ -1,8 +1,10 @@
 <script lang="ts">
   import { Sparkles, Star } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
+  import { Input } from '$kit/components/ui/input/index.js';
+  import { Textarea } from '$kit/components/ui/textarea/index.js';
   import PickSelect from '$kit/ui/pick-select.svelte';
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import Field from '$kit/ui/field.svelte';
   import Panel from '$kit/ui/panel.svelte';
   import Section from '$kit/ui/section.svelte';
   import { ADMIN_SECTION_TITLE } from '$lib/styling/admin-tokens';
@@ -10,6 +12,7 @@
   import type { ImageLabController } from './state/image-lab-controller.svelte';
 
   let { ctl }: { ctl: ImageLabController } = $props();
+  const uid = $props.id();
 
   const isDefaultModel = $derived(ctl.options?.default_model === ctl.model);
 </script>
@@ -17,21 +20,20 @@
 <Panel class="grid content-start gap-4">
   <h2 class={ADMIN_SECTION_TITLE}>Generate</h2>
 
-  <FormField label="Model">
-    {#snippet children()}
-      <PickSelect
-        class="h-9 w-full text-sm"
-        label="Model"
-        value={ctl.model}
-        options={ctl.models.map((modelRow) => ({
-          value: modelRow.id,
-          label: `${modelRow.display_name} — ${modelRow.provider_display_name}${modelRow.available ? '' : ' (provider not configured)'}`,
-          disabled: !modelRow.available
-        }))}
-        onchange={(v) => (ctl.model = v)}
-      />
-    {/snippet}
-  </FormField>
+  <Field label="Model" for="{uid}-model">
+    <PickSelect
+      id="{uid}-model"
+      class="h-9 w-full text-sm"
+      label="Model"
+      value={ctl.model}
+      options={ctl.models.map((modelRow) => ({
+        value: modelRow.id,
+        label: `${modelRow.display_name} — ${modelRow.provider_display_name}${modelRow.available ? '' : ' (provider not configured)'}`,
+        disabled: !modelRow.available
+      }))}
+      onchange={(v) => (ctl.model = v)}
+    />
+  </Field>
   {#if !ctl.modelReady && ctl.selectedModel}
     <p class="font-sans text-xs text-warning">
       {ctl.selectedModel.provider_display_name} is not ready — add its API key
@@ -44,52 +46,42 @@
     </Button>
   {/if}
 
-  <FormField
+  <Field
     label="Recipe"
+    for="{uid}-recipe"
     hint="Loads a saved recipe (model, steps, seed, style scaffolding) into this form — generation always runs with exactly what the form shows."
   >
-    {#snippet children()}
-      <PickSelect
-        class="h-8 w-full text-sm"
-        label="Recipe"
-        value={ctl.profileId}
-        options={Object.entries(ctl.profiles).map(([id, profile]) => ({
-          value: id,
-          label: `${profile.label || id}${profile.locked ? ' (built-in)' : ''}`
-        }))}
-        onchange={(v) => ctl.applyProfile(v)}
-      />
-    {/snippet}
-  </FormField>
+    <PickSelect
+      id="{uid}-recipe"
+      class="h-8 w-full text-sm"
+      label="Recipe"
+      value={ctl.profileId}
+      options={Object.entries(ctl.profiles).map(([id, profile]) => ({
+        value: id,
+        label: `${profile.label || id}${profile.locked ? ' (built-in)' : ''}`
+      }))}
+      onchange={(v) => ctl.applyProfile(v)}
+    />
+  </Field>
 
-  <FormField label="Prompt">
-    {#snippet children()}
-      <textarea rows="4" bind:value={ctl.prompt} placeholder="A cozy cabin under northern lights…"></textarea>
-    {/snippet}
-  </FormField>
+  <Field label="Prompt" for="{uid}-prompt">
+    <Textarea id="{uid}-prompt" rows={4} bind:value={ctl.prompt} placeholder="A cozy cabin under northern lights…" />
+  </Field>
 
   <Section class="grid gap-3">
-    <FormField label="Style prefix" hint="Prepended to every prompt — the recipe's look-and-feel.">
-      {#snippet children()}
-        <input type="text" bind:value={ctl.stylePrefix} placeholder="warm photorealistic style, soft lighting" />
-      {/snippet}
-    </FormField>
-    <FormField label="Style suffix">
-      {#snippet children()}
-        <input type="text" bind:value={ctl.styleSuffix} placeholder="high detail, no text" />
-      {/snippet}
-    </FormField>
+    <Field label="Style prefix" for="{uid}-prefix" hint="Prepended to every prompt — the recipe's look-and-feel.">
+      <Input id="{uid}-prefix" type="text" bind:value={ctl.stylePrefix} placeholder="warm photorealistic style, soft lighting" />
+    </Field>
+    <Field label="Style suffix" for="{uid}-suffix">
+      <Input id="{uid}-suffix" type="text" bind:value={ctl.styleSuffix} placeholder="high detail, no text" />
+    </Field>
     <div class="grid gap-3 sm:grid-cols-2">
-      <FormField label="Steps (1–8)" hint="More steps = better quality, slower.">
-        {#snippet children()}
-          <input type="number" min="1" max="8" bind:value={ctl.steps} />
-        {/snippet}
-      </FormField>
-      <FormField label="Seed" hint="Empty = random. Pin for reproducibility.">
-        {#snippet children()}
-          <input type="text" inputmode="numeric" bind:value={ctl.seedText} placeholder="random" />
-        {/snippet}
-      </FormField>
+      <Field label="Steps (1–8)" for="{uid}-steps" hint="More steps = better quality, slower.">
+        <Input id="{uid}-steps" type="number" min="1" max="8" bind:value={ctl.steps} />
+      </Field>
+      <Field label="Seed" for="{uid}-seed" hint="Empty = random. Pin for reproducibility.">
+        <Input id="{uid}-seed" type="text" inputmode="numeric" bind:value={ctl.seedText} placeholder="random" />
+      </Field>
     </div>
   </Section>
 

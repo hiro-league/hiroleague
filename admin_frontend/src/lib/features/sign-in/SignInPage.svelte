@@ -12,11 +12,12 @@
   import { page } from '$app/state';
   import { House, LogIn, TriangleAlert } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import Field from '$kit/ui/field.svelte';
   import { Input } from '$kit/components/ui/input/index.js';
   import { backToAppUrl, offeredSignInUrl } from '$lib/api/auth';
   import { adminSession } from '$lib/runtime/admin-session.svelte';
 
+  const uid = $props.id();
   let name = $state('');
   let password = $state('');
   let busy = $state(false);
@@ -86,12 +87,12 @@
         </div>
       {/if}
       <form class="grid gap-4" onsubmit={submit}>
-        <FormField label="Name">
-          <Input bind:value={name} autocomplete="username" autocapitalize="none" spellcheck={false} required />
-        </FormField>
-        <FormField label="Password">
-          <Input bind:value={password} type="password" autocomplete="current-password" required />
-        </FormField>
+        <Field label="Name" for="{uid}-name">
+          <Input id="{uid}-name" bind:value={name} autocomplete="username" autocapitalize="none" spellcheck={false} required />
+        </Field>
+        <Field label="Password" for="{uid}-password">
+          <Input id="{uid}-password" bind:value={password} type="password" autocomplete="current-password" required />
+        </Field>
         {#if error}
           <p class="text-sm text-destructive" role="alert">{error}</p>
         {/if}

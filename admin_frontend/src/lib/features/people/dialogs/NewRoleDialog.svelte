@@ -2,11 +2,12 @@
   /** People → Roles (Phase 9a): name a new role; its rights are given after, in its own tab. */
   import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import Field from '$kit/ui/field.svelte';
   import { Input } from '$kit/components/ui/input/index.js';
   import type { RolesController } from '../state/roles-controller.svelte';
 
   let { ctrl }: { ctrl: RolesController } = $props();
+  const uid = $props.id();
 
   function submit(event: SubmitEvent) {
     event.preventDefault();
@@ -26,15 +27,16 @@
     </Dialog.Header>
     <form id="new-role-form" class="grid gap-4" onsubmit={submit}>
       <p class="text-sm text-muted-foreground">It starts with no rights anywhere; give it what it needs in its tab.</p>
-      <FormField label="Name">
+      <Field label="Name" for="{uid}-name">
         <Input
+          id="{uid}-name"
           value={ctrl.newName ?? ''}
           oninput={(e) => (ctrl.newName = e.currentTarget.value)}
           placeholder="Guest, Nanny, Teen"
           autocomplete="off"
           required
         />
-      </FormField>
+      </Field>
     </form>
     <Dialog.Footer>
       <Button variant="outline" onclick={() => (ctrl.newName = null)}>Cancel</Button>

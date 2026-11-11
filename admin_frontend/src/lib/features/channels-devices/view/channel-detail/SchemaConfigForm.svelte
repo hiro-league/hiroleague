@@ -1,8 +1,9 @@
 <script lang="ts">
   import { Button } from '$kit/components/ui/button/index.js';
   import { Checkbox } from '$kit/components/ui/checkbox/index.js';
+  import { Input } from '$kit/components/ui/input/index.js';
   import PickSelect from '$kit/ui/pick-select.svelte';
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import Field from '$kit/ui/field.svelte';
   import type { FieldSpec } from '../../shared/schema-form';
 
   // `draft` is the controller's reactive $state proxy; fields bind into it by key.
@@ -18,6 +19,7 @@
     secretSet: Record<string, boolean>;
     onClearSecret: (key: string) => void;
   } = $props();
+  const uid = $props.id();
 </script>
 
 <div class="flex flex-col gap-4">
@@ -31,44 +33,49 @@
         <p class="-mt-3 text-xs text-muted-foreground">{field.description}</p>
       {/if}
     {:else if field.type === 'enum'}
-      <FormField label={field.title} hint={field.description}>
+      <Field label={field.title} for="{uid}-{field.key}" hint={field.description}>
         <PickSelect
+          id="{uid}-{field.key}"
           class="h-8 w-full text-sm"
           label={field.title}
           value={String(draft[field.key] ?? '')}
           options={(field.enumValues ?? []).map((option) => ({ value: option, label: option }))}
           onchange={(v) => (draft[field.key] = v)}
         />
-      </FormField>
+      </Field>
     {:else if field.secret}
-      <FormField
+      <Field
         label={field.title}
+        for="{uid}-{field.key}"
         hint={secretSet[field.key]
           ? `${field.description} (stored — leave blank to keep the current value)`
           : field.description}
       >
-        <input
+        <Input
+          id="{uid}-{field.key}"
           type="password"
           autocomplete="off"
           bind:value={draft[field.key]}
           placeholder={secretSet[field.key] ? '•••••••• set' : 'not set'}
         />
-      </FormField>
+      </Field>
       {#if secretSet[field.key]}
         <div class="-mt-2">
           <Button variant="outline" size="sm" onclick={() => onClearSecret(field.key)}>Clear</Button>
         </div>
       {/if}
     {:else}
-      <FormField
+      <Field
         label={field.title}
+        for="{uid}-{field.key}"
         hint={field.type === 'array' ? `${field.description} (comma-separated)` : field.description}
       >
-        <input
+        <Input
+          id="{uid}-{field.key}"
           type={field.type === 'integer' || field.type === 'number' ? 'number' : 'text'}
           bind:value={draft[field.key]}
         />
-      </FormField>
+      </Field>
     {/if}
   {/each}
 </div>

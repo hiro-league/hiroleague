@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { RefreshCw } from '@lucide/svelte';
   import StickyBar from '$kit/ui/sticky-bar.svelte';
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import Field from '$kit/ui/field.svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import { Checkbox } from '$kit/components/ui/checkbox/index.js';
@@ -14,6 +14,7 @@
   import { cn } from '$lib/utils';
 
   let { notify }: { notify: Notify } = $props();
+  const uid = $props.id();
 
   const ctrl = createMetricsController({
     notify: (kind, message) => notify(kind, message)
@@ -24,13 +25,14 @@
 
 <StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
   <div class="flex flex-wrap items-end gap-4">
-    <FormField label="Enable metrics">
+    <Field label="Enable metrics" for="{uid}-enabled">
       <Checkbox
+        id="{uid}-enabled"
         checked={ctrl.enabled}
         disabled={!ctrl.available || ctrl.applying}
         onCheckedChange={ctrl.onEnabledChange}
       />
-    </FormField>
+    </Field>
     <SliderField
       label="Interval"
       class="min-w-60"

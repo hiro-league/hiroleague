@@ -1,12 +1,13 @@
 <script lang="ts">
   import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import Field from '$kit/ui/field.svelte';
   import { Input } from '$kit/components/ui/input/index.js';
   import PickSelect from '$kit/ui/pick-select.svelte';
   import type { PeopleController } from '../state/people-controller.svelte';
 
   let { ctrl }: { ctrl: PeopleController } = $props();
+  const uid = $props.id();
 
   function submit(event: SubmitEvent) {
     event.preventDefault();
@@ -26,24 +27,25 @@
     </Dialog.Header>
     {#if ctrl.form}
       <form id="person-form" class="grid gap-4" onsubmit={submit}>
-        <FormField label="Name">
-          <Input bind:value={ctrl.form.name} required />
-        </FormField>
-        <FormField label="What Hiro calls them" hint="Leave empty to use their name.">
-          <Input bind:value={ctrl.form.calls_them} placeholder={ctrl.form.name} />
-        </FormField>
-        <FormField label="Role" hint="What each role may do in Home is set in HomeHiro.">
+        <Field label="Name" for="{uid}-name">
+          <Input id="{uid}-name" bind:value={ctrl.form.name} required />
+        </Field>
+        <Field label="What Hiro calls them" for="{uid}-calls" hint="Leave empty to use their name.">
+          <Input id="{uid}-calls" bind:value={ctrl.form.calls_them} placeholder={ctrl.form.name} />
+        </Field>
+        <Field label="Role" for="{uid}-role" hint="What each role may do in Home is set in HomeHiro.">
           <PickSelect
+            id="{uid}-role"
             class="h-8 w-full text-sm"
             label="Role"
             value={ctrl.form.role_id}
             options={ctrl.roles.map((role) => ({ value: role.role_id, label: role.name }))}
             onchange={(v) => ctrl.form && (ctrl.form.role_id = v)}
           />
-        </FormField>
-        <FormField label="WhatsApp number" hint="With the country code, e.g. +20 100 123 4567. Empty = none.">
-          <Input bind:value={ctrl.form.whatsapp} inputmode="tel" autocomplete="off" />
-        </FormField>
+        </Field>
+        <Field label="WhatsApp number" for="{uid}-whatsapp" hint="With the country code, e.g. +20 100 123 4567. Empty = none.">
+          <Input id="{uid}-whatsapp" bind:value={ctrl.form.whatsapp} inputmode="tel" autocomplete="off" />
+        </Field>
         {#if ctrl.formError}
           <p class="text-sm text-destructive" role="alert">{ctrl.formError}</p>
         {/if}

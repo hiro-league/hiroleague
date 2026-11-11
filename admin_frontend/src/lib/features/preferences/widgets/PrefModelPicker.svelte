@@ -56,7 +56,7 @@
 </script>
 
 {#if vis.visible}
-<div data-pref-path={path}>
+<div data-field-anchor={path}>
 <SingleModelPicker
   {embedded}
   {labelled}

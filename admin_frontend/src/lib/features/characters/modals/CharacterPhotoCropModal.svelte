@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Upload } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import Field from '$kit/ui/field.svelte';
   import { Slider } from '$kit/components/ui/slider/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
   import { untrack } from 'svelte';
@@ -62,22 +62,16 @@
         height="512"
         bind:this={localCropCanvas}
       ></canvas>
-      <FormField label="Zoom">
-        {#snippet children()}
-          <Slider type="single" min={1} max={3} step={0.05} value={cropZoom} onValueChange={onCropZoomChange} aria-label="Zoom" />
-        {/snippet}
-      </FormField>
+      <Field label="Zoom">
+        <Slider type="single" min={1} max={3} step={0.05} value={cropZoom} onValueChange={onCropZoomChange} aria-label="Zoom" />
+      </Field>
       <div class="grid gap-3 md:grid-cols-2">
-        <FormField label="Horizontal">
-          {#snippet children()}
-            <Slider type="single" min={-100} max={100} step={1} value={cropX} onValueChange={onCropXChange} aria-label="Horizontal" />
-          {/snippet}
-        </FormField>
-        <FormField label="Vertical">
-          {#snippet children()}
-            <Slider type="single" min={-100} max={100} step={1} value={cropY} onValueChange={onCropYChange} aria-label="Vertical" />
-          {/snippet}
-        </FormField>
+        <Field label="Horizontal">
+          <Slider type="single" min={-100} max={100} step={1} value={cropX} onValueChange={onCropXChange} aria-label="Horizontal" />
+        </Field>
+        <Field label="Vertical">
+          <Slider type="single" min={-100} max={100} step={1} value={cropY} onValueChange={onCropYChange} aria-label="Vertical" />
+        </Field>
       </div>
     </div>
     <Dialog.Footer>

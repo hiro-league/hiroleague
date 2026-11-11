@@ -54,7 +54,7 @@
   }
 </script>
 
-<div data-pref-path={path} class="flex flex-wrap items-center justify-between gap-3">
+<div data-field-anchor={path} class="flex flex-wrap items-center justify-between gap-3">
   <div class="flex items-center gap-2">
     <span class="inline-flex items-center gap-1.5 font-sans text-[0.9375rem] font-semibold text-foreground">
 <!-- title shows the dotted preference path on hover. -->

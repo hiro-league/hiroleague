@@ -7,7 +7,7 @@
    * elsewhere (eval panel / active_*_id selector); this is edit-only.
    */
   import { Button } from '$kit/components/ui/button/index.js';
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import Field from '$kit/ui/field.svelte';
   import { getPreferenceByPath } from '$lib/features/preferences/state/preferences-edits';
   import PickSelect from '$kit/ui/pick-select.svelte';
   import {
@@ -19,6 +19,8 @@
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import PromptEditorDialog from './PromptEditorDialog.svelte';
   import type { PromptDialogModel, PromptSavePayload } from './prompt-editor';
+
+  const uid = $props.id();
 
   type Props = {
     ctrl: PreferencesController;
@@ -91,16 +93,17 @@
   }
 </script>
 
-<div data-pref-path={dictPath} class="flex flex-wrap items-end gap-3">
-  <FormField label="Version to edit" class="min-w-[16rem] flex-1" {hint} hintTooltip>
+<div data-field-anchor={dictPath} class="flex flex-wrap items-end gap-3">
+  <Field label="Version to edit" for="{uid}-version" class="min-w-[16rem] flex-1" help={hint}>
     <PickSelect
+      id="{uid}-version"
       class="h-8 w-full text-sm"
       label="Version to edit"
       value={selectedId}
       options={entries.map(([id, p]) => ({ value: id, label: `${p.label}${p.locked ? ' 🔒' : ''}` }))}
       onchange={(v) => (selectedId = v)}
     />
-  </FormField>
+  </Field>
   <Button variant="outline" size="sm" class="mb-1" onclick={() => (open = true)}>
     Edit versions
   </Button>

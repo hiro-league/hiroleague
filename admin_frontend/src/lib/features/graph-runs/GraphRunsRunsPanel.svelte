@@ -4,7 +4,7 @@
   import type { GraphLedgerRow } from '$lib/api/graph-runs';
   import FilterBar from '$kit/ui/filter-bar.svelte';
   import SearchInput from '$lib/search/SearchInput.svelte';
-  import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
+  import FilterSelect from '$kit/ui/filter-select.svelte';
   import StickyBar from '$kit/ui/sticky-bar.svelte';
   import TableShell from '$kit/ui/table-shell.svelte';
   import AdminAvatarNameCell from '$lib/components/page/table/AdminAvatarNameCell.svelte';
@@ -101,28 +101,28 @@
   {#if !hidden}
     <StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
       <FilterBar class="items-end">
-      <AdminFilterBarSelect
+      <FilterSelect
         label="Run kind"
         bind:value={filterRunKind}
         placeholder="All run kinds"
         class="min-w-[10rem]"
         options={runKindOptions}
       />
-      <AdminFilterBarSelect
+      <FilterSelect
         label="Character"
         bind:value={filterCharacterId}
         placeholder="All characters"
         class="min-w-[10rem]"
         options={characterOptions}
       />
-      <AdminFilterBarSelect
+      <FilterSelect
         label="Channel"
         bind:value={filterChannelId}
         placeholder="All channels"
         class="min-w-[10rem]"
         options={channelOptions}
       />
-      <AdminFilterBarSelect
+      <FilterSelect
         label="Status"
         bind:value={filterStatus}
         placeholder="All statuses"

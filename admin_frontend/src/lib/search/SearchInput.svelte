@@ -1,7 +1,8 @@
 <script lang="ts">
   import { LoaderCircle, Search, X } from '@lucide/svelte';
-  import FormField from '$lib/components/ui/form-field.svelte';
-  import { ADMIN_INPUT, ADMIN_SEARCH_FIELD } from '$lib/styling/admin-tokens';
+  import Field from '$kit/ui/field.svelte';
+  import { Input } from '$kit/components/ui/input/index.js';
+  import { ADMIN_SEARCH_FIELD } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
 
   type Props = {
@@ -32,6 +33,7 @@
     variant,
     'aria-label': ariaLabel
   }: Props = $props();
+  const uid = $props.id();
 
   const layout = $derived(variant ?? (label ? 'field' : 'inline'));
   const showTrailing = $derived(
@@ -130,17 +132,17 @@
     {/if}
   </div>
 {:else}
-  <FormField {label} class={cn('min-w-[12rem]', className)}>
+  <Field {label} for="{uid}-search" class={cn('min-w-[12rem]', className)}>
     <div class="relative">
       <Search
         size={14}
         class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
         aria-hidden="true"
       />
-      <input
+      <Input
+        id="{uid}-search"
         type="search"
         class={cn(
-          ADMIN_INPUT,
           'w-full pl-9',
           showTrailing ? 'pr-8' : '',
           inputSizeClass,
@@ -162,5 +164,5 @@
         </button>
       {/if}
     </div>
-  </FormField>
+  </Field>
 {/if}

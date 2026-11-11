@@ -1,10 +1,12 @@
 <script lang="ts">
   import { Button } from '$kit/components/ui/button/index.js';
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import Field from '$kit/ui/field.svelte';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
+  import { Input } from '$kit/components/ui/input/index.js';
   import type { createWorkspaceStore } from '../state/workspace-store.svelte';
 
   let { workspace }: { workspace: ReturnType<typeof createWorkspaceStore> } = $props();
+  const uid = $props.id();
 </script>
 
 <Dialog.Root
@@ -16,16 +18,12 @@
       <Dialog.Title>Create workspace</Dialog.Title>
     </Dialog.Header>
     <div class="grid gap-4">
-      <FormField label="Name">
-        {#snippet children()}
-          <input bind:value={workspace.createForm.name} placeholder="e.g. work" />
-        {/snippet}
-      </FormField>
-      <FormField label="Path (optional)">
-        {#snippet children()}
-          <input bind:value={workspace.createForm.path} placeholder="Leave blank for default location" />
-        {/snippet}
-      </FormField>
+      <Field label="Name" for="{uid}-name">
+        <Input id="{uid}-name" bind:value={workspace.createForm.name} placeholder="e.g. work" />
+      </Field>
+      <Field label="Path (optional)" for="{uid}-path">
+        <Input id="{uid}-path" bind:value={workspace.createForm.path} placeholder="Leave blank for default location" />
+      </Field>
     </div>
     <Dialog.Footer>
       <Button variant="outline" onclick={workspace.closeDialog}>Cancel</Button>

@@ -1,9 +1,9 @@
 <script lang="ts">
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import { Input } from '$kit/components/ui/input/index.js';
+  import Field from '$kit/ui/field.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { usePrefField } from '$lib/features/preferences/shared/preferences-field.svelte';
   import { type PreferencePath } from '$lib/features/preferences/shared/preferences-schema';
-  import { ADMIN_INPUT_LG } from '$lib/features/preferences/shared/preferences-ui';
 
   type Props = {
     ctrl: PreferencesController;
@@ -11,7 +11,6 @@
     /** Optional label override; omit to use the field's backend `title` (single source of truth). */
     label?: string;
     class?: string;
-    inputClass?: string;
     disabled?: boolean;
     placeholder?: string;
     maxlength?: number;
@@ -24,7 +23,6 @@
     path,
     label,
     class: className = '',
-    inputClass = ADMIN_INPUT_LG,
     disabled = false,
     placeholder,
     maxlength,
@@ -34,6 +32,7 @@
   // Value owned by `path`. The rune's null/empty normalization keeps a nullable-string field (e.g.
   // `device`) from showing a reset dot when its box is merely empty; reset still writes the real
   // default. See preferences-field.svelte.ts.
+  const uid = $props.id();
   const field = usePrefField<string | null>(() => ctrl, () => path, {
     label: () => label,
     hint: () => hintOverride
@@ -41,22 +40,21 @@
 </script>
 
 {#if field.visible}
-  <FormField
+  <Field
     label={field.label}
-    hint={field.hint}
-    hintTooltip
+    for="{uid}-input"
+    help={field.hint}
     anchor={path}
-    showReset={field.canReset}
-    onReset={field.reset}
+    onreset={field.canReset ? field.reset : undefined}
     class={className}
   >
-    <input
+    <Input
+      id="{uid}-input"
       type="text"
-      class={inputClass}
       bind:value={field.value}
       {disabled}
       {placeholder}
       {maxlength}
     />
-  </FormField>
+  </Field>
 {/if}

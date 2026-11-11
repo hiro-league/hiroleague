@@ -6,7 +6,9 @@
   import Section from '$kit/ui/section.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import { Input } from '$kit/components/ui/input/index.js';
+  import { Textarea } from '$kit/components/ui/textarea/index.js';
+  import Field from '$kit/ui/field.svelte';
   import Notice from '$kit/ui/notice.svelte';
   import PickSelect from '$kit/ui/pick-select.svelte';
   import SliderField from '$kit/ui/slider-field.svelte';
@@ -16,6 +18,7 @@
   import { AT_ONCE_OPTIONS, chainLabel, MAX_FALLBACKS, THINKING_LABELS } from './ai-profile-rules';
 
   let { ai }: { ai: AiController } = $props();
+  const uid = $props.id();
 
   const d = $derived(ai.draft);
   const provider = $derived(ai.draftModel.provider);
@@ -47,9 +50,9 @@
 
     <div class="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
       <div class="grid content-start gap-4">
-        <FormField label="Name">
-          <input bind:value={ai.draft.name} placeholder="e.g. Camera questions" />
-        </FormField>
+        <Field label="Name" for="{uid}-name">
+          <Input id="{uid}-name" bind:value={ai.draft.name} placeholder="e.g. Camera questions" />
+        </Field>
 
         <Section title="Model">
           <!-- The admin's shared single-model picker (provider list → model list). Local servers'
@@ -82,9 +85,10 @@
         <Section title="Answer">
           <!-- items-start: a two-line hint in one cell must not stretch the other cells' controls. -->
           <div class="grid items-start gap-3 sm:grid-cols-3">
-            <FormField label="Thinking">
+            <Field label="Thinking" for="{uid}-thinking">
               <!-- '' = the model's default (stored as null). -->
               <PickSelect
+                id="{uid}-thinking"
                 class="h-9 w-full text-sm"
                 label="Thinking"
                 value={d.thinking ?? ''}
@@ -92,14 +96,14 @@
                 options={[{ value: '', label: 'Model default' }, ...levels.map((level) => ({ value: level, label: THINKING_LABELS[level] }))]}
                 onchange={(v) => (ai.draft.thinking = (v || null) as typeof d.thinking)}
               />
-            </FormField>
-            <FormField label="Max tokens" hint="Empty = the model default.">
-              <input type="number" min="1" step="64" placeholder="Default" bind:value={ai.draft.maxTokens} />
-            </FormField>
+            </Field>
+            <Field label="Max tokens" for="{uid}-max-tokens" hint="Empty = the model default.">
+              <Input id="{uid}-max-tokens" type="number" min="1" step="64" placeholder="Default" bind:value={ai.draft.maxTokens} />
+            </Field>
             {#if kind === 'local'}
-              <FormField label="Context (tokens)" hint="More fits more pictures.">
-                <input type="number" min="2048" step="1024" bind:value={ai.draft.context} />
-              </FormField>
+              <Field label="Context (tokens)" for="{uid}-context" hint="More fits more pictures.">
+                <Input id="{uid}-context" type="number" min="2048" step="1024" bind:value={ai.draft.context} />
+              </Field>
             {/if}
           </div>
           <SliderField
@@ -115,52 +119,56 @@
             modified={!temperatureOff && d.temperature !== null}
             format={() => (temperatureOff ? '—' : (d.temperature?.toFixed(1) ?? 'Default'))}
           />
-          <FormField label="Extra instructions (optional)" hint="Added to every question; leave empty for none.">
-            <textarea rows="2" bind:value={ai.draft.instructions} placeholder="e.g. Answer only from what the picture shows."></textarea>
-          </FormField>
+          <Field label="Extra instructions (optional)" for="{uid}-instructions" hint="Added to every question; leave empty for none.">
+            <Textarea id="{uid}-instructions" rows={2} bind:value={ai.draft.instructions} placeholder="e.g. Answer only from what the picture shows." />
+          </Field>
         </Section>
 
         <Section title="Budget">
           <div class="grid items-start gap-3 sm:grid-cols-2">
             {#if kind === 'api'}
-              <FormField label="Cost per day (USD)" hint="Past it, the fallback asks. Empty = no limit.">
-                <input type="number" min="0" step="0.25" bind:value={ai.draft.budget.costPerDay} />
-              </FormField>
+              <Field label="Cost per day (USD)" for="{uid}-cost" hint="Past it, the fallback asks. Empty = no limit.">
+                <Input id="{uid}-cost" type="number" min="0" step="0.25" bind:value={ai.draft.budget.costPerDay} />
+              </Field>
             {:else}
-              <FormField
+              <Field
                 label="Questions per hour"
+                for="{uid}-per-hour"
                 hint={kind === 'plan'
                   ? "Keeps this profile's share of your plan small. Empty = no limit."
                   : 'Keeps the PC free for you. Empty = no limit.'}
               >
-                <input type="number" min="0" step="1" bind:value={ai.draft.budget.perHour} />
-              </FormField>
+                <Input id="{uid}-per-hour" type="number" min="0" step="1" bind:value={ai.draft.budget.perHour} />
+              </Field>
             {/if}
-            <FormField label="At once" hint="Questions it works on together; past it they wait their turn.">
+            <Field label="At once" for="{uid}-at-once" hint="Questions it works on together; past it they wait their turn.">
               <PickSelect
+                id="{uid}-at-once"
                 value={String(ai.draft.budget.atOnce)}
                 options={AT_ONCE_OPTIONS.map((n) => ({ value: String(n), label: String(n) }))}
                 onchange={(v) => (ai.draft.budget.atOnce = Number(v) as typeof ai.draft.budget.atOnce)}
                 label="At once"
                 class="h-8 w-full text-sm"
               />
-            </FormField>
+            </Field>
           </div>
         </Section>
 
         <Section title="Fallback">
-          <FormField
+          <Field
             label="When it can't answer, ask"
+            for="{uid}-fallback"
             hint="Used when a budget is reached, the provider fails, or the ask must stay local."
           >
             <PickSelect
+              id="{uid}-fallback"
               value={d.fallbackId ?? ''}
               options={[{ value: '', label: 'Nobody: the ask fails' }, ...fallbackOptions.map((p) => ({ value: p.id, label: p.name }))]}
               onchange={(v) => (ai.draft.fallbackId = v || null)}
               label="Fallback"
               class="h-8 w-full text-sm"
             />
-          </FormField>
+          </Field>
           {#if d.fallbackId}
             <p class="text-sm">
               <span class="font-semibold">{d.name || 'This profile'}</span>

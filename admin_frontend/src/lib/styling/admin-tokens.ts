@@ -70,10 +70,6 @@ export const ADMIN_SECTION_HEADING_LG = 'font-sans text-lg font-semibold text-fo
 
 // ── form controls ──────────────────────────────────────────────────────────
 
-export const ADMIN_FIELD_LABEL = 'grid gap-1 font-sans text-sm';
-
-export const ADMIN_FIELD_LABEL_TEXT = 'font-medium';
-
 // Focus ring is drawn `ring-inset` (inside the element's own box) so it is never
 // clipped on the bottom/left when an input sits flush against an `overflow-hidden`
 // ancestor; `border-ring` keeps it reading as a single clean blue outline.
@@ -90,7 +86,7 @@ export const ADMIN_INPUT_LG = cn(
   ADMIN_FOCUS_RING
 );
 
-/** Destructive icon button for clearing a single filter (AdminFilterBarSelect + LogsFiltersPanel). */
+/** Destructive icon button for clearing a single filter (LogsFiltersPanel). */
 export const FILTER_CLEAR_ICON_BTN =
   'size-8 shrink-0 text-destructive hover:bg-destructive/15 hover:text-destructive';
 

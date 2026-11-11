@@ -37,7 +37,7 @@
 </script>
 
 <label
-  data-pref-path={anchor}
+  data-field-anchor={anchor}
   class={cn(
     'group flex gap-3 rounded-md border border-border/50 bg-card/45 px-3',
     details ? 'items-start py-2.5' : 'min-h-10 items-center',
@@ -53,7 +53,7 @@
         <FieldHelp text={hint} />
       {/if}
       {#if showReset && onReset}
-        <!-- Hidden until the toggle row is hovered/focused (see FormField) to avoid icon clutter. -->
+        <!-- Hidden until the toggle row is hovered/focused (see the kit's Field) to avoid icon clutter. -->
         <ResetDot
           {onReset}
           class="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"

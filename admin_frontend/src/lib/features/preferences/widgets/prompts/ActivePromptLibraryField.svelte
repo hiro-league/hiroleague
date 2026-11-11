@@ -12,7 +12,7 @@
    */
   import { Copy, Pencil, Plus } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import Field from '$kit/ui/field.svelte';
   import {
     getPreferenceByPath,
     setPreferenceByPath
@@ -56,6 +56,8 @@
     editorLabel,
     dialogTitle
   }: Props = $props();
+
+  const uid = $props.id();
 
   let open = $state(false);
   // Which action the just-clicked icon asked the dialog to run on open (undefined = plain Edit).
@@ -111,21 +113,22 @@
 </script>
 
 <div class="flex flex-wrap items-end gap-3">
-  <FormField
+  <Field
     label={resolvedLabel}
+    for="{uid}-active"
     anchor={activeIdPath}
-    hint={resolvedHint}
-    hintTooltip
+    help={resolvedHint}
     class="min-w-[16rem] flex-1"
   >
     <PickSelect
+      id="{uid}-active"
       class="h-8 w-full text-sm"
       label={resolvedLabel}
       value={activeId}
       options={entries.map(([id, p]) => ({ value: id, label: `${p.label}${p.locked ? ' 🔒' : ''}` }))}
       onchange={setActive}
     />
-  </FormField>
+  </Field>
   <div class="flex gap-2 pb-px">
     <Button variant="outline" size="icon" aria-label="New prompt profile" title="New profile" onclick={() => openDialog('create')}>
       <Plus class="size-4" aria-hidden="true" />

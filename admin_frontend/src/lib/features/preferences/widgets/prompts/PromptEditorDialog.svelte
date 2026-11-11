@@ -8,10 +8,10 @@
    */
   import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import Field from '$kit/ui/field.svelte';
   import MarkdownEditorPreview from '$lib/components/ui/markdown/MarkdownEditorPreview.svelte';
   import MarkdownPreview from '$lib/components/ui/markdown/MarkdownPreview.svelte';
-  import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
+  import { Input } from '$kit/components/ui/input/index.js';
   import type { AnswerPromptProfile } from '$lib/api/preferences';
   import PromptLibraryVersionBar from './PromptLibraryVersionBar.svelte';
   import {
@@ -20,6 +20,8 @@
     type PromptDialogModel,
     type PromptSavePayload
   } from './prompt-editor';
+
+  const uid = $props.id();
 
   type Props = {
     open: boolean;
@@ -213,13 +215,13 @@
           <MarkdownPreview markdown={selected.prompt || libraryDefaultText} compact />
         </div>
       {:else if selected}
-        <FormField label="Label" class="mb-3 max-w-md" hint="">
-          <input
-            class={ADMIN_INPUT}
+        <Field label="Label" for="{uid}-label" class="mb-3 max-w-md">
+          <Input
+            id="{uid}-label"
             value={selected.label}
             oninput={(e) => renameSelected(e.currentTarget.value)}
           />
-        </FormField>
+        </Field>
         <MarkdownEditorPreview
           {editorLabel}
           previewLabel="Preview"

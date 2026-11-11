@@ -7,13 +7,14 @@
   import { ImagePlus, MessageSquare, X } from '@lucide/svelte';
   import Section from '$kit/ui/section.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
-  import FormField from '$lib/components/ui/form-field.svelte';
-  import { ADMIN_TEXTAREA } from '$lib/styling/admin-tokens';
+  import Field from '$kit/ui/field.svelte';
+  import { Textarea } from '$kit/components/ui/textarea/index.js';
   import type { AiController } from './ai-controller.svelte';
   import Notice from '$kit/ui/notice.svelte';
   import { thinkingWords } from './ai-profile-rules';
 
   let { ai }: { ai: AiController } = $props();
+  const uid = $props.id();
 
   let fileInput = $state<HTMLInputElement | null>(null);
   const model = $derived(ai.draftModel.model);
@@ -24,9 +25,9 @@
     {ai.draftModel.provider?.label ?? 'No provider'} · {model?.name ?? ai.draft.model} · thinking
     {thinkingWords(ai.draft.thinking).toLowerCase()}
   </p>
-  <FormField label="Question">
-    <textarea class={ADMIN_TEXTAREA} rows="3" bind:value={ai.tryPrompt}></textarea>
-  </FormField>
+  <Field label="Question" for="{uid}-question">
+    <Textarea id="{uid}-question" rows={3} bind:value={ai.tryPrompt} />
+  </Field>
 
   <div class="grid gap-2">
     <span class="font-sans text-sm font-semibold text-muted-foreground">Picture (optional)</span>

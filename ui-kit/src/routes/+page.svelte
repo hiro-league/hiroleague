@@ -33,6 +33,7 @@
 	import StatusDot from '$kit/ui/status-dot.svelte';
 	import SliderField from '$kit/ui/slider-field.svelte';
 	import FileButton from '$kit/ui/file-button.svelte';
+	import FilterSelect from '$kit/ui/filter-select.svelte';
 	import { CAT, CATEGORY_COUNT } from '$kit/ui/category';
 	import { Inbox, Moon, Plus, Sun, Trash2 } from '@lucide/svelte';
 
@@ -44,6 +45,7 @@
 	let kind = $state('lights');
 	let time = $state('17:30');
 	let search = $state('');
+	let deviceKind = $state('');
 	let volume = $state(40);
 	let agreed = $state(true);
 	let threshold = $state('0.75');
@@ -218,6 +220,16 @@
 							]}
 						/>
 						<SearchInput bind:value={search} placeholder="Search devices…" />
+						<FilterSelect
+							label="Kind"
+							bind:value={deviceKind}
+							placeholder="All kinds"
+							options={[
+								{ value: 'phone', label: 'Phone' },
+								{ value: 'tablet', label: 'Tablet' }
+							]}
+							clearable
+						/>
 					</div>
 					<OptionChips
 						label="Which devices"

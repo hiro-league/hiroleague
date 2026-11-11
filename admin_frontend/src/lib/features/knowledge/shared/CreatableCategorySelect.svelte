@@ -16,6 +16,7 @@
     creating = false,
     allowClear = true,
     class: className = '',
+    id,
     onCreate,
     onSelect
   }: {
@@ -28,6 +29,7 @@
     creating?: boolean;
     allowClear?: boolean;
     class?: string;
+    id?: string;
     onCreate: (name: string) => Promise<KnowledgeCategory | void>;
     onSelect?: (id: string) => void;
   } = $props();
@@ -82,6 +84,7 @@
     {#snippet child({ props })}
       <Button
         {...props}
+        {id}
         variant="outline"
         size="lg"
         class={`h-9 w-[180px] justify-between font-normal font-sans shadow-xs ${className}`}

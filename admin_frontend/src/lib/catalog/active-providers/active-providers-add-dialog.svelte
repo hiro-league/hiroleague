@@ -1,7 +1,8 @@
 <script lang="ts">
   import { Button } from '$kit/components/ui/button/index.js';
-  import FormField from '$lib/components/ui/form-field.svelte';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
+  import { Input } from '$kit/components/ui/input/index.js';
+  import Field from '$kit/ui/field.svelte';
   import Loading from '$kit/ui/loading.svelte';
   import PickSelect from '$kit/ui/pick-select.svelte';
   import type { AddableProviderRow } from '$lib/api/catalog';
@@ -47,6 +48,7 @@
     onAccountIdChange,
     onBaseUrlChange
   }: Props = $props();
+  const uid = $props.id();
 
   // Cataloged models not yet pulled on the probed server — surfaced with their `ollama pull` hint.
   const missingModels = $derived(
@@ -76,31 +78,30 @@
       <Loading label="Loading providers…" />
     {:else}
       <div class="grid gap-4">
-        <FormField label="Provider">
-          {#snippet children()}
-            <PickSelect
-              value={providerId}
-              options={addableProviders.map((provider) => ({ value: provider.id, label: `${provider.display_name} (${provider.id})` }))}
-              onchange={onProviderIdChange}
-              label="Provider"
-              class="h-8 w-full text-sm"
-            />
-          {/snippet}
-        </FormField>
+        <Field label="Provider" for="{uid}-provider">
+          <PickSelect
+            id="{uid}-provider"
+            value={providerId}
+            options={addableProviders.map((provider) => ({ value: provider.id, label: `${provider.display_name} (${provider.id})` }))}
+            onchange={onProviderIdChange}
+            label="Provider"
+            class="h-8 w-full text-sm"
+          />
+        </Field>
         {#if isLocal}
-          <FormField
+          <Field
             label="Endpoint URL"
+            for="{uid}-url"
             hint="HTTP base URL of the local server — no API key. Ollama defaults to http://localhost:11434."
           >
-            {#snippet children()}
-              <input
-                type="text"
-                value={baseUrl}
-                oninput={(event) => onBaseUrlChange((event.currentTarget as HTMLInputElement).value)}
-                placeholder="http://localhost:11434"
-              />
-            {/snippet}
-          </FormField>
+            <Input
+              id="{uid}-url"
+              type="text"
+              value={baseUrl}
+              oninput={(event) => onBaseUrlChange((event.currentTarget as HTMLInputElement).value)}
+              placeholder="http://localhost:11434"
+            />
+          </Field>
           <div class="grid gap-2">
             <Button
               variant="outline"
@@ -144,30 +145,29 @@
             {/if}
           </div>
         {:else}
-          <FormField label="API key">
-            {#snippet children()}
-              <input
-                type="password"
-                value={apiKey}
-                oninput={(event) => onApiKeyChange((event.currentTarget as HTMLInputElement).value)}
-                placeholder="Paste the provider API key"
-              />
-            {/snippet}
-          </FormField>
+          <Field label="API key" for="{uid}-key">
+            <Input
+              id="{uid}-key"
+              type="password"
+              value={apiKey}
+              oninput={(event) => onApiKeyChange((event.currentTarget as HTMLInputElement).value)}
+              placeholder="Paste the provider API key"
+            />
+          </Field>
           {#if requiresAccountId}
-            <FormField
+            <Field
               label="Account ID"
+              for="{uid}-account"
               hint="Non-secret vendor account identifier (part of the API URL) — e.g. the Cloudflare account id from the dashboard."
             >
-              {#snippet children()}
-                <input
-                  type="text"
-                  value={accountId}
-                  oninput={(event) => onAccountIdChange((event.currentTarget as HTMLInputElement).value)}
-                  placeholder="Paste the provider account id"
-                />
-              {/snippet}
-            </FormField>
+              <Input
+                id="{uid}-account"
+                type="text"
+                value={accountId}
+                oninput={(event) => onAccountIdChange((event.currentTarget as HTMLInputElement).value)}
+                placeholder="Paste the provider account id"
+              />
+            </Field>
           {/if}
         {/if}
       </div>
