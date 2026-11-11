@@ -7,9 +7,12 @@
 	// UI kit, step 3: `adornment` (a small thing beside the title: an open-folder icon), `description` (one quiet
 	// line under the title) and `details` (the same place, for more than words) came with the HiroLeague admin's pages.
 	import type { Snippet } from 'svelte';
+	import { ArrowLeft } from '@lucide/svelte';
 
 	interface Props {
 		title?: string;
+		/** A link back to where this page was opened from. UI kit, step 5: one style for every back link. */
+		back?: { href: string; label: string };
 		heading?: Snippet; // in place of the title (a floor picker)
 		adornment?: Snippet;
 		description?: string;
@@ -20,7 +23,7 @@
 		/** false for a page that fills the window and scrolls inside itself (a chat): the header just sits on top. */
 		sticky?: boolean;
 	}
-	let { title, heading, adornment, description, details, tabs, actions, children, sticky = true }: Props = $props();
+	let { title, back, heading, adornment, description, details, tabs, actions, children, sticky = true }: Props = $props();
 
 	let height = $state(0);
 	$effect(() => {
@@ -30,6 +33,7 @@
 </script>
 
 <header class={['z-20 -mx-4 -mt-2 mb-3 bg-background/85 px-4 py-2 backdrop-blur md:-mx-6 md:px-6', sticky && 'sticky top-[var(--app-top,0px)]']} bind:clientHeight={height}>
+	{#if back}<a href={back.href} class="mb-1 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"><ArrowLeft class="size-3.5" />{back.label}</a>{/if}
 	<div class="flex flex-wrap items-center gap-x-4 gap-y-2">
 		<div class="flex max-w-full min-w-0 items-center gap-4">
 			{#if heading}{@render heading()}{:else}

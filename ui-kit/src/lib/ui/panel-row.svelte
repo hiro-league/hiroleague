@@ -7,16 +7,18 @@
 	interface Props {
 		label: string;
 		title?: string; // what it does, on hover
+		/** a line of help under the name (UI kit, step 5: settings rows) */
+		hint?: string;
 		off?: string | null; // why it does nothing now
 		checked?: boolean;
 		onchange?: (v: boolean) => void;
 		children?: Snippet;
 	}
-	let { label, title, off = null, checked, onchange, children }: Props = $props();
+	let { label, title, hint, off = null, checked, onchange, children }: Props = $props();
 </script>
 
 <div class={['flex min-h-8 items-center justify-between gap-3', off && 'pointer-events-none opacity-50']} title={off ?? title}>
-	<span class="text-xs">{label}</span>
+	{#if hint}<span class="grid gap-0.5"><span class="text-xs">{label}</span><span class="text-[11px] text-muted-foreground">{hint}</span></span>{:else}<span class="text-xs">{label}</span>{/if}
 	{#if children}
 		{@render children()}
 	{:else}
