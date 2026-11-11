@@ -96,6 +96,14 @@ _FEATURES: tuple[FeatureSpec, ...] = (
         active=False,
         note="Server resource metrics (CPU/memory/disk/network).",
     ),
+    FeatureSpec(
+        id="ui_kit",
+        label="UI kit",
+        # The shared UI kit's gallery + Theme designer, shown inside the admin. A pure
+        # frontend page (no API behind it); active so the owner/admin can design a theme.
+        active=True,
+        note="The shared UI kit's components and theme, as deployed",
+    ),
     # WhatsApp is no longer a standalone feature/page — channel management (WhatsApp
     # and every other plugin) now lives in the generic Channels & Devices page (§5.5),
     # driven by each channel's declared schema + capabilities. No per-channel flag.

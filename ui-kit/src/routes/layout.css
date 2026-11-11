@@ -4,3 +4,4 @@
 @import "tw-animate-css";
 @import "shadcn-svelte/tailwind.css";
 @import "../lib/theme.css";
+@import "../sample/theme.css";

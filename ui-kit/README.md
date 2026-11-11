@@ -25,10 +25,18 @@ HiroLeague checkout beside them.
 
 ## The kit's own project
 
-This folder is also a small SvelteKit app: the **gallery** (`src/routes`), every shared piece on one page inside the
+This folder is also a small SvelteKit app: the **gallery** (`src/lib/gallery`), every shared piece on one page inside the
 shared shell, running against a **sample app** (`src/sample`: what a real app keeps in its `src/lib/app`). A new
-app starts by copying `src/sample` and changing its words.
+app starts by copying `src/sample` and changing its words. The gallery is a kit component (`Gallery`), so the HiroLeague
+admin shows it too, at `/ui-kit` (Configuration, UI kit): the kit as that admin has it. Its tabs: **Pieces**, **Theme**
+(the Theme designer) and **Standard pages** (`pages/logs`, `users`, `hiroleague`, `ai`: what they are, with the parts that
+need no backend).
 
+- **Theme designer:** every token of `theme.css`, light and dark, each with a colour picker and a text box; edits apply live
+  to the page, are kept in this browser, and **Copy theme.css** writes only the differences from the kit.
+- **A theme per app:** each app has `src/lib/app/theme.css` (empty by default; the sample's is `src/sample/theme.css`).
+  Its stylesheet imports it right after the kit's `theme.css` (`@import "../lib/app/theme.css";`), so its tokens win.
+  Paste the designer's output there, commit and deploy that app.
 - `npm install` once, then `npm run dev` for the gallery and `npm run check` for svelte-check, ESLint and the tests.
 - The repo's `./scripts/check.sh` runs `npm run check` here as its "ui-kit: check" part.
 - shadcn's components are added here with its CLI (`npx shadcn-svelte@1.7.0 add <name> --yes`; `components.json`

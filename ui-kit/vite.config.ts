@@ -30,6 +30,8 @@ export default defineConfig({
 	// code, as in the apps: in Svelte's server build, effects never run.
 	test: {
 		include: ['src/**/*.test.ts'],
-		environment: 'happy-dom'
+		environment: 'happy-dom',
+		// the kit's Theme designer reads theme.css as text (?raw); Vitest would otherwise hand back an empty string
+		css: { include: [/theme\.css/] }
 	}
 });

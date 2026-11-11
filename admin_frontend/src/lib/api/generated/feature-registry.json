@@ -28,5 +28,10 @@
     "label": "Metrics",
     "active": false,
     "note": "Server resource metrics (CPU/memory/disk/network)."
+  },
+  "ui_kit": {
+    "label": "UI kit",
+    "active": true,
+    "note": "The shared UI kit's components and theme, as deployed"
   }
 }

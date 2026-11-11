@@ -39,5 +39,6 @@ export const navItems: NavItem[] = [
   // Configuration moved to the end of the sidebar; Logs moved to the end of this group.
   { group: 'Configuration', label: 'Providers/Models', path: '/catalog', icon: 'book', right: 'open_settings' },
   { group: 'Configuration', label: 'Settings', path: '/preferences', icon: 'settings', right: 'open_settings' },
-  { group: 'Configuration', label: 'Logs', path: '/logs', icon: 'list', right: 'open_settings' }
+  { group: 'Configuration', label: 'Logs', path: '/logs', icon: 'list', right: 'open_settings' },
+  { group: 'Configuration', label: 'UI kit', path: '/ui-kit', icon: 'palette', feature: 'ui_kit', right: 'open_settings' }
 ];
