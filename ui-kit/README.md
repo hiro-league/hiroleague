@@ -19,6 +19,16 @@ stream (`live.ts`). It started as HomeHiro's frontend; the palette and colour st
 - **Styles:** the app's stylesheet imports Tailwind, `tw-animate-css`, `shadcn-svelte/tailwind.css`, then the kit's
   `theme.css` from `.kit/lib`, and adds `@source` for that folder (Tailwind skips what git ignores unless told).
 - **Packages:** the app lists the libraries the kit uses (this folder's `peerDependencies`) in its own `package.json`.
+- **Vite settings:** an app's `vite.config.ts` is `defineConfig({ ...hiroVite({ apiEnv, apiDefault }) })`, with
+  `hiroVite` imported from `./.kit/lib/vite-preset.js` (Tailwind, SvelteKit with the `$kit` and `$hiro-app` aliases,
+  the `/api` dev proxy, the vitest settings). The file only exists after `npm run kit`, so every script that reads
+  `vite.config.ts` runs it first.
+- **Lint rules:** the house rules are `hiroRules` in `./.kit/lib/eslint-rules.js`; the app's `eslint.config.js` spreads them.
+- **Settings page:** `$kit/pages/settings/settings-page.svelte` does the Settings tab handling; the app's
+  `routes/settings/+page.svelte` passes `content={{ tabId: snippet }}`.
+- **Standard pages:** `$kit/pages/logs`, `users`, `hiroleague`, `ai`; what is the app's own comes from
+  `$hiro-app/<page>.ts`. Their backend contract: `mintdocs/build/ui-kit/standard-pages-api.mdx` in hiro-docs.
+- **Where the kit is:** `scripts/kit-sync.mjs` takes it from `HIRO_KIT_DIR`, else from the HiroLeague checkout beside the app.
 
 Change shared code here, never in an app's `.kit`. No published release yet: apps take it from the
 HiroLeague checkout beside them.
@@ -27,7 +37,9 @@ HiroLeague checkout beside them.
 
 This folder is also a small SvelteKit app: the **gallery** (`src/lib/gallery`), every shared piece on one page inside the
 shared shell, running against a **sample app** (`src/sample`: what a real app keeps in its `src/lib/app`). A new
-app starts by copying `src/sample` and changing its words. The gallery is a kit component (`Gallery`), so the HiroLeague
+app starts with `node scripts/new-app.mjs <folder> <Name> [--port 8050] [--ai] [--icon Shapes]`, which writes the
+whole frontend (from `scripts/app-template/` and `src/sample`); then `npm install` and `npm run check` in that
+folder, with `HIRO_KIT_DIR` set when it does not sit beside the HiroLeague checkout. The gallery is a kit component (`Gallery`), so the HiroLeague
 admin shows it too, at `/ui-kit` (Configuration, UI kit): the kit as that admin has it. Its tabs: **Pieces**, **Theme**
 (the Theme designer) and **Standard pages** (`pages/logs`, `users`, `hiroleague`, `ai`: what they are, with the parts that
 need no backend).
