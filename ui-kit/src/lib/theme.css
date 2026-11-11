@@ -1,0 +1,206 @@
+
+@custom-variant dark (&:is(.dark *));
+
+/* UI kit: the Hiro palette, from the HiroLeague admin (warm paper and ink, a blue primary, a teal accent, and the
+   brand's amber-to-rose run for titles and fades). The components and their shapes are HomeHiro's; only the colours
+   and the colour style (several colours, fades between two) come from HiroLeague. Hex as HiroLeague wrote them. */
+:root {
+	--background: #fff6f5;
+	--foreground: #3c0608;
+	/* cards near white, so a full page of them isn't pink: the warmth stays in the ground behind them */
+	--card: #fffdfc;
+	--card-foreground: #150f0e;
+	--popover: #ffffff;
+	--popover-foreground: #201918;
+	--primary: #006bb3;
+	--primary-foreground: #faf8f0;
+	--secondary: #dceef5;
+	--secondary-foreground: #123849;
+	/* muted: the quiet fill under a picked choice or a hover; a step off the card so it shows on one */
+	--muted: #f7e9e6;
+	--muted-foreground: #605252;
+	--accent: #d8f0eb;
+	--accent-foreground: #143d3d;
+	--destructive: #db0000;
+	/* status: all is well (online, right, home) and look at this (a mismatch, not set up) */
+	--success: #00896f;
+	--warning: #c26a05;
+	--border: #efdcd9;
+	--input: #e6cfcb;
+	--ring: #0f68a3;
+	/* the brand's run, warm to hot, and its two cool companions */
+	--brand: #f59e0b;
+	--brand-mid: #f97316;
+	--brand-deep: #ef4444;
+	--brand-rose: #e11d48;
+	--brand-pink: #ec4ab0;
+	--brand-blue: #006bb3;
+	--brand-green: #00a889;
+	/* a chart's series, and anything else sorted into kinds: told apart at a glance, in this order */
+	--chart-1: var(--brand-blue);
+	--chart-2: var(--brand-green);
+	--chart-3: var(--brand);
+	--chart-4: var(--brand-rose);
+	--chart-5: var(--brand-pink);
+	--radius: 0.625rem;
+	--sidebar: #fffaf8;
+	--sidebar-foreground: #3c0608;
+	--sidebar-primary: #006bb3;
+	--sidebar-primary-foreground: #faf8f0;
+	--sidebar-accent: #f7e9e6;
+	--sidebar-accent-foreground: #3c0608;
+	--sidebar-border: #efdcd9;
+	--sidebar-ring: #0f68a3;
+}
+
+.dark {
+	--background: #15100f;
+	--foreground: #f5eceb;
+	--card: #1c1817;
+	--card-foreground: #f5eceb;
+	--popover: #1f1a19;
+	--popover-foreground: #f5eceb;
+	--primary: #1687b8;
+	--primary-foreground: #faf8f0;
+	--secondary: #21323a;
+	--secondary-foreground: #f5eceb;
+	--muted: #2b2423;
+	--muted-foreground: #a59d9c;
+	--accent: #127b72;
+	--accent-foreground: #f5eceb;
+	/* the brand's own red here: HiroLeague's #db0000 is too dark to read as words on this background */
+	--destructive: #f87171;
+	--success: #19c2a2;
+	--warning: #fbbf24;
+	--border: #393232;
+	--input: #4a4140;
+	--ring: #1687b8;
+	--brand: #fbbf24;
+	--brand-mid: #fb913b;
+	--brand-deep: #f87171;
+	--brand-rose: #fb7185;
+	--brand-pink: #f975d2;
+	--brand-blue: #1687b8;
+	--brand-green: #00a889;
+	--chart-1: #3aa7d6;
+	--chart-2: #19c2a2;
+	--chart-3: var(--brand);
+	--chart-4: var(--brand-rose);
+	--chart-5: var(--brand-pink);
+	--sidebar: #1c1817;
+	--sidebar-foreground: #f5eceb;
+	--sidebar-primary: #1687b8;
+	--sidebar-primary-foreground: #faf8f0;
+	--sidebar-accent: #2b2423;
+	--sidebar-accent-foreground: #f5eceb;
+	--sidebar-border: #393232;
+	--sidebar-ring: #1687b8;
+}
+
+@theme inline {
+	--radius-sm: calc(var(--radius) - 4px);
+	--radius-md: calc(var(--radius) - 2px);
+	--radius-lg: var(--radius);
+	--radius-xl: calc(var(--radius) + 4px);
+	--color-background: var(--background);
+	--color-foreground: var(--foreground);
+	--color-card: var(--card);
+	--color-card-foreground: var(--card-foreground);
+	--color-popover: var(--popover);
+	--color-popover-foreground: var(--popover-foreground);
+	--color-primary: var(--primary);
+	--color-primary-foreground: var(--primary-foreground);
+	--color-secondary: var(--secondary);
+	--color-secondary-foreground: var(--secondary-foreground);
+	--color-muted: var(--muted);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-accent: var(--accent);
+	--color-accent-foreground: var(--accent-foreground);
+	--color-destructive: var(--destructive);
+	--color-success: var(--success);
+	--color-warning: var(--warning);
+	--color-border: var(--border);
+	--color-input: var(--input);
+	--color-ring: var(--ring);
+	--color-brand: var(--brand);
+	--color-brand-mid: var(--brand-mid);
+	--color-brand-deep: var(--brand-deep);
+	--color-brand-rose: var(--brand-rose);
+	--color-brand-pink: var(--brand-pink);
+	--color-brand-blue: var(--brand-blue);
+	--color-brand-green: var(--brand-green);
+	--color-chart-1: var(--chart-1);
+	--color-chart-2: var(--chart-2);
+	--color-chart-3: var(--chart-3);
+	--color-chart-4: var(--chart-4);
+	--color-chart-5: var(--chart-5);
+	--color-sidebar: var(--sidebar);
+	--color-sidebar-foreground: var(--sidebar-foreground);
+	--color-sidebar-primary: var(--sidebar-primary);
+	--color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+	--color-sidebar-accent: var(--sidebar-accent);
+	--color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+	--color-sidebar-border: var(--sidebar-border);
+	--color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+	* {
+		@apply border-border outline-ring/50;
+	}
+	body {
+		@apply bg-background text-foreground;
+		/* the page's ground: a faint fade from the brand's warm corner to the cool one */
+		background:
+			linear-gradient(
+				145deg,
+				color-mix(in oklch, var(--background) 90%, var(--brand-deep)) 0%,
+				var(--background) 42%,
+				color-mix(in oklch, var(--background) 91%, var(--secondary)) 100%
+			);
+		background-attachment: fixed;
+	}
+}
+
+/* The Hiro colour style: fades between two colours. */
+@layer utilities {
+	/* words in the brand's warm run: a page's title, the app's name */
+	.brand-text-gradient {
+		background-image: linear-gradient(90deg, var(--brand-deep), var(--brand-mid) 48%, var(--brand));
+		background-clip: text;
+		color: transparent;
+		-webkit-background-clip: text;
+		-webkit-text-fill-color: transparent;
+	}
+	/* words in the cool pair: a small heading over a group */
+	.accent-text-gradient {
+		background-image: linear-gradient(90deg, var(--brand-blue), var(--brand-green));
+		background-clip: text;
+		color: transparent;
+		-webkit-background-clip: text;
+		-webkit-text-fill-color: transparent;
+	}
+	/* a surface with a breath of blue in one corner: the menu */
+	.brand-surface {
+		background:
+			linear-gradient(135deg, color-mix(in oklch, var(--card) 90%, var(--brand-blue)), var(--card) 46%),
+			var(--card);
+	}
+}
+
+/* While the menu's edge is dragged (sidebar-resize.svelte): the menu follows the pointer at once. */
+:root[data-sidebar-resizing] {
+	cursor: col-resize;
+	user-select: none;
+	[data-slot='sidebar-gap'],
+	[data-slot='sidebar-container'] {
+		transition: none;
+	}
+}
+
+/* The menu's ground: the card with a breath of blue in one corner (shadcn's sidebar draws its own inner box). */
+[data-slot='sidebar-inner'] {
+	background:
+		linear-gradient(135deg, color-mix(in oklch, var(--sidebar) 90%, var(--brand-blue)), var(--sidebar) 46%),
+		var(--sidebar);
+}

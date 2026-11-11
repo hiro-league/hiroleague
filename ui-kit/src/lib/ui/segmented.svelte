@@ -1,0 +1,27 @@
+<script lang="ts" generics="T extends string | number | boolean">
+	// One of a few choices, side by side (Group by, 24 h / 7 days, zoom steps), each a label with an
+	// optional icon: the picked one stands out, and screen readers hear which is pressed.
+	import type { Component } from 'svelte';
+
+	interface Props {
+		options: readonly { value: T; label: string; title?: string; icon?: Component }[];
+		value: T | null; // null: none is picked (e.g. days picked on a calendar instead)
+		onchange: (v: T) => void;
+		size?: 'xs' | 'sm';
+		label?: string; // what the group chooses, for screen readers
+	}
+	let { options, value, onchange, size = 'xs', label }: Props = $props();
+</script>
+
+<div class={['flex rounded-md border p-0.5', size === 'xs' ? 'text-xs' : 'text-sm']} role="group" aria-label={label}>
+	{#each options as o (String(o.value))}
+		<button
+			type="button"
+			class={['inline-flex items-center gap-1 rounded whitespace-nowrap [&_svg]:size-3.5', size === 'xs' ? 'px-2 py-1' : 'px-3 py-1', value === o.value ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:text-foreground']}
+			aria-pressed={value === o.value}
+			title={o.title}
+			onclick={() => onchange(o.value)}
+			>{#if o.icon}<o.icon />{/if}{o.label}</button
+		>
+	{/each}
+</div>
