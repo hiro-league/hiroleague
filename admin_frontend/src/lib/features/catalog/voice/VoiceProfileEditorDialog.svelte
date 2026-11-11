@@ -57,11 +57,12 @@
     style: '',
     speed: 1
   };
-  // The profile being edited. It asks nothing on leaving the page (the dialog has no unsaved-changes question).
+  // The profile being edited. UI kit step 5, rule 1 (every editor with Save asks before its changes are lost):
+  // leaving the page while the dialog is open with edits asks first; a closed dialog never does.
   const form = new Draft<VoiceProfileFields>(
     { ...NEW },
     {
-      guard: false,
+      guard: () => open,
       save: async (fields) => {
         const id = await ctrl.save(editingId, { ...fields, speed: fields.model.startsWith('openai:') ? fields.speed : 1 });
         open = false;
