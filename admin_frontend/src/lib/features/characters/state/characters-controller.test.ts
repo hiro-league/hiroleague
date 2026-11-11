@@ -80,17 +80,16 @@ function setup(prefsInit?: Parameters<typeof makePrefs>[0]) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  h.listCharacters.mockResolvedValue({ data: [] });
-  h.getCharacter.mockResolvedValue({ data: { id: 'ada', name: 'Ada' } });
-  h.getCharacterResolved.mockResolvedValue({ data: { character_id: 'ada' } });
-  h.createCharacter.mockResolvedValue({ data: { warnings: [], character: { id: 'ada' } } });
-  h.updateCharacter.mockResolvedValue({ data: { warnings: [], character: { id: 'ada' } } });
-  h.deleteCharacter.mockResolvedValue({ data: {} });
-  h.listCatalogModels.mockResolvedValue({ data: { models: [] } });
-  h.listCatalogProviders.mockResolvedValue({ data: [] });
+  h.listCharacters.mockResolvedValue([]);
+  h.getCharacter.mockResolvedValue({ id: 'ada', name: 'Ada' });
+  h.getCharacterResolved.mockResolvedValue({ character_id: 'ada' });
+  h.createCharacter.mockResolvedValue({ warnings: [], character: { id: 'ada' } });
+  h.updateCharacter.mockResolvedValue({ warnings: [], character: { id: 'ada' } });
+  h.deleteCharacter.mockResolvedValue({});
+  h.listCatalogModels.mockResolvedValue({ models: [] });
+  h.listCatalogProviders.mockResolvedValue([]);
   // Phase 7b step 5: the editor's lists pick from the workspace's AI and voice profiles.
   h.getPreferences.mockResolvedValue({
-    data: {
       preferences: {
         ai: {
           profiles: {
@@ -105,13 +104,12 @@ beforeEach(() => {
           }
         }
       }
-    }
-  });
+    });
 });
 
 describe('loadCharacters', () => {
   it('populates rows on success and clears loading/error', async () => {
-    h.listCharacters.mockResolvedValueOnce({ data: [{ id: 'a', name: 'A' }] });
+    h.listCharacters.mockResolvedValueOnce([{ id: 'a', name: 'A' }]);
     const { ctrl } = setup();
     await ctrl.loadCharacters();
     expect(ctrl.rows).toHaveLength(1);
@@ -130,9 +128,7 @@ describe('loadCharacters', () => {
 
 describe('openCharacterEdit', () => {
   it('loads detail, hydrates the form, and navigates to edit', async () => {
-    h.getCharacter.mockResolvedValueOnce({
-      data: { id: 'a', name: 'A', ai_profiles: ['a-claude'], voice_profiles: ['hiro-voice'] }
-    });
+    h.getCharacter.mockResolvedValueOnce({ id: 'a', name: 'A', ai_profiles: ['a-claude'], voice_profiles: ['hiro-voice'] });
     const { ctrl, prefs, formApi } = setup();
     await ctrl.openCharacterEdit({ id: 'a', name: 'A' });
     expect(ctrl.selected?.id).toBe('a');
@@ -176,9 +172,7 @@ describe('saveCharacter', () => {
   });
 
   it('updates an existing character and surfaces backend warnings', async () => {
-    h.updateCharacter.mockResolvedValueOnce({
-      data: { warnings: ['heads up'], character: { id: 'ada' } }
-    });
+    h.updateCharacter.mockResolvedValueOnce({ warnings: ['heads up'], character: { id: 'ada' } });
     const { ctrl, formApi, notify } = setup({
       activeTab: 'detail',
       detailMode: 'edit',

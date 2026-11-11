@@ -131,7 +131,7 @@
     serverReadiness.subscribe();
     getAdminConfig()
       .then((payload) => {
-        adminConfig = payload.data ?? DEFAULT_ADMIN_CONFIG;
+        adminConfig = payload ?? DEFAULT_ADMIN_CONFIG;
       })
       .catch(() => {
         adminConfig = DEFAULT_ADMIN_CONFIG;

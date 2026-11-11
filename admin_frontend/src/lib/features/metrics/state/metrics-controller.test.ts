@@ -49,15 +49,13 @@ function sampleFrame(ts = 1_000): MetricsUiFrame {
 
 function tickResponse(overrides: Record<string, unknown> = {}) {
   return {
-    data: {
       available: true,
       enabled: true,
       interval: 2,
       status_text: 'History: 1 samples',
       frame: sampleFrame(),
       ...overrides
-    }
-  };
+    };
 }
 
 function setup() {
@@ -74,7 +72,7 @@ async function flushAsync() {
 beforeEach(() => {
   vi.clearAllMocks();
   h.tick.mockResolvedValue(tickResponse());
-  h.configure.mockResolvedValue({ data: { enabled: true, interval: 2 } });
+  h.configure.mockResolvedValue({ enabled: true, interval: 2 });
 });
 
 describe('createMetricsController — loadTick', () => {

@@ -57,7 +57,7 @@ function make() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(api.listWorkspaces).mockResolvedValue({ data: [], hosting_workspace_id: null } as never);
+  vi.mocked(api.listWorkspaces).mockResolvedValue({ workspaces: [], hosting_workspace_id: null } as never);
 });
 
 describe('createWorkspaceStore — defaults', () => {
@@ -75,7 +75,7 @@ describe('load', () => {
   it('populates rows + hosting id and clears loading/error on success', async () => {
     const { store } = make();
     vi.mocked(api.listWorkspaces).mockResolvedValue({
-      data: [wsRow({ id: 'a' }), wsRow({ id: 'b' })],
+      workspaces: [wsRow({ id: 'a' }), wsRow({ id: 'b' })],
       hosting_workspace_id: 'a'
     } as never);
     await store.load();
@@ -167,7 +167,7 @@ describe('open* dialog flows seed the right form + selection', () => {
 describe('submit flows', () => {
   it('submitCreate sends a trimmed path → null, notifies, resets, reloads', async () => {
     const { store, notify } = make();
-    vi.mocked(api.createWorkspace).mockResolvedValue({ data: 'created' } as never);
+    vi.mocked(api.createWorkspace).mockResolvedValue('created' as never);
     store.openCreate();
     store.createForm.name = 'work';
     store.createForm.path = '  ';
@@ -180,7 +180,7 @@ describe('submit flows', () => {
 
   it('submitEdit sends the selected id + previous display name', async () => {
     const { store } = make();
-    vi.mocked(api.updateWorkspace).mockResolvedValue({ data: 'updated' } as never);
+    vi.mocked(api.updateWorkspace).mockResolvedValue('updated' as never);
     store.openEdit(wsRow({ id: 'w9', name: 'old' }));
     store.editForm.name = 'new';
     store.editForm.gatewayUrl = 'ws://h:2';
@@ -196,7 +196,7 @@ describe('submit flows', () => {
 
   it('submitSetup stashes the public key and advances to the setup-key dialog', async () => {
     const { store } = make();
-    vi.mocked(api.setupWorkspace).mockResolvedValue({ data: { desktop_pub: 'KEY==' } } as never);
+    vi.mocked(api.setupWorkspace).mockResolvedValue({ desktop_pub: 'KEY==' } as never);
     store.openSetup(wsRow({ id: 'w1' }));
     await store.submitSetup();
     expect(store.setupPublicKey).toBe('KEY==');
@@ -216,18 +216,14 @@ describe('submit flows', () => {
 describe('start', () => {
   it('warns instead of success when the workspace was already running', async () => {
     const { store, notify } = make();
-    vi.mocked(api.startWorkspace).mockResolvedValue({
-      data: { already_running: true, name: 'work', pid: 42 }
-    } as never);
+    vi.mocked(api.startWorkspace).mockResolvedValue({ already_running: true, name: 'work', pid: 42 } as never);
     await store.start(wsRow());
     expect(notify).toHaveBeenCalledWith('warning', expect.stringContaining('already running'));
   });
 
   it('reports the PID on a fresh start', async () => {
     const { store, notify } = make();
-    vi.mocked(api.startWorkspace).mockResolvedValue({
-      data: { already_running: false, name: 'work', pid: 42 }
-    } as never);
+    vi.mocked(api.startWorkspace).mockResolvedValue({ already_running: false, name: 'work', pid: 42 } as never);
     await store.start(wsRow());
     expect(notify).toHaveBeenCalledWith('success', expect.stringContaining('PID 42'));
   });
@@ -243,7 +239,7 @@ describe('closeDialog busy guard', () => {
     expect(store.busy).toBe(true);
     store.closeDialog();
     expect(store.dialog).toBe('create'); // guard held
-    release({ data: 'ok' });
+    release('ok');
     await pending;
     expect(store.dialog).toBeNull(); // reset on success
   });

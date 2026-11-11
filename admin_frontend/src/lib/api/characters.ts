@@ -1,4 +1,4 @@
-import { apiRequest, type ApiResponse } from './client';
+import { apiRequest } from './client';
 
 export type CharacterRow = {
   id: string;
@@ -95,17 +95,17 @@ export type CharacterResolvedPayload = {
   voice_disabled: boolean;
 };
 
-export async function listCharacters(): Promise<ApiResponse<CharacterRow[]>> {
+export async function listCharacters(): Promise<CharacterRow[]> {
   return apiRequest<CharacterRow[]>('/characters');
 }
 
-export async function getCharacter(id: string): Promise<ApiResponse<CharacterDetail>> {
+export async function getCharacter(id: string): Promise<CharacterDetail> {
   return apiRequest<CharacterDetail>(`/characters/${encodeURIComponent(id)}`);
 }
 
 export async function getCharacterResolved(
   id: string
-): Promise<ApiResponse<CharacterResolvedPayload>> {
+): Promise<CharacterResolvedPayload> {
   return apiRequest<CharacterResolvedPayload>(`/characters/${encodeURIComponent(id)}/resolved`);
 }
 

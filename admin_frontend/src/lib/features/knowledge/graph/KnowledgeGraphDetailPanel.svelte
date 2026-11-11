@@ -213,7 +213,7 @@
       try {
         const res = await fetchGraphChunksDetail(ids, ctrl.signal);
         if (ctrl.signal.aborted) return;
-        chunkDetails = res.data?.chunks ?? [];
+        chunkDetails = res?.chunks ?? [];
       } catch (err) {
         if (ctrl.signal.aborted) return;
         console.error('graph episode-detail lookup failed', err);

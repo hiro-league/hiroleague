@@ -29,7 +29,7 @@ export async function reloadCatalogAndRefetch(
 ): Promise<CatalogRefetchResult> {
   const reloadPayload = await reloadModelCatalog();
   const modelRequests = modelKinds.map((kind) =>
-    listCatalogModels({ model_kind: kind }).then((response) => [kind, response.data.models] as const)
+    listCatalogModels({ model_kind: kind }).then((response) => [kind, response.models] as const)
   );
   const [modelResults, providersPayload] = await Promise.all([
     Promise.all(modelRequests),
@@ -40,9 +40,9 @@ export async function reloadCatalogAndRefetch(
     modelsByKind[kind] = models;
   }
   return {
-    reload: reloadPayload.data,
+    reload: reloadPayload,
     modelsByKind,
-    providers: providersPayload.data
+    providers: providersPayload
   };
 }
 

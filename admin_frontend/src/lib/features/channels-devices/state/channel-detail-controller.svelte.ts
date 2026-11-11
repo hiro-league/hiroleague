@@ -57,13 +57,13 @@ export function createChannelDetailController(name: string, notify: Notify, onCh
   }
 
   async function loadConfig() {
-    const config = (await getChannelConfig(name)).data.config;
+    const config = (await getChannelConfig(name)).config;
     seedDraft(config);
   }
 
   async function refreshStatus() {
-    status = (await getChannelStatus(name)).data;
-    qrSvg = status?.has_qr ? sanitizePairingQrSvg((await getChannelPairing(name)).data.qr_svg) : '';
+    status = (await getChannelStatus(name));
+    qrSvg = status?.has_qr ? sanitizePairingQrSvg((await getChannelPairing(name)).qr_svg) : '';
   }
 
   // The descriptor (config schema + capabilities → the settings form, pairing pane and
@@ -71,7 +71,7 @@ export function createChannelDetailController(name: string, notify: Notify, onCh
   // seconds after Enable. Track whether we have it so the poller can keep trying.
   let descriptorLoaded = false;
   async function loadDescriptor() {
-    const descriptor = (await getChannelDescriptor(name)).data;
+    const descriptor = (await getChannelDescriptor(name));
     fields = fieldsFromSchema(descriptor.config_schema);
     capabilities = descriptor.capabilities;
     if (descriptor.capabilities) descriptorLoaded = true;
@@ -122,11 +122,11 @@ export function createChannelDetailController(name: string, notify: Notify, onCh
         if (field.secret) {
           // Only write a secret when a new value was typed; blank = leave unchanged.
           if (typeof value === 'string' && value.trim() !== '') {
-            applied = (await setChannelConfig(name, field.key, value)).data.applied ?? false;
+            applied = (await setChannelConfig(name, field.key, value)).applied ?? false;
             wrote = true;
           }
         } else if (value !== baseline[field.key]) {
-          applied = (await setChannelConfig(name, field.key, parseDraftValue(field, value))).data
+          applied = (await setChannelConfig(name, field.key, parseDraftValue(field, value)))
             .applied ?? false;
           wrote = true;
         }
@@ -182,7 +182,7 @@ export function createChannelDetailController(name: string, notify: Notify, onCh
       const res = await uninstallChannel(name);
       notify(
         'success',
-        res.data.uninstalled
+        res.uninstalled
           ? `Uninstalled '${name}' and removed its package.`
           : `Uninstalled '${name}' (package left in place).`
       );

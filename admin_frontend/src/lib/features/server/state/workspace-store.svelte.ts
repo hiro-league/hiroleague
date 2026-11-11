@@ -35,8 +35,9 @@ export function createWorkspaceStore(notify: Notify) {
   const listResource = createResource(
     async (): Promise<WorkspaceListSnapshot> => {
       const payload = await listWorkspaces();
+      // Step 1d: the rows and the hosting id are one answer ({workspaces, hosting_workspace_id}).
       return {
-        rows: payload.data,
+        rows: payload.workspaces,
         hostingWorkspaceId: payload.hosting_workspace_id ?? null
       };
     },
@@ -161,7 +162,7 @@ export function createWorkspaceStore(notify: Notify) {
           }),
         {
           notify,
-          successMsg: (result) => result.data ?? 'Workspace created.',
+          successMsg: (result) => result ?? 'Workspace created.',
           errorPrefix: 'Create failed.',
           onDone: async () => {
             resetDialog();
@@ -188,7 +189,7 @@ export function createWorkspaceStore(notify: Notify) {
           }),
         {
           notify,
-          successMsg: (result) => result.data ?? 'Workspace updated.',
+          successMsg: (result) => result ?? 'Workspace updated.',
           errorPrefix: 'Update failed.',
           onDone: async () => {
             resetDialog();
@@ -207,7 +208,7 @@ export function createWorkspaceStore(notify: Notify) {
     try {
       await createMutation(() => removeWorkspace(selected!.id, removeForm.purge), {
         notify,
-        successMsg: (result) => result.data ?? 'Workspace removed.',
+        successMsg: (result) => result ?? 'Workspace removed.',
         errorPrefix: 'Remove failed.',
         onDone: async () => {
           resetDialog();
@@ -257,7 +258,7 @@ export function createWorkspaceStore(notify: Notify) {
           notify,
           errorPrefix: 'Setup failed.',
           onDone: async (result) => {
-            setupPublicKey = result.data.desktop_pub;
+            setupPublicKey = result.desktop_pub;
             dialog = 'setup-key';
             await load();
           }
@@ -274,13 +275,13 @@ export function createWorkspaceStore(notify: Notify) {
       await createMutation(() => startWorkspace(row.id), {
         notify,
         successMsg: (result) =>
-          result.data.already_running
+          result.already_running
             ? undefined
-            : `'${result.data.name}' started (PID ${result.data.pid}).`,
+            : `'${result.name}' started (PID ${result.pid}).`,
         errorPrefix: 'Start failed.',
         onDone: async (result) => {
-          if (result.data.already_running) {
-            notify('warning', `'${result.data.name}' is already running.`);
+          if (result.already_running) {
+            notify('warning', `'${result.name}' is already running.`);
           }
           await load();
         }
@@ -295,7 +296,7 @@ export function createWorkspaceStore(notify: Notify) {
     try {
       await createMutation(() => stopWorkspace(row.id), {
         notify,
-        successMsg: (result) => result.data ?? `'${row.name}' stopped.`,
+        successMsg: (result) => result ?? `'${row.name}' stopped.`,
         errorPrefix: 'Stop failed.',
         onDone: () => load()
       }).run();
@@ -328,7 +329,7 @@ export function createWorkspaceStore(notify: Notify) {
     selected = row;
     try {
       const result = await getWorkspacePublicKey(row.id);
-      publicKey = result.data;
+      publicKey = result;
       dialog = 'public-key';
     } catch (err) {
       notify('error', err instanceof Error ? err.message : 'Failed to load public key.');
@@ -342,7 +343,7 @@ export function createWorkspaceStore(notify: Notify) {
     busy = true;
     try {
       const result = await regenerateWorkspaceKey(selected.id);
-      publicKey = result.data;
+      publicKey = result;
       notify('warning', `New key generated for '${selected.name}'. Update your gateway.`);
     } catch (err) {
       notify('error', err instanceof Error ? err.message : 'Regenerate failed.');

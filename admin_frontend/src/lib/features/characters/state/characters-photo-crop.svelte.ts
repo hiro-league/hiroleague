@@ -87,7 +87,7 @@ export function createCharactersPhotoCrop(opts: {
     setBusy(true);
     try {
       const payload = await uploadCharacterPhoto(characterId, canvas.toDataURL('image/png'));
-      notify('success', `Photo updated (${payload.data}).`);
+      notify('success', `Photo updated (${payload}).`);
       avatarCropModalOpen = false;
       await onAfterPhotoUpload();
     } catch (err) {

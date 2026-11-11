@@ -14,8 +14,8 @@ export async function loadMemoriesList(groupId?: string): Promise<{
   try {
     const res = await listWorkspaceMemories(groupId);
     return {
-      memoryEnabled: res.data.memory_enabled,
-      memories: res.data.memories ?? [],
+      memoryEnabled: res.memory_enabled,
+      memories: res.memories ?? [],
       error: ''
     };
   } catch (e) {

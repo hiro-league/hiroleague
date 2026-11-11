@@ -58,22 +58,26 @@
 
   async function load(source: VoiceSource, refresh = false) {
     loading = true;
-    const res =
-      source === 'library'
-        ? await listVoices({ source, language, gender, q: query.trim(), limit: 60, refresh })
-        : await listVoices({ source, limit: 300, refresh });
-    loading = false;
-    if (!res.ok || !res.data) {
-      error = res.error ?? "Gemini's voices could not be read.";
+    // Step 1d: a failed request throws (answers are the data itself; there is no {ok, error} to test).
+    let res: Awaited<ReturnType<typeof listVoices>>;
+    try {
+      res =
+        source === 'library'
+          ? await listVoices({ source, language, gender, q: query.trim(), limit: 60, refresh })
+          : await listVoices({ source, limit: 300, refresh });
+    } catch (err) {
+      error = err instanceof Error ? err.message : "Gemini's voices could not be read.";
       return;
+    } finally {
+      loading = false;
     }
     error = null;
-    if (source === 'studio') studio = res.data.voices;
-    else if (source === 'mine') mine = res.data.voices;
+    if (source === 'studio') studio = res.voices;
+    else if (source === 'mine') mine = res.voices;
     else {
-      library = res.data.voices;
-      libraryTotal = res.data.total;
-      languages = res.data.languages;
+      library = res.voices;
+      libraryTotal = res.total;
+      languages = res.languages;
     }
   }
 
@@ -127,42 +131,49 @@
 
   async function design() {
     designing = true;
-    const res = await designVoice({
-      name: form.name.trim(),
-      description: form.who.trim(),
-      language: form.language || undefined,
-      gender: form.gender || undefined
-    });
-    designing = false;
-    if (!res.ok || !res.data) {
-      error = res.error ?? 'The voice was not designed.';
+    let res: Awaited<ReturnType<typeof designVoice>>;
+    try {
+      res = await designVoice({
+        name: form.name.trim(),
+        description: form.who.trim(),
+        language: form.language || undefined,
+        gender: form.gender || undefined
+      });
+    } catch (err) {
+      error = err instanceof Error ? err.message : 'The voice was not designed.';
       return;
+    } finally {
+      designing = false;
     }
     error = null;
-    designed = { name: res.data.voice.name, cost: res.data.clip.cost_usd, clipId: res.data.clip.id };
-    pick(res.data.voice); // as in HomeHiro: the new voice is used by this profile at once
+    designed = { name: res.voice.name, cost: res.clip.cost_usd, clipId: res.clip.id };
+    pick(res.voice); // as in HomeHiro: the new voice is used by this profile at once
     form.who = form.name = '';
     await load('mine');
   }
   async function remove(v: GeminiVoice) {
     deleting = true;
-    const res = await deleteVoice(v.id);
-    deleting = false;
-    confirmDelete = null;
-    if (!res.ok) {
-      error = res.error ?? 'The voice was not deleted.';
+    try {
+      await deleteVoice(v.id);
+    } catch (err) {
+      error = err instanceof Error ? err.message : 'The voice was not deleted.';
       return;
+    } finally {
+      deleting = false;
+      confirmDelete = null;
     }
     error = null;
     await load('mine');
   }
   async function add() {
     adding = true;
-    const res = await addVoice(pasteId.trim());
-    adding = false;
-    if (!res.ok) {
-      error = res.error ?? 'The voice was not added.';
+    try {
+      await addVoice(pasteId.trim());
+    } catch (err) {
+      error = err instanceof Error ? err.message : 'The voice was not added.';
       return;
+    } finally {
+      adding = false;
     }
     error = null;
     pasteId = '';

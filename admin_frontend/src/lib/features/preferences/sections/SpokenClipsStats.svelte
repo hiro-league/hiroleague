@@ -14,9 +14,12 @@
   let stats = $state<ClipCacheStats | null>(null);
   let error = $state<string | null>(null);
   onMount(async () => {
-    const res = await getClipCache();
-    if (res.ok && res.data) stats = res.data;
-    else error = res.error ?? 'The clip cache could not be read.';
+    // Step 1d: a failed request throws (answers are the data itself; there is no {ok, error} to test).
+    try {
+      stats = await getClipCache();
+    } catch (err) {
+      error = err instanceof Error ? err.message : 'The clip cache could not be read.';
+    }
   });
 
   const maxMb = $derived(Number((ctrl.draft as { voice?: { clip_cache_mb?: number } }).voice?.clip_cache_mb ?? 0));

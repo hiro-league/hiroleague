@@ -70,14 +70,14 @@ export function createModelCatalog(notify: Notify) {
       listLocalCatalogModels('embedding'),
       listLocalCatalogModels('rerank')
     ]);
-    chatOptions = chatPayload.data.models;
-    sttOptions = sttPayload.data.models;
-    ttsOptions = ttsPayload.data.models;
-    embeddingCatalogOptions = embeddingPayload.data.models;
+    chatOptions = chatPayload.models;
+    sttOptions = sttPayload.models;
+    ttsOptions = ttsPayload.models;
+    embeddingCatalogOptions = embeddingPayload.models;
     embeddingLocalOptions = embeddingLocal;
-    rerankCatalogOptions = rerankPayload.data.models;
+    rerankCatalogOptions = rerankPayload.models;
     rerankLocalOptions = rerankLocal;
-    catalogAllProviders = providersPayload.data;
+    catalogAllProviders = providersPayload;
     loaded = true;
     await activeProvidersStore.load({ silent: true });
   }

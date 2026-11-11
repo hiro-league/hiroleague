@@ -44,8 +44,8 @@ function createServerReadinessStore() {
   async function pollOnce() {
     try {
       const payload = await getRuntimeStatus();
-      status = payload.data;
-      ready = Boolean(payload.data.ready);
+      status = payload;
+      ready = Boolean(payload.ready);
       lastError = null;
       if (ready) {
         everReady = true;

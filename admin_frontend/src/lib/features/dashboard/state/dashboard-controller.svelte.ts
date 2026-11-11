@@ -37,10 +37,10 @@ export function createDashboardController() {
     try {
       const [workspacePayload, gatewayRows] = await Promise.all([
         listWorkspaces(),
-        gatewayActive ? listGateways().then((payload) => payload.data) : Promise.resolve([] as GatewayRow[])
+        gatewayActive ? listGateways().then((payload) => payload) : Promise.resolve([] as GatewayRow[])
       ]);
       await activeProvidersStore.load({ silent: true });
-      workspaces = workspacePayload.data;
+      workspaces = workspacePayload.workspaces;
       gateways = gatewayRows;
     } catch (err) {
       error = featureErrorFrom(err, 'Unable to load dashboard status.');

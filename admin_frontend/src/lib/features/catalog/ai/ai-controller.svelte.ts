@@ -222,9 +222,9 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
   async function loadCatalog() {
     try {
       const [chat, local] = await Promise.all([listCatalogModels({ model_kind: 'chat' }), listAiLocalModels()]);
-      catalogChatModels = chat.data.models;
+      catalogChatModels = chat.models;
       // The servers' live check (loadServers) may already have filled this with fresher rows.
-      if (!localModels.length) localModels = local.data.models;
+      if (!localModels.length) localModels = local.models;
     } catch (err) {
       notify('error', errorText(err, 'Could not load the models for the picker.'));
     } finally {
@@ -235,9 +235,9 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
   async function loadProfiles() {
     try {
       const payload = await listAiProfiles();
-      profiles = payload.data.profiles.map(profileFromRow);
-      rawUses = payload.data.uses ?? {};
-      jobs = (payload.data.jobs ?? []).map(jobFromRow);
+      profiles = payload.profiles.map(profileFromRow);
+      rawUses = payload.uses ?? {};
+      jobs = (payload.jobs ?? []).map(jobFromRow);
       profilesError = null;
     } catch (err) {
       profilesError = errorText(err, 'Could not load the AI profiles.');
@@ -249,7 +249,7 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
   async function loadUses() {
     try {
       const payload = await listAiUses();
-      const mapped = usesFromPayload(payload.data.extensions);
+      const mapped = usesFromPayload(payload.extensions);
       uses = mapped.uses;
       useGroups = mapped.groups;
       usesError = null;
@@ -263,8 +263,8 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
   async function loadPlans(fresh = false) {
     try {
       const payload = await getPlans(fresh);
-      plans = payload.data.tools;
-      planUpdates = payload.data.updates;
+      plans = payload.tools;
+      planUpdates = payload.updates;
       plansError = null;
       if (planUpdates.running) scheduleUpdatePoll();
     } catch (err) {
@@ -275,7 +275,7 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
   async function loadServers() {
     try {
       const payload = await listLocalServers();
-      servers = payload.data.servers;
+      servers = payload.servers;
       localModels = servers.flatMap((s) => s.models);
       serversError = null;
     } catch (err) {
@@ -535,9 +535,9 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     refreshingExtensions = { ...refreshingExtensions, [group.extension]: true };
     try {
       const payload = await refreshAiUses(group.extensionId);
-      const failed = payload.data.failed[0];
+      const failed = payload.failed[0];
       if (failed) notify('warning', `${failed.extension}: ${failed.error}`);
-      else if (payload.data.note) notify('info', payload.data.note);
+      else if (payload.note) notify('info', payload.note);
       else notify('success', `${group.extension}: uses refreshed.`);
       await loadUses();
     } catch (err) {
@@ -589,7 +589,7 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
         draft: { ...profileToPrefs(draft), label: draft.name.trim() || 'Try it' },
         picture: tryPicture?.dataUrl ?? null
       });
-      const mapped = tryResultFrom(payload.data, kind);
+      const mapped = tryResultFrom(payload, kind);
       tryResult = mapped.result;
       tryError = mapped.error;
     } catch (err) {
@@ -643,10 +643,10 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     checkingServerIds = { ...checkingServerIds, [id]: true };
     try {
       const payload = await checkLocalServer(id);
-      replaceServer(payload.data);
+      replaceServer(payload);
       const label = LOCAL_SERVER_KIND_LABELS[id] ?? id;
-      if (payload.data.state === 'up') notify('success', `${label} is up: ${payload.data.models.length} models.`);
-      else notify('warning', `${label}: ${payload.data.error ?? payload.data.state}.`);
+      if (payload.state === 'up') notify('success', `${label} is up: ${payload.models.length} models.`);
+      else notify('warning', `${label}: ${payload.error ?? payload.state}.`);
     } catch (err) {
       notify('error', errorText(err, 'Could not check the server.'));
     } finally {
@@ -714,7 +714,7 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     signInTimers.delete(id);
     try {
       const payload = await planSignIn(id, 'state');
-      await applySignIn(id, payload.data);
+      await applySignIn(id, payload);
     } catch (err) {
       notify('error', errorText(err, 'Could not read the sign-in.'));
     }
@@ -725,7 +725,7 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     try {
       const payload = await planSignIn(id, 'start');
       signInCodes = { ...signInCodes, [id]: '' };
-      await applySignIn(id, payload.data);
+      await applySignIn(id, payload);
     } catch (err) {
       notify('error', errorText(err, 'Could not start the sign-in.'));
     } finally {
@@ -740,7 +740,7 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     setPlanBusy(id, 'Sending the code…');
     try {
       const payload = await planSignIn(id, 'code', code);
-      await applySignIn(id, payload.data);
+      await applySignIn(id, payload);
     } catch (err) {
       notify('error', errorText(err, 'Could not send the code.'));
     } finally {
@@ -763,8 +763,8 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     setPlanBusy(id, 'Signing out…');
     try {
       const payload = await planSignOut(id);
-      if (payload.data.signed_out) notify('success', 'Signed out.');
-      else notify('warning', payload.data.message ?? 'The tool did not confirm the sign-out.');
+      if (payload.signed_out) notify('success', 'Signed out.');
+      else notify('warning', payload.message ?? 'The tool did not confirm the sign-out.');
       planTests = { ...planTests, [id]: null };
       await loadPlans(true);
     } catch (err) {
@@ -779,7 +779,7 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     planTests = { ...planTests, [id]: null };
     try {
       const payload = await planTest(id);
-      planTests = { ...planTests, [id]: payload.data };
+      planTests = { ...planTests, [id]: payload };
     } catch (err) {
       notify('error', errorText(err, 'The test question failed.'));
     } finally {
@@ -805,7 +805,7 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
   async function updateNow() {
     try {
       const payload = await updatePlans();
-      planUpdates = payload.data.updates;
+      planUpdates = payload.updates;
       notify('info', 'Updating Claude Code and Codex…');
       scheduleUpdatePoll();
     } catch (err) {

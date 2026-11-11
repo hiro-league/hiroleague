@@ -193,8 +193,8 @@ export function createKnowledgeBrowseModel(deps: {
         title: f.kb_title,
         limit: 100
       });
-      documents = payload.data.documents;
-      documentTotal = payload.data.total;
+      documents = payload.documents;
+      documentTotal = payload.total;
       pruneDocumentSelection();
       if (!activeDocumentId && documents[0]) {
         await openDocument(documents[0].id);
@@ -227,10 +227,10 @@ export function createKnowledgeBrowseModel(deps: {
     chunkNextOffset = null;
     try {
       const payload = await getKnowledgeDocument(documentId, { chunkLimit: KNOWLEDGE_CHUNK_FETCH_SIZE });
-      activeDocument = payload.data.document;
-      applyFetchedChunks(payload.data.chunks, payload.data.chunk_next_offset, false);
-      const apiTags = payload.data.document?.tags ?? [];
-      const chunkTags = tagsFromChunks(payload.data.chunks);
+      activeDocument = payload.document;
+      applyFetchedChunks(payload.chunks, payload.chunk_next_offset, false);
+      const apiTags = payload.document?.tags ?? [];
+      const chunkTags = tagsFromChunks(payload.chunks);
       const listTags = documents.find((document) => document.id === documentId)?.tags ?? [];
       detailTags = [...(apiTags.length > 0 ? apiTags : chunkTags.length > 0 ? chunkTags : listTags)];
     } catch (err) {
@@ -246,7 +246,7 @@ export function createKnowledgeBrowseModel(deps: {
         chunkLimit: KNOWLEDGE_CHUNK_FETCH_SIZE,
         chunkOffset: chunkNextOffset
       });
-      applyFetchedChunks(payload.data.chunks, payload.data.chunk_next_offset, true);
+      applyFetchedChunks(payload.chunks, payload.chunk_next_offset, true);
     } catch (err) {
       deps.setError(err instanceof Error ? err.message : 'Could not load more chunks.');
     } finally {

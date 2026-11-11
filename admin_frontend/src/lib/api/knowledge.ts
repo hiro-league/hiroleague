@@ -1,4 +1,4 @@
-import { apiRequest, type ApiResponse } from './client';
+import { apiRequest } from './client';
 
 export type KnowledgeScannedFile = {
   path: string;
@@ -215,7 +215,7 @@ export type KnowledgeFilePreviewData = {
   estimated_tokens: number;
 };
 
-export function scanKnowledgeFolder(folder: string, recursive = true): Promise<ApiResponse<KnowledgeScanData>> {
+export function scanKnowledgeFolder(folder: string, recursive = true): Promise<KnowledgeScanData> {
   return apiRequest<KnowledgeScanData>('/knowledge/scan-folder', {
     method: 'POST',
     body: { folder, recursive },
@@ -223,7 +223,7 @@ export function scanKnowledgeFolder(folder: string, recursive = true): Promise<A
   });
 }
 
-export function pickKnowledgeFolder(initialFolder?: string): Promise<ApiResponse<{ folder: string | null }>> {
+export function pickKnowledgeFolder(initialFolder?: string): Promise<{ folder: string | null }> {
   return apiRequest<{ folder: string | null }>('/knowledge/pick-folder', {
     method: 'POST',
     body: { initial_folder: initialFolder ?? null },
@@ -231,7 +231,7 @@ export function pickKnowledgeFolder(initialFolder?: string): Promise<ApiResponse
   });
 }
 
-export function previewKnowledgeFile(path: string): Promise<ApiResponse<KnowledgeFilePreviewData>> {
+export function previewKnowledgeFile(path: string): Promise<KnowledgeFilePreviewData> {
   return apiRequest<KnowledgeFilePreviewData>('/knowledge/preview-file', {
     method: 'POST',
     body: { path },
@@ -239,7 +239,7 @@ export function previewKnowledgeFile(path: string): Promise<ApiResponse<Knowledg
   });
 }
 
-export function getKnowledgeOptions(): Promise<ApiResponse<KnowledgeOptionsData>> {
+export function getKnowledgeOptions(): Promise<KnowledgeOptionsData> {
   return apiRequest<KnowledgeOptionsData>('/knowledge/options', {
     timeoutMs: 60000
   });
@@ -264,7 +264,7 @@ export type LocalRerankerRow = {
   total_bytes: number | null;
 };
 
-export function listKnowledgeRerankers(): Promise<ApiResponse<{ local: LocalRerankerRow[] }>> {
+export function listKnowledgeRerankers(): Promise<{ local: LocalRerankerRow[] }> {
   return apiRequest<{ local: LocalRerankerRow[] }>('/knowledge/rerankers', {
     timeoutMs: 60000
   });
@@ -272,7 +272,7 @@ export function listKnowledgeRerankers(): Promise<ApiResponse<{ local: LocalRera
 
 export function downloadKnowledgeReranker(
   modelId: string
-): Promise<ApiResponse<{ model_id: string; status: RerankerDownloadStatus }>> {
+): Promise<{ model_id: string; status: RerankerDownloadStatus }> {
   // Non-blocking on the live workspace: returns immediately with status "downloading"; the
   // caller polls listKnowledgeRerankers for byte progress and the ready/error transition.
   return apiRequest<{ model_id: string; status: RerankerDownloadStatus }>(
@@ -287,7 +287,7 @@ export function downloadKnowledgeReranker(
 
 export function cancelKnowledgeReranker(
   modelId: string
-): Promise<ApiResponse<{ model_id: string; status: RerankerDownloadStatus }>> {
+): Promise<{ model_id: string; status: RerankerDownloadStatus }> {
   return apiRequest<{ model_id: string; status: RerankerDownloadStatus }>(
     '/knowledge/rerankers/cancel',
     {
@@ -315,7 +315,7 @@ export type LocalEmbedderRow = {
   total_bytes: number | null;
 };
 
-export function listKnowledgeEmbedders(): Promise<ApiResponse<{ local: LocalEmbedderRow[] }>> {
+export function listKnowledgeEmbedders(): Promise<{ local: LocalEmbedderRow[] }> {
   return apiRequest<{ local: LocalEmbedderRow[] }>('/knowledge/embedders', {
     timeoutMs: 60000
   });
@@ -323,7 +323,7 @@ export function listKnowledgeEmbedders(): Promise<ApiResponse<{ local: LocalEmbe
 
 export function downloadKnowledgeEmbedder(
   modelId: string
-): Promise<ApiResponse<{ model_id: string; status: RerankerDownloadStatus }>> {
+): Promise<{ model_id: string; status: RerankerDownloadStatus }> {
   return apiRequest<{ model_id: string; status: RerankerDownloadStatus }>(
     '/knowledge/embedders/download',
     {
@@ -336,7 +336,7 @@ export function downloadKnowledgeEmbedder(
 
 export function cancelKnowledgeEmbedder(
   modelId: string
-): Promise<ApiResponse<{ model_id: string; status: RerankerDownloadStatus }>> {
+): Promise<{ model_id: string; status: RerankerDownloadStatus }> {
   return apiRequest<{ model_id: string; status: RerankerDownloadStatus }>(
     '/knowledge/embedders/cancel',
     {
@@ -350,7 +350,7 @@ export function cancelKnowledgeEmbedder(
 export function createKnowledgeCategory(
   name: string,
   parentId: number | null = null
-): Promise<ApiResponse<KnowledgeCategory>> {
+): Promise<KnowledgeCategory> {
   return apiRequest<KnowledgeCategory>('/knowledge/categories', {
     method: 'POST',
     body: { name, parent_id: parentId },
@@ -358,7 +358,7 @@ export function createKnowledgeCategory(
   });
 }
 
-export function createKnowledgeTag(name: string): Promise<ApiResponse<KnowledgeTag>> {
+export function createKnowledgeTag(name: string): Promise<KnowledgeTag> {
   return apiRequest<KnowledgeTag>('/knowledge/tags', {
     method: 'POST',
     body: { name },
@@ -377,7 +377,7 @@ export type KnowledgeIngestMetadata = {
 export function ingestKnowledge(
   paths: string[],
   metadata: KnowledgeIngestMetadata
-): Promise<ApiResponse<KnowledgeJobData>> {
+): Promise<KnowledgeJobData> {
   return apiRequest<KnowledgeJobData>('/knowledge/ingest', {
     method: 'POST',
     body: { paths, ...metadata, wait: false },
@@ -385,13 +385,13 @@ export function ingestKnowledge(
   });
 }
 
-export function getKnowledgeJob(jobId: string): Promise<ApiResponse<KnowledgeJobData>> {
+export function getKnowledgeJob(jobId: string): Promise<KnowledgeJobData> {
   return apiRequest<KnowledgeJobData>(`/knowledge/jobs/${encodeURIComponent(jobId)}`, {
     timeoutMs: 60000
   });
 }
 
-export function listKnowledgeJobs(limit = 20): Promise<ApiResponse<KnowledgeListJobsData>> {
+export function listKnowledgeJobs(limit = 20): Promise<KnowledgeListJobsData> {
   return apiRequest<KnowledgeListJobsData>(`/knowledge/jobs?limit=${encodeURIComponent(String(limit))}`);
 }
 
@@ -400,7 +400,7 @@ export function searchKnowledge(
   topK = 10,
   minScore = 0,
   filters: KnowledgeFilters = {}
-): Promise<ApiResponse<KnowledgeSearchData>> {
+): Promise<KnowledgeSearchData> {
   return apiRequest<KnowledgeSearchData>('/knowledge/search', {
     method: 'POST',
     body: { query, top_k: topK, min_score: minScore, filters },
@@ -433,7 +433,7 @@ export type KnowledgeGraphIngestBatchData = {
 export function runKnowledgeGraphIngestBatch(
   documentIds: string[],
   sourceRole: string = 'user_document'
-): Promise<ApiResponse<KnowledgeGraphIngestBatchData>> {
+): Promise<KnowledgeGraphIngestBatchData> {
   return apiRequest<KnowledgeGraphIngestBatchData>('/knowledge/graph/ingest_batch', {
     method: 'POST',
     body: { document_ids: documentIds, source_role: sourceRole },
@@ -452,7 +452,7 @@ export function answerKnowledge(
   rewrite = false,
   graphMode: KnowledgeGraphMode = 'off',
   graphTemporal: KnowledgeGraphTemporal = 'default'
-): Promise<ApiResponse<KnowledgeAnswerData | KnowledgeAnswerCompareData>> {
+): Promise<KnowledgeAnswerData | KnowledgeAnswerCompareData> {
   // graph_mode='compare' makes the server run both legs (use_graph=False/True)
   // concurrently and return a compare shape. The route response type is a
   // union; callers use isAnswerCompareData() to discriminate.
@@ -486,7 +486,7 @@ export function listKnowledgeDocuments(filters: {
   title?: string;
   limit?: number;
   offset?: number;
-} = {}): Promise<ApiResponse<KnowledgeListDocumentsData>> {
+} = {}): Promise<KnowledgeListDocumentsData> {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(filters)) {
     if (value !== undefined && value !== null && String(value).trim() !== '') {
@@ -500,7 +500,7 @@ export function listKnowledgeDocuments(filters: {
 export function getKnowledgeDocument(
   documentId: string,
   options?: { chunkLimit?: number; chunkOffset?: string | null }
-): Promise<ApiResponse<KnowledgeDocumentDetailData>> {
+): Promise<KnowledgeDocumentDetailData> {
   const params = new URLSearchParams();
   if (options?.chunkLimit != null) params.set('chunk_limit', String(options.chunkLimit));
   if (options?.chunkOffset) params.set('chunk_offset', options.chunkOffset);
@@ -510,14 +510,14 @@ export function getKnowledgeDocument(
   );
 }
 
-export function deleteKnowledgeDocument(documentId: string): Promise<ApiResponse<{ document_id: string; deleted: boolean }>> {
+export function deleteKnowledgeDocument(documentId: string): Promise<{ document_id: string; deleted: boolean }> {
   return apiRequest<{ document_id: string; deleted: boolean }>(`/knowledge/documents/${encodeURIComponent(documentId)}`, {
     method: 'DELETE',
     timeoutMs: 60000
   });
 }
 
-export function reingestKnowledgeDocument(documentId: string): Promise<ApiResponse<KnowledgeJobData>> {
+export function reingestKnowledgeDocument(documentId: string): Promise<KnowledgeJobData> {
   return apiRequest<KnowledgeJobData>(`/knowledge/documents/${encodeURIComponent(documentId)}/reingest`, {
     method: 'POST'
   });
@@ -526,7 +526,7 @@ export function reingestKnowledgeDocument(documentId: string): Promise<ApiRespon
 export function updateKnowledgeDocumentMetadata(
   documentId: string,
   metadata: KnowledgeIngestMetadata
-): Promise<ApiResponse<KnowledgeDocument>> {
+): Promise<KnowledgeDocument> {
   return apiRequest<KnowledgeDocument>(`/knowledge/documents/${encodeURIComponent(documentId)}/metadata`, {
     method: 'PATCH',
     body: metadata,
@@ -601,7 +601,7 @@ export type GraphIngestProgress = {
 
 export function exportKnowledgeGraph(
   opts: { nodeLimit?: number; edgeLimit?: number; groupIds?: string[] } = {}
-): Promise<ApiResponse<KnowledgeGraphExportData>> {
+): Promise<KnowledgeGraphExportData> {
   return apiRequest<KnowledgeGraphExportData>('/knowledge/graph/export', {
     method: 'POST',
     body: {
@@ -622,7 +622,7 @@ export type KnowledgeGraphGroupsData = {
 };
 
 /** List the graph's partitions (Knowledge + each conversation-memory group). */
-export function listKnowledgeGraphGroups(): Promise<ApiResponse<KnowledgeGraphGroupsData>> {
+export function listKnowledgeGraphGroups(): Promise<KnowledgeGraphGroupsData> {
   return apiRequest<KnowledgeGraphGroupsData>('/knowledge/graph/groups', { timeoutMs: 30000 });
 }
 
@@ -643,7 +643,7 @@ export type KnowledgeGraphEpisodesData = { episodes: GraphEpisode[] };
 /** List a partition's episodes for the Graph tab's episode multi-select (ordered by id). */
 export function listKnowledgeGraphEpisodes(
   groupId: string
-): Promise<ApiResponse<KnowledgeGraphEpisodesData>> {
+): Promise<KnowledgeGraphEpisodesData> {
   return apiRequest<KnowledgeGraphEpisodesData>('/knowledge/graph/episodes', {
     method: 'POST',
     body: { group_id: groupId },
@@ -656,7 +656,7 @@ export function listKnowledgeGraphEpisodes(
  *  Qdrant chunks. Backs the Browse tab per-document "Remove from graph" action. */
 export function removeDocumentFromKnowledgeGraph(
   documentId: string
-): Promise<ApiResponse<{ document_id: string; removed_episodes: number }>> {
+): Promise<{ document_id: string; removed_episodes: number }> {
   return apiRequest<{ document_id: string; removed_episodes: number }>(
     '/knowledge/graph/remove-document',
     { method: 'POST', body: { document_id: documentId }, timeoutMs: 120000 }
@@ -682,7 +682,7 @@ export type GraphChunksDetailData = { chunks: GraphChunkDetail[] };
 export function fetchGraphChunksDetail(
   chunkIds: string[],
   signal?: AbortSignal
-): Promise<ApiResponse<GraphChunksDetailData>> {
+): Promise<GraphChunksDetailData> {
   return apiRequest<GraphChunksDetailData>('/knowledge/graph/chunks-detail', {
     method: 'POST',
     body: { chunk_ids: chunkIds },
@@ -698,7 +698,7 @@ export type GraphSearchChunksData = { point_ids: string[] };
 export function searchGraphChunks(
   text: string,
   signal?: AbortSignal
-): Promise<ApiResponse<GraphSearchChunksData>> {
+): Promise<GraphSearchChunksData> {
   return apiRequest<GraphSearchChunksData>('/knowledge/graph/search-chunks', {
     method: 'POST',
     body: { text },

@@ -1,4 +1,4 @@
-import { apiRequest, type ApiResponse } from './client';
+import { apiRequest } from './client';
 
 export type AdminConfig = {
   hiro_env: string;
@@ -18,7 +18,7 @@ export const DEFAULT_ADMIN_CONFIG: AdminConfig = {
   hiro_package_version: 'unknown'
 };
 
-export async function getAdminConfig(): Promise<ApiResponse<AdminConfig>> {
+export async function getAdminConfig(): Promise<AdminConfig> {
   return apiRequest<AdminConfig>('/config');
 }
 

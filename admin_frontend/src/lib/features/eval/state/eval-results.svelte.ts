@@ -76,7 +76,7 @@ export function createEvalResults(deps: EvalResultsDeps) {
     }
     try {
       const res = await listEvalResults('memory', corpus.id, corpus.questions_path);
-      const data = res.data;
+      const data = res;
       const map: Record<string, string> = {};
       const rsMap: Record<string, boolean> = {};
       const aaMap: Record<string, string> = {};
@@ -116,7 +116,7 @@ export function createEvalResults(deps: EvalResultsDeps) {
     benchmarkResultsError = null;
     try {
       const res = await listEvalBenchmarkResults(bid, deps.getFolder().trim());
-      benchmarkResults = res.data;
+      benchmarkResults = res;
     } catch (err) {
       benchmarkResultsError = err instanceof Error ? err.message : 'Failed to load benchmark results.';
       benchmarkResults = null;

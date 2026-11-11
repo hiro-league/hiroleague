@@ -81,22 +81,31 @@
   async function generate() {
     generating = true;
     const said = text;
-    const res = picked ? await tryVoice({ text: said, profile_id: picked.id }) : await tryVoice({ text: said, draft: editing.fields });
-    generating = false;
-    if (!res.ok || !res.data) {
-      error = res.error ?? 'Nothing was spoken.';
+    // Step 1d: a failed request throws (answers are the data itself; there is no {ok, error} to test).
+    let res: Awaited<ReturnType<typeof tryVoice>>;
+    try {
+      res = picked ? await tryVoice({ text: said, profile_id: picked.id }) : await tryVoice({ text: said, draft: editing.fields });
+    } catch (err) {
+      error = err instanceof Error ? err.message : 'Nothing was spoken.';
       return;
+    } finally {
+      generating = false;
     }
     error = null;
-    takes = [{ clip: res.data.clip, profile: speaker.name, provider: speaker.provider, text: said }, ...takes];
+    takes = [{ clip: res.clip, profile: speaker.name, provider: speaker.provider, text: said }, ...takes];
   }
 
   async function send(t: Take) {
     if (!recipient) return;
     t.sending = true;
-    const res = await sendVoiceClip(t.clip.id, recipient.person_id);
-    t.sending = false;
-    t.note = res.ok ? `Sent to ${res.data?.name ?? recipient.name} as a voice note.` : `Not sent: ${res.error ?? 'unknown error'}`;
+    try {
+      const res = await sendVoiceClip(t.clip.id, recipient.person_id);
+      t.note = `Sent to ${res.name ?? recipient.name} as a voice note.`;
+    } catch (err) {
+      t.note = `Not sent: ${err instanceof Error ? err.message : 'unknown error'}`;
+    } finally {
+      t.sending = false;
+    }
   }
 
   const tagBtn = 'rounded-md border px-1.5 py-0.5 font-mono text-[11px] hover:bg-accent disabled:opacity-50';

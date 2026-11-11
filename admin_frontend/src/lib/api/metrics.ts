@@ -1,4 +1,4 @@
-import { apiRequest, type ApiResponse } from './client';
+import { apiRequest } from './client';
 
 export type MetricsChartScalars = {
   ts_ms: number;
@@ -56,14 +56,14 @@ export type MetricsConfigState = {
   interval: number;
 };
 
-export function getMetricsTick(): Promise<ApiResponse<MetricsTickResponse>> {
+export function getMetricsTick(): Promise<MetricsTickResponse> {
   return apiRequest<MetricsTickResponse>('/metrics/tick');
 }
 
 export function configureMetrics(body: {
   enabled?: boolean | null;
   interval?: number | null;
-}): Promise<ApiResponse<MetricsConfigState>> {
+}): Promise<MetricsConfigState> {
   return apiRequest<MetricsConfigState>('/metrics/configure', {
     method: 'POST',
     body

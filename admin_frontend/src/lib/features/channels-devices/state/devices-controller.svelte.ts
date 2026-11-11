@@ -33,7 +33,7 @@ export function createDevicesController(notify: Notify) {
     error = null;
     try {
       const payload = await listDevices();
-      rows = payload.data;
+      rows = payload;
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to load devices.';
     } finally {
@@ -56,7 +56,7 @@ export function createDevicesController(notify: Notify) {
     busy = true;
     try {
       const result = await generateDevicePairingCode();
-      pairing = result.data;
+      pairing = result;
       await load();
     } catch (err) {
       notify('error', err instanceof Error ? err.message : 'Failed to generate code.');
@@ -83,7 +83,7 @@ export function createDevicesController(notify: Notify) {
     busy = true;
     try {
       const result = await revokeDevice(revokeTarget.device_id);
-      notify('success', result.data ?? 'Device revoked.');
+      notify('success', result ?? 'Device revoked.');
       revokeTarget = null;
       await load();
     } catch (err) {

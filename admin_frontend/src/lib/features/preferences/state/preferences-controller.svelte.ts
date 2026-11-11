@@ -111,15 +111,15 @@ export function createPreferencesController(notify: Notify) {
     busy = true;
     try {
       const payload = await patchPreferences(edits);
-      const saved = payload.data.preferences;
+      const saved = payload.preferences;
       for (const path of Object.keys(edits)) {
         const value = getPreferenceByPath(saved, path);
         // Clone so baseline and draft never share a mutable reference for the committed path.
         setPreferenceByPath(baseline, path, JSON.parse(JSON.stringify(value ?? null)));
         setPreferenceByPath(draft, path, JSON.parse(JSON.stringify(value ?? null)));
       }
-      promptDefaults = payload.data.prompt_defaults ?? promptDefaults;
-      sections = payload.data.sections ?? sections;
+      promptDefaults = payload.prompt_defaults ?? promptDefaults;
+      sections = payload.sections ?? sections;
       notify('success', 'Prompt saved.');
       return true;
     } catch (err) {
@@ -138,10 +138,10 @@ export function createPreferencesController(notify: Notify) {
         getPreferences(),
         getPreferencesSchema()
       ]);
-      sections = prefsPayload.data.sections ?? [];
-      promptDefaults = prefsPayload.data.prompt_defaults ?? {};
-      fieldSchema = schemaPayload.ok ? (schemaPayload.data.fields ?? null) : null;
-      const prefs = prefsPayload.data.preferences;
+      sections = prefsPayload.sections ?? [];
+      promptDefaults = prefsPayload.prompt_defaults ?? {};
+      fieldSchema = schemaPayload.fields ?? null;
+      const prefs = prefsPayload.preferences;
       setDraftFromServer(prefs);
       // Catalog lists no longer depend on prefs (a saved id missing from the catalog is flagged by
       // the picker, not merged into the options); fetch them with the download-status rows.
@@ -160,9 +160,9 @@ export function createPreferencesController(notify: Notify) {
     busy = true;
     try {
       const payload = await patchPreferences(edits);
-      sections = payload.data.sections ?? [];
-      promptDefaults = payload.data.prompt_defaults ?? promptDefaults;
-      setDraftFromServer(payload.data.preferences);
+      sections = payload.sections ?? [];
+      promptDefaults = payload.prompt_defaults ?? promptDefaults;
+      setDraftFromServer(payload.preferences);
       notify('success', 'Workspace preferences saved.');
     } catch (err) {
       notify('error', err instanceof Error ? err.message : 'Save failed.');

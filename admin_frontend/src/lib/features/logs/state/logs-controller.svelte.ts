@@ -210,7 +210,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     error = null;
     try {
       const layoutPayload = await getLogsLayout();
-      const nextLayout = layoutPayload.data;
+      const nextLayout = layoutPayload;
       layout = nextLayout;
       const validSources = sourcesForLayout(nextLayout);
       const restoredSources = prefs.activeSources.filter((source) => validSources.includes(source));
@@ -224,8 +224,8 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
           discoverLogMethods(),
           listDevices()
         ]);
-        logMethods = methodsPayload.data ?? [];
-        pairedDevices = devicesPayload.data ?? [];
+        logMethods = methodsPayload ?? [];
+        pairedDevices = devicesPayload ?? [];
       } catch {
         logMethods = [];
         pairedDevices = [];
@@ -296,8 +296,8 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     }
     const prevRowKey = rowSelection.selectedId;
     const payload = await tailLogs(buildTailRequestBody());
-    rows = withRenderKeys(payload.data.rows);
-    fileOffsets = payload.data.file_offsets;
+    rows = withRenderKeys(payload.rows);
+    fileOffsets = payload.file_offsets;
     reconcileActiveRowAfterTailReload(prevRowKey, rows);
   }
 
@@ -316,7 +316,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
         method: prefs.scopeMethod.trim() || undefined
       });
       if (myGen !== searchFetchGeneration) return;
-      rows = withRenderKeys(payload.data.rows);
+      rows = withRenderKeys(payload.rows);
       fileOffsets = {};
       rowSelection.select(rows[0]?._rowKey ?? null);
     } catch (err) {
@@ -344,9 +344,9 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     try {
       const payload = await tailLogs(buildTailRequestBody(fileOffsets));
       pollError = null;
-      fileOffsets = payload.data.file_offsets;
-      if (payload.data.rows.length > 0) {
-        rows = [...rows, ...withRenderKeys(payload.data.rows, rows.length)];
+      fileOffsets = payload.file_offsets;
+      if (payload.rows.length > 0) {
+        rows = [...rows, ...withRenderKeys(payload.rows, rows.length)];
       }
       trimRowsToRollingWindow();
     } catch (err) {

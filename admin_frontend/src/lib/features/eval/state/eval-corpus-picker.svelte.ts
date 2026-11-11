@@ -86,12 +86,12 @@ export function createEvalCorpusPicker(deps: EvalCorpusPickerDeps) {
     corpusesError = null;
     try {
       const res = await listEvalCorpuses(track, folder.trim());
-      corpuses = res.data.corpuses ?? [];
+      corpuses = res.corpuses ?? [];
       // Keep the resolved logs/ dir if present; never clobber a good value with an empty one
       // (a degraded scan shouldn't wipe a path the brief already has).
-      if (res.data.log_dir) logDir = res.data.log_dir;
+      if (res.log_dir) logDir = res.log_dir;
       // Keep the folder the server resolved (so the default eval/ path shows in the field).
-      if (!folder.trim() && res.data.folder) folder = res.data.folder;
+      if (!folder.trim() && res.folder) folder = res.folder;
       // Prefer the current in-session selection, else the persisted one (fresh load),
       // else the first corpus. Only ids that still exist in the scanned list survive.
       const desired = selectedCorpusId || readCorpusPref(track);
@@ -116,8 +116,8 @@ export function createEvalCorpusPicker(deps: EvalCorpusPickerDeps) {
     deps.setError(null);
     try {
       const res = await pickKnowledgeFolder(folder.trim() || undefined);
-      if (res.data.folder) {
-        setFolder(res.data.folder);
+      if (res.folder) {
+        setFolder(res.folder);
         await scanCorpuses();
       }
     } catch (err) {
@@ -147,11 +147,11 @@ export function createEvalCorpusPicker(deps: EvalCorpusPickerDeps) {
     corpusLoading = true;
     try {
       const res = await getEvalCorpus(corpus.corpus_path);
-      corpusEpisodes = res.data.episodes ?? [];
+      corpusEpisodes = res.episodes ?? [];
       corpusMeta = {
-        episode_count: res.data.episode_count,
-        first_timestamp: res.data.first_timestamp,
-        last_timestamp: res.data.last_timestamp
+        episode_count: res.episode_count,
+        first_timestamp: res.first_timestamp,
+        last_timestamp: res.last_timestamp
       };
     } catch (err) {
       corpusError = err instanceof Error ? err.message : 'Failed to load corpus episodes.';
@@ -170,8 +170,8 @@ export function createEvalCorpusPicker(deps: EvalCorpusPickerDeps) {
       const res = await getCorpusIngestExtraction(corpusId);
       // Only apply if the user hasn't switched corpus mid-flight (the episodes are this corpus's).
       if (selectedCorpus()?.id === corpusId) {
-        corpusExtraction = res.data?.episodes ?? {};
-        corpusExtractionGroup = res.data?.group_id ?? '';
+        corpusExtraction = res?.episodes ?? {};
+        corpusExtractionGroup = res?.group_id ?? '';
       }
     } catch (err) {
       console.warn('eval corpus extraction load failed', err);
@@ -202,7 +202,7 @@ export function createEvalCorpusPicker(deps: EvalCorpusPickerDeps) {
     questionsError = null;
     try {
       const res = await listEvalQuestions(corpus.questions_path);
-      questions = res.data.questions ?? [];
+      questions = res.questions ?? [];
     } catch (err) {
       questionsError = err instanceof Error ? err.message : 'Failed to load questions.';
       questions = [];

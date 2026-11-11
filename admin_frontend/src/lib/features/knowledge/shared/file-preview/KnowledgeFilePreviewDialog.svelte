@@ -28,7 +28,7 @@
     preview = null;
     try {
       const payload = await previewKnowledgeFile(target.path);
-      preview = payload.data;
+      preview = payload;
     } catch (err) {
       error = err instanceof Error ? err.message : 'Could not load file preview.';
     } finally {

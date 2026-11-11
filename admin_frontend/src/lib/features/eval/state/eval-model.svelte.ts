@@ -199,7 +199,7 @@ export function createEvalModel(deps: { setError: (message: string | null) => vo
         questionConcurrency: setup.questionConcurrency
       });
       const res = await runKnowledgeEval(req);
-      run.setRunId(res.data.run_id);
+      run.setRunId(res.run_id);
       // Auto-disarm the Clear Graph wipe as soon as an ingest run is accepted: the next batch must
       // NOT silently wipe the graph we just built. The flag is per-run; users opt in again per wipe.
       if (track === 'memory' && ingesting && setup.clearBefore) setup.disarmClearBefore();

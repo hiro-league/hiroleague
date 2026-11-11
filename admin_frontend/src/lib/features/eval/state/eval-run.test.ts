@@ -5,8 +5,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const h = vi.hoisted(() => ({
   handlers: null as Record<string, (p: unknown) => void> | null,
   teardown: vi.fn(),
-  cancel: vi.fn(async () => ({ data: { cancelled: true, run_id: 'r1' } })),
-  state: { data: null as unknown }
+  cancel: vi.fn(async () => ({ cancelled: true, run_id: 'r1' })),
+  // What the server answers for the run's state (the answer itself; null = no run).
+  state: { value: null as unknown }
 }));
 
 vi.mock('$lib/features/eval/shared/eval-events', () => ({
@@ -18,7 +19,7 @@ vi.mock('$lib/features/eval/shared/eval-events', () => ({
 
 vi.mock('$lib/api/eval', () => ({
   cancelKnowledgeEval: (...args: unknown[]) => h.cancel(...(args as [])),
-  getKnowledgeEvalState: async () => h.state
+  getKnowledgeEvalState: async () => h.state.value
 }));
 
 import { createEvalRunController, type EvalRunCtx } from './eval-run.svelte';
@@ -53,7 +54,7 @@ const q = (index: number, id: string) => ({
 
 beforeEach(() => {
   h.handlers = null;
-  h.state.data = null;
+  h.state.value = null;
   vi.clearAllMocks();
 });
 
@@ -170,7 +171,7 @@ describe('applySnapshot', () => {
 describe('hydrateFromServer', () => {
   it('no server run while idle → resets', async () => {
     const { run, afterHydrate } = setup();
-    h.state.data = null;
+    h.state.value = null;
     await run.hydrateFromServer();
     expect(run.status).toBe('idle');
     expect(afterHydrate).not.toHaveBeenCalled();
@@ -178,7 +179,7 @@ describe('hydrateFromServer', () => {
 
   it('adopts a live run track and replays its rows, then signals afterHydrate', async () => {
     const { run, afterHydrate, getTrack } = setup();
-    h.state.data = {
+    h.state.value = {
       run_id: 'r9',
       status: 'running',
       track: 'knowledge',

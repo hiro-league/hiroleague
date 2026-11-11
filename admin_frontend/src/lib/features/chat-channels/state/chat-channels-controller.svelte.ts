@@ -154,7 +154,7 @@ export function createChatChannelsPageController() {
   async function loadCharacters() {
     try {
       const payload = await listCharacters();
-      characters = payload.data;
+      characters = payload;
     } catch {
       characters = [];
     }
@@ -165,7 +165,7 @@ export function createChatChannelsPageController() {
     channelsError = null;
     try {
       const payload = await listChatChannels();
-      channels = payload.data;
+      channels = payload;
       if (selectedChannelId && !channels.some((channel) => String(channel.id) === selectedChannelId)) {
         selectedChannelId = null;
         engine.resetConversation();

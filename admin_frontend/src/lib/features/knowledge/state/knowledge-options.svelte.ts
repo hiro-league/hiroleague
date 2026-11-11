@@ -27,11 +27,11 @@ export function createKnowledgeOptionsModel(deps: { setError: (message: string |
   async function loadOptions() {
     try {
       const payload = await getKnowledgeOptions();
-      categories = payload.data.categories;
-      tags = payload.data.tags;
-      characters = payload.data.characters;
-      users = payload.data.users;
-      rewriteDefaultOn = payload.data.rewrite_default_on ?? false;
+      categories = payload.categories;
+      tags = payload.tags;
+      characters = payload.characters;
+      users = payload.users;
+      rewriteDefaultOn = payload.rewrite_default_on ?? false;
     } catch (err) {
       deps.setError(err instanceof Error ? err.message : 'Could not load knowledge options.');
     }
@@ -43,10 +43,10 @@ export function createKnowledgeOptionsModel(deps: { setError: (message: string |
     deps.setError(null);
     try {
       const payload = await createKnowledgeCategory(name.trim(), parentId);
-      categories = [...categories.filter((category) => category.id !== payload.data.id), payload.data].sort((a, b) =>
+      categories = [...categories.filter((category) => category.id !== payload.id), payload].sort((a, b) =>
         a.name.localeCompare(b.name)
       );
-      return payload.data;
+      return payload;
     } catch (err) {
       deps.setError(err instanceof Error ? err.message : 'Could not create category.');
       throw err;
@@ -63,10 +63,10 @@ export function createKnowledgeOptionsModel(deps: { setError: (message: string |
     deps.setError(null);
     try {
       const payload = await createKnowledgeTag(clean);
-      tags = [...tags.filter((tag) => tag.id !== payload.data.id), payload.data].sort((a, b) =>
+      tags = [...tags.filter((tag) => tag.id !== payload.id), payload].sort((a, b) =>
         a.name.localeCompare(b.name)
       );
-      return payload.data;
+      return payload;
     } catch (err) {
       deps.setError(err instanceof Error ? err.message : 'Could not create tag.');
       throw err;

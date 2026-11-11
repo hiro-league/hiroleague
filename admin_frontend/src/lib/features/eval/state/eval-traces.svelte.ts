@@ -65,7 +65,7 @@ export function createEvalTraces(ctx: EvalTracesCtx) {
     ingestTraceLoading = true;
     try {
       const res = await getGraphRunIngestTrace(runId);
-      const traces = res.ok && res.data ? (res.data.traces ?? []) : [];
+      const traces = res.traces ?? [];
       if (traces.length > 0) {
         ingestTraces = traces;
         ingestTraceIndex = 0;
@@ -91,7 +91,7 @@ export function createEvalTraces(ctx: EvalTracesCtx) {
     ingestTraceLoading = true;
     try {
       const res = await getGraphRunIngestTrace(info.runId);
-      const traces = res.ok && res.data ? (res.data.traces ?? []) : [];
+      const traces = res.traces ?? [];
       if (traces.length === 0) {
         notify(
           'error',
@@ -169,19 +169,19 @@ export function createEvalTraces(ctx: EvalTracesCtx) {
     exportingLocomo = true;
     try {
       const res = await exportEvalResultsLocomo(corpus.id, corpus.questions_path);
-      const blob = new Blob([res.data.content], { type: 'application/json' });
+      const blob = new Blob([res.content], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = res.data.filename;
+      a.download = res.filename;
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
       notify(
         'success',
-        `${res.data.exported_count}/${res.data.total_count} LoCoMo rows exported${
-          res.data.partial ? ' (partial)' : ''
+        `${res.exported_count}/${res.total_count} LoCoMo rows exported${
+          res.partial ? ' (partial)' : ''
         }.`
       );
     } catch (err) {
