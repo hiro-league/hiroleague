@@ -23,6 +23,8 @@
 				"icon-xs": "size-6 rounded-[min(var(--radius-md),10px)] in-data-[slot=button-group]:rounded-lg [&_svg:not([class*='size-'])]:size-3",
 				"icon-sm": "size-7 rounded-[min(var(--radius-md),12px)] in-data-[slot=button-group]:rounded-lg",
 				"icon-lg": "size-9",
+				// UI kit, step 3: a button that reads as words in a sentence (with variant "link"): no box, no padding
+				inline: "h-auto gap-1 rounded-sm p-0 align-baseline",
 			},
 		},
 		defaultVariants: {

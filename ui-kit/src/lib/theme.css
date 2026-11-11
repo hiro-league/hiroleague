@@ -42,6 +42,15 @@
 	--chart-3: var(--brand);
 	--chart-4: var(--brand-rose);
 	--chart-5: var(--brand-pink);
+	/* categories: things sorted into kinds (ui/category.ts); blue, teal, amber, rose, violet, green, orange, pink */
+	--cat-1: #0369a1;
+	--cat-2: #0f766e;
+	--cat-3: #b45309;
+	--cat-4: #be123c;
+	--cat-5: #6d28d9;
+	--cat-6: #15803d;
+	--cat-7: #c2410c;
+	--cat-8: #be185d;
 	--radius: 0.625rem;
 	--sidebar: #fffaf8;
 	--sidebar-foreground: #3c0608;
@@ -87,6 +96,14 @@
 	--chart-3: var(--brand);
 	--chart-4: var(--brand-rose);
 	--chart-5: var(--brand-pink);
+	--cat-1: #38bdf8;
+	--cat-2: #2dd4bf;
+	--cat-3: #fbbf24;
+	--cat-4: #fb7185;
+	--cat-5: #a78bfa;
+	--cat-6: #4ade80;
+	--cat-7: #fb923c;
+	--cat-8: #f472b6;
 	--sidebar: #1c1817;
 	--sidebar-foreground: #f5eceb;
 	--sidebar-primary: #1687b8;
@@ -134,6 +151,14 @@
 	--color-chart-3: var(--chart-3);
 	--color-chart-4: var(--chart-4);
 	--color-chart-5: var(--chart-5);
+	--color-cat-1: var(--cat-1);
+	--color-cat-2: var(--cat-2);
+	--color-cat-3: var(--cat-3);
+	--color-cat-4: var(--cat-4);
+	--color-cat-5: var(--cat-5);
+	--color-cat-6: var(--cat-6);
+	--color-cat-7: var(--cat-7);
+	--color-cat-8: var(--cat-8);
 	--color-sidebar: var(--sidebar);
 	--color-sidebar-foreground: var(--sidebar-foreground);
 	--color-sidebar-primary: var(--sidebar-primary);

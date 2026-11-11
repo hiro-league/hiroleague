@@ -30,8 +30,13 @@
 	import SearchInput from '$kit/ui/search-input.svelte';
 	import Segmented from '$kit/ui/segmented.svelte';
 	import TimeField from '$kit/ui/time-field.svelte';
+	import StatusDot from '$kit/ui/status-dot.svelte';
+	import SliderField from '$kit/ui/slider-field.svelte';
+	import FileButton from '$kit/ui/file-button.svelte';
+	import { CAT, CATEGORY_COUNT } from '$kit/ui/category';
 	import { Inbox, Moon, Plus, Sun, Trash2 } from '@lucide/svelte';
 
+	let level = $state(50);
 	let range = $state('24h');
 	let chip = $state('all');
 	let on = $state(true);
@@ -172,6 +177,32 @@
 
 			<Card.Root>
 				<Card.Header>
+					<Card.Title>Status, kinds and files</Card.Title>
+					<Card.Description>Status lights, the eight category colours, a slider in a form, a file button.</Card.Description>
+				</Card.Header>
+				<Card.Content class="grid gap-4">
+					<div class="flex flex-wrap items-center gap-4 text-sm">
+						<span class="inline-flex items-center gap-1.5"><StatusDot tone="ok" ping />Online</span>
+						<span class="inline-flex items-center gap-1.5"><StatusDot tone="warn" />Not set up</span>
+						<span class="inline-flex items-center gap-1.5"><StatusDot tone="error" />Failed</span>
+						<span class="inline-flex items-center gap-1.5"><StatusDot tone="info" pulse />Live</span>
+						<span class="inline-flex items-center gap-1.5"><StatusDot tone="off" />Off</span>
+					</div>
+					<div class="flex flex-wrap gap-1.5">
+						{#each Array.from({ length: CATEGORY_COUNT }, (_, i) => i + 1) as n (n)}
+							<span class={['rounded-md border px-2 py-0.5 text-xs font-medium', CAT.chip[n]]}>Kind {n}</span>
+						{/each}
+					</div>
+					<SliderField label="Speaking speed" value={level} onchange={(v) => (level = v)} reset={50} format={(v) => `${v}%`} hint="How fast Hiro speaks." />
+					<div class="flex flex-wrap items-center gap-3">
+						<FileButton accept="image/*" onfiles={(f) => toast.info(`Picked ${f[0].name}`)}>Upload a photo</FileButton>
+						<span class="text-sm">Text with <Button variant="link" size="inline" onclick={() => toast.info('Opened')}>a link button</Button> inside.</span>
+					</div>
+				</Card.Content>
+			</Card.Root>
+
+			<Card.Root>
+				<Card.Header>
 					<Card.Title>Choices and filters</Card.Title>
 					<Card.Description>One of a few, side by side; a search; chips.</Card.Description>
 				</Card.Header>
@@ -181,9 +212,9 @@
 							value={range}
 							onchange={(v) => (range = v)}
 							options={[
-								{ value: '1h', label: '1 h' },
-								{ value: '24h', label: '24 h' },
-								{ value: '7d', label: '7 days' }
+								{ value: '1h', label: '1 h', count: 3 },
+								{ value: '24h', label: '24 h', count: 41 },
+								{ value: '7d', label: '7 days', count: 280 }
 							]}
 						/>
 						<SearchInput bind:value={search} placeholder="Search devices…" />
