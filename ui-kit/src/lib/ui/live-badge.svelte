@@ -20,10 +20,10 @@
 <span class="inline-flex items-center gap-2 text-sm text-muted-foreground" {title}>
 	<span class="relative flex size-2.5">
 		{#if status?.connected}
-			<span class="absolute inline-flex size-full animate-ping rounded-full bg-green-500 opacity-60"></span>
-			<span class="relative inline-flex size-2.5 rounded-full bg-green-500"></span>
+			<span class="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-60"></span>
+			<span class="relative inline-flex size-2.5 rounded-full bg-success"></span>
 		{:else}
-			<span class="relative inline-flex size-2.5 rounded-full {status ? 'bg-amber-500' : 'bg-muted-foreground'}"></span>
+			<span class="relative inline-flex size-2.5 rounded-full {status ? 'bg-warning' : 'bg-muted-foreground'}"></span>
 		{/if}
 	</span>
 	{status?.connected ? 'Live' : status ? 'Reconnecting…' : '…'}
