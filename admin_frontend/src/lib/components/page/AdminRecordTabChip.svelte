@@ -9,7 +9,6 @@
   import type { Component, Snippet } from 'svelte';
   import { X } from '@lucide/svelte';
   import { cn } from '$lib/utils';
-  import { cnAdminTab } from '$lib/styling/admin-tokens';
 
   type Props = {
     /** Truncated label for the chip (typically the record's display name). */
@@ -43,10 +42,11 @@
 
   const base =
     'inline-flex shrink-0 items-center gap-2 rounded-md px-3 py-2 font-sans text-sm font-semibold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring';
-  const activeStyle = 'bg-secondary text-secondary-foreground shadow-xs hover:bg-secondary/80';
+  const activeStyle = 'bg-secondary text-secondary-foreground hover:bg-secondary/80';
+  const idleStyle = 'bg-transparent text-muted-foreground hover:bg-secondary';
 </script>
 
-<div class={cn(base, active ? activeStyle : '', cnAdminTab(active))} role="tab" aria-selected={active}>
+<div class={cn(base, active ? activeStyle : idleStyle)} role="tab" aria-selected={active}>
   <button
     type="button"
     class="flex min-w-0 items-center gap-2 bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring"

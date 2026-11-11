@@ -2,13 +2,13 @@
   /**
    * One row of the Providers list for a local server's provider or a plan tool, in the same 10
    * columns and cell styling as `ProvidersTab`'s catalog rows: status as dot + short word in the
-   * Online column, secondary facts in the admin's tooltip (`FieldHelp`) next to the name, and one
+   * Online column, secondary facts in the admin's tooltip (`HelpTip`) next to the name, and one
    * action button that opens the provider's dialog.
    */
   import { Settings2 } from '@lucide/svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
-  import FieldHelp from '$lib/components/ui/field-help.svelte';
+  import HelpTip from '$kit/ui/help-tip.svelte';
   import StatusDot from '$kit/ui/status-dot.svelte';
   import { cn } from '$lib/utils';
   import type { ProviderRowStatus } from './ai-types';
@@ -49,7 +49,7 @@
   <td class="min-w-0 px-3 py-3">
     <div class="inline-flex max-w-full items-center gap-1">
       <span class="min-w-0 truncate font-sans text-sm font-semibold">{name}</span>
-      <FieldHelp text={info} label={`About ${name}`} />
+      <HelpTip text={info} label={name} />
     </div>
     <small class="block truncate text-xs text-muted-foreground">{id}</small>
   </td>

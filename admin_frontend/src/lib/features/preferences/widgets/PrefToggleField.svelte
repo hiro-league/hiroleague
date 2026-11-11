@@ -3,7 +3,7 @@
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { usePrefField } from '$lib/features/preferences/shared/preferences-field.svelte';
   import { type PreferencePath } from '$lib/features/preferences/shared/preferences-schema';
-  import SettingToggle from '$lib/features/preferences/widgets/SettingToggle.svelte';
+  import CheckboxField from '$kit/ui/checkbox-field.svelte';
 
   type Props = {
     ctrl: PreferencesController;
@@ -37,15 +37,14 @@
 </script>
 
 {#if field.visible}
-  <SettingToggle
+  <CheckboxField
     label={field.label}
     anchor={path}
-    hint={field.hint}
+    help={field.hint}
     {details}
     bind:checked={field.value}
     {disabled}
     class={className}
-    showReset={field.canReset}
-    onReset={field.reset}
+    onreset={field.canReset ? field.reset : undefined}
   />
 {/if}

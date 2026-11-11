@@ -28,7 +28,7 @@
   import PrefPanel from '$lib/features/preferences/widgets/PrefPanel.svelte';
   import PromptField from '$lib/features/preferences/widgets/prompts/PromptField.svelte';
   import ActivePromptLibraryField from '$lib/features/preferences/widgets/prompts/ActivePromptLibraryField.svelte';
-  import FieldHelp from '$lib/components/ui/field-help.svelte';
+  import HelpTip from '$kit/ui/help-tip.svelte';
   import PrefFieldRenderer from './PrefFieldRenderer.svelte';
   import GraphEvalContextToggles from '$lib/features/preferences/sections/graph-engine/GraphEvalContextToggles.svelte';
   import SpokenClipsStats from '$lib/features/preferences/sections/SpokenClipsStats.svelte';
@@ -173,7 +173,7 @@
     {#if spec.heading}
       <h4 class={HEADING_CLASS}>
         {spec.heading}
-        {#if spec.headingHelp}<FieldHelp text={spec.headingHelp} />{/if}
+        {#if spec.headingHelp}<HelpTip text={spec.headingHelp} label={spec.heading} />{/if}
       </h4>
     {/if}
     <PromptField
@@ -189,7 +189,7 @@
     {#if spec.heading}
       <h4 class={HEADING_CLASS}>
         {spec.heading}
-        {#if spec.headingHelp}<FieldHelp text={spec.headingHelp} />{/if}
+        {#if spec.headingHelp}<HelpTip text={spec.headingHelp} label={spec.heading} />{/if}
       </h4>
     {/if}
     <ActivePromptLibraryField

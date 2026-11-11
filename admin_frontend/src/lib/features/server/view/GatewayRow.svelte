@@ -2,7 +2,7 @@
   import { FolderOpen, Play, Square, Star, Trash2 } from '@lucide/svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
-  import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
+  import { TABLE_GRID_ROW } from '$kit/ui/table-grid';
   import type { GatewayRow } from '$lib/api/server';
   import AutostartBadge from '../shared/AutostartBadge.svelte';
   import StderrLogButton from '../shared/StderrLogButton.svelte';
@@ -19,7 +19,7 @@
   } = $props();
 </script>
 
-<div class={ADMIN_TABLE_GRID_ROW} style:grid-template-columns={grid}>
+<div class={TABLE_GRID_ROW} style:grid-template-columns={grid}>
   <span class="flex min-w-0 items-center gap-1.5">
     {#if row.is_default}
       <Star

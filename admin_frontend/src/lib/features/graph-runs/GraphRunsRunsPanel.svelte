@@ -7,7 +7,7 @@
   import FilterSelect from '$kit/ui/filter-select.svelte';
   import StickyBar from '$kit/ui/sticky-bar.svelte';
   import TableShell from '$kit/ui/table-shell.svelte';
-  import AdminAvatarNameCell from '$lib/components/page/table/AdminAvatarNameCell.svelte';
+  import AvatarNameCell from '$kit/ui/avatar-name-cell.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import { FileText } from '@lucide/svelte';
   import { formatCompactDateTime } from '$lib/format/timestamp-cell';
@@ -173,7 +173,7 @@
             <span>{listTs.date}</span>
             <span>{listTs.time}</span>
           </td>
-          <AdminAvatarNameCell photo={listCh.photo} name={listCh.name} />
+          <AvatarNameCell photo={listCh.photo} name={listCh.name} />
           <td class={graphRunsNameCellClass}>{listRowChannelName(row, channelById)}</td>
           <td class="font-mono" title={row.run_id}>{graphRunKindLabel(row.run_id)}</td>
           <td class="align-middle">

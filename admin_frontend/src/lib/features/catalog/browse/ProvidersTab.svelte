@@ -3,7 +3,7 @@
   import Panel from '$kit/ui/panel.svelte';
   import type { Snippet } from 'svelte';
   import { Filter, Plus, RefreshCw, Search, Trash2 } from '@lucide/svelte';
-  import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
+  import SortHead from '$kit/ui/sort-head.svelte';
   import TableShell from '$kit/ui/table-shell.svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
@@ -114,17 +114,17 @@
       <TableShell stickyHead class={cn('min-w-[1540px]', ctrl.providersLoading && 'opacity-60 transition-opacity')}>
         <thead class={ADMIN_TABLE_HEAD}>
           <tr>
-            <AdminTableHeaderCell column="online" sort={ctrl.providerSort} class="w-12 text-center">
+            <SortHead key="online" sorter={ctrl.providerSort} class="w-12 text-center">
               Online
-            </AdminTableHeaderCell>
-            <AdminTableHeaderCell column="provider" sort={ctrl.providerSort}>Provider</AdminTableHeaderCell>
-            <AdminTableHeaderCell column="hosting" sort={ctrl.providerSort}>Hosting</AdminTableHeaderCell>
+            </SortHead>
+            <SortHead key="provider" sorter={ctrl.providerSort}>Provider</SortHead>
+            <SortHead key="hosting" sorter={ctrl.providerSort}>Hosting</SortHead>
             <th class="px-3 py-2 text-left">Auth</th>
             <th class="px-3 py-2 text-center">Models</th>
             <th class="px-3 py-2 text-left">Kinds</th>
             <th class="px-3 py-2 text-left">Credential env</th>
             <th class="px-3 py-2 text-left">Recommended models</th>
-            <AdminTableHeaderCell column="updated" sort={ctrl.providerSort}>Updated</AdminTableHeaderCell>
+            <SortHead key="updated" sorter={ctrl.providerSort}>Updated</SortHead>
             <th class="px-3 py-2 text-left">Actions</th>
           </tr>
         </thead>

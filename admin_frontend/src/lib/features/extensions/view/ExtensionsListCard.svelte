@@ -5,7 +5,7 @@
   import Panel from '$kit/ui/panel.svelte';
   import ResourceView from '$kit/ui/resource-view.svelte';
   import TableShell from '$kit/ui/table-shell.svelte';
-  import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
+  import { TABLE_GRID_ROW } from '$kit/ui/table-grid';
   import { dateTime } from '$lib/format/time';
   import type { ExtensionsController } from '../state/extensions-controller.svelte';
 
@@ -61,7 +61,7 @@
         {/snippet}
         {#snippet body()}
           {#each ctrl.rows as row (row.extension_id)}
-            <div class={ADMIN_TABLE_GRID_ROW} style:grid-template-columns={GRID}>
+            <div class={TABLE_GRID_ROW} style:grid-template-columns={GRID}>
               <span class="truncate font-sans text-sm font-semibold" title={row.extension_id}>
                 {row.name || row.extension_id.slice(0, 12)}
               </span>

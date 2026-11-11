@@ -4,9 +4,8 @@
   import { FolderOpen } from '@lucide/svelte';
   import PageHeader from '$kit/ui/page-header.svelte';
   import PageTabs from '$kit/ui/page-tabs.svelte';
-  import { ADMIN_HEADER_INTRO, ADMIN_PAGE_MAX_W_WIDE } from '$lib/styling/admin-tokens';
+  import { ADMIN_PAGE_MAX_W_WIDE } from '$lib/styling/admin-tokens';
   import { toast } from '$kit/ui/toast.svelte';
-  import { cn } from '$lib/utils';
   import { createLogsPreferences } from '$lib/preferences/logs-preferences.svelte';
   import { createLogsTabPreferences } from '$lib/preferences/logs-tab-preferences.svelte';
   import { createLogsPageController } from './state/logs-controller.svelte';
@@ -74,15 +73,15 @@
     {/snippet}
     {#snippet details()}
     {#if isRunsTab}
-      <p class={cn(ADMIN_HEADER_INTRO, 'mt-1 font-sans text-xs')}>
+      <p class={'mt-1 font-sans text-xs text-muted-foreground'}>
         Recent agent turns with aggregate cost, latency, and drill-down timelines.
       </p>
     {:else if isUsageTab}
-      <p class={cn(ADMIN_HEADER_INTRO, 'mt-1 font-sans text-xs')}>
+      <p class={'mt-1 font-sans text-xs text-muted-foreground'}>
         What every paid AI call costs (questions, speech, transcription, images, embeddings): the extensions' and Hiro's own jobs, by the hour.
       </p>
     {:else}
-      <p class={cn(ADMIN_HEADER_INTRO, 'mt-1 font-sans text-xs')}>
+      <p class={'mt-1 font-sans text-xs text-muted-foreground'}>
         {logsCtrl.visibleRows.length} visible / {logsCtrl.rows.length} loaded
         {#if logsCtrl.searchBusy}
           <span class="ml-2 text-primary">Searching...</span>

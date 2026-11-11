@@ -7,7 +7,6 @@
   import Field from '$kit/ui/field.svelte';
   import Panel from '$kit/ui/panel.svelte';
   import Section from '$kit/ui/section.svelte';
-  import { ADMIN_SECTION_TITLE } from '$lib/styling/admin-tokens';
   import { toast } from '$kit/ui/toast.svelte';
   import type { ImageLabController } from './state/image-lab-controller.svelte';
 
@@ -17,9 +16,7 @@
   const isDefaultModel = $derived(ctl.options?.default_model === ctl.model);
 </script>
 
-<Panel class="grid content-start gap-4">
-  <h2 class={ADMIN_SECTION_TITLE}>Generate</h2>
-
+<Panel title="Generate" class="content-start" contentClass="grid gap-4">
   <Field label="Model" for="{uid}-model">
     <PickSelect
       id="{uid}-model"

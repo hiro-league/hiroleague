@@ -1,19 +1,9 @@
 <script lang="ts" generics="TId extends string">
-  /**
-   * Inner section scroll-spy navigation (Preferences-style).
-   *
-   * **Not** a page-level tab strip. This is the in-page pill row that
-   * highlights which `<section id="…">` is currently under the marker line
-   * and supports `#hash` deep-links. See
-   * `docs/admin-frontend-refactor-plan.md` §2.3.
-   *
-   * Phase 1 ships the contract; Preferences is the first consumer (Phase 4).
-   * Promoted to `lib/components/page/` from day one so the API is settled
-   * before adoption; until a second consumer appears it stays the only user.
-   */
+  // A row of links to the sections of one long page. The one the page is scrolled to is lit, a click scrolls to its
+  // section (an element with that id) and puts it in the address bar, and an address with a #section opens there.
+  // Not for switching pages or tabs. UI kit, step 7: from the HiroLeague admin.
   import { onMount } from 'svelte';
-  import { cn } from '$lib/utils';
-  import { cnAdminTab } from '$lib/styling/admin-tokens';
+  import { cn } from '$kit/utils';
 
   type Section<I extends string> = { id: I; label: string };
 
@@ -104,8 +94,8 @@
     <a
       class={cn(
         'inline-flex items-center justify-center rounded-md px-3 py-1.5 font-sans text-sm font-semibold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        isActive ? 'bg-secondary text-secondary-foreground shadow-xs hover:bg-secondary/80' : '',
-        cnAdminTab(isActive)
+        isActive ? 'bg-secondary text-secondary-foreground hover:bg-secondary/80' : '',
+        !isActive && 'bg-transparent text-muted-foreground hover:bg-secondary'
       )}
       href={`#${section.id}`}
       aria-current={isActive ? 'true' : undefined}

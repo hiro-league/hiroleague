@@ -3,7 +3,6 @@
   import Panel from '$kit/ui/panel.svelte';
   import Notice from '$kit/ui/notice.svelte';
   import StatusDot from '$kit/ui/status-dot.svelte';
-  import { ADMIN_SECTION_TITLE } from '$lib/styling/admin-tokens';
   import type { ChannelDetailController } from '../../state/channel-detail-controller.svelte';
   import ChannelPairingPane from './ChannelPairingPane.svelte';
 
@@ -17,9 +16,7 @@
   const label = (action: string) => ACTION_LABELS[action] ?? action;
 </script>
 
-<Panel class="grid gap-3">
-  <h2 class={ADMIN_SECTION_TITLE}>Connection</h2>
-
+<Panel title="Connection" contentClass="grid gap-3">
   <div class="flex items-center gap-2 text-sm">
     <StatusDot size="md" tone={ctrl.connected ? 'ok' : ctrl.needsRepair ? 'error' : 'warn'} />
     <span class="font-medium capitalize">{ctrl.status?.state ?? 'unknown'}</span>

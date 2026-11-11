@@ -1,9 +1,9 @@
 <script lang="ts">
   import { Eye, MessagesSquare } from '@lucide/svelte';
   import TableShell from '$kit/ui/table-shell.svelte';
-  import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
-  import AdminAvatarNameCell from '$lib/components/page/table/AdminAvatarNameCell.svelte';
-  import type { TableSortController } from '$lib/components/page/table/use-table-sort.svelte';
+  import SortHead from '$kit/ui/sort-head.svelte';
+  import AvatarNameCell from '$kit/ui/avatar-name-cell.svelte';
+  import type { SortState } from '$kit/ui/sort.svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import type { ChatChannelRow } from '$lib/api/chat-channels';
@@ -59,7 +59,7 @@
     /** URL-synced filter values keyed by `mem_*`; written only via `setFilter`. */
     filters: Record<MemoryFilterKey, string>;
     setFilter: (key: MemoryFilterKey, value: string) => void;
-    sort: TableSortController<MemorySortColumn>;
+    sort: SortState<MemorySortColumn>;
     hidden: boolean;
     memoriesError: string;
     memoriesLoading: boolean;
@@ -138,16 +138,16 @@
           <TableShell density="dense" stickyHead class="memories-table-wrap">
             <thead>
               <tr>
-                <AdminTableHeaderCell column="kind" {sort}>Kind</AdminTableHeaderCell>
-                <AdminTableHeaderCell column="created" {sort}>Created</AdminTableHeaderCell>
-                <AdminTableHeaderCell column="validity" {sort}>Validity</AdminTableHeaderCell>
-                <AdminTableHeaderCell column="character" {sort}>Character</AdminTableHeaderCell>
-                <AdminTableHeaderCell column="memory" {sort}>Memory</AdminTableHeaderCell>
-                <AdminTableHeaderCell column="entities" {sort}>Entities</AdminTableHeaderCell>
-                <AdminTableHeaderCell column="group" {sort}>Group</AdminTableHeaderCell>
-                <AdminTableHeaderCell column="origin" {sort}>Origin</AdminTableHeaderCell>
-                <AdminTableHeaderCell column="id" {sort}>Id</AdminTableHeaderCell>
-                <AdminTableHeaderCell column="id" {sort} sortable={false}>Payload</AdminTableHeaderCell>
+                <SortHead key="kind" sorter={sort}>Kind</SortHead>
+                <SortHead key="created" sorter={sort}>Created</SortHead>
+                <SortHead key="validity" sorter={sort}>Validity</SortHead>
+                <SortHead key="character" sorter={sort}>Character</SortHead>
+                <SortHead key="memory" sorter={sort}>Memory</SortHead>
+                <SortHead key="entities" sorter={sort}>Entities</SortHead>
+                <SortHead key="group" sorter={sort}>Group</SortHead>
+                <SortHead key="origin" sorter={sort}>Origin</SortHead>
+                <SortHead key="id" sorter={sort}>Id</SortHead>
+                <SortHead key="id" sorter={sort} sortable={false}>Payload</SortHead>
               </tr>
             </thead>
             <tbody>
@@ -186,7 +186,7 @@
                       <Badge variant="success">Current</Badge>
                     {/if}
                   </td>
-                  <AdminAvatarNameCell photo={memCharacter.photo} name={memCharacter.name} />
+                  <AvatarNameCell photo={memCharacter.photo} name={memCharacter.name} />
                   <td class="memories-text-cell">{memoryPrimaryText(row)}</td>
                   <MemoriesEntitiesCell {entities} />
                   <td class="memories-group-cell" title={groupLabel}>{groupLabel || '—'}</td>

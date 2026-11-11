@@ -5,9 +5,9 @@
 	// can scroll to it (a settings page's "find a setting").
 	// UI kit, step 2: from the HiroLeague admin's FormField (hint, help tip, reset to default, search anchor).
 	import type { Snippet } from 'svelte';
-	import { RotateCcw } from '@lucide/svelte';
 	import { Label } from '$kit/components/ui/label/index.js';
 	import HelpTip from '$kit/ui/help-tip.svelte';
+	import ResetButton from '$kit/ui/reset-button.svelte';
 	import { cn } from '$kit/utils';
 
 	interface Props {
@@ -30,13 +30,11 @@
 			<Label for={htmlFor}>{label}</Label>
 			{#if help}<HelpTip {label} text={help} />{/if}
 			{#if onreset}
-				<button
-					type="button"
-					class="inline-flex text-muted-foreground opacity-0 transition-opacity group-focus-within/field:opacity-100 group-hover/field:opacity-100 hover:text-foreground focus-visible:opacity-100"
-					title="Back to the default"
-					aria-label="Set {label} back to its default"
-					onclick={onreset}><RotateCcw class="size-3.5" /></button
-				>
+				<ResetButton
+					{onreset}
+					label="Set {label} back to its default"
+					class="opacity-0 group-focus-within/field:opacity-100 group-hover/field:opacity-100 focus-visible:opacity-100"
+				/>
 			{/if}
 		</div>
 	{/if}

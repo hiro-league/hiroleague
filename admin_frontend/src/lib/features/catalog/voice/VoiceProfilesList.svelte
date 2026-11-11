@@ -7,7 +7,7 @@
   import { Copy, Pencil, Plus, Trash2, TriangleAlert } from '@lucide/svelte';
   import Panel from '$kit/ui/panel.svelte';
   import TableShell from '$kit/ui/table-shell.svelte';
-  import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
+  import { TABLE_GRID_ROW } from '$kit/ui/table-grid';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import { Action } from '$kit/state/action.svelte';
@@ -92,7 +92,7 @@
       {/snippet}
       {#snippet body()}
         {#each rows as r (r.id)}
-          <div class={ADMIN_TABLE_GRID_ROW} style:grid-template-columns={GRID}>
+          <div class={TABLE_GRID_ROW} style:grid-template-columns={GRID}>
             <span class="grid content-start gap-1">
               <span class="flex items-center gap-2">
                 <span class="font-sans text-sm font-semibold">{r.label}</span>

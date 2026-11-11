@@ -11,10 +11,9 @@ import {
   catalogReloadSuccessMessage,
   reloadCatalogAndRefetch
 } from '$lib/catalog/catalog-reload';
-import { preserveStickyAnchor } from '$lib/components/page/table/preserve-sticky-anchor';
-import { useTableFilters } from '$lib/components/page/table/use-table-filters.svelte';
-import { useTableSort } from '$lib/components/page/table/use-table-sort.svelte';
-import { asTableSortDirection } from '$lib/components/page/table/table-sort-utils';
+import { preserveStickyAnchor } from '$kit/ui/preserve-sticky-anchor';
+import { useTableFilters } from '$kit/ui/table-filters.svelte';
+import { asSortDirection, SortState } from '$kit/ui/sort.svelte';
 import { createCatalogPreferences } from '$lib/preferences/catalog-preferences.svelte';
 import type { CatalogTabPreference } from '$lib/preferences/keys';
 import { createResource } from '$lib/state/create-resource.svelte';
@@ -88,17 +87,15 @@ export function createCatalogController(notify: Notify) {
     urlSync: true
   });
 
-  const providerSort = useTableSort({
+  const providerSort = new SortState({
     allowed: PROVIDER_SORT_COLUMNS,
-    defaultBy: 'provider',
-    defaultDirection: 'asc'
+    initial: 'provider'
   });
 
-  const modelSort = useTableSort({
+  const modelSort = new SortState({
     allowed: MODEL_SORT_COLUMNS,
-    defaultBy: 'model',
-    defaultDirection: 'asc',
-    urlSync: true
+    initial: 'model',
+    url: true
   });
 
   let catalogVersion = $state<string | null>(null);
@@ -230,8 +227,8 @@ export function createCatalogController(notify: Notify) {
   const sortedProviders = $derived(
     sortProviders(
       mergedProviders,
-      providerSort.sortBy,
-      asTableSortDirection(providerSort.direction),
+      providerSort.key ?? 'provider',
+      asSortDirection(providerSort.direction),
       configuredWorkspaceProviderIds
     )
   );
@@ -247,8 +244,8 @@ export function createCatalogController(notify: Notify) {
   const sortedModels = $derived(
     sortModels(
       filteredModels,
-      modelSort.sortBy,
-      asTableSortDirection(modelSort.direction),
+      modelSort.key ?? 'model',
+      asSortDirection(modelSort.direction),
       providerLabels,
       configuredWorkspaceProviderIds
     )

@@ -9,12 +9,12 @@
    * profiles its uses ask with), Unused — a profile reached as a fallback counts for its source too.
    */
   import { Copy, Pencil, Plus, RotateCcw, Trash2 } from '@lucide/svelte';
-  import FieldHelp from '$lib/components/ui/field-help.svelte';
+  import HelpTip from '$kit/ui/help-tip.svelte';
   import Segmented from '$kit/ui/segmented.svelte';
   import ResourceView from '$kit/ui/resource-view.svelte';
   import Panel from '$kit/ui/panel.svelte';
   import TableShell from '$kit/ui/table-shell.svelte';
-  import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
+  import { TABLE_GRID_ROW } from '$kit/ui/table-grid';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
@@ -115,13 +115,14 @@
           {@const chain = chainLabel(ai.profiles, fallbackChain(ai.profiles, profile.id))}
           {@const used = ai.usedBy(profile.id)}
           {@const hiroJobs = ai.jobsUsing(profile.id)}
-          <div class={ADMIN_TABLE_GRID_ROW} style:grid-template-columns={GRID}>
+          <div class={TABLE_GRID_ROW} style:grid-template-columns={GRID}>
             <span class="grid content-start gap-1">
               <span class="flex flex-wrap items-center gap-1.5">
                 <span class="font-sans text-sm font-semibold">{profile.name}</span>
                 {#if profile.preset}
                   <Badge variant="outline">Default</Badge>
-                  <FieldHelp
+                  <HelpTip
+                    label="the default profile"
                     text={`Hiro's default profile for ${ai.jobLabel(profile.preset) || profile.preset}. Edit it freely; Restore default brings back the job's first settings (thinking, temperature, max tokens). It can't be deleted.`}
                   />
                 {/if}

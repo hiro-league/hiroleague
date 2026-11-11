@@ -2,7 +2,6 @@
   import { LoaderCircle, Search, X } from '@lucide/svelte';
   import Field from '$kit/ui/field.svelte';
   import { Input } from '$kit/components/ui/input/index.js';
-  import { ADMIN_SEARCH_FIELD } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
 
   type Props = {
@@ -35,6 +34,10 @@
   }: Props = $props();
   const uid = $props.id();
 
+  // The inline search: a box with the magnifier in it and a bare input; the focus ring is drawn inside the box.
+  const INLINE_FIELD =
+    'flex h-9 min-w-72 items-center gap-2 rounded-md border border-input bg-background px-3 font-sans text-sm shadow-xs focus-within:border-ring focus-within:ring-2 focus-within:ring-inset focus-within:ring-ring';
+
   const layout = $derived(variant ?? (label ? 'field' : 'inline'));
   const showTrailing = $derived(
     value.trim().length > 0 || count !== undefined || busy
@@ -60,7 +63,7 @@
 </script>
 
 {#if layout === 'inline'}
-  <label class={cn(ADMIN_SEARCH_FIELD, className)}>
+  <label class={cn(INLINE_FIELD, className)}>
     <Search size={15} class="shrink-0 text-muted-foreground" aria-hidden="true" />
     <input
       type="search"

@@ -1,7 +1,7 @@
 <script lang="ts">
   // Logs → AI usage (Phase 7b): the headline numbers for the days shown, each with its change
   // from the same span before. Billed (API keys) and the plans' estimate stay apart.
-  import FieldHelp from '$lib/components/ui/field-help.svelte';
+  import HelpTip from '$kit/ui/help-tip.svelte';
   import { change, short, usd, type Totals } from './ai-usage';
 
   let { now, before, compared }: { now: Totals; before: Totals; compared: string } = $props();
@@ -29,7 +29,7 @@
     <!-- The tile's explanation is a tooltip, so the numbers stand out. -->
     <div class="grid content-start gap-0.5 rounded-md border bg-card p-3 font-sans shadow-sm">
       <span class="flex items-center gap-1 text-xs text-muted-foreground"
-        >{t.label}{#if t.sub}<FieldHelp text={t.sub} label="About {t.label}" />{/if}</span
+        >{t.label}{#if t.sub}<HelpTip text={t.sub} label={t.label} />{/if}</span
       >
       <span class="text-xl font-semibold tabular-nums">{t.value}</span>
       <span class="text-[11px] {tone(t.delta, t.up)}" title="Compared with {compared}"

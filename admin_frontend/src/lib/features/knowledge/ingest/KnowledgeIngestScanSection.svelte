@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Input } from '$kit/components/ui/input/index.js';
   import {
     Ban,
     CircleCheck,
@@ -11,7 +12,7 @@
     RefreshCw,
     Search
   } from '@lucide/svelte';
-  import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
+  import SortHead from '$kit/ui/sort-head.svelte';
   import TableShell from '$kit/ui/table-shell.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import { Badge } from '$kit/components/ui/badge/index.js';
@@ -22,11 +23,9 @@
   import {
     KNOWLEDGE_FIELD_LABEL,
     KNOWLEDGE_FIELD_LABEL_TEXT,
-    KNOWLEDGE_INPUT,
     KNOWLEDGE_SECTION_CARD,
     KNOWLEDGE_TABLE_HEAD
   } from '$lib/features/knowledge/shared/knowledge-ui';
-  import { cn } from '$lib/utils';
 
   type Props = {
     ingest: KnowledgeIngestModel;
@@ -66,8 +65,8 @@
           <FolderOpen size={16} />
         </Button>
         <label class="block min-w-[300px] flex-1">
-          <input
-            class={cn(KNOWLEDGE_INPUT, 'w-full')}
+          <Input
+            class="w-full"
             bind:value={ingest.folder}
             placeholder="Path to folder to scan"
             oninput={ingest.onFolderChange}
@@ -150,11 +149,11 @@
                 bind:indeterminate={() => ingest.someSupportedSelected, () => {}}
               />
             </th>
-            <AdminTableHeaderCell column="filename" sort={fileSort}>Filename</AdminTableHeaderCell>
-            <AdminTableHeaderCell column="relative_path" sort={fileSort}>Relative path</AdminTableHeaderCell>
-            <AdminTableHeaderCell column="size" sort={fileSort}>Size</AdminTableHeaderCell>
-            <AdminTableHeaderCell column="ext" sort={fileSort}>Ext</AdminTableHeaderCell>
-            <AdminTableHeaderCell column="state" sort={fileSort}>State</AdminTableHeaderCell>
+            <SortHead key="filename" sorter={fileSort}>Filename</SortHead>
+            <SortHead key="relative_path" sorter={fileSort}>Relative path</SortHead>
+            <SortHead key="size" sorter={fileSort}>Size</SortHead>
+            <SortHead key="ext" sorter={fileSort}>Ext</SortHead>
+            <SortHead key="state" sorter={fileSort}>State</SortHead>
           </tr>
         </thead>
         <tbody>

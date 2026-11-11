@@ -29,7 +29,7 @@
     type GeminiVoice,
     type VoiceSource
   } from '$lib/api/voice';
-  import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
+  import { Input } from '$kit/components/ui/input/index.js';
   import { cn } from '$lib/utils';
   import { keptUntil, langName, sourceOf } from './voice-format';
 
@@ -267,7 +267,7 @@
         onchange={(v) => (language = v)}
       />
       <PickSelect class="h-8 w-full text-sm" label="Gender" value={gender} options={GENDERS} onchange={(v) => (gender = v)} />
-      <input class={ADMIN_INPUT} bind:value={query} placeholder="Search: warm, narrator, Egyptian…" />
+      <Input bind:value={query} placeholder="Search: warm, narrator, Egyptian…" />
     </div>
     <div class="grid max-h-72 gap-0.5 overflow-y-auto">
       {#each library as v (v.id)}
@@ -301,7 +301,7 @@
           Age, gender, accent, what the voice sounds like. Used once, to make the voice; how it speaks (tone, pace) is this profile's speaking style.
         </label>
         <div class="grid gap-2 sm:grid-cols-3">
-          <input class={ADMIN_INPUT} bind:value={form.name} placeholder="Name, e.g. Hiro" maxlength="80" />
+          <Input bind:value={form.name} placeholder="Name, e.g. Hiro" maxlength={80} />
           <PickSelect
             class="h-8 w-full text-sm"
             label="Language"
@@ -331,7 +331,7 @@
 
     <div class="flex flex-wrap items-center gap-2">
       {#if !designOpen}<Button size="sm" variant="outline" onclick={() => (designOpen = true)}><Plus size={13} /> Design a voice</Button>{/if}
-      <input class={cn(ADMIN_INPUT, 'h-8 min-w-48 flex-1')} bind:value={pasteId} placeholder="Or add one made in AI Studio: voice_abc123" />
+      <Input class="h-8 min-w-48 flex-1" bind:value={pasteId} placeholder="Or add one made in AI Studio: voice_abc123" />
       <Button size="sm" variant="outline" disabled={!pasteId.trim().startsWith('voice_') || adding} onclick={add}>Add</Button>
       <Button size="sm" variant="ghost" title="Reload from Google" disabled={loading} onclick={() => load('mine', true)}><RefreshCw size={13} /></Button>
     </div>

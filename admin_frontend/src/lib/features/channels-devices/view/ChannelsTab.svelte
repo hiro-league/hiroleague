@@ -6,7 +6,7 @@
   import Panel from '$kit/ui/panel.svelte';
   import ResourceView from '$kit/ui/resource-view.svelte';
   import TableShell from '$kit/ui/table-shell.svelte';
-  import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
+  import { TABLE_GRID_ROW } from '$kit/ui/table-grid';
   import type { Notify } from '$kit/ui/toast.svelte';
   import type { ChannelsController } from '../state/channels-controller.svelte';
   import ChannelDetail from './ChannelDetail.svelte';
@@ -113,7 +113,7 @@
         {/snippet}
         {#snippet body()}
           {#each ctrl.rows as row (row.name)}
-            <div class={ADMIN_TABLE_GRID_ROW} style:grid-template-columns={CHANNEL_GRID}>
+            <div class={TABLE_GRID_ROW} style:grid-template-columns={CHANNEL_GRID}>
               <span class="truncate font-sans text-sm font-semibold" title={row.name}>{row.name}</span>
               <span>
                 <Badge variant={row.enabled ? 'success' : 'outline'}>

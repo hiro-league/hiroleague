@@ -6,7 +6,7 @@ import { base } from '$app/paths';
 import type { ChatChannelRow } from '$lib/api/chat-channels';
 import type { CharacterRow } from '$lib/api/characters';
 import type { GraphLedgerRow } from '$lib/api/graph-runs';
-import { DISTINCT_EMPTY_VALUE } from '$lib/components/page/table/distinct-options';
+import { DISTINCT_EMPTY_VALUE } from '$kit/ui/distinct-options';
 import { rowMatches } from '$lib/search/match';
 import {
   formatAgentElapsedMs,

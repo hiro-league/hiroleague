@@ -8,7 +8,7 @@
   import SectionLabel from '$kit/ui/section-label.svelte';
   import { Download, FoldVertical, ListChecks, ListX, LoaderCircle, UnfoldVertical } from '@lucide/svelte';
   import FilterBar from '$kit/ui/filter-bar.svelte';
-  import { useTableFilters } from '$lib/components/page/table/use-table-filters.svelte';
+  import { useTableFilters } from '$kit/ui/table-filters.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import { setupStickyHeightVar } from '$lib/styling/sticky-height';
   import { Checkbox } from '$kit/components/ui/checkbox/index.js';
@@ -17,8 +17,8 @@
   import EvalResultsTable from '$lib/features/eval/answers/EvalResultsTable.svelte';
   import EvalRowDetailDialog from '$lib/features/eval/answers/EvalRowDetailDialog.svelte';
   import EvalNotRunList from '$lib/features/eval/answers/EvalNotRunList.svelte';
-  import { useTableSort } from '$lib/components/page/table/use-table-sort.svelte';
-  import { distinctOptionsWithSentinel } from '$lib/components/page/table/distinct-options';
+  import { SortState } from '$kit/ui/sort.svelte';
+  import { distinctOptionsWithSentinel } from '$kit/ui/distinct-options';
   import SearchInput from '$lib/search/SearchInput.svelte';
   import {
     EVAL_ANSWER_FILTER_KEYS,
@@ -53,9 +53,9 @@
 
   type EvalAnswerSortColumn = Exclude<AnsSortKey, 'none'>;
 
-  const sort = useTableSort<EvalAnswerSortColumn>({
-    defaultBy: 'time',
-    defaultDirection: 'none',
+  const sort = new SortState<EvalAnswerSortColumn>({
+    initial: 'time',
+    order: 'none',
     allowed: ['recall', 'time', 'difficulty', 'evidence', 'mark'],
     threeState: true
   });
@@ -182,7 +182,7 @@
   // --- Flat results list (sorted) -----------------------------------------------------------
   const resultRows = $derived.by<EvalRow[]>(() => {
     const sorted = [...filteredAnswerRows].sort((a, b) => a.index - b.index);
-    return sortGroupRows(sorted, sort.sortBy, sort.direction);
+    return sortGroupRows(sorted, sort.key ?? 'time', sort.direction);
   });
 
   function expandAllFolds() {

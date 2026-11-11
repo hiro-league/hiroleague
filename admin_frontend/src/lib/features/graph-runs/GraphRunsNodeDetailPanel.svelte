@@ -2,7 +2,7 @@
   import DetailFieldGrid, {
     type DetailFieldRow
   } from '$lib/components/page/DetailFieldGrid.svelte';
-  import DetailPanelShell from '$lib/components/page/DetailPanelShell.svelte';
+  import DetailPanel from '$kit/ui/detail-panel.svelte';
   import type { GraphLedgerRow } from '$lib/api/graph-runs';
   import { fieldLabel, formatLedgerField, previewMultiline } from './graph-runs-pure';
 
@@ -79,7 +79,7 @@
   );
 </script>
 
-<DetailPanelShell
+<DetailPanel
   ariaLabel="Graph run node details"
   class="node-detail-panel bg-card/90"
   closeLabel="Close node details"
@@ -96,7 +96,7 @@
   {#snippet children()}
     <DetailFieldGrid rows={gridRows} />
   {/snippet}
-</DetailPanelShell>
+</DetailPanel>
 
 <style>
   .node-detail-title {

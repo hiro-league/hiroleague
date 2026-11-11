@@ -16,7 +16,7 @@
   import { Checkbox } from '$kit/components/ui/checkbox/index.js';
   import * as Table from '$kit/components/ui/table/index.js';
   import Segmented from '$kit/ui/segmented.svelte';
-  import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
+  import { Input } from '$kit/components/ui/input/index.js';
   import { cn } from '$lib/utils';
   import type { AccessFeature, AccessSource, Person, RoleAccess } from '$lib/api/people';
   import { ALL_ROLES, ALL_SOURCES, OWNER, rightKey, type RolesController } from '../state/roles-controller.svelte';
@@ -122,8 +122,8 @@
     <div class="grid gap-3 sm:grid-cols-[1fr_2fr_1fr] sm:items-end">
       <label class="grid gap-1">
         <span class="font-sans text-xs font-medium text-muted-foreground">Name</span>
-        <input
-          class={cn(ADMIN_INPUT, 'font-sans')}
+        <Input
+          class="font-sans"
           value={role.name}
           disabled={role.built_in || ctrl.busy}
           title={role.built_in ? `${role.name} is built in and keeps its name.` : ''}
@@ -132,8 +132,8 @@
       </label>
       <label class="grid gap-1">
         <span class="font-sans text-xs font-medium text-muted-foreground">What this role is for</span>
-        <input
-          class={cn(ADMIN_INPUT, 'font-sans')}
+        <Input
+          class="font-sans"
           value={role.says}
           maxlength={160}
           disabled={ctrl.busy}

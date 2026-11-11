@@ -1,5 +1,5 @@
 import { untrack } from 'svelte';
-import { useTableFilters } from '$lib/components/page/table/use-table-filters.svelte';
+import { useTableFilters } from '$kit/ui/table-filters.svelte';
 
 export type TextSearchController = {
   readonly query: string;

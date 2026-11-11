@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Search } from '@lucide/svelte';
-  import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
+  import SortHead from '$kit/ui/sort-head.svelte';
   import TableShell from '$kit/ui/table-shell.svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
@@ -49,16 +49,16 @@
           onCheckedChange={browse.toggleSelectAllDocuments}
         />
       </th>
-      <AdminTableHeaderCell column="title" sort={documentSort}>Title</AdminTableHeaderCell>
-      <AdminTableHeaderCell column="owner" sort={documentSort}>Owner</AdminTableHeaderCell>
-      <AdminTableHeaderCell column="category" sort={documentSort}>Category</AdminTableHeaderCell>
-      <AdminTableHeaderCell column="tags" sort={documentSort}>Tags</AdminTableHeaderCell>
-      <AdminTableHeaderCell column="chunks" sort={documentSort}>Chunks</AdminTableHeaderCell>
-      <AdminTableHeaderCell column="ingested_at" sort={documentSort}>Ingested</AdminTableHeaderCell>
-      <AdminTableHeaderCell column="type" sort={documentSort}>Type</AdminTableHeaderCell>
-      <AdminTableHeaderCell column="size" sort={documentSort}>Size</AdminTableHeaderCell>
-      <AdminTableHeaderCell column="path" sort={documentSort}>Path</AdminTableHeaderCell>
-      <AdminTableHeaderCell column="status" sort={documentSort}>Status</AdminTableHeaderCell>
+      <SortHead key="title" sorter={documentSort}>Title</SortHead>
+      <SortHead key="owner" sorter={documentSort}>Owner</SortHead>
+      <SortHead key="category" sorter={documentSort}>Category</SortHead>
+      <SortHead key="tags" sorter={documentSort}>Tags</SortHead>
+      <SortHead key="chunks" sorter={documentSort}>Chunks</SortHead>
+      <SortHead key="ingested_at" sorter={documentSort}>Ingested</SortHead>
+      <SortHead key="type" sorter={documentSort}>Type</SortHead>
+      <SortHead key="size" sorter={documentSort}>Size</SortHead>
+      <SortHead key="path" sorter={documentSort}>Path</SortHead>
+      <SortHead key="status" sorter={documentSort}>Status</SortHead>
     </tr>
   </thead>
   <tbody>

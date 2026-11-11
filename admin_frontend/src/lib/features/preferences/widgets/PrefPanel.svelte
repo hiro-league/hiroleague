@@ -13,8 +13,8 @@
    */
   import { onMount, type Snippet } from 'svelte';
   import { cn } from '$lib/utils';
-  import FieldHelp from '$lib/components/ui/field-help.svelte';
-  import ResetDot from '$lib/components/ui/reset-dot.svelte';
+  import HelpTip from '$kit/ui/help-tip.svelte';
+  import ResetButton from '$kit/ui/reset-button.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { DEFAULT_WORKSPACE_PREFERENCES } from '$lib/api/generated/workspace-preferences.defaults';
   import {
@@ -86,10 +86,10 @@
   <legend class="ml-1 flex items-center gap-1.5 px-1.5 font-sans text-sm font-semibold text-foreground">
     {title}
     {#if hint?.trim()}
-      <FieldHelp text={hint} />
+      <HelpTip text={hint} label={title} />
     {/if}
     {#if dirty}
-      <ResetDot onReset={resetPanel} label={`Reset ${title} to defaults`} />
+      <ResetButton onreset={resetPanel} label={`Reset ${title} to defaults`} />
     {/if}
   </legend>
   <div class="grid gap-2">

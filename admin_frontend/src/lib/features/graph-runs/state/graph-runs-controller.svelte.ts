@@ -14,9 +14,9 @@
 import { errorMessage } from '$kit/api/client';
 import { listChatChannels, type ChatChannelRow } from '$lib/api/chat-channels';
 import { getCharacter, listCharacters, type CharacterDetail, type CharacterRow } from '$lib/api/characters';
-import { preserveStickyAnchorAround } from '$lib/components/page/table/preserve-sticky-anchor';
-import { useTableFilters } from '$lib/components/page/table/use-table-filters.svelte';
-import { distinctOptionsWithSentinel } from '$lib/components/page/table/distinct-options';
+import { preserveStickyAnchorAround } from '$kit/ui/preserve-sticky-anchor';
+import { useTableFilters } from '$kit/ui/table-filters.svelte';
+import { distinctOptionsWithSentinel } from '$kit/ui/distinct-options';
 import {
   getGraphRun,
   getGraphRunLangsmithUrl,

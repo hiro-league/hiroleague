@@ -2,7 +2,7 @@
   import type { Snippet } from 'svelte';
   import { Brain, Check, Pencil, Plus, Trash2 } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
-  import FieldHelp from '$lib/components/ui/field-help.svelte';
+  import HelpTip from '$kit/ui/help-tip.svelte';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
   import Notice from '$kit/ui/notice.svelte';
   import { selectedModelIssue } from '$lib/catalog/selected-model-issue';
@@ -262,7 +262,7 @@
       >
         <span class="pref-field-label" title={path}>{label}</span>
         {#if hint?.trim()}
-          <FieldHelp text={hint} />
+          <HelpTip text={hint} label={label} />
         {/if}
       </h4>
     {/if}

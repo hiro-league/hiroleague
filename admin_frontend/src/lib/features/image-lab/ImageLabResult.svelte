@@ -5,7 +5,6 @@
   import Notice from '$kit/ui/notice.svelte';
   import EmptyState from '$kit/ui/empty-state.svelte';
   import Loading from '$kit/ui/loading.svelte';
-  import { ADMIN_SECTION_TITLE } from '$lib/styling/admin-tokens';
   import type { ImageLabController } from './state/image-lab-controller.svelte';
 
   let { ctl }: { ctl: ImageLabController } = $props();
@@ -20,24 +19,21 @@
   );
 </script>
 
-<Panel class="grid content-start gap-4">
-  <div class="flex items-center justify-between gap-3">
-    <h2 class={ADMIN_SECTION_TITLE}>Result</h2>
+<Panel title="Result" class="content-start" contentClass="grid gap-4">
+  {#snippet actions()}
     {#if ctl.result}
-      <div class="flex items-center gap-2">
-        <Button size="sm" variant="outline" onclick={() => ctl.openSaveDialog()}>
-          <Save size={13} /> Save as recipe
-        </Button>
-        <a
-          class="inline-flex h-8 items-center rounded-md border border-input bg-background px-3 font-sans text-xs font-semibold shadow-xs hover:bg-accent"
-          href={dataUri}
-          download={downloadName}
-        >
-          Download
+      <Button size="sm" variant="outline" onclick={() => ctl.openSaveDialog()}>
+        <Save size={13} /> Save as recipe
+      </Button>
+      <a
+        class="inline-flex h-8 items-center rounded-md border border-input bg-background px-3 font-sans text-xs font-semibold shadow-xs hover:bg-accent"
+        href={dataUri}
+        download={downloadName}
+      >
+        Download
         </a>
-      </div>
     {/if}
-  </div>
+  {/snippet}
 
   {#if ctl.generating}
     <Loading label="Generating image…" />

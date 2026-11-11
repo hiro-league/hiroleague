@@ -1,6 +1,6 @@
 <script lang="ts">
   import TableShell from '$kit/ui/table-shell.svelte';
-  import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
+  import { TABLE_GRID_ROW } from '$kit/ui/table-grid';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import EmptyState from '$kit/ui/empty-state.svelte';
   import Panel from '$kit/ui/panel.svelte';
@@ -30,7 +30,7 @@
       {/snippet}
       {#snippet body()}
         {#each ctrl.children as child (child.name)}
-          <div class={ADMIN_TABLE_GRID_ROW} style:grid-template-columns={CHANNEL_GRID}>
+          <div class={TABLE_GRID_ROW} style:grid-template-columns={CHANNEL_GRID}>
             <span class="truncate font-semibold">{child.name}</span>
             <span class="text-center text-muted-foreground">{child.pid}</span>
             <span class="text-center">

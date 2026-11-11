@@ -29,7 +29,7 @@ import {
   runStatusDataValue,
   trimRunIdForList
 } from './graph-runs-pure';
-import { DISTINCT_EMPTY_VALUE } from '$lib/components/page/table/distinct-options';
+import { DISTINCT_EMPTY_VALUE } from '$kit/ui/distinct-options';
 
 const ledger = (p: Partial<GraphLedgerRow> = {}): GraphLedgerRow => p as unknown as GraphLedgerRow;
 const character = (p: Partial<CharacterRow> = {}): CharacterRow => p as unknown as CharacterRow;

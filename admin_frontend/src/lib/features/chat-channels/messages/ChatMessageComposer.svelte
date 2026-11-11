@@ -5,7 +5,7 @@
   import ChatComposerOptions from '$lib/features/chat-channels/messages/ChatComposerOptions.svelte';
   import type { ChatChannelsPageController } from '$lib/features/chat-channels/state/chat-channels-controller.svelte';
   import { serverReadiness } from '$lib/runtime/server-readiness.svelte';
-  import { ADMIN_TEXTAREA } from '$lib/styling/admin-tokens';
+  import { Textarea } from '$kit/components/ui/textarea/index.js';
   import { createPoller } from '$lib/state/create-poller.svelte';
   import { cn } from '$lib/utils';
 
@@ -102,9 +102,9 @@
     </div>
   {:else}
     <div class={cn('flex gap-2', dense ? 'items-end' : 'items-stretch')}>
-      <textarea
-        bind:this={draftTextareaEl}
-        class={cn(ADMIN_TEXTAREA, 'min-w-0 flex-1 placeholder:text-muted-foreground/40', !dense && 'md:min-w-[16rem]')}
+      <Textarea
+        bind:ref={draftTextareaEl}
+        class={cn('field-sizing-fixed min-h-11 min-w-0 flex-1 resize-y placeholder:text-muted-foreground/40', !dense && 'md:min-w-[16rem]')}
         placeholder="Ask Hiro Anything"
         rows={dense ? 4 : 2}
         bind:value={ctrl.draftMessage}
@@ -122,7 +122,7 @@
           }
         }}
         disabled={ctrl.composingBusy}
-      ></textarea>
+      />
       <Button
         class="h-11 min-w-11 self-stretch px-0"
         title={serverReadiness.ready

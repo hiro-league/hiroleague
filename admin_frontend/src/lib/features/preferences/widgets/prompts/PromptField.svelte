@@ -6,7 +6,7 @@
    * never marks the page-level form dirty.
    */
   import { Button } from '$kit/components/ui/button/index.js';
-  import FieldHelp from '$lib/components/ui/field-help.svelte';
+  import HelpTip from '$kit/ui/help-tip.svelte';
   import { cn } from '$lib/utils';
   import { getPreferenceByPath } from '$lib/features/preferences/state/preferences-edits';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
@@ -60,7 +60,7 @@
 <!-- title shows the dotted preference path on hover. -->
       <span class="pref-field-label" title={path}>{resolvedLabel}</span>
       {#if hint?.trim()}
-        <FieldHelp text={hint} />
+        <HelpTip text={hint} label={resolvedLabel} />
       {/if}
     </span>
     <span

@@ -1,4 +1,6 @@
 <script lang="ts">
+  // A big number with a title and an icon, a line of caption and one of detail under it, and room for more. In a Panel,
+  // or, nested, in a Section when the card sits inside a panel already. UI kit, step 7: from the HiroLeague admin.
   import type { Component, Snippet } from 'svelte';
   import Panel from '$kit/ui/panel.svelte';
   import Section from '$kit/ui/section.svelte';

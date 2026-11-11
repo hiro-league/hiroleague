@@ -5,7 +5,7 @@
    * its own profile in the extension; this is the default.
    */
   import TableShell from '$kit/ui/table-shell.svelte';
-  import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
+  import { TABLE_GRID_ROW } from '$kit/ui/table-grid';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import Notice from '$kit/ui/notice.svelte';
   import PickSelect from '$kit/ui/pick-select.svelte';
@@ -41,7 +41,7 @@
       {#snippet body()}
         {#each rows as u (u.key)}
           {@const p = voice.profiles.find((x) => x.id === u.profile_id)}
-          <div class={ADMIN_TABLE_GRID_ROW} style:grid-template-columns={GRID}>
+          <div class={TABLE_GRID_ROW} style:grid-template-columns={GRID}>
             <span class="flex items-center gap-2 font-sans text-sm font-semibold">
               {u.name}
               {#if u.status === 'removed'}<Badge variant="outline">Removed</Badge>{/if}

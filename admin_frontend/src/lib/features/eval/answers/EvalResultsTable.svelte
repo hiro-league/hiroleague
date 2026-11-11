@@ -1,7 +1,7 @@
 <!--
   Unified results table: selection, #, Question, Type, Difficulty, Ideal, optional recall flag /
   evidence / answer-type columns, per-leg answer, optional Δ, Time. Rows are rendered as a single
-  flat list (sort owned by EvalAnswersPane via useTableSort). Expanding a row reveals
+  flat list (sort owned by EvalAnswersPane via SortState). Expanding a row reveals
   EvalResultRowDetail.
 -->
 <script lang="ts">
@@ -9,8 +9,8 @@
   import TableShell from '$kit/ui/table-shell.svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Checkbox } from '$kit/components/ui/checkbox/index.js';
-  import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
-  import type { TableSortController } from '$lib/components/page/table/use-table-sort.svelte';
+  import SortHead from '$kit/ui/sort-head.svelte';
+  import type { SortState } from '$kit/ui/sort.svelte';
   import Highlight from '$lib/search/Highlight.svelte';
   import EvalResultRowDetail from '$lib/features/eval/answers/EvalResultRowDetail.svelte';
   import { EVAL_ANSWERS_TABLE_STICKY_TOP } from '$lib/features/eval/shared/eval-table-ui';
@@ -47,7 +47,7 @@
     showEvidenceCol: boolean;
     resultsColspan: number;
     resultRows: EvalRow[];
-    sort: TableSortController<Exclude<AnsSortKey, 'none'>>;
+    sort: SortState<Exclude<AnsSortKey, 'none'>>;
     expandedRows: Set<number>;
     toggleRow: (index: number) => void;
     /** Open the giant detail dialog for a row (from the answer-type / answer cell). */
@@ -131,29 +131,29 @@
       <th class="px-3 py-2 text-left">Type</th>
       <th class="px-3 py-2 text-left">Question</th>
       {#if showRecallCol}
-        <AdminTableHeaderCell
-          column="recall"
-          {sort}
+        <SortHead
+          key="recall"
+          sorter={sort}
           class="text-center"
           title="Sort by judge recall-sufficiency · loop stats when agentic retrieval ran"
         >
           <Flag size={12} aria-hidden="true" />
-        </AdminTableHeaderCell>
+        </SortHead>
       {/if}
       {#if showEvidenceCol}
-        <AdminTableHeaderCell
-          column="evidence"
-          {sort}
+        <SortHead
+          key="evidence"
+          sorter={sort}
           class="text-center"
           title="Sort by evidence recall — gold evidence episodes the recall covered (LoCoMo corpora)"
         >
           Ev
-        </AdminTableHeaderCell>
+        </SortHead>
       {/if}
       {#each legColumns as mode (mode)}
         {#if cfg.showAnswerTypeColumn}
-          <AdminTableHeaderCell column="mark" {sort} title="Sort by answer type"
-            >Answer type</AdminTableHeaderCell
+          <SortHead key="mark" sorter={sort} title="Sort by answer type"
+            >Answer type</SortHead
           >
         {:else}
           <th class="px-3 py-2 text-left">{legLabel(mode)} answer</th>
@@ -162,11 +162,11 @@
       {#if showDelta}
         <th class="px-3 py-2 text-center" title="best graph leg vs flat">&#916;</th>
       {/if}
-      <AdminTableHeaderCell column="difficulty" {sort} title="Sort by Difficulty"
-        >Difficulty</AdminTableHeaderCell
+      <SortHead key="difficulty" sorter={sort} title="Sort by Difficulty"
+        >Difficulty</SortHead
       >
-      <AdminTableHeaderCell column="time" {sort} class="text-right" title="Sort by eval time"
-        >Time</AdminTableHeaderCell
+      <SortHead key="time" sorter={sort} class="text-right" title="Sort by eval time"
+        >Time</SortHead
       >
     </tr>
   </thead>

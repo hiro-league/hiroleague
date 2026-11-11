@@ -1,7 +1,7 @@
 <script lang="ts">
   import { errorMessage } from '$kit/api/client';
   import { Copy } from '@lucide/svelte';
-  import DetailPanelShell from '$lib/components/page/DetailPanelShell.svelte';
+  import DetailPanel from '$kit/ui/detail-panel.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import type { Notify } from '$kit/ui/toast.svelte';
   import LogExtraSegments from './LogExtraSegments.svelte';
@@ -43,7 +43,7 @@
   }
 </script>
 
-<DetailPanelShell
+<DetailPanel
   id={LOGS_DETAIL_PANEL_ID}
   ariaLabel="Log line details"
   class={className}
@@ -184,4 +184,4 @@
       </div>
     {/if}
   {/snippet}
-</DetailPanelShell>
+</DetailPanel>

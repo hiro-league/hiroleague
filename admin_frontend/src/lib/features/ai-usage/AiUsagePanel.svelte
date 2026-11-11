@@ -11,7 +11,7 @@
   import FilterBar from '$kit/ui/filter-bar.svelte';
   import FilterSelect from '$kit/ui/filter-select.svelte';
   import MultiSelectFilter from '$lib/components/ui/multi-select-filter.svelte';
-  import FieldHelp from '$lib/components/ui/field-help.svelte';
+  import HelpTip from '$kit/ui/help-tip.svelte';
   import AiUsageChart from './AiUsageChart.svelte';
   import AiUsageRangePicker from './AiUsageRangePicker.svelte';
   import AiUsageTable from './AiUsageTable.svelte';
@@ -102,7 +102,7 @@
       <span class="inline-flex items-center gap-2">
         <Segmented label="Measure" options={METRICS} value={pg.metric} onchange={(m: Metric) => (pg.metric = m)} />
         {#if pg.metric === 'cost'}
-          <FieldHelp text="Cost here is what was billed plus what your plans' questions would cost on an API key (an estimate)." label="About cost" />
+          <HelpTip text="Cost here is what was billed plus what your plans' questions would cost on an API key (an estimate)." label="cost" />
         {/if}
       </span>
       {#if pg.steps.length > 1}

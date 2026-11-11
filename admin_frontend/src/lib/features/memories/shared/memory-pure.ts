@@ -9,8 +9,8 @@
  */
 import type { ChatChannelRow } from '$lib/api/chat-channels';
 import type { CharacterRow } from '$lib/api/characters';
-import type { TableSortDirection } from '$lib/components/page/table/table-sort-utils';
-import { distinctOptionsWithSentinel } from '$lib/components/page/table/distinct-options';
+import type { SortDirection } from '$kit/ui/sort.svelte';
+import { distinctOptionsWithSentinel } from '$kit/ui/distinct-options';
 import { formatCompactDateTime, parseFlexibleDate } from '$lib/format/timestamp-cell';
 import { shortGraphId } from '$lib/format/short-graph-id';
 import { rowMatches } from '$lib/search/match';
@@ -304,7 +304,7 @@ export const MEMORY_FILTER_KEYS = ['mem_group', 'mem_char', 'mem_source', 'mem_f
 export type MemoryFilterKey = (typeof MEMORY_FILTER_KEYS)[number];
 
 // ── Sorting (Memories table column headers) ─────────────────────────────────
-// Pure, deterministic ordering driven by the `useTableSort` controller. Kept here
+// Pure, deterministic ordering driven by the `SortState` (kit). Kept here
 // (not in the controller) so column ordering stays unit-testable.
 
 export type MemorySortColumn =
@@ -331,7 +331,7 @@ export const MEMORY_SORT_COLUMNS: readonly MemorySortColumn[] = [
 ] as const;
 
 /** Most-recent-first is the default, matching the historical hard-coded order. */
-export const DEFAULT_MEMORY_SORT: { column: MemorySortColumn; direction: TableSortDirection } = {
+export const DEFAULT_MEMORY_SORT: { column: MemorySortColumn; direction: SortDirection } = {
   column: 'created',
   direction: 'desc'
 };
@@ -390,7 +390,7 @@ function compareMemoryColumn(
 export function sortMemories(
   rows: Record<string, unknown>[],
   column: MemorySortColumn,
-  direction: TableSortDirection,
+  direction: SortDirection,
   opts: MemorySortOpts
 ): Record<string, unknown>[] {
   const factor = direction === 'asc' ? 1 : -1;

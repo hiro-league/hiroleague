@@ -4,7 +4,7 @@
   import { Edit, MessageSquare, Plus, RefreshCw, Trash2 } from '@lucide/svelte';
   import type { ChatChannelRow } from '$lib/api/chat-channels';
   import TableShell from '$kit/ui/table-shell.svelte';
-  import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
+  import { TABLE_GRID_ROW } from '$kit/ui/table-grid';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import { formatChatTimestamp } from '$lib/features/chat-channels/chat-datetime';
@@ -68,7 +68,7 @@
         {/snippet}
         {#snippet body()}
           {#each channels as row (row.id)}
-            <div class={ADMIN_TABLE_GRID_ROW} style:grid-template-columns={CHAT_CHANNELS_GRID}>
+            <div class={TABLE_GRID_ROW} style:grid-template-columns={CHAT_CHANNELS_GRID}>
               <span class="font-mono text-xs text-muted-foreground">{row.id}</span>
               <span class="flex min-w-0 items-center gap-2">
                 {#if row.photo_data_url}

@@ -8,7 +8,7 @@
    * profiles aren't offered.
    */
   import TableShell from '$kit/ui/table-shell.svelte';
-  import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
+  import { TABLE_GRID_ROW } from '$kit/ui/table-grid';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { isPlanModel } from '$lib/catalog/hiro-jobs';
   import Notice from '$kit/ui/notice.svelte';
@@ -85,7 +85,7 @@
       {#each ai.jobs as job (job.id)}
         {@const n = note(job)}
         {@const known = !job.profileId || jobProfiles.some((p) => p.id === job.profileId)}
-        <div class={ADMIN_TABLE_GRID_ROW} style:grid-template-columns={GRID}>
+        <div class={TABLE_GRID_ROW} style:grid-template-columns={GRID}>
           <span class="font-sans text-sm font-semibold">{job.label}</span>
           <span class="flex flex-wrap content-start gap-1">
             {#each NEEDS[job.id] ?? [] as need (need)}
@@ -131,7 +131,7 @@
       <span>Note</span>
     {/snippet}
     {#snippet body()}
-      <div class={ADMIN_TABLE_GRID_ROW} style:grid-template-columns={GRID}>
+      <div class={TABLE_GRID_ROW} style:grid-template-columns={GRID}>
         <span class="font-sans text-sm font-semibold">Hiro's voice</span>
         <span><Badge variant="secondary">a voice clip</Badge></span>
         <span>

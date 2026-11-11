@@ -13,10 +13,9 @@ import { errorMessage } from '$kit/api/client';
 import { listChatChannels, type ChatChannelRow } from '$lib/api/chat-channels';
 import { listCharacters, type CharacterRow } from '$lib/api/characters';
 import { listKnowledgeGraphGroups, type GraphGroup } from '$lib/api/knowledge';
-import { preserveStickyAnchorAround } from '$lib/components/page/table/preserve-sticky-anchor';
-import { useTableFilters } from '$lib/components/page/table/use-table-filters.svelte';
-import { useTableSort } from '$lib/components/page/table/use-table-sort.svelte';
-import { asTableSortDirection } from '$lib/components/page/table/table-sort-utils';
+import { preserveStickyAnchorAround } from '$kit/ui/preserve-sticky-anchor';
+import { useTableFilters } from '$kit/ui/table-filters.svelte';
+import { asSortDirection, SortState } from '$kit/ui/sort.svelte';
 import {
   DEFAULT_MEMORY_SORT,
   MEMORY_FILTER_KEYS,
@@ -62,13 +61,11 @@ export function createMemoriesPageController() {
   // All Memories-table filters live in one URL-synced controller (deep-linkable, survives reload)
   // and column ordering in a sibling sort controller. `setFilter` (below) is the single write path.
   const tableFilters = useTableFilters<MemoryFilterKey>({ keys: MEMORY_FILTER_KEYS, urlSync: true });
-  const sort = useTableSort<MemorySortColumn>({
-    defaultBy: DEFAULT_MEMORY_SORT.column,
-    defaultDirection: DEFAULT_MEMORY_SORT.direction,
+  const sort = new SortState<MemorySortColumn>({
+    initial: DEFAULT_MEMORY_SORT.column,
+    order: DEFAULT_MEMORY_SORT.direction,
     allowed: MEMORY_SORT_COLUMNS,
-    urlSync: true,
-    sortParam: 'mem_sort',
-    directionParam: 'mem_sort_dir'
+    url: { sortParam: 'mem_sort', orderParam: 'mem_sort_dir' }
   });
 
   const memorySearchQuery = $derived(tableFilters.filters.mem_q);
@@ -94,7 +91,7 @@ export function createMemoriesPageController() {
   });
 
   const sortedMemoriesRows = $derived(
-    sortMemories(memoriesRows, sort.sortBy, asTableSortDirection(sort.direction), {
+    sortMemories(memoriesRows, sort.key ?? DEFAULT_MEMORY_SORT.column, asSortDirection(sort.direction), {
       characterMap,
       channelById,
       groupLabelById: memoryGroupLabelById

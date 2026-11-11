@@ -37,8 +37,7 @@
   import { getPreferences, type WorkspacePreferences } from '$lib/api/preferences';
   import type { EvalModel } from '$lib/features/eval/state/eval-model.svelte';
   import type { ToastKind } from '$kit/ui/toast.svelte';
-  import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
-  import { cn } from '$lib/utils';
+  import { Input } from '$kit/components/ui/input/index.js';
 
   interface Props {
     /** Eval model (track state, run lifecycle, corpus picker) — created and
@@ -201,8 +200,8 @@
   <div class="flex flex-wrap items-center gap-3">
     <div class="flex items-center gap-1.5 font-sans text-sm">
       <span class="text-muted-foreground">Folder</span>
-      <input
-        class={cn(ADMIN_INPUT, 'h-8 w-64')}
+      <Input
+        class="h-8 w-64"
         placeholder="Folder to scan for corpuses"
         value={eval_.folder}
         oninput={(e) => eval_.setFolder(e.currentTarget.value)}

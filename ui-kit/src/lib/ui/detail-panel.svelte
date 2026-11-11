@@ -1,8 +1,10 @@
 <script lang="ts">
+  // The panel at the right of a MasterDetail (or beside any list): a title row with actions and a close button, a body
+  // that scrolls, and an optional footer pinned under it. UI kit, step 7: from the HiroLeague admin.
   import type { Snippet } from 'svelte';
   import { X } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
-  import { cn } from '$lib/utils';
+  import { cn } from '$kit/utils';
 
   let {
     ariaLabel,

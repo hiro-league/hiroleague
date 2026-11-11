@@ -29,8 +29,7 @@
   import type { EvalTrackConfig } from '$lib/features/eval/shared/eval-tracks';
   import type { EvalTraces } from '$lib/features/eval/state/eval-traces.svelte';
   import type { WorkspacePreferences } from '$lib/api/preferences';
-  import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
-  import { cn } from '$lib/utils';
+  import { Input } from '$kit/components/ui/input/index.js';
 
   interface Props {
     eval_: EvalModel;
@@ -258,20 +257,20 @@
       title="Ingest episodes From..To this run (1-based, inclusive — episode 1 is the first turn). To = 0 means to the end. Auto-advances after each batch."
     >
       <span class="text-muted-foreground">Episodes</span>
-      <input
+      <Input
         type="number"
         min="1"
-        class={cn(ADMIN_INPUT, 'h-8 w-20')}
+        class="h-8 w-20"
         value={eval_.episodeFrom}
         oninput={(e) => (eval_.episodeFrom = e.currentTarget.valueAsNumber)}
         disabled={isBusy}
         title="From episode (1-based, inclusive)"
       />
       <span class="text-muted-foreground">to</span>
-      <input
+      <Input
         type="number"
         min="0"
-        class={cn(ADMIN_INPUT, 'h-8 w-20')}
+        class="h-8 w-20"
         value={eval_.episodeTo}
         oninput={(e) => (eval_.episodeTo = e.currentTarget.valueAsNumber)}
         disabled={isBusy}
@@ -337,11 +336,11 @@
       title="Questions evaluated in parallel (1 = one at a time). Higher is faster but per-question times include waiting, and aggressive caps can hit LLM provider rate limits."
     >
       <span class="text-muted-foreground">Parallel</span>
-      <input
+      <Input
         type="number"
         min="1"
         max={eval_.questionConcurrencyMax}
-        class={cn(ADMIN_INPUT, 'h-8 w-16')}
+        class="h-8 w-16"
         value={eval_.questionConcurrency}
         oninput={(e) => (eval_.questionConcurrency = e.currentTarget.valueAsNumber)}
         disabled={isBusy || eval_.selectedCount === 0}

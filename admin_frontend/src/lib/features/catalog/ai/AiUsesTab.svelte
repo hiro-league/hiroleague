@@ -10,13 +10,11 @@
   import { RefreshCw, X } from '@lucide/svelte';
   import Panel from '$kit/ui/panel.svelte';
   import TableShell from '$kit/ui/table-shell.svelte';
-  import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
+  import { TABLE_GRID_ROW } from '$kit/ui/table-grid';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import { dateTime } from '$lib/format/time';
-  import Notice from '$kit/ui/notice.svelte';
-  import EmptyState from '$kit/ui/empty-state.svelte';
-  import Loading from '$kit/ui/loading.svelte';
+  import ResourceView from '$kit/ui/resource-view.svelte';
   import PickSelect from '$kit/ui/pick-select.svelte';
   import { cn } from '$lib/utils';
   import type { AiController } from './ai-controller.svelte';
@@ -38,6 +36,31 @@
     ...ai.useGroups.map((g) => ({ value: g.extension, label: g.extension, count: ai.uses.filter((u) => u.extension === g.extension && u.status !== 'removed').length }))
   ]);
   const activeSource = $derived(sourceTabs.some((t) => t.value === source) ? source : (sourceTabs[0]?.value ?? ''));
+
+  // The two sources load apart, each with its own states (the kit's ResourceView). `data` is null while there is
+  // nothing to show yet or the load failed, so a failed load shows the error alone, as before.
+  const hiroJobs = {
+    get data() {
+      return ai.profilesError || (ai.profilesLoading && ai.jobs.length === 0) ? null : ai.jobs;
+    },
+    get error() {
+      return ai.profilesError ?? '';
+    },
+    get loading() {
+      return ai.profilesLoading;
+    }
+  };
+  const extensionUses = {
+    get data() {
+      return ai.usesError || (ai.usesLoading && ai.useGroups.length === 0) ? null : ai.useGroups;
+    },
+    get error() {
+      return ai.usesError ?? '';
+    },
+    get loading() {
+      return ai.usesLoading;
+    }
+  };
 
   const GRID = 'minmax(200px,1.1fr) minmax(170px,0.9fr) minmax(200px,1fr) minmax(240px,1.4fr)';
 
@@ -67,24 +90,22 @@
   {/snippet}
 
   {#if activeSource === HIRO}
-    {#if ai.profilesLoading && ai.jobs.length === 0}
-      <Loading label="Loading Hiro's jobs…" />
-    {:else if ai.profilesError}
-      <Notice title="Could not load Hiro's jobs" message={ai.profilesError} />
-    {:else}
-      <HiroUsesTable {ai} {voice} />
-    {/if}
+    <ResourceView resource={hiroJobs} loadingLabel="Loading Hiro's jobs…" errorTitle="Could not load Hiro's jobs">
+      {#snippet children()}
+        <HiroUsesTable {ai} {voice} />
+      {/snippet}
+    </ResourceView>
   {:else}
-
-  {#if ai.usesLoading && ai.useGroups.length === 0}
-    <Loading label="Loading uses…" />
-  {:else if ai.usesError}
-    <Notice title="Could not load uses" message={ai.usesError} />
-  {:else if ai.useGroups.length === 0}
-    <EmptyState message="No extension has declared uses yet." hint="Pair an extension on the Extensions page." />
-  {/if}
-
-  {#each ai.useGroups.filter((g) => g.extension === activeSource) as group (group.extension)}
+  <ResourceView
+    resource={extensionUses}
+    empty={(groups) => groups.length === 0}
+    emptyMessage="No extension has declared uses yet."
+    emptyHint="Pair an extension on the Extensions page."
+    loadingLabel="Loading uses…"
+    errorTitle="Could not load uses"
+  >
+  {#snippet children(groups)}
+  {#each groups.filter((g) => g.extension === activeSource) as group (group.extension)}
     {@const rows = ai.uses.filter((u) => u.extension === group.extension)}
     {@const offered = rows.filter((u) => u.status !== 'removed').length}
     {@const refreshing = ai.refreshingExtension(group.extension)}
@@ -126,7 +147,7 @@
             {@const n = note(use)}
             {@const removed = use.status === 'removed'}
             {@const busy = ai.useBusy(use.id)}
-            <div class={cn(ADMIN_TABLE_GRID_ROW, removed && 'opacity-60')} style:grid-template-columns={GRID}>
+            <div class={cn(TABLE_GRID_ROW, removed && 'opacity-60')} style:grid-template-columns={GRID}>
               <span class="flex items-start gap-2">
                 <span class="font-sans text-sm font-semibold">{use.label}</span>
                 {#if use.status === 'new'}
@@ -174,5 +195,7 @@
       <!-- Phase 7b: the extension's speaking (voice uses), real. -->
       <VoiceUsesTable {voice} extension={group.extension} />
   {/each}
+  {/snippet}
+  </ResourceView>
   {/if}
 </Panel>

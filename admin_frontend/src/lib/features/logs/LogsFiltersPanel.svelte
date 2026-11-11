@@ -8,7 +8,6 @@
   import { X } from '@lucide/svelte';
   import type { LogsPageController } from './state/logs-controller.svelte';
   import type { LogsPreferences } from '$lib/preferences/logs-preferences.svelte';
-  import { FILTER_CLEAR_ICON_BTN } from '$lib/styling/admin-tokens';
   import {
     SOURCE_LABELS,
     TRAFFIC_CLASS_LABELS,
@@ -127,7 +126,7 @@
               <Button
                 variant="ghost"
                 size="icon"
-                class={FILTER_CLEAR_ICON_BTN}
+                class="size-8 shrink-0 text-destructive hover:bg-destructive/15 hover:text-destructive"
                 onclick={() => ctrl.removeScopeMsg()}
                 title="Remove message filter"
                 aria-label="Remove message filter"

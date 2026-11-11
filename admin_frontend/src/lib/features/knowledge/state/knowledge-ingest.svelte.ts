@@ -18,8 +18,7 @@ import { PREF_KEYS } from '$lib/preferences/keys';
 import { readLocalBoolean, writeLocalBoolean } from '$lib/preferences/storage';
 import { connectKnowledgeJobEvents } from '../shared/knowledge-events';
 import { upsertRecentJobRecord } from '../shared/knowledge-jobs';
-import { useTableSort } from '$lib/components/page/table/use-table-sort.svelte';
-import { asTableSortDirection } from '$lib/components/page/table/table-sort-utils';
+import { asSortDirection, SortState } from '$kit/ui/sort.svelte';
 import {
   buildIngestMetadata,
   DEFAULT_SCANNED_FILE_SORT,
@@ -70,9 +69,9 @@ export function createKnowledgeIngestModel(deps: {
   let graphBuildResult = $state<KnowledgeGraphIngestBatchData | null>(null);
   let graphBuildError = $state<string | null>(null);
 
-  const fileSort = useTableSort({
-    defaultBy: DEFAULT_SCANNED_FILE_SORT.column,
-    defaultDirection: DEFAULT_SCANNED_FILE_SORT.direction,
+  const fileSort = new SortState({
+    initial: DEFAULT_SCANNED_FILE_SORT.column,
+    order: DEFAULT_SCANNED_FILE_SORT.direction,
     allowed: SCANNED_FILE_SORT_COLUMNS
   });
 
@@ -85,8 +84,8 @@ export function createKnowledgeIngestModel(deps: {
   const sortedVisibleFiles = $derived(
     sortScannedFiles(
       visibleFiles,
-      fileSort.sortBy,
-      asTableSortDirection(fileSort.direction)
+      fileSort.key ?? DEFAULT_SCANNED_FILE_SORT.column,
+      asSortDirection(fileSort.direction)
     )
   );
   const allSupportedSelected = $derived(

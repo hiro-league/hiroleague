@@ -5,7 +5,7 @@
   import ResourceView from '$kit/ui/resource-view.svelte';
   import Panel from '$kit/ui/panel.svelte';
   import TableShell from '$kit/ui/table-shell.svelte';
-  import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
+  import { TABLE_GRID_ROW } from '$kit/ui/table-grid';
   import { shownNumber, type PeopleController } from '../state/people-controller.svelte';
 
   let { ctrl }: { ctrl: PeopleController } = $props();
@@ -46,7 +46,7 @@
         {/snippet}
         {#snippet body()}
           {#each ctrl.people as person (person.person_id)}
-            <div class={ADMIN_TABLE_GRID_ROW} style:grid-template-columns={GRID}>
+            <div class={TABLE_GRID_ROW} style:grid-template-columns={GRID}>
               <span class="truncate font-sans text-sm font-semibold">{person.name}</span>
               <span class="truncate font-sans text-sm">{person.calls_them || person.name}</span>
               <span><Badge variant={person.role_id === 'owner' ? 'default' : 'secondary'}>{ctrl.roleName(person.role_id)}</Badge></span>

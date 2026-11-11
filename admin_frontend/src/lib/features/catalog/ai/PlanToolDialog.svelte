@@ -10,7 +10,7 @@
   import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
   import { dateTime } from '$lib/format/time';
-  import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
+  import { Input } from '$kit/components/ui/input/index.js';
   import Notice from '$kit/ui/notice.svelte';
   import { cn } from '$lib/utils';
   import type { AiController } from './ai-controller.svelte';
@@ -101,8 +101,8 @@
                   void ai.sendSignInCode(tool.id);
                 }}
               >
-                <input
-                  class={cn(ADMIN_INPUT, 'min-w-0 flex-1')}
+                <Input
+                  class="min-w-0 flex-1"
                   bind:value={ai.signInCodes[tool.id]}
                   placeholder="Code from {tool.name}"
                   autocomplete="off"

@@ -3,7 +3,7 @@
   import Panel from '$kit/ui/panel.svelte';
   import { ArrowUpRight } from '@lucide/svelte';
   import { count } from '$kit/format/number';
-  import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
+  import SortHead from '$kit/ui/sort-head.svelte';
   import TableShell from '$kit/ui/table-shell.svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import CatalogTabActions from '$lib/features/catalog/browse/CatalogTabActions.svelte';
@@ -57,17 +57,17 @@
       <TableShell stickyHead class={cn('min-w-[1540px]', ctrl.modelsLoading && 'opacity-60 transition-opacity')}>
         <thead class={ADMIN_TABLE_HEAD}>
           <tr>
-            <AdminTableHeaderCell column="online" sort={ctrl.modelSort} class="w-12 text-center">
+            <SortHead key="online" sorter={ctrl.modelSort} class="w-12 text-center">
               Online
-            </AdminTableHeaderCell>
-            <AdminTableHeaderCell column="provider" sort={ctrl.modelSort}>Provider</AdminTableHeaderCell>
-            <AdminTableHeaderCell column="model" sort={ctrl.modelSort}>Model</AdminTableHeaderCell>
-            <AdminTableHeaderCell column="kind" sort={ctrl.modelSort}>Kind</AdminTableHeaderCell>
-            <AdminTableHeaderCell column="class" sort={ctrl.modelSort}>Class</AdminTableHeaderCell>
-            <AdminTableHeaderCell column="hosting" sort={ctrl.modelSort}>Hosting</AdminTableHeaderCell>
-            <AdminTableHeaderCell column="context" sort={ctrl.modelSort} class="text-center">
+            </SortHead>
+            <SortHead key="provider" sorter={ctrl.modelSort}>Provider</SortHead>
+            <SortHead key="model" sorter={ctrl.modelSort}>Model</SortHead>
+            <SortHead key="kind" sorter={ctrl.modelSort}>Kind</SortHead>
+            <SortHead key="class" sorter={ctrl.modelSort}>Class</SortHead>
+            <SortHead key="hosting" sorter={ctrl.modelSort}>Hosting</SortHead>
+            <SortHead key="context" sorter={ctrl.modelSort} class="text-center">
               Context
-            </AdminTableHeaderCell>
+            </SortHead>
             <th class="px-3 py-2 text-left">Pricing</th>
             <th class="px-3 py-2 text-left">Features</th>
           </tr>

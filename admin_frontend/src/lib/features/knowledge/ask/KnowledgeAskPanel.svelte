@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Input } from '$kit/components/ui/input/index.js';
   import { BookText, Code, ExternalLink, LoaderCircle, Search } from '@lucide/svelte';
   import StickyBar from '$kit/ui/sticky-bar.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
@@ -20,8 +21,7 @@
   import {
     KNOWLEDGE_ASK_CHUNK_RESULTS_BODY_ID,
     KNOWLEDGE_ASK_QUESTION_BODY_ID,
-    KNOWLEDGE_FIELD_LABEL_TEXT,
-    KNOWLEDGE_INPUT_LG
+    KNOWLEDGE_FIELD_LABEL_TEXT
   } from '$lib/features/knowledge/shared/knowledge-ui';
 
   interface Props {
@@ -133,9 +133,9 @@
     <div class="flex flex-wrap items-end gap-3">
       <label class="grid min-w-[320px] flex-1 gap-1 font-sans text-sm">
         <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Question</span>
-        <input
-          class={KNOWLEDGE_INPUT_LG}
-          bind:this={ask.queryInputEl}
+        <Input
+          class="h-10"
+          bind:ref={ask.queryInputEl}
           bind:value={ask.query}
           onkeydown={(event) => {
             if (event.key === 'Enter') void ask.runSearch();

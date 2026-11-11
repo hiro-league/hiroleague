@@ -35,6 +35,15 @@
 	import FileButton from '$kit/ui/file-button.svelte';
 	import FilterSelect from '$kit/ui/filter-select.svelte';
 	import { CAT, CATEGORY_COUNT } from '$kit/ui/category';
+	import AvatarNameCell from '$kit/ui/avatar-name-cell.svelte';
+	import CheckboxField from '$kit/ui/checkbox-field.svelte';
+	import DetailPanel from '$kit/ui/detail-panel.svelte';
+	import MetricCard from '$kit/ui/metric-card.svelte';
+	import ResetButton from '$kit/ui/reset-button.svelte';
+	import SectionNav from '$kit/ui/section-nav.svelte';
+	import SortHead from '$kit/ui/sort-head.svelte';
+	import { Sorter } from '$kit/ui/sort.svelte';
+	import { TABLE_GRID_ROW } from '$kit/ui/table-grid';
 	import { Inbox, Moon, Plus, Sun, Trash2 } from '@lucide/svelte';
 
 	let level = $state(50);
@@ -50,6 +59,13 @@
 	let agreed = $state(true);
 	let threshold = $state('0.75');
 	let dialogOpen = $state(false);
+	let shared = $state(true);
+	let detailOpen = $state(false);
+	const sorter = new Sorter<(typeof ROWS)[number]>({ name: (r) => r.name, kind: (r) => r.kind, state: (r) => r.state }, 'name', { threeState: true });
+	const SECTIONS = [
+		{ id: 'kit-sec-metrics', label: 'Metrics' },
+		{ id: 'kit-sec-tables', label: 'Tables' }
+	];
 
 	const KINDS = [
 		{ value: 'lights', label: 'Lights' },
@@ -297,6 +313,47 @@
 						<Button size="sm" variant="outline" onclick={() => toast.success('Saved')}>Toast: saved</Button>
 						<Button size="sm" variant="outline" onclick={() => toast.error("Couldn't save: the name is taken.")}>Toast: error</Button>
 						<Button size="sm" variant="outline" onclick={() => toast.info('Copied')}>Toast: info</Button>
+					</div>
+				</div>
+			</Panel>
+
+			<Panel title="Metrics, checkboxes, tables" description="A big number with its caption; a checkbox row with help and a way back; a sortable table; a side panel." class="md:col-span-2">
+				<div class="grid gap-4">
+					<SectionNav ariaLabel="Sections of this panel" sections={SECTIONS} scrollMarkerPx={80} />
+					<div id="kit-sec-metrics" class="grid gap-3 sm:grid-cols-3">
+						<MetricCard title="At home" icon={Inbox} value="3" caption="of 5 people" detail="Since 6:10 PM" />
+						<MetricCard title="Messages" icon={Inbox} value="1,204" caption="today" />
+						<div class="grid gap-2">
+							<CheckboxField label="Tell me when it is done" bind:checked={shared} help="A message in the app when a long job ends." onreset={() => (shared = true)} anchor="notify.done" />
+							<div class="flex items-center gap-2 text-xs text-muted-foreground">A reset button on its own: <ResetButton onreset={() => (shared = true)} /></div>
+						</div>
+					</div>
+					<div id="kit-sec-tables" class="grid gap-2">
+						<Table.Root>
+							<Table.Header>
+								<Table.Row>
+									<SortHead {sorter} key="name" label="Name" />
+									<SortHead {sorter} key="kind" label="Kind" />
+									<SortHead {sorter} key="state" label="State" />
+								</Table.Row>
+							</Table.Header>
+							<Table.Body>
+								{#each sorter.apply([...ROWS]) as r (r.name)}
+									<Table.Row>
+										<AvatarNameCell photo={null} name={r.name} />
+										<Table.Cell>{r.kind}</Table.Cell>
+										<Table.Cell>{r.state}</Table.Cell>
+									</Table.Row>
+								{/each}
+							</Table.Body>
+						</Table.Root>
+						<div class="rounded-md border"><div class={TABLE_GRID_ROW} style:grid-template-columns="2fr 1fr"><span>A row of a grid table</span><span class="text-muted-foreground">TABLE_GRID_ROW</span></div></div>
+						<div><Button size="sm" variant="outline" onclick={() => (detailOpen = !detailOpen)}>{detailOpen ? 'Close' : 'Open'} the detail panel</Button></div>
+						{#if detailOpen}
+							<DetailPanel ariaLabel="Example detail" title="Living room lamp" onClose={() => (detailOpen = false)} class="max-w-sm">
+								<p class="text-sm text-muted-foreground">What the right-hand panel of a list and detail page holds.</p>
+							</DetailPanel>
+						{/if}
 					</div>
 				</div>
 			</Panel>

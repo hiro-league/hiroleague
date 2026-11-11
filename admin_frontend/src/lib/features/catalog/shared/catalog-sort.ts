@@ -1,5 +1,5 @@
 import type { CatalogModelRow, CatalogProviderRow } from '$lib/api/catalog';
-import type { TableSortDirection } from '$lib/components/page/table/table-sort-utils';
+import type { SortDirection } from '$kit/ui/sort.svelte';
 import { allCatalogKinds, isRowAvailable } from './catalog-filter-ui';
 
 export const PROVIDER_SORT_COLUMNS = ['online', 'provider', 'hosting', 'updated'] as const;
@@ -8,12 +8,12 @@ export type ProviderSortColumn = (typeof PROVIDER_SORT_COLUMNS)[number];
 export const MODEL_SORT_COLUMNS = ['online', 'provider', 'model', 'kind', 'class', 'hosting', 'context'] as const;
 export type ModelSortColumn = (typeof MODEL_SORT_COLUMNS)[number];
 
-function compareStrings(a: string, b: string, direction: TableSortDirection): number {
+function compareStrings(a: string, b: string, direction: SortDirection): number {
   const cmp = a.localeCompare(b, undefined, { sensitivity: 'base' });
   return direction === 'asc' ? cmp : -cmp;
 }
 
-function compareNumbers(a: number | null, b: number | null, direction: TableSortDirection): number {
+function compareNumbers(a: number | null, b: number | null, direction: SortDirection): number {
   const av = a ?? -1;
   const bv = b ?? -1;
   const cmp = av === bv ? 0 : av < bv ? -1 : 1;
@@ -23,7 +23,7 @@ function compareNumbers(a: number | null, b: number | null, direction: TableSort
 export function sortProviders(
   rows: CatalogProviderRow[],
   sortBy: ProviderSortColumn,
-  direction: TableSortDirection,
+  direction: SortDirection,
   configuredProviderIds: Set<string>
 ): CatalogProviderRow[] {
   const list = [...rows];
@@ -49,7 +49,7 @@ export function sortProviders(
 export function sortModels(
   rows: CatalogModelRow[],
   sortBy: ModelSortColumn,
-  direction: TableSortDirection,
+  direction: SortDirection,
   providerLabels: Record<string, string>,
   configuredProviderIds: Set<string>
 ): CatalogModelRow[] {

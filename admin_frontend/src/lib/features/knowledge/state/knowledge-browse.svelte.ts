@@ -19,9 +19,8 @@ import {
   KNOWLEDGE_BROWSE_FILTER_KEYS,
   type DocumentSortColumn
 } from '../shared/knowledge-pure';
-import { useTableSort } from '$lib/components/page/table/use-table-sort.svelte';
-import { useTableFilters } from '$lib/components/page/table/use-table-filters.svelte';
-import { asTableSortDirection } from '$lib/components/page/table/table-sort-utils';
+import { useTableFilters } from '$kit/ui/table-filters.svelte';
+import { asSortDirection, SortState } from '$kit/ui/sort.svelte';
 import type { KnowledgeOptionsModel } from './knowledge-options.svelte';
 
 function tagsFromChunks(chunks: KnowledgeChunk[]): string[] {
@@ -59,17 +58,17 @@ export function createKnowledgeBrowseModel(deps: {
   let selectedDocuments = $state<Record<string, boolean>>({});
   let filterDebounceTimer: ReturnType<typeof setTimeout> | undefined;
 
-  const documentSort = useTableSort<DocumentSortColumn>({
-    defaultBy: DEFAULT_DOCUMENT_SORT.column,
-    defaultDirection: DEFAULT_DOCUMENT_SORT.direction,
+  const documentSort = new SortState<DocumentSortColumn>({
+    initial: DEFAULT_DOCUMENT_SORT.column,
+    order: DEFAULT_DOCUMENT_SORT.direction,
     allowed: DOCUMENT_SORT_COLUMNS
   });
 
   const sortedDocuments = $derived(
     sortDocuments(
       documents,
-      documentSort.sortBy,
-      asTableSortDirection(documentSort.direction),
+      documentSort.key ?? DEFAULT_DOCUMENT_SORT.column,
+      asSortDirection(documentSort.direction),
       deps.options.categoryLabel
     )
   );
