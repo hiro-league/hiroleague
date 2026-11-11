@@ -1,5 +1,5 @@
 <script lang="ts" module>
-	export type DotTone = 'ok' | 'warn' | 'error' | 'info' | 'off';
+	export type DotTone = 'ok' | 'warn' | 'error' | 'info' | 'off' | 'neutral';
 </script>
 
 <script lang="ts">
@@ -26,7 +26,8 @@
 		warn: 'bg-warning',
 		error: 'bg-destructive',
 		info: 'bg-primary',
-		off: 'bg-muted-foreground/50'
+		off: 'bg-muted-foreground/50',
+		neutral: 'bg-foreground/70' // live, but not good or bad (a ping on a chart)
 	};
 	const SIZE = { xs: 'size-1.5', sm: 'size-2', md: 'size-2.5' } as const;
 </script>
