@@ -14,7 +14,7 @@
     CircleSlash,
     CircleX
   } from '@lucide/svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { fmtScore, pct } from '$lib/features/eval/shared/eval-format';
   import { legLabel } from '$lib/features/eval/shared/eval-display';
   import { breakdownTotals } from '$lib/features/eval/shared/eval-derive';
@@ -34,9 +34,9 @@
 
   // Answer-mark groups: colored icon + name (mirrors the saved-badge icons).
   const MARK_GROUP_META = [
-    { key: 'pass', name: 'Pass', Icon: CircleCheck, cls: 'text-emerald-600 dark:text-emerald-400' },
-    { key: 'partial', name: 'Partial', Icon: CircleDashed, cls: 'text-amber-600 dark:text-amber-400' },
-    { key: 'fail', name: 'Fail', Icon: CircleX, cls: 'text-rose-600 dark:text-rose-400' },
+    { key: 'pass', name: 'Pass', Icon: CircleCheck, cls: 'text-success' },
+    { key: 'partial', name: 'Partial', Icon: CircleDashed, cls: 'text-warning' },
+    { key: 'fail', name: 'Fail', Icon: CircleX, cls: 'text-destructive' },
     { key: 'abstain', name: 'Abstain', Icon: CircleSlash, cls: 'text-muted-foreground' }
   ] as const;
 
@@ -76,7 +76,7 @@
     {@const score = st.score?.[mode] ?? 0}
     {@const recallOk = st.recall_ok?.[mode] ?? 0}
     {@const win = mode !== 'flat' && correct > flatCorrect}
-    {@const winCls = win ? 'font-semibold text-emerald-600' : isTotal ? 'text-foreground font-semibold' : 'text-foreground'}
+    {@const winCls = win ? 'font-semibold text-success' : isTotal ? 'text-foreground font-semibold' : 'text-foreground'}
     <td class="px-1.5 py-1.5 text-center font-mono tabular-nums {tone} {multi ? 'border-l' : ''}">{g.pass}</td>
     <td class="px-1.5 py-1.5 text-center font-mono tabular-nums {tone}">{g.partial}</td>
     <td class="px-1.5 py-1.5 text-center font-mono tabular-nums {tone}">{g.fail}</td>
@@ -112,7 +112,7 @@
 </button>
 {#if !collapsed}
   <div class="mt-2">
-    <AdminTableShell>
+    <TableShell>
       <thead class={ADMIN_TABLE_HEAD}>
         {#if multi}
           <tr>
@@ -145,6 +145,6 @@
           {@render bdCells(totals, totals.correct.flat ?? 0, true)}
         </tr>
       </tbody>
-    </AdminTableShell>
+    </TableShell>
   </div>
 {/if}

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Badge from '$lib/components/ui/badge.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
 
   let { method }: { method: string | null } = $props();
 </script>

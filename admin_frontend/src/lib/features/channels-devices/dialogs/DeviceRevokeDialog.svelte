@@ -1,5 +1,5 @@
 <script lang="ts">
-  import ConfirmDialog from '$lib/components/ui/dialog/ConfirmDialog.svelte';
+  import ConfirmDialog from '$kit/ui/confirm-dialog.svelte';
   import type { DevicesController } from '../state/devices-controller.svelte';
 
   type Props = {

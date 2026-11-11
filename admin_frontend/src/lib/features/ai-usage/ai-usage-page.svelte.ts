@@ -3,6 +3,7 @@
  * grouped by and measure, and a filter per dimension. Loads the core's hourly rows (`/ai/usage`) for
  * the days shown and the same span before (the tiles compare with it).
  */
+import { errorMessage } from '$kit/api/client';
 import { fetchAiUsage } from '$lib/api/ai';
 import {
   applyFilters,
@@ -73,17 +74,19 @@ export class AiUsagePage {
     if (key === this.loadedFor) return;
     this.loadedFor = key;
     this.loading = true;
-    const res = await fetchAiUsage(from, to);
+    // Step 1d: a failed request throws (answers are the data itself; there is no {ok, error} to test).
+    let rows: UsageRow[] = [];
+    let failure: string | null = null;
+    try {
+      rows = (await fetchAiUsage(from, to)).rows;
+    } catch (err) {
+      failure = errorMessage(err);
+    }
     // A later range picked while this one loaded wins.
     if (this.loadedFor !== key) return;
     this.loading = false;
-    if (res.ok && res.data) {
-      this.all = res.data.rows;
-      this.error = null;
-    } else {
-      this.error = res.error ?? 'AI usage could not be read.';
-      this.all = [];
-    }
+    this.all = rows;
+    this.error = failure;
   };
 
   setPeriod = (p: Period) => this.setSpan(spanOf(p, this.now));

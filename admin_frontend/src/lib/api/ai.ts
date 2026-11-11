@@ -5,7 +5,7 @@
  * readiness, Try one, and manage `ai.uses`. Contract: `docs/phase7a-ai-asks-design.md`.
  */
 import type { UsageRow } from '$lib/features/ai-usage/ai-usage';
-import { apiRequest, type ApiResponse } from './client';
+import { apiRequest } from './client';
 import type { AiProfile as AiProfilePrefs } from './generated/preferences.generated';
 
 export type AiProfileKind = 'api' | 'local' | 'plan';
@@ -131,7 +131,7 @@ export type AiUsesRefreshPayload = {
   note: string;
 };
 
-export async function listAiProfiles(): Promise<ApiResponse<AiProfilesPayload>> {
+export async function listAiProfiles(): Promise<AiProfilesPayload> {
   return apiRequest<AiProfilesPayload>('/ai/profiles');
 }
 
@@ -139,11 +139,11 @@ export async function listAiProfiles(): Promise<ApiResponse<AiProfilesPayload>> 
  *  tokens; no context window, no instructions). Its model, name, limits and fallback stay. */
 export async function restoreAiProfileDefault(
   profileId: string
-): Promise<ApiResponse<{ profile_id: string; preset: string; profile: AiProfilePrefs }>> {
+): Promise<{ profile_id: string; preset: string; profile: AiProfilePrefs }> {
   return apiRequest(`/ai/profiles/${encodeURIComponent(profileId)}/restore-default`, { method: 'POST' });
 }
 
-export async function listAiLocalModels(): Promise<ApiResponse<{ models: AiLocalModel[] }>> {
+export async function listAiLocalModels(): Promise<{ models: AiLocalModel[] }> {
   return apiRequest<{ models: AiLocalModel[] }>('/ai/local-models');
 }
 
@@ -153,30 +153,30 @@ export async function tryAiProfile(body: {
   profile_id?: string | null;
   draft?: AiProfilePrefs | null;
   picture?: string | null;
-}): Promise<ApiResponse<AiTryPayload>> {
+}): Promise<AiTryPayload> {
   // A real ask (plan tools and local models can take minutes): well past the default 20 s.
   return apiRequest<AiTryPayload>('/ai/try', { method: 'POST', body, timeoutMs: 300_000 });
 }
 
 /** Phase 7b: Logs → AI usage — every paid AI call per hour in [start, end) (`UsageRow`s, named). */
-export async function fetchAiUsage(start: number, end: number): Promise<ApiResponse<{ rows: UsageRow[] }>> {
+export async function fetchAiUsage(start: number, end: number): Promise<{ rows: UsageRow[] }> {
   const q = new URLSearchParams({ start: new Date(start).toISOString(), end: new Date(end).toISOString() });
   return apiRequest<{ rows: UsageRow[] }>(`/ai/usage?${q}`, { timeoutMs: 60_000 });
 }
 
-export async function listAiUses(): Promise<ApiResponse<AiUsesPayload>> {
+export async function listAiUses(): Promise<AiUsesPayload> {
   return apiRequest<AiUsesPayload>('/ai/uses');
 }
 
-export async function setAiUse(key: string, profileId: string | null): Promise<ApiResponse<unknown>> {
+export async function setAiUse(key: string, profileId: string | null): Promise<unknown> {
   return apiRequest(`/ai/uses/${encodeURIComponent(key)}`, { method: 'PUT', body: { profile_id: profileId } });
 }
 
-export async function forgetAiUse(key: string): Promise<ApiResponse<unknown>> {
+export async function forgetAiUse(key: string): Promise<unknown> {
   return apiRequest(`/ai/uses/${encodeURIComponent(key)}`, { method: 'DELETE' });
 }
 
-export async function refreshAiUses(extensionId: string | null): Promise<ApiResponse<AiUsesRefreshPayload>> {
+export async function refreshAiUses(extensionId: string | null): Promise<AiUsesRefreshPayload> {
   return apiRequest<AiUsesRefreshPayload>('/ai/uses/refresh', {
     method: 'POST',
     body: { extension_id: extensionId },
@@ -279,7 +279,7 @@ export type LocalServerSettingsBody = {
   batch?: number | null;
 };
 
-export async function getPlans(fresh = false): Promise<ApiResponse<PlansPayload>> {
+export async function getPlans(fresh = false): Promise<PlansPayload> {
   return apiRequest<PlansPayload>(`/ai/plans${fresh ? '?fresh=true' : ''}`, { timeoutMs: 60_000 });
 }
 
@@ -287,7 +287,7 @@ export async function planSignIn(
   tool: string,
   action: 'start' | 'state' | 'code' | 'cancel',
   code?: string
-): Promise<ApiResponse<PlanSignIn & { tool: string }>> {
+): Promise<PlanSignIn & { tool: string }> {
   return apiRequest<PlanSignIn & { tool: string }>(`/ai/plans/${encodeURIComponent(tool)}/sign-in`, {
     method: 'POST',
     body: { action, code: code ?? null },
@@ -297,11 +297,11 @@ export async function planSignIn(
 
 export async function planSignOut(
   tool: string
-): Promise<ApiResponse<{ tool: string; signed_out: boolean; message: string | null }>> {
+): Promise<{ tool: string; signed_out: boolean; message: string | null }> {
   return apiRequest(`/ai/plans/${encodeURIComponent(tool)}/sign-out`, { method: 'POST', timeoutMs: 60_000 });
 }
 
-export async function planTest(tool: string): Promise<ApiResponse<PlanTestPayload>> {
+export async function planTest(tool: string): Promise<PlanTestPayload> {
   // A real question through the tool: can take a couple of minutes.
   return apiRequest<PlanTestPayload>(`/ai/plans/${encodeURIComponent(tool)}/test`, {
     method: 'POST',
@@ -310,19 +310,19 @@ export async function planTest(tool: string): Promise<ApiResponse<PlanTestPayloa
 }
 
 /** Starts npm in the background (it can take minutes); poll `getPlans` while `updates.running`. */
-export async function updatePlans(): Promise<ApiResponse<{ updates: PlanUpdates }>> {
+export async function updatePlans(): Promise<{ updates: PlanUpdates }> {
   return apiRequest<{ updates: PlanUpdates }>('/ai/plans/update', { method: 'POST', body: { wait: false } });
 }
 
 /** Both local server kinds, checked now. */
-export async function listLocalServers(): Promise<ApiResponse<{ servers: LocalServerStatus[] }>> {
+export async function listLocalServers(): Promise<{ servers: LocalServerStatus[] }> {
   return apiRequest<{ servers: LocalServerStatus[] }>('/ai/local-servers', { timeoutMs: 60_000 });
 }
 
 export async function checkLocalServer(
   providerId: string,
   baseUrl?: string | null
-): Promise<ApiResponse<LocalServerStatus>> {
+): Promise<LocalServerStatus> {
   return apiRequest<LocalServerStatus>(`/ai/local-servers/${encodeURIComponent(providerId)}/check`, {
     method: 'POST',
     body: { base_url: baseUrl ?? null },
@@ -333,6 +333,6 @@ export async function checkLocalServer(
 export async function setLocalServer(
   providerId: string,
   body: LocalServerSettingsBody
-): Promise<ApiResponse<{ provider_id: string; base_url: string | null; unload_idle_min: number; context: number; batch: number }>> {
+): Promise<{ provider_id: string; base_url: string | null; unload_idle_min: number; context: number; batch: number }> {
   return apiRequest(`/ai/local-servers/${encodeURIComponent(providerId)}`, { method: 'PUT', body });
 }

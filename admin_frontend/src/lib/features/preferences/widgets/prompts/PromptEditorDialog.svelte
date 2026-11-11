@@ -6,12 +6,14 @@
    * the backend immediately); Cancel / close discards the working copy (with a confirm when dirty).
    * The page only selects which version opens here — see PromptLibraryField.
    */
-  import Button from '$lib/components/ui/button.svelte';
-  import * as Dialog from '$lib/components/ui/dialog';
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import { untrack } from 'svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import { Draft } from '$kit/state/draft.svelte';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
+  import Field from '$kit/ui/field.svelte';
   import MarkdownEditorPreview from '$lib/components/ui/markdown/MarkdownEditorPreview.svelte';
   import MarkdownPreview from '$lib/components/ui/markdown/MarkdownPreview.svelte';
-  import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
+  import { Input } from '$kit/components/ui/input/index.js';
   import type { AnswerPromptProfile } from '$lib/api/preferences';
   import PromptLibraryVersionBar from './PromptLibraryVersionBar.svelte';
   import {
@@ -20,6 +22,8 @@
     type PromptDialogModel,
     type PromptSavePayload
   } from './prompt-editor';
+
+  const uid = $props.id();
 
   type Props = {
     open: boolean;
@@ -46,10 +50,13 @@
   }: Props = $props();
 
   // --- local working state (seeded once per open; never written back to the page draft) ---
-  let workingValue = $state(''); // single
-  let workingDict = $state<Record<string, AnswerPromptProfile>>({}); // library
+  // One draft for both kinds: `single` is the prompt text, `dict` the library; the other stays empty.
+  // The dialog asks "Discard unsaved changes?" itself, so the draft does not also guard the page.
+  const draft = new Draft<{ single: string; dict: Record<string, AnswerPromptProfile> }>(
+    { single: '', dict: {} },
+    { guard: false }
+  );
   let selectedId = $state('');
-  let originalSnapshot = $state(''); // JSON of the seeded value, for dirty detection
   let confirmingClose = $state(false);
   // Plain latch (not reactive): reseed only when the dialog transitions closed → open, so a parent
   // re-render while open never wipes in-progress edits.
@@ -57,13 +64,11 @@
 
   function seed() {
     if (model.kind === 'single') {
-      workingValue = model.initialValue;
-      originalSnapshot = JSON.stringify(model.initialValue);
+      draft.load({ single: model.initialValue, dict: {} }, true);
     } else {
-      workingDict = JSON.parse(JSON.stringify(model.initialDict));
-      selectedId = model.initialSelectedId in workingDict ? model.initialSelectedId : model.defaultId;
-      // Snapshot BEFORE any initialAction so a New/Duplicate-on-open counts as a dirty change.
-      originalSnapshot = JSON.stringify(workingDict);
+      // Loaded BEFORE any initialAction so a New/Duplicate-on-open counts as a dirty change.
+      draft.load({ single: '', dict: model.initialDict }, true);
+      selectedId = model.initialSelectedId in draft.value.dict ? model.initialSelectedId : model.defaultId;
       // Reuse the dialog's own create/duplicate logic when the page's New/Duplicate icon opened us.
       if (model.initialAction === 'create') createProfile();
       else if (model.initialAction === 'duplicate') duplicateProfile();
@@ -73,7 +78,8 @@
 
   $effect(() => {
     if (open && !seeded) {
-      seed();
+      // Untracked: seeding reads the draft, which must not make this effect re-run on every edit.
+      untrack(seed);
       seeded = true;
     } else if (!open && seeded) {
       seeded = false;
@@ -81,44 +87,41 @@
   });
 
   const defaultId = $derived(model.kind === 'library' ? model.defaultId : 'default');
-  const libraryDefaultText = $derived(workingDict[defaultId]?.prompt ?? '');
+  const libraryDefaultText = $derived(draft.value.dict[defaultId]?.prompt ?? '');
   const entries = $derived(
-    Object.entries(workingDict).sort(([ka, a], [kb, b]) =>
+    Object.entries(draft.value.dict).sort(([ka, a], [kb, b]) =>
       ka === defaultId ? -1 : kb === defaultId ? 1 : a.label.localeCompare(b.label)
     )
   );
-  const selected = $derived(workingDict[selectedId] ?? workingDict[defaultId] ?? null);
+  const selected = $derived(draft.value.dict[selectedId] ?? draft.value.dict[defaultId] ?? null);
 
-  const currentSnapshot = $derived(
-    model.kind === 'single' ? JSON.stringify(workingValue) : JSON.stringify(workingDict)
-  );
-  const dirty = $derived(currentSnapshot !== originalSnapshot);
+  const dirty = $derived(draft.dirty);
 
   // No empties: every editable (non-locked) prompt must have text before Save is allowed.
   const valid = $derived(
     model.kind === 'single'
-      ? workingValue.trim().length > 0
-      : Object.values(workingDict).every((p) => p.locked || p.prompt.trim().length > 0)
+      ? draft.value.single.trim().length > 0
+      : Object.values(draft.value.dict).every((p) => p.locked || p.prompt.trim().length > 0)
   );
   const canSave = $derived(dirty && valid && !pending);
 
   function createProfile() {
-    const label = `Custom ${Object.keys(workingDict).length}`;
-    const id = uniquePromptId(slugifyPromptLabel(label), workingDict);
-    workingDict[id] = { label, locked: false, prompt: '' };
+    const label = `Custom ${Object.keys(draft.value.dict).length}`;
+    const id = uniquePromptId(slugifyPromptLabel(label), draft.value.dict);
+    draft.value.dict[id] = { label, locked: false, prompt: '' };
     selectedId = id;
   }
 
   function duplicateProfile() {
     // Read the working dict directly (not the `selected` derived) so this is reliable when called
     // from seed() during initialAction, before the derived has recomputed for the new selectedId.
-    const src = workingDict[selectedId] ?? workingDict[defaultId];
+    const src = draft.value.dict[selectedId] ?? draft.value.dict[defaultId];
     if (!src) return;
     const label = `${src.label} copy`;
-    const id = uniquePromptId(slugifyPromptLabel(label), workingDict);
+    const id = uniquePromptId(slugifyPromptLabel(label), draft.value.dict);
     // Duplicating the locked default seeds from its full default text so editing starts from the
     // real prompt (a non-default profile's own prompt otherwise).
-    workingDict[id] = {
+    draft.value.dict[id] = {
       label,
       locked: false,
       prompt: src.prompt || (src.locked ? libraryDefaultText : '')
@@ -129,13 +132,13 @@
   function deleteProfile() {
     if (!selected || selected.locked) return;
     // Reassign a fresh object (not delete) so the $state proxy reliably re-renders the list.
-    const { [selectedId]: _removed, ...rest } = workingDict;
-    workingDict = rest;
+    const { [selectedId]: _removed, ...rest } = draft.value.dict;
+    draft.value.dict = rest;
     selectedId = defaultId;
   }
 
   function renameSelected(label: string) {
-    const p = workingDict[selectedId];
+    const p = draft.value.dict[selectedId];
     if (!p || p.locked) return;
     p.label = label;
   }
@@ -158,8 +161,8 @@
     if (!canSave) return;
     const payload: PromptSavePayload =
       model.kind === 'single'
-        ? { kind: 'single', value: workingValue }
-        : { kind: 'library', dict: workingDict };
+        ? { kind: 'single', value: draft.value.single }
+        : { kind: 'library', dict: draft.value.dict };
     const ok = await onSave(payload);
     if (ok) onClose();
   }
@@ -196,7 +199,7 @@
           {editorLabel}
           previewLabel="Preview"
           {ariaLabel}
-          bind:value={workingValue}
+          bind:value={draft.value.single}
           defaultValue={model.defaultText}
           minHeightClass="min-h-[max(18rem,52vh)]"
         />
@@ -213,18 +216,18 @@
           <MarkdownPreview markdown={selected.prompt || libraryDefaultText} compact />
         </div>
       {:else if selected}
-        <FormField label="Label" class="mb-3 max-w-md" hint="">
-          <input
-            class={ADMIN_INPUT}
+        <Field label="Label" for="{uid}-label" class="mb-3 max-w-md">
+          <Input
+            id="{uid}-label"
             value={selected.label}
             oninput={(e) => renameSelected(e.currentTarget.value)}
           />
-        </FormField>
+        </Field>
         <MarkdownEditorPreview
           {editorLabel}
           previewLabel="Preview"
           {ariaLabel}
-          bind:value={workingDict[selectedId].prompt}
+          bind:value={draft.value.dict[selectedId].prompt}
           defaultValue={libraryDefaultText}
           minHeightClass="min-h-[max(16rem,42vh)]"
         />

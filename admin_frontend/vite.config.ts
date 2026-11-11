@@ -1,6 +1,6 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
-import { defineConfig } from 'vite';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 const hiroAdminOrigin = process.env.HIRO_ADMIN_ORIGIN ?? 'http://127.0.0.1:18083';
 
@@ -11,6 +11,11 @@ const fastBuild = process.env.HIRO_FAST_BUILD === '1';
 
 export default defineConfig({
   plugins: [tailwindcss(), sveltekit()],
+  // The shared UI kit's copy (.kit, scripts/kit-sync.mjs) brings the kit's own tests with it; they run in the
+  // kit (ui-kit/), against its sample app, not here.
+  test: {
+    exclude: [...configDefaults.exclude, '.kit/**']
+  },
   build: {
     minify: fastBuild ? false : 'esbuild',
     cssMinify: !fastBuild,

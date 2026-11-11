@@ -1,13 +1,13 @@
 <script lang="ts">
   import { Edit, FilterX, Network, RefreshCw, Repeat2, Trash2 } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import type { KnowledgeDocument } from '$lib/api/knowledge';
   import KnowledgeBrowseDocumentsTable from '$lib/features/knowledge/browse/KnowledgeBrowseDocumentsTable.svelte';
   import type { KnowledgeBrowseModel } from '$lib/features/knowledge/state/knowledge-browse.svelte';
   import type { KnowledgeOptionsModel } from '$lib/features/knowledge/state/knowledge-options.svelte';
   import { KNOWLEDGE_SECTION_CARD, KNOWLEDGE_SECTION_TITLE } from '$lib/features/knowledge/shared/knowledge-ui';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
+  import Loading from '$kit/ui/loading.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
   import { cn } from '$lib/utils';
 
   type Props = {
@@ -79,9 +79,9 @@
   </div>
 
   {#if browse.loadingDocs && browse.documents.length === 0}
-    <InlineLoading label="Loading documents…" />
+    <Loading label="Loading documents…" />
   {:else if browse.documents.length === 0}
-    <InlineEmptyState message="No documents">
+    <EmptyState message="No documents">
       {#snippet actions()}
         {#if browse.hasBrowseFilters}
           <Button variant="outline" class="h-8" onclick={() => browse.clearBrowseFilters()}>
@@ -90,7 +90,7 @@
           </Button>
         {/if}
       {/snippet}
-    </InlineEmptyState>
+    </EmptyState>
   {:else}
     <KnowledgeBrowseDocumentsTable {browse} {options} {onPreview} {onOpenChunks} />
   {/if}

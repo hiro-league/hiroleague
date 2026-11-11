@@ -1,3 +1,4 @@
+import { errorMessage } from '$kit/api/client';
 import {
   exportKnowledgeGraph,
   type GraphEdgeDTO,
@@ -115,22 +116,17 @@ export function createGraphDataStore(deps: GraphDataStoreDeps) {
     try {
       const activeGroupId = deps.getActiveGroupId();
       const res = await exportKnowledgeGraph(activeGroupId ? { groupIds: [activeGroupId] } : {});
-      if (!res.ok || !res.data) {
-        loadError = res.error ?? 'Failed to load graph';
-        deps.setError(loadError);
-        return;
-      }
       nodeById.clear();
       edgeById.clear();
-      for (const n of res.data.nodes) nodeById.set(n.id, { ...n });
-      for (const e of res.data.edges) edgeById.set(e.id, { ...e });
-      truncated = res.data.truncated;
+      for (const n of res.nodes) nodeById.set(n.id, { ...n });
+      for (const e of res.edges) edgeById.set(e.id, { ...e });
+      truncated = res.truncated;
       recent = {};
       rebuildArrays();
       loadVersion += 1;
       deps.onLoadComplete();
     } catch (err) {
-      loadError = err instanceof Error ? err.message : String(err);
+      loadError = errorMessage(err);
       deps.setError(loadError);
     } finally {
       loading = false;
@@ -140,7 +136,7 @@ export function createGraphDataStore(deps: GraphDataStoreDeps) {
   async function loadPreferences(): Promise<void> {
     try {
       const res = await getPreferences();
-      const t = res.data?.preferences?.graph?.view?.large_type_threshold;
+      const t = res?.preferences?.graph?.view?.large_type_threshold;
       if (typeof t === 'number' && t > 0) largeTypeThreshold = t;
     } catch (err) {
       console.error('graph: failed to load view preferences', err);

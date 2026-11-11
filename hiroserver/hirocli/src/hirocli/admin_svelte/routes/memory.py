@@ -11,7 +11,7 @@ from fastapi import APIRouter, Request
 from hiro_commons.log import Logger
 
 from hirocli.admin_svelte.deps import SelectedWorkspaceIdDep
-from hirocli.admin_svelte.result_payload import envelope_failure
+from hirocli.admin_svelte.result_payload import api_failure
 from hirocli.domain.data_store import get_default_user_id
 from hirocli.domain.preferences import load_preferences
 from hirocli.domain.workspace import resolve_workspace
@@ -87,12 +87,12 @@ def _sort_memories(memories: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(memories, key=_memory_updated_sort_key, reverse=True)
 
 
-def _success(data: Any) -> dict[str, Any]:
-    return {"ok": True, "error": None, "data": data}
+def _success(data: Any) -> Any:
+    return data
 
 
-def _service_unavailable() -> dict[str, Any]:
-    return envelope_failure("Memory service is disabled or unavailable.")
+def _service_unavailable() -> Any:
+    return api_failure("Memory service is disabled or unavailable.")
 
 
 async def _resolve_memory_service(
@@ -113,7 +113,7 @@ async def list_workspace_memories(
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
     group_id: str | None = None,
-) -> dict[str, Any]:
+) -> Any:
     """List memories. Default (no ``group_id``): all of the workspace default user's
     conversation-memory groups. With ``group_id``: that one partition's facts — lets the
     Memories group selector show ANY group (memory / knowledge / eval), mirroring the Graph
@@ -135,7 +135,7 @@ async def list_workspace_memories(
             try:
                 gid = validate_group_id(gid)
             except GroupPolicyError as exc:
-                return envelope_failure(f"Invalid memory group: {exc}")
+                return api_failure(f"Invalid memory group: {exc}")
             memories = _sort_memories(await service.list_facts_in_groups([gid]))
         else:
             memories = _sort_memories(
@@ -144,14 +144,14 @@ async def list_workspace_memories(
         return _success({"memory_enabled": True, "memories": memories})
     except Exception as exc:
         log.error("list memories - admin failed", error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @memory_router.post("/memory/clear")
 async def clear_workspace_memories(
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     """Delete all long-term memories for the workspace default user."""
     try:
         service, workspace_path = await _resolve_memory_service(request, workspace_id)
@@ -161,14 +161,14 @@ async def clear_workspace_memories(
         return _success({"deleted_count": deleted})
     except Exception as exc:
         log.error("clear memories - admin failed", error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @memory_router.post("/memory/clear-group")
 async def clear_workspace_group(
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     """Wipe ONE graph partition — backs the admin "Clear group" action. Unlike
     ``/memory/delete`` (forgets specific fact edges), this drops the whole group: facts +
     entities + episodes + communities. The client-supplied ``group_id`` is re-validated at
@@ -180,7 +180,7 @@ async def clear_workspace_group(
         raw_gid = body.get("group_id") if isinstance(body, dict) else None
         gid = str(raw_gid or "").strip()
         if not gid:
-            return envelope_failure("'group_id' is required.")
+            return api_failure("'group_id' is required.")
         # Re-mint the untrusted client scope against the closed grammar before any write.
         from hirocli.services.knowledge.graph.group_scope import (
             GroupPolicyError,
@@ -190,7 +190,7 @@ async def clear_workspace_group(
         try:
             gid = validate_group_id(gid)
         except GroupPolicyError as exc:
-            return envelope_failure(f"Invalid memory group: {exc}")
+            return api_failure(f"Invalid memory group: {exc}")
         service, _ = await _resolve_memory_service(request, workspace_id)
         if service is None:
             return _service_unavailable()
@@ -198,21 +198,21 @@ async def clear_workspace_group(
         return _success({"deleted_count": deleted})
     except Exception as exc:
         log.error("clear group - admin failed", error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @memory_router.post("/memory/delete")
 async def delete_workspace_memories(
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     """Delete several long-term memories (Graphiti fact edges) by id — backs the admin
     "Clear shown" action over the displayed/filtered rows. Idempotent for missing ids."""
     try:
         body = await request.json()
         ids = body.get("ids") if isinstance(body, dict) else None
         if not isinstance(ids, list):
-            return envelope_failure("'ids' must be a list of memory ids.")
+            return api_failure("'ids' must be a list of memory ids.")
         service, _ = await _resolve_memory_service(request, workspace_id)
         if service is None:
             return _service_unavailable()
@@ -220,7 +220,7 @@ async def delete_workspace_memories(
         return _success({"deleted_count": deleted})
     except Exception as exc:
         log.error("delete memories (batch) - admin failed", error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @memory_router.delete("/memory/{memory_id}")
@@ -228,7 +228,7 @@ async def delete_workspace_memory(
     memory_id: str,
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     """Delete one long-term memory (Graphiti fact edge) by id."""
     try:
         service, _ = await _resolve_memory_service(request, workspace_id)
@@ -236,9 +236,9 @@ async def delete_workspace_memory(
             return _service_unavailable()
         mid = str(memory_id or "").strip()
         if not mid:
-            return envelope_failure("Memory id is required.")
+            return api_failure("Memory id is required.")
         await service.delete(mid)
         return _success({"memory_id": mid})
     except Exception as exc:
         log.error("delete memory - admin failed", memory_id=memory_id, error=str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))

@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Component, Snippet } from 'svelte';
-  import SectionCard from '$lib/components/page/SectionCard.svelte';
-  import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
+  import Panel from '$kit/ui/panel.svelte';
+  import Section from '$kit/ui/section.svelte';
 
   type Props = {
     title: string;
@@ -38,11 +38,11 @@
 {/snippet}
 
 {#if nested}
-  <SectionCardMuted class="grid min-w-0 gap-[0.65rem]">
+  <Section class="grid min-w-0 gap-[0.65rem]">
     {@render body()}
-  </SectionCardMuted>
+  </Section>
 {:else}
-  <SectionCard class="grid min-w-0 gap-[0.65rem]">
+  <Panel class="grid min-w-0 gap-[0.65rem]">
     {@render body()}
-  </SectionCard>
+  </Panel>
 {/if}

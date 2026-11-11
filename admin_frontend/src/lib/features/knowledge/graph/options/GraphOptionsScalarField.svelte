@@ -3,6 +3,7 @@
   // Filters option sections. Replaces the hand-rolled <label> slider blocks that were
   // near-duplicates of one another. One-way `value` + `onInput` callback keeps the
   // writable target in the parent (parents bind to $bindable props / call the model).
+  import { Slider } from '$kit/components/ui/slider/index.js';
   import GraphOptionsResetDot from './GraphOptionsResetDot.svelte';
 
   let {
@@ -34,7 +35,7 @@
   } = $props();
 </script>
 
-<label class="block">
+<div class="block">
   <div class="mb-1 flex items-center justify-between text-xs">
     <span class="flex items-center font-medium">
       {title}
@@ -42,17 +43,8 @@
     </span>
     <span class="tabular-nums text-muted-foreground">{valueText}</span>
   </div>
-  <input
-    type="range"
-    {min}
-    {max}
-    {step}
-    {value}
-    oninput={(e) => onInput(e.currentTarget.valueAsNumber)}
-    class="h-1.5 w-full cursor-pointer accent-primary"
-    aria-label={ariaLabel}
-  />
+  <Slider type="single" {min} {max} {step} {value} onValueChange={onInput} class="py-1" aria-label={ariaLabel} />
   <div class="mt-0.5 flex justify-between text-[10px] text-muted-foreground">
     <span>{leftLabel}</span><span>{rightLabel}</span>
   </div>
-</label>
+</div>

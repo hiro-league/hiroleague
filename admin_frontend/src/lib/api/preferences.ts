@@ -1,4 +1,4 @@
-import { apiRequest, type ApiResponse } from './client';
+import { apiRequest } from './client';
 import { DEFAULT_WORKSPACE_PREFERENCES } from './generated/workspace-preferences.defaults';
 import type { WorkspacePreferences } from './preferences-types';
 
@@ -112,13 +112,13 @@ export type PreferencesPatchPayload = PreferencesPayload & {
   changed: string[];
 };
 
-export async function getPreferences(): Promise<ApiResponse<PreferencesPayload>> {
+export async function getPreferences(): Promise<PreferencesPayload> {
   return apiRequest<PreferencesPayload>('/preferences');
 }
 
 export async function patchPreferences(
   edits: Record<string, unknown>
-): Promise<ApiResponse<PreferencesPatchPayload>> {
+): Promise<PreferencesPatchPayload> {
   return apiRequest<PreferencesPatchPayload>('/preferences', {
     method: 'PATCH',
     body: { edits }

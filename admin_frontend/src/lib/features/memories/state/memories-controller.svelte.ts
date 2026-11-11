@@ -9,6 +9,7 @@
  * Follows getters for `$derived` consumers (avoid returning shorthand `$derived`
  * from a factory — that captures a stale value).
  */
+import { errorMessage } from '$kit/api/client';
 import { listChatChannels, type ChatChannelRow } from '$lib/api/chat-channels';
 import { listCharacters, type CharacterRow } from '$lib/api/characters';
 import { listKnowledgeGraphGroups, type GraphGroup } from '$lib/api/knowledge';
@@ -213,7 +214,7 @@ export function createMemoriesPageController() {
 
   async function loadChatChannels() {
     try {
-      chatChannels = (await listChatChannels()).data;
+      chatChannels = (await listChatChannels());
     } catch {
       // apiRequest throws on failure; leave the last loaded channels visible.
     }
@@ -221,7 +222,7 @@ export function createMemoriesPageController() {
 
   async function loadCharacters() {
     try {
-      characters = (await listCharacters()).data;
+      characters = (await listCharacters());
     } catch {
       // apiRequest throws on failure; leave the last loaded characters visible.
     }
@@ -246,7 +247,7 @@ export function createMemoriesPageController() {
   // "All memory" option; the list itself is unaffected.
   async function loadMemoryGroups() {
     try {
-      const data = (await listKnowledgeGraphGroups()).data;
+      const data = (await listKnowledgeGraphGroups());
       memoryGroups = data.groups;
       memoryDefaultGroupId = data.default_group_id;
     } catch {
@@ -288,7 +289,7 @@ export function createMemoriesPageController() {
       clearMemoriesConfirmOpen = false;
       await loadMemories();
     } catch (e) {
-      memoriesError = e instanceof Error ? e.message : 'Failed to clear memories.';
+      memoriesError = errorMessage(e);
     } finally {
       memoryActionBusy = false;
     }
@@ -320,7 +321,7 @@ export function createMemoriesPageController() {
         await loadMemories();
       }
     } catch (e) {
-      memoriesError = e instanceof Error ? e.message : 'Failed to clear group.';
+      memoriesError = errorMessage(e);
     } finally {
       memoryActionBusy = false;
     }

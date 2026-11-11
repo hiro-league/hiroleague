@@ -1,3 +1,4 @@
+import { errorMessage } from '$kit/api/client';
 import {
   clearWorkspaceGroup,
   deleteWorkspaceMemories,
@@ -14,15 +15,15 @@ export async function loadMemoriesList(groupId?: string): Promise<{
   try {
     const res = await listWorkspaceMemories(groupId);
     return {
-      memoryEnabled: res.data.memory_enabled,
-      memories: res.data.memories ?? [],
+      memoryEnabled: res.memory_enabled,
+      memories: res.memories ?? [],
       error: ''
     };
   } catch (e) {
     return {
       memoryEnabled: null,
       memories: [],
-      error: e instanceof Error ? e.message : 'Failed to load memories.'
+      error: errorMessage(e)
     };
   }
 }

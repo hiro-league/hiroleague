@@ -1,5 +1,6 @@
+import { errorMessage } from '$kit/api/client';
 import { sendChatMessage } from '$lib/api/chat-channels';
-import type { ToastKind } from '$lib/ui/toast-types';
+import type { ToastKind } from '$kit/ui/toast.svelte';
 import { pickRecordingMimeType } from '$lib/features/chat-channels/shared/chat-channel-media';
 import {
   buildRecordingBlobFromChunks,
@@ -49,7 +50,7 @@ export function createChatComposer(opts: ChatComposerOptions) {
       const sentAt = new Date().toISOString();
       draftMessage = '';
       engine.addOptimisticMessage({
-        id: sent.data.message_id,
+        id: sent.message_id,
         message_pk: engine.nextOptimisticPk(),
         channel_id: id,
         sender_type: 'user',
@@ -60,7 +61,7 @@ export function createChatComposer(opts: ChatComposerOptions) {
       engine.markAgentReplyPending(sentAt, requestVoiceReply);
       notify('success', 'Message sent.');
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Send failed.');
+      notify('error', errorMessage(err));
     } finally {
       composingBusy = false;
     }
@@ -90,7 +91,7 @@ export function createChatComposer(opts: ChatComposerOptions) {
     } catch (err) {
       recordingStartedAt = null;
       mediaRecorderObj = null;
-      notify('error', err instanceof Error ? err.message : 'Could not start microphone.');
+      notify('error', errorMessage(err));
     } finally {
       composingBusy = false;
     }
@@ -125,7 +126,7 @@ export function createChatComposer(opts: ChatComposerOptions) {
       });
       const sentAt = new Date().toISOString();
       engine.addOptimisticMessage({
-        id: sent.data.message_id,
+        id: sent.message_id,
         message_pk: engine.nextOptimisticPk(),
         channel_id: id,
         sender_type: 'user',
@@ -134,7 +135,7 @@ export function createChatComposer(opts: ChatComposerOptions) {
         content: [
           {
             content_type: 'audio',
-            body: `optimistic_audio:${sent.data.message_id}`,
+            body: `optimistic_audio:${sent.message_id}`,
             metadata: {
               duration_ms,
               media_type: effectiveMime,
@@ -146,7 +147,7 @@ export function createChatComposer(opts: ChatComposerOptions) {
       engine.markAgentReplyPending(sentAt, requestVoiceReply);
       notify('success', 'Voice message sent.');
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Send failed.');
+      notify('error', errorMessage(err));
     } finally {
       composingBusy = false;
     }

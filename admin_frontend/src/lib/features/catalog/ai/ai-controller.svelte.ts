@@ -17,6 +17,9 @@
  * - The model picker is the shared `SingleModelPicker`, fed catalog chat models, the models local
  *   servers reported and the models each plan tool lists.
  */
+import { errorMessage } from '$kit/api/client';
+import { Action } from '$kit/state/action.svelte';
+import { KeyedAction } from '$kit/state/keyed-action.svelte';
 import {
   checkLocalServer,
   forgetAiUse,
@@ -44,7 +47,7 @@ import {
 import { listCatalogModels, type CatalogModelRow, type CatalogProviderRow } from '$lib/api/catalog';
 import type { AiProfile as AiProfilePrefs } from '$lib/api/generated/preferences.generated';
 import { patchPreferences } from '$lib/api/preferences';
-import type { Notify } from '$lib/ui/toast-types';
+import type { Notify } from '$kit/ui/toast.svelte';
 import {
   jobFromRow,
   localModelCatalogRows,
@@ -86,10 +89,6 @@ function copy<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-function errorText(err: unknown, fallback: string): string {
-  return err instanceof Error && err.message ? err.message : fallback;
-}
-
 function blankProfile(id: string): AiProfile {
   return {
     id,
@@ -126,15 +125,18 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
   let profilesError = $state<string | null>(null);
   /** Phase 7b step 5: Hiro's own jobs, each pointing at one profile (from the profiles list). */
   let jobs = $state<AiJob[]>([]);
-  let jobBusy = $state<Record<string, boolean>>({});
+  /** One job's profile being changed. */
+  const jobAction = new KeyedAction();
 
   // ── uses ──────────────────────────────────────────────────────────────
   let uses = $state<AiUse[]>([]);
   let useGroups = $state<AiUsesGroup[]>([]);
   let usesLoading = $state(true);
   let usesError = $state<string | null>(null);
-  let refreshingExtensions = $state<Record<string, boolean>>({});
-  let useBusy = $state<Record<string, boolean>>({});
+  /** An extension's uses being read again (keyed by its name). */
+  const refreshAction = new KeyedAction();
+  /** One use's profile being changed or forgotten. */
+  const useAction = new KeyedAction();
 
   // ── plan tools ────────────────────────────────────────────────────────
   let plans = $state<PlanToolStatus[]>([]);
@@ -152,9 +154,10 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
   let servers = $state<LocalServerStatus[]>([]);
   let serversLoading = $state(true);
   let serversError = $state<string | null>(null);
-  let checkingServerIds = $state<Record<string, boolean>>({});
+  /** A local server being checked (keyed by provider id). */
+  const checkAction = new KeyedAction();
   let serverDraft = $state<LocalServerDraft>({ baseUrl: '', unloadIdleMin: 60, context: 16384, batch: 2048 });
-  let serverSaving = $state(false);
+  const serverSave = new Action();
 
   /** Provider whose dialog is open (a local server or a plan tool), or null. */
   let dialogProviderId = $state<string | null>(null);
@@ -222,11 +225,11 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
   async function loadCatalog() {
     try {
       const [chat, local] = await Promise.all([listCatalogModels({ model_kind: 'chat' }), listAiLocalModels()]);
-      catalogChatModels = chat.data.models;
+      catalogChatModels = chat.models;
       // The servers' live check (loadServers) may already have filled this with fresher rows.
-      if (!localModels.length) localModels = local.data.models;
+      if (!localModels.length) localModels = local.models;
     } catch (err) {
-      notify('error', errorText(err, 'Could not load the models for the picker.'));
+      notify('error', errorMessage(err));
     } finally {
       catalogLoaded = true;
     }
@@ -235,12 +238,12 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
   async function loadProfiles() {
     try {
       const payload = await listAiProfiles();
-      profiles = payload.data.profiles.map(profileFromRow);
-      rawUses = payload.data.uses ?? {};
-      jobs = (payload.data.jobs ?? []).map(jobFromRow);
+      profiles = payload.profiles.map(profileFromRow);
+      rawUses = payload.uses ?? {};
+      jobs = (payload.jobs ?? []).map(jobFromRow);
       profilesError = null;
     } catch (err) {
-      profilesError = errorText(err, 'Could not load the AI profiles.');
+      profilesError = errorMessage(err);
     } finally {
       profilesLoading = false;
     }
@@ -249,12 +252,12 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
   async function loadUses() {
     try {
       const payload = await listAiUses();
-      const mapped = usesFromPayload(payload.data.extensions);
+      const mapped = usesFromPayload(payload.extensions);
       uses = mapped.uses;
       useGroups = mapped.groups;
       usesError = null;
     } catch (err) {
-      usesError = errorText(err, 'Could not load the uses.');
+      usesError = errorMessage(err);
     } finally {
       usesLoading = false;
     }
@@ -263,23 +266,23 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
   async function loadPlans(fresh = false) {
     try {
       const payload = await getPlans(fresh);
-      plans = payload.data.tools;
-      planUpdates = payload.data.updates;
+      plans = payload.tools;
+      planUpdates = payload.updates;
       plansError = null;
       if (planUpdates.running) scheduleUpdatePoll();
     } catch (err) {
-      plansError = errorText(err, 'Could not read Claude Code and Codex.');
+      plansError = errorMessage(err);
     }
   }
 
   async function loadServers() {
     try {
       const payload = await listLocalServers();
-      servers = payload.data.servers;
+      servers = payload.servers;
       localModels = servers.flatMap((s) => s.models);
       serversError = null;
     } catch (err) {
-      serversError = errorText(err, 'Could not check the local servers.');
+      serversError = errorMessage(err);
     } finally {
       serversLoading = false;
     }
@@ -300,21 +303,22 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
   // ── profile editor ────────────────────────────────────────────────────
   let editorOpen = $state(false);
   let editorIsNew = $state(false);
-  let saving = $state(false);
+  /** The editor's Save, Delete and Restore default. */
+  const saveAction = new Action();
+  const deleteAction = new Action();
+  const restoreAction = new Action();
   let draft = $state<AiProfile>(blankProfile(''));
   const draftModel = $derived(findModel(providers, draft.model));
   const draftCheck = $derived(checkDraftFallback(profiles, draft));
   const draftTemperatureNote = $derived(temperatureNote(draftModel.provider, draft.thinking));
 
   let deletingId = $state<string | null>(null);
-  let deleting = $state(false);
   let restoringId = $state<string | null>(null);
-  let restoring = $state(false);
 
   // ── try it (inside the editor) ────────────────────────────────────────
   let tryPrompt = $state('Is anyone at the front door?');
   let tryPicture = $state<{ name: string; url: string; dataUrl: string } | null>(null);
-  let trying = $state(false);
+  const askAction = new Action();
   let tryResult = $state<AiTryResult | null>(null);
   let tryError = $state<string | null>(null);
 
@@ -421,17 +425,13 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     }
     // A new profile's id comes from its name (the backend wants a lowercase slug).
     const id = editorIsNew ? profileIdFor(name, takenIds()) : draft.id;
-    saving = true;
-    try {
+    await saveAction.run(async () => {
       await patchPreferences({ [`ai.profiles.${id}`]: profileToPrefs({ ...draft, name }) });
       notify('success', `Saved ${name}.`);
       closeEditor();
       await loadProfiles();
-    } catch (err) {
-      notify('error', errorText(err, 'Could not save the profile.'));
-    } finally {
-      saving = false;
-    }
+    });
+    if (saveAction.error) notify('error', saveAction.error);
   }
 
   function askDelete(id: string) {
@@ -452,17 +452,13 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     }
     const nextUses = Object.fromEntries(Object.entries(rawUses).map(([key, pid]) => [key, pid === id ? null : pid]));
     const jobEdits = Object.fromEntries(jobs.filter((j) => j.profileId === id).map((j) => [j.path, null]));
-    deleting = true;
-    try {
+    await deleteAction.run(async () => {
       await patchPreferences({ 'ai.profiles': rest, 'ai.uses': nextUses, ...jobEdits });
       notify('success', `Deleted ${name}.`);
       deletingId = null;
       await Promise.all([loadProfiles(), loadUses()]);
-    } catch (err) {
-      notify('error', errorText(err, 'Could not delete the profile.'));
-    } finally {
-      deleting = false;
-    }
+    });
+    if (deleteAction.error) notify('error', deleteAction.error);
   }
 
   // ── Hiro's jobs (Phase 7b step 5) ─────────────────────────────────────
@@ -476,25 +472,20 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     const id = restoringId;
     if (!id) return;
     const name = profileName(id);
-    restoring = true;
-    try {
+    await restoreAction.run(async () => {
       await restoreAiProfileDefault(id);
       notify('success', `${name} is back to its default settings.`);
       restoringId = null;
       await loadProfiles();
-    } catch (err) {
-      notify('error', errorText(err, 'Could not restore the profile.'));
-    } finally {
-      restoring = false;
-    }
+    });
+    if (restoreAction.error) notify('error', restoreAction.error);
   }
 
   /** Point one of Hiro's jobs at a profile ('' = not set: it borrows its fallback job's profile). */
   async function setJobProfile(jobId: string, profileId: string) {
     const job = jobs.find((j) => j.id === jobId);
     if (!job) return;
-    jobBusy = { ...jobBusy, [jobId]: true };
-    try {
+    await jobAction.run(jobId, async () => {
       await patchPreferences({ [job.path]: profileId || null });
       const parent = jobLabel(job.fallsBackTo);
       notify(
@@ -506,60 +497,46 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
             : `${job.label} is off.`
       );
       await loadProfiles();
-    } catch (err) {
-      notify('error', errorText(err, 'Could not change the profile.'));
-    } finally {
-      jobBusy = { ...jobBusy, [jobId]: false };
-    }
+    });
+    if (jobAction.error(jobId)) notify('error', jobAction.error(jobId));
   }
 
   // ── uses ──────────────────────────────────────────────────────────────
 
   async function setUseProfile(useKey: string, profileId: string) {
     const use = uses.find((u) => u.id === useKey);
-    useBusy = { ...useBusy, [useKey]: true };
-    try {
+    await useAction.run(useKey, async () => {
       await setAiUse(useKey, profileId || null);
       notify('success', `${use?.label ?? 'Use'} now asks ${profileName(profileId) || 'no profile'}.`);
       await Promise.all([loadUses(), loadProfiles()]);
-    } catch (err) {
-      notify('error', errorText(err, 'Could not change the profile.'));
-    } finally {
-      useBusy = { ...useBusy, [useKey]: false };
-    }
+    });
+    if (useAction.error(useKey)) notify('error', useAction.error(useKey));
   }
 
   /** Ask the extension for its uses again (it can change them without telling the core). */
   async function refreshUses(group: AiUsesGroup) {
     if (!group.extensionId) return;
-    refreshingExtensions = { ...refreshingExtensions, [group.extension]: true };
-    try {
-      const payload = await refreshAiUses(group.extensionId);
-      const failed = payload.data.failed[0];
+    const extensionId = group.extensionId;
+    await refreshAction.run(group.extension, async () => {
+      const payload = await refreshAiUses(extensionId);
+      const failed = payload.failed[0];
       if (failed) notify('warning', `${failed.extension}: ${failed.error}`);
-      else if (payload.data.note) notify('info', payload.data.note);
+      else if (payload.note) notify('info', payload.note);
       else notify('success', `${group.extension}: uses refreshed.`);
       await loadUses();
-    } catch (err) {
-      notify('error', errorText(err, `Could not ask ${group.extension} for its uses.`));
-    } finally {
-      refreshingExtensions = { ...refreshingExtensions, [group.extension]: false };
-    }
+    });
+    if (refreshAction.error(group.extension)) notify('error', refreshAction.error(group.extension));
   }
 
   /** Drop a use the extension no longer offers (its profile choice goes with it). */
   async function forgetUse(useKey: string) {
     const use = uses.find((u) => u.id === useKey);
-    useBusy = { ...useBusy, [useKey]: true };
-    try {
+    await useAction.run(useKey, async () => {
       await forgetAiUse(useKey);
       notify('success', `Forgot ${use?.label ?? 'the use'}.`);
       await Promise.all([loadUses(), loadProfiles()]);
-    } catch (err) {
-      notify('error', errorText(err, 'Could not forget the use.'));
-    } finally {
-      useBusy = { ...useBusy, [useKey]: false };
-    }
+    });
+    if (useAction.error(useKey)) notify('error', useAction.error(useKey));
   }
 
   // ── try it ────────────────────────────────────────────────────────────
@@ -572,30 +549,28 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     try {
       tryPicture = { name: file.name, url: URL.createObjectURL(file), dataUrl: await readAsDataUrl(file) };
     } catch (err) {
-      notify('error', errorText(err, 'Could not read the picture.'));
+      notify('error', errorMessage(err));
     }
   }
 
   async function tryIt() {
     if (!tryPrompt.trim() || !draft.model) return;
-    trying = true;
     tryResult = null;
     tryError = null;
     const kind = draftModel.provider?.kind;
-    try {
+    const mapped = await askAction.run(async () => {
       // The draft as it is in the editor, saved or not (a name is required by the profile shape).
       const payload = await tryAiProfile({
         prompt: tryPrompt,
         draft: { ...profileToPrefs(draft), label: draft.name.trim() || 'Try it' },
         picture: tryPicture?.dataUrl ?? null
       });
-      const mapped = tryResultFrom(payload.data, kind);
+      return tryResultFrom(payload, kind);
+    });
+    if (askAction.error) tryError = askAction.error;
+    else if (mapped) {
       tryResult = mapped.result;
       tryError = mapped.error;
-    } catch (err) {
-      tryError = errorText(err, 'The ask failed.');
-    } finally {
-      trying = false;
     }
   }
 
@@ -640,24 +615,19 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
   }
 
   async function checkServer(id: string) {
-    checkingServerIds = { ...checkingServerIds, [id]: true };
-    try {
+    await checkAction.run(id, async () => {
       const payload = await checkLocalServer(id);
-      replaceServer(payload.data);
+      replaceServer(payload);
       const label = LOCAL_SERVER_KIND_LABELS[id] ?? id;
-      if (payload.data.state === 'up') notify('success', `${label} is up: ${payload.data.models.length} models.`);
-      else notify('warning', `${label}: ${payload.data.error ?? payload.data.state}.`);
-    } catch (err) {
-      notify('error', errorText(err, 'Could not check the server.'));
-    } finally {
-      checkingServerIds = { ...checkingServerIds, [id]: false };
-    }
+      if (payload.state === 'up') notify('success', `${label} is up: ${payload.models.length} models.`);
+      else notify('warning', `${label}: ${payload.error ?? payload.state}.`);
+    });
+    if (checkAction.error(id)) notify('error', checkAction.error(id));
   }
 
   /** Save the dialog's address and load settings (context / batch for LM Studio only), then check. */
   async function saveServer(id: string) {
-    serverSaving = true;
-    try {
+    await serverSave.run(async () => {
       await setLocalServer(id, {
         base_url: serverDraft.baseUrl.trim() || null,
         unload_idle_min: serverDraft.unloadIdleMin || null,
@@ -666,11 +636,8 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
       });
       notify('success', `Saved ${LOCAL_SERVER_KIND_LABELS[id] ?? id}.`);
       await checkServer(id);
-    } catch (err) {
-      notify('error', errorText(err, 'Could not save the server.'));
-    } finally {
-      serverSaving = false;
-    }
+    });
+    if (serverSave.error) notify('error', serverSave.error);
   }
 
   function profilesOnProvider(id: string): string[] {
@@ -714,9 +681,9 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     signInTimers.delete(id);
     try {
       const payload = await planSignIn(id, 'state');
-      await applySignIn(id, payload.data);
+      await applySignIn(id, payload);
     } catch (err) {
-      notify('error', errorText(err, 'Could not read the sign-in.'));
+      notify('error', errorMessage(err));
     }
   }
 
@@ -725,9 +692,9 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     try {
       const payload = await planSignIn(id, 'start');
       signInCodes = { ...signInCodes, [id]: '' };
-      await applySignIn(id, payload.data);
+      await applySignIn(id, payload);
     } catch (err) {
-      notify('error', errorText(err, 'Could not start the sign-in.'));
+      notify('error', errorMessage(err));
     } finally {
       setPlanBusy(id, '');
     }
@@ -740,9 +707,9 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     setPlanBusy(id, 'Sending the code…');
     try {
       const payload = await planSignIn(id, 'code', code);
-      await applySignIn(id, payload.data);
+      await applySignIn(id, payload);
     } catch (err) {
-      notify('error', errorText(err, 'Could not send the code.'));
+      notify('error', errorMessage(err));
     } finally {
       setPlanBusy(id, '');
     }
@@ -753,7 +720,7 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     try {
       await planSignIn(id, 'cancel');
     } catch (err) {
-      notify('error', errorText(err, 'Could not cancel the sign-in.'));
+      notify('error', errorMessage(err));
     }
     signIns = { ...signIns, [id]: null };
     await loadPlans();
@@ -763,12 +730,12 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     setPlanBusy(id, 'Signing out…');
     try {
       const payload = await planSignOut(id);
-      if (payload.data.signed_out) notify('success', 'Signed out.');
-      else notify('warning', payload.data.message ?? 'The tool did not confirm the sign-out.');
+      if (payload.signed_out) notify('success', 'Signed out.');
+      else notify('warning', payload.message ?? 'The tool did not confirm the sign-out.');
       planTests = { ...planTests, [id]: null };
       await loadPlans(true);
     } catch (err) {
-      notify('error', errorText(err, 'Could not sign out.'));
+      notify('error', errorMessage(err));
     } finally {
       setPlanBusy(id, '');
     }
@@ -779,9 +746,9 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     planTests = { ...planTests, [id]: null };
     try {
       const payload = await planTest(id);
-      planTests = { ...planTests, [id]: payload.data };
+      planTests = { ...planTests, [id]: payload };
     } catch (err) {
-      notify('error', errorText(err, 'The test question failed.'));
+      notify('error', errorMessage(err));
     } finally {
       setPlanBusy(id, '');
     }
@@ -805,11 +772,11 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
   async function updateNow() {
     try {
       const payload = await updatePlans();
-      planUpdates = payload.data.updates;
+      planUpdates = payload.updates;
       notify('info', 'Updating Claude Code and Codex…');
       scheduleUpdatePoll();
     } catch (err) {
-      notify('error', errorText(err, 'Could not start the update.'));
+      notify('error', errorMessage(err));
     }
   }
 
@@ -826,14 +793,13 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     get jobs() {
       return jobs;
     },
-    get jobBusy() {
-      return jobBusy;
-    },
+    /** Is this job's profile being changed? */
+    jobBusy: jobAction.busy,
     get restoringId() {
       return restoringId;
     },
     get restoring() {
-      return restoring;
+      return restoreAction.busy;
     },
     get uses() {
       return uses;
@@ -847,12 +813,10 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     get usesError() {
       return usesError;
     },
-    get refreshingExtensions() {
-      return refreshingExtensions;
-    },
-    get useBusy() {
-      return useBusy;
-    },
+    /** Are this extension's uses being read again? */
+    refreshingExtension: refreshAction.busy,
+    /** Is this use being changed or forgotten? */
+    useBusy: useAction.busy,
     get plans() {
       return plans;
     },
@@ -884,15 +848,14 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     get serversError() {
       return serversError;
     },
-    get checkingServerIds() {
-      return checkingServerIds;
-    },
+    /** Is this local server being checked? */
+    serverChecking: checkAction.busy,
     /** The open server dialog's fields — bind inputs to them. */
     get serverDraft() {
       return serverDraft;
     },
     get serverSaving() {
-      return serverSaving;
+      return serverSave.busy;
     },
     get dialogProviderId() {
       return dialogProviderId;
@@ -923,7 +886,7 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
       return editorIsNew;
     },
     get saving() {
-      return saving;
+      return saveAction.busy;
     },
     /** The profile being edited — bind inputs to its fields. */
     get draft() {
@@ -942,7 +905,7 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
       return deletingId;
     },
     get deleting() {
-      return deleting;
+      return deleteAction.busy;
     },
     get tryPrompt() {
       return tryPrompt;
@@ -954,7 +917,7 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
       return tryPicture;
     },
     get trying() {
-      return trying;
+      return askAction.busy;
     },
     get tryResult() {
       return tryResult;

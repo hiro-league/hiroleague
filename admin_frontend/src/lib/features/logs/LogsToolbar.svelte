@@ -2,9 +2,9 @@
   import { ChevronDown, ChevronUp, PanelRightClose, PanelRightOpen, Pause, Play, Trash2 } from '@lucide/svelte';
   import SearchInput from '$lib/search/SearchInput.svelte';
   import type { LogTimeRange } from '$lib/api/logs';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import AdminIconToggleGroup from '$lib/components/page/AdminIconToggleGroup.svelte';
-  import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import { cn } from '$lib/utils';
   import { LOG_LEVELS, LOG_TIME_RANGES } from '$lib/api/logs';
   import type { LogsPageController } from './state/logs-controller.svelte';
@@ -32,6 +32,10 @@
     '3d': '3 days',
     all: 'All'
   };
+  const timeWindowOptions = [
+    { value: 'last', label: 'Last session' },
+    ...LOG_TIME_RANGES.map((r) => ({ value: r, label: timeRangeLabels[r] }))
+  ];
 
   // Merged "Last session" + time-range picker: "last" pins to the latest server
   // startup; any other value is a rolling past-window.
@@ -97,22 +101,13 @@
         Clear filters
       </Button>
     {/if}
-    <label class="flex items-center gap-1.5 font-sans text-sm text-muted-foreground">
-      <span class="sr-only">Time window</span>
-      <select
-        class={cn(ADMIN_INPUT, 'min-w-[7rem] px-2')}
-        value={prefs.lastSessionOnly ? 'last' : prefs.logTimeRange}
-        onchange={(event) =>
-          onSessionRangeChange((event.currentTarget as HTMLSelectElement).value)}
-        aria-label="Log time window"
-        title="Show logs from the last session or a rolling time window"
-      >
-        <option value="last">Last session</option>
-        {#each LOG_TIME_RANGES as r (r)}
-          <option value={r}>{timeRangeLabels[r]}</option>
-        {/each}
-      </select>
-    </label>
+    <PickSelect
+      class="h-8 w-auto min-w-[7rem] text-sm"
+      value={prefs.lastSessionOnly ? 'last' : prefs.logTimeRange}
+      options={timeWindowOptions}
+      onchange={onSessionRangeChange}
+      label="Log time window"
+    />
     <!-- Trailing actions grouped to the right; the collapse chevron pins to the far
          right of the line so the first toolbar row stays usable while collapsed. -->
     <div class="ml-auto flex items-center gap-2">

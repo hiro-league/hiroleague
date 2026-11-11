@@ -4,15 +4,16 @@
   import { page } from '$app/state';
   import { onMount, setContext, tick } from 'svelte';
   import { ChevronsDownUp, ChevronsUpDown, Eye, EyeOff, RotateCcw, Save } from '@lucide/svelte';
-  import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
-  import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
-  import AdminSubtabStrip from '$lib/components/page/AdminSubtabStrip.svelte';
+  import PageHeader from '$kit/ui/page-header.svelte';
+  import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
+  import StickyBar from '$kit/ui/sticky-bar.svelte';
+  import Subtabs from '$kit/ui/subtabs.svelte';
   import {
     COLLAPSIBLE_SECTION_REGISTRY,
     createCollapsibleSectionRegistry
-  } from '$lib/components/page/collapsible-section-registry.svelte';
-  import type { AdminSubtabDescriptor } from '$lib/components/page/tab-types';
-  import Button from '$lib/components/ui/button.svelte';
+  } from '$kit/ui/collapsible-registry.svelte';
+  import type { SubtabDescriptor } from '$kit/ui/subtabs-types';
+  import { Button } from '$kit/components/ui/button/index.js';
   import PrefManifestTab from '$lib/features/preferences/widgets/manifest/PrefManifestTab.svelte';
   import {
     PREFERENCE_TAB_IDS,
@@ -32,14 +33,12 @@
   import type { PrefSearchEntry } from '$lib/features/preferences/shared/preferences-search-index';
   import { getPreferenceByPath } from '$lib/features/preferences/state/preferences-edits';
   import { createPreferencesTabPreferences } from '$lib/preferences/preferences-tab-preferences.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
-  import ToastHost from '$lib/ui/ToastHost.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import Loading from '$kit/ui/loading.svelte';
   import UnsavedPreferencesDialog from '$lib/features/preferences/widgets/UnsavedPreferencesDialog.svelte';
-  import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
+  import { toast } from '$kit/ui/toast.svelte';
 
-  const toasts = createToastNotifier();
-  const ctrl = createPreferencesController(toasts.notify);
+  const ctrl = createPreferencesController(toast.show);
   // Global "show advanced" toggle, shared with every field gate via context (session-persisted).
   const advancedVis = createAdvancedVisibility();
   provideAdvancedVisibility(advancedVis);
@@ -72,7 +71,7 @@
   });
 
   // Per-tab result counts appear in the tab strip while a search is active (e.g. "Memory (3)").
-  const subtabDescriptors = $derived<readonly AdminSubtabDescriptor<PreferenceTabId>[]>(
+  const subtabDescriptors = $derived<readonly SubtabDescriptor<PreferenceTabId>[]>(
     VISIBLE_PREFERENCE_TABS.map((tab) => ({
       id: tab.id,
       label: tab.label,
@@ -143,8 +142,8 @@
     if (!browser) return;
     const paths = new Set(search.matches.map((m) => m.path));
     const active = search.activeMatch?.path ?? null;
-    for (const el of document.querySelectorAll<HTMLElement>('[data-pref-path]')) {
-      const path = el.getAttribute('data-pref-path');
+    for (const el of document.querySelectorAll<HTMLElement>('[data-field-anchor]')) {
+      const path = el.getAttribute('data-field-anchor');
       el.classList.toggle('pref-search-match', !!path && paths.has(path));
       el.classList.toggle('pref-search-active', path === active);
     }
@@ -174,7 +173,7 @@
     await tick(); // let the (possibly newly mounted) tab + its section cards render
     sectionRegistry.expandAll();
     await tick(); // let expanded sections + advanced fields paint before we look them up
-    const el = document.querySelector(`[data-pref-path="${match.path}"]`);
+    const el = document.querySelector(`[data-field-anchor="${match.path}"]`);
     if (!el) return; // a control without a single anchor — the tab switch is enough
     el.scrollIntoView({ block: 'center' });
     document
@@ -190,19 +189,12 @@
   <title>Settings - Hiro Admin</title>
 </svelte:head>
 
-<ToastHost toast={toasts.toast} />
 
-<AdminPageHeader
-  sticky
-  forceCompact={search.active}
-  kicker="Workspace"
-  title="Settings"
-  subtitle="Runtime settings are held in memory and persisted to preferences.json when saved."
-  class="w-full"
->
+<section class={ADMIN_PAGE_MAX_W}>
+  <PageHeader title="Settings" description="Runtime settings are held in memory and persisted to preferences.json when saved." />
   {#if !ctrl.error}
-    <AdminPageStickyToolbar>
-      <AdminSubtabStrip
+    <StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
+      <Subtabs
         ariaLabel={PREFERENCE_TABLIST_LABEL}
         tabs={subtabDescriptors}
         active={tabPrefs.activeTab}
@@ -275,20 +267,20 @@
             {/if}
           </div>
         {/snippet}
-      </AdminSubtabStrip>
-    </AdminPageStickyToolbar>
+      </Subtabs>
+    </StickyBar>
   {/if}
 
   {#if ctrl.loading}
-    <InlineLoading label="Loading preferences…" />
+    <Loading label="Loading preferences…" />
   {:else if ctrl.error}
-    <InlineDestructiveAlert message={ctrl.error} class="p-4 text-sm" />
+    <Notice message={ctrl.error} class="p-4 text-sm" />
   {:else if ctrl.draft}
     {#if activeManifestTab}
       <PrefManifestTab {ctrl} tab={activeManifestTab} />
     {/if}
   {/if}
-</AdminPageHeader>
+</section>
 
 <UnsavedPreferencesDialog unsaved={ctrl.unsaved} onDiscard={discardUnsavedChanges} />
 
@@ -299,8 +291,9 @@
      each jump. Ordered so `active` wins over `match`. Yellow (#facc15/#eab308) reads as a highlight
      and works translucent over both light and dark themes. */
   /* Persistent marker: highlight only the field NAME (a yellow marker behind the label text),
-     not the whole field area. `.pref-field-label` wraps the label text in each Pref* widget. */
-  :global([data-pref-path].pref-search-match .pref-field-label) {
+     not the whole field area. The kit Field's label (`data-slot='label'`) and `.pref-field-label` (the
+     headings the model pickers and toggles draw themselves) are the field name. */
+  :global([data-field-anchor].pref-search-match :is(.pref-field-label, [data-slot='label'])) {
     border-radius: 0.25rem;
     padding: 0.0625rem 0.3rem;
     background-color: color-mix(in oklab, #facc15 65%, transparent);
@@ -309,13 +302,13 @@
     box-decoration-break: clone;
   }
   /* Current result: just a simple border around the field — no background fill. */
-  :global([data-pref-path].pref-search-active) {
+  :global([data-field-anchor].pref-search-active) {
     border-radius: 0.5rem;
     outline: 2px solid #eab308;
     outline-offset: 4px;
   }
   /* Jump pulse: a brief glow on the name. */
-  :global([data-pref-path].pref-search-hit .pref-field-label) {
+  :global([data-field-anchor].pref-search-hit :is(.pref-field-label, [data-slot='label'])) {
     animation: pref-search-pulse 1.1s ease-out;
   }
   @keyframes pref-search-pulse {

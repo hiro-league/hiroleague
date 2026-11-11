@@ -8,6 +8,7 @@
  * by the inline download affordance), distinct from the catalog "local model" picker options the
  * controller loads separately.
  */
+import { errorMessage } from '$kit/api/client';
 import {
   cancelKnowledgeEmbedder,
   cancelKnowledgeReranker,
@@ -18,7 +19,7 @@ import {
   type LocalEmbedderRow,
   type LocalRerankerRow
 } from '$lib/api/knowledge';
-import type { ToastKind } from '$lib/ui/toast-types';
+import type { ToastKind } from '$kit/ui/toast.svelte';
 
 type Notify = (kind: ToastKind, message: string) => void;
 
@@ -49,7 +50,7 @@ export function createLocalModelDownloads(notify: Notify) {
       // Each poll refreshes the registry rows so percent/status stay live in the UI.
       for (let i = 0; i < 1200; i++) {
         const refreshed = await listKnowledgeRerankers();
-        localRerankers = refreshed.data.local ?? localRerankers;
+        localRerankers = refreshed.local ?? localRerankers;
         const row = localRerankers.find((m) => m.id === modelId);
         if (!row || row.downloaded || row.status === 'ready') {
           if (notifyOnDone) notify('success', 'Reranker downloaded.');
@@ -77,7 +78,7 @@ export function createLocalModelDownloads(notify: Notify) {
       await downloadKnowledgeReranker(modelId);
       await pollReranker(modelId, true);
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Reranker download failed.');
+      notify('error', errorMessage(err));
     } finally {
       rerankerDownloading = null;
     }
@@ -95,10 +96,10 @@ export function createLocalModelDownloads(notify: Notify) {
     try {
       await cancelKnowledgeReranker(modelId);
       const refreshed = await listKnowledgeRerankers();
-      localRerankers = refreshed.data.local ?? localRerankers;
+      localRerankers = refreshed.local ?? localRerankers;
       notify('info', 'Download cancelled.');
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Cancel failed.');
+      notify('error', errorMessage(err));
     }
   }
 
@@ -109,7 +110,7 @@ export function createLocalModelDownloads(notify: Notify) {
     try {
       for (let i = 0; i < 1200; i++) {
         const refreshed = await listKnowledgeEmbedders();
-        localEmbedders = refreshed.data.local ?? localEmbedders;
+        localEmbedders = refreshed.local ?? localEmbedders;
         const row = localEmbedders.find((m) => m.id === modelId);
         if (!row || row.downloaded || row.status === 'ready') {
           if (notifyOnDone) notify('success', 'Embedder downloaded.');
@@ -136,7 +137,7 @@ export function createLocalModelDownloads(notify: Notify) {
       await downloadKnowledgeEmbedder(modelId);
       await pollEmbedder(modelId, true);
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Embedder download failed.');
+      notify('error', errorMessage(err));
     } finally {
       embedderDownloading = null;
     }
@@ -152,10 +153,10 @@ export function createLocalModelDownloads(notify: Notify) {
     try {
       await cancelKnowledgeEmbedder(modelId);
       const refreshed = await listKnowledgeEmbedders();
-      localEmbedders = refreshed.data.local ?? localEmbedders;
+      localEmbedders = refreshed.local ?? localEmbedders;
       notify('info', 'Download cancelled.');
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Cancel failed.');
+      notify('error', errorMessage(err));
     }
   }
 
@@ -173,7 +174,7 @@ export function createLocalModelDownloads(notify: Notify) {
       listKnowledgeRerankers(),
       listKnowledgeEmbedders()
     ]);
-    seedFromLoad(rerankPayload.data.local ?? [], embedderPayload.data.local ?? []);
+    seedFromLoad(rerankPayload.local ?? [], embedderPayload.local ?? []);
   }
 
   return {

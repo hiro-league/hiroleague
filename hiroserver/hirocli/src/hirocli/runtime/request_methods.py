@@ -37,6 +37,7 @@ from .voice_for_extensions import VOICE_REQUEST_HANDLERS
 from .sign_in_for_extensions import SIGN_IN_REQUEST_HANDLERS
 from .site_names import SITE_NAMES_REQUEST_HANDLERS
 from .extensions_for_extensions import EXTENSIONS_REQUEST_HANDLERS
+from .asks_between_extensions import ASK_REQUEST_HANDLERS
 from .uses_for_extensions import USES_REQUEST_HANDLERS
 from .envelope_factory import EnvelopeFactory
 from .notify import NOTIFY_REQUEST_HANDLERS
@@ -337,6 +338,7 @@ _REGISTERED_HANDLERS: Final[tuple[tuple[str, Any, frozenset[str]], ...]] = (
     *SIGN_IN_REQUEST_HANDLERS,  # Phase 8: auth.code (an extension redeems the one-time sign-in code)
     *SITE_NAMES_REQUEST_HANDLERS,  # sites.claim: an app's LAN name, set up by the core
     *EXTENSIONS_REQUEST_HANDLERS,  # extensions.list: every paired extension and its repo (the code reports)
+    *ASK_REQUEST_HANDLERS,  # Phase 9b: extensions.ask (one extension asks another, through the core)
 )
 
 REGISTERED_REQUEST_METHOD_NAMES: frozenset[str] = frozenset(

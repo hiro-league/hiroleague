@@ -32,6 +32,7 @@ from .log_scope_fields import (
     METADATA_LOG_TEXT_PREVIEW,
     unified_message_log_scope,
 )
+from .access import ExtensionFeature, ExtensionRight
 from .extension import (
     ExtensionClient,
     ExtensionCredentials,
@@ -76,6 +77,8 @@ __all__ = [
     "ExtensionClient",
     "ExtensionCredentials",
     "ExtensionInfo",
+    "ExtensionFeature",
+    "ExtensionRight",
     "ExtensionUse",
     "ExtensionVoiceUse",
     "ExtensionOffers",

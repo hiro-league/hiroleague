@@ -1,8 +1,8 @@
 <script lang="ts">
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
-  import Badge from '$lib/components/ui/badge.svelte';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import EmptyState from '$kit/ui/empty-state.svelte';
   import { ADMIN_SECTION_HEADING_LG } from '$lib/styling/admin-tokens';
   import type { MetricsController } from '../state/metrics-controller.svelte';
 
@@ -18,9 +18,9 @@
 <section class="grid gap-3">
   <h3 class={ADMIN_SECTION_HEADING_LG}>Channel Plugins</h3>
   {#if ctrl.children.length === 0}
-    <InlineEmptyState message="No channel plugin processes reported." />
+    <EmptyState message="No channel plugin processes reported." />
   {:else}
-    <AdminTableShell layout="grid" minWidth={760} gridColumns={CHANNEL_GRID}>
+    <TableShell layout="grid" minWidth={760} gridColumns={CHANNEL_GRID}>
       {#snippet headRow()}
         <span>Channel</span>
         <span class="text-center">PID</span>
@@ -43,7 +43,7 @@
           </div>
         {/each}
       {/snippet}
-    </AdminTableShell>
+    </TableShell>
   {/if}
   <p class="font-sans text-sm text-muted-foreground">{ctrl.frame?.children_total_caption ?? '-'}</p>
 </section>

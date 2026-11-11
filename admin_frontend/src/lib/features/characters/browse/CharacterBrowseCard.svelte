@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Edit3, UserRound } from '@lucide/svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
   import type { CharacterRow } from '$lib/api/characters';
   import { cn } from '$lib/utils';
 

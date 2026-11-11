@@ -1,10 +1,13 @@
 <script lang="ts">
-  import Button from '$lib/components/ui/button.svelte';
-  import FormField from '$lib/components/ui/form-field.svelte';
-  import * as Dialog from '$lib/components/ui/dialog';
+  import { Checkbox } from '$kit/components/ui/checkbox/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import Field from '$kit/ui/field.svelte';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
+  import { Input } from '$kit/components/ui/input/index.js';
   import type { createWorkspaceStore } from '../state/workspace-store.svelte';
 
   let { workspace }: { workspace: ReturnType<typeof createWorkspaceStore> } = $props();
+  const uid = $props.id();
 </script>
 
 <Dialog.Root
@@ -16,18 +19,14 @@
       <Dialog.Title>Edit workspace '{workspace.selected?.name ?? ''}'</Dialog.Title>
     </Dialog.Header>
     <div class="grid gap-4">
-      <FormField label="Display name">
-        {#snippet children()}
-          <input bind:value={workspace.editForm.name} />
-        {/snippet}
-      </FormField>
-      <FormField label="Gateway WebSocket URL">
-        {#snippet children()}
-          <input bind:value={workspace.editForm.gatewayUrl} placeholder="ws://myhost:8765" />
-        {/snippet}
-      </FormField>
+      <Field label="Display name" for="{uid}-name">
+        <Input id="{uid}-name" bind:value={workspace.editForm.name} />
+      </Field>
+      <Field label="Gateway WebSocket URL" for="{uid}-gateway">
+        <Input id="{uid}-gateway" bind:value={workspace.editForm.gatewayUrl} placeholder="ws://myhost:8765" />
+      </Field>
       <label class="flex items-center gap-2 font-sans text-sm">
-        <input type="checkbox" bind:checked={workspace.editForm.setDefault} />
+        <Checkbox bind:checked={workspace.editForm.setDefault} />
         Set as default workspace
       </label>
     </div>

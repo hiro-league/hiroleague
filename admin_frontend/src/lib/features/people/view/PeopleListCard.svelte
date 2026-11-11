@@ -1,8 +1,8 @@
 <script lang="ts">
   import { KeyRound, Pencil, Trash2 } from '@lucide/svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import RefreshableSectionCard from '$lib/features/channels-devices/shared/RefreshableSectionCard.svelte';
   import { shownNumber, type PeopleController } from '../state/people-controller.svelte';
@@ -23,7 +23,7 @@
   emptyMessage="Nobody in the family list yet."
   onRefresh={() => void ctrl.load()}
 >
-  <AdminTableShell layout="grid" minWidth={900} gridColumns={GRID} stickyHead>
+  <TableShell layout="grid" minWidth={900} gridColumns={GRID} stickyHead>
     {#snippet headRow()}
       <span>Name</span>
       <span>Hiro calls them</span>
@@ -70,5 +70,5 @@
         </div>
       {/each}
     {/snippet}
-  </AdminTableShell>
+  </TableShell>
 </RefreshableSectionCard>

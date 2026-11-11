@@ -1,6 +1,6 @@
 /** Sticky `<thead>` offset beneath eval page chrome + sub-tabs + answers toolbar. */
 export const EVAL_ANSWERS_TABLE_STICKY_TOP =
-  'calc(4rem + var(--admin-page-header-h, 0px) + var(--admin-page-sticky-toolbar-h, 0px) + var(--admin-eval-subtabs-h, 0px) + var(--admin-eval-acontrols-h, 0px))';
+  'calc(var(--app-top, 0px) + var(--page-header, 0px) + var(--sticky-bar, 0px) + var(--admin-eval-subtabs-h, 0px) + var(--admin-eval-acontrols-h, 0px))';
 
 /** Compact toolbar search field (answers pane, corpus review). */
 export const EVAL_TOOLBAR_SEARCH =

@@ -1,92 +1,89 @@
 <script lang="ts">
   import { Sparkles, Star } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import FormField from '$lib/components/ui/form-field.svelte';
-  import SectionCard from '$lib/components/page/SectionCard.svelte';
-  import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import { Input } from '$kit/components/ui/input/index.js';
+  import { Textarea } from '$kit/components/ui/textarea/index.js';
+  import PickSelect from '$kit/ui/pick-select.svelte';
+  import Field from '$kit/ui/field.svelte';
+  import Panel from '$kit/ui/panel.svelte';
+  import Section from '$kit/ui/section.svelte';
   import { ADMIN_SECTION_TITLE } from '$lib/styling/admin-tokens';
-  import type { ToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
+  import { toast } from '$kit/ui/toast.svelte';
   import type { ImageLabController } from './state/image-lab-controller.svelte';
 
-  let { ctl, toasts }: { ctl: ImageLabController; toasts: ToastNotifier } = $props();
+  let { ctl }: { ctl: ImageLabController } = $props();
+  const uid = $props.id();
 
   const isDefaultModel = $derived(ctl.options?.default_model === ctl.model);
 </script>
 
-<SectionCard class="grid content-start gap-4">
+<Panel class="grid content-start gap-4">
   <h2 class={ADMIN_SECTION_TITLE}>Generate</h2>
 
-  <FormField label="Model">
-    {#snippet children()}
-      <select bind:value={ctl.model}>
-        {#each ctl.models as modelRow (modelRow.id)}
-          <option value={modelRow.id} disabled={!modelRow.available}>
-            {modelRow.display_name} — {modelRow.provider_display_name}{modelRow.available
-              ? ''
-              : ' (provider not configured)'}
-          </option>
-        {/each}
-      </select>
-    {/snippet}
-  </FormField>
+  <Field label="Model" for="{uid}-model">
+    <PickSelect
+      id="{uid}-model"
+      class="h-9 w-full text-sm"
+      label="Model"
+      value={ctl.model}
+      options={ctl.models.map((modelRow) => ({
+        value: modelRow.id,
+        label: `${modelRow.display_name} — ${modelRow.provider_display_name}${modelRow.available ? '' : ' (provider not configured)'}`,
+        disabled: !modelRow.available
+      }))}
+      onchange={(v) => (ctl.model = v)}
+    />
+  </Field>
   {#if !ctl.modelReady && ctl.selectedModel}
-    <p class="font-sans text-xs text-amber-600 dark:text-amber-300">
+    <p class="font-sans text-xs text-warning">
       {ctl.selectedModel.provider_display_name} is not ready — add its API key
       {ctl.selectedModel.provider_id === 'cloudflare' ? ' and account id ' : ' '}
-      on the <a class="underline" href="/catalog/">Providers/Models</a> page.
+      on the <a class="underline" href="/catalog">Providers/Models</a> page.
     </p>
   {:else if ctl.model && !isDefaultModel}
-    <Button size="sm" variant="outline" class="justify-self-start" onclick={() => void ctl.setDefaultModel(toasts.notify)}>
+    <Button size="sm" variant="outline" class="justify-self-start" onclick={() => void ctl.setDefaultModel(toast.show)}>
       <Star size={13} /> Set as workspace default
     </Button>
   {/if}
 
-  <FormField
+  <Field
     label="Recipe"
+    for="{uid}-recipe"
     hint="Loads a saved recipe (model, steps, seed, style scaffolding) into this form — generation always runs with exactly what the form shows."
   >
-    {#snippet children()}
-      <select
-        value={ctl.profileId}
-        onchange={(event) => ctl.applyProfile((event.currentTarget as HTMLSelectElement).value)}
-      >
-        {#each Object.entries(ctl.profiles) as [id, profile] (id)}
-          <option value={id}>{profile.label || id}{profile.locked ? ' (built-in)' : ''}</option>
-        {/each}
-      </select>
-    {/snippet}
-  </FormField>
+    <PickSelect
+      id="{uid}-recipe"
+      class="h-8 w-full text-sm"
+      label="Recipe"
+      value={ctl.profileId}
+      options={Object.entries(ctl.profiles).map(([id, profile]) => ({
+        value: id,
+        label: `${profile.label || id}${profile.locked ? ' (built-in)' : ''}`
+      }))}
+      onchange={(v) => ctl.applyProfile(v)}
+    />
+  </Field>
 
-  <FormField label="Prompt">
-    {#snippet children()}
-      <textarea rows="4" bind:value={ctl.prompt} placeholder="A cozy cabin under northern lights…"></textarea>
-    {/snippet}
-  </FormField>
+  <Field label="Prompt" for="{uid}-prompt">
+    <Textarea id="{uid}-prompt" rows={4} bind:value={ctl.prompt} placeholder="A cozy cabin under northern lights…" />
+  </Field>
 
-  <SectionCardMuted class="grid gap-3">
-    <FormField label="Style prefix" hint="Prepended to every prompt — the recipe's look-and-feel.">
-      {#snippet children()}
-        <input type="text" bind:value={ctl.stylePrefix} placeholder="warm photorealistic style, soft lighting" />
-      {/snippet}
-    </FormField>
-    <FormField label="Style suffix">
-      {#snippet children()}
-        <input type="text" bind:value={ctl.styleSuffix} placeholder="high detail, no text" />
-      {/snippet}
-    </FormField>
+  <Section class="grid gap-3">
+    <Field label="Style prefix" for="{uid}-prefix" hint="Prepended to every prompt — the recipe's look-and-feel.">
+      <Input id="{uid}-prefix" type="text" bind:value={ctl.stylePrefix} placeholder="warm photorealistic style, soft lighting" />
+    </Field>
+    <Field label="Style suffix" for="{uid}-suffix">
+      <Input id="{uid}-suffix" type="text" bind:value={ctl.styleSuffix} placeholder="high detail, no text" />
+    </Field>
     <div class="grid gap-3 sm:grid-cols-2">
-      <FormField label="Steps (1–8)" hint="More steps = better quality, slower.">
-        {#snippet children()}
-          <input type="number" min="1" max="8" bind:value={ctl.steps} />
-        {/snippet}
-      </FormField>
-      <FormField label="Seed" hint="Empty = random. Pin for reproducibility.">
-        {#snippet children()}
-          <input type="text" inputmode="numeric" bind:value={ctl.seedText} placeholder="random" />
-        {/snippet}
-      </FormField>
+      <Field label="Steps (1–8)" for="{uid}-steps" hint="More steps = better quality, slower.">
+        <Input id="{uid}-steps" type="number" min="1" max="8" bind:value={ctl.steps} />
+      </Field>
+      <Field label="Seed" for="{uid}-seed" hint="Empty = random. Pin for reproducibility.">
+        <Input id="{uid}-seed" type="text" inputmode="numeric" bind:value={ctl.seedText} placeholder="random" />
+      </Field>
     </div>
-  </SectionCardMuted>
+  </Section>
 
   {#if ctl.composedPrompt}
     <p class="font-sans text-xs text-muted-foreground">
@@ -98,7 +95,7 @@
   <div class="flex flex-wrap items-center gap-3">
     <Button
       disabled={ctl.generating || !ctl.composedPrompt || !ctl.modelReady}
-      onclick={() => void ctl.generate(toasts.notify)}
+      onclick={() => void ctl.generate(toast.show)}
     >
       <Sparkles size={15} />
       {ctl.generating ? 'Generating…' : 'Generate'}
@@ -109,4 +106,4 @@
       </span>
     {/if}
   </div>
-</SectionCard>
+</Panel>

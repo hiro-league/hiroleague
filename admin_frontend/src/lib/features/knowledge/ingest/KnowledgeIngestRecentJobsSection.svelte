@@ -1,12 +1,12 @@
 <script lang="ts">
   import { ChevronRight } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import { Badge } from '$kit/components/ui/badge/index.js';
   import { formatChatTimestamp } from '$lib/features/chat-channels/chat-datetime';
   import type { KnowledgeIngestModel } from '$lib/features/knowledge/state/knowledge-ingest.svelte';
   import { formatJobTotalsSummary } from '$lib/features/knowledge/shared/knowledge-pure';
   import { KNOWLEDGE_SECTION_CARD, KNOWLEDGE_SECTION_TITLE } from '$lib/features/knowledge/shared/knowledge-ui';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
   import { cn } from '$lib/utils';
 
   type Props = {
@@ -70,7 +70,7 @@
           {#if ingest.activeErrorsJobId === item.id}
             <details class="basis-full text-xs" open>
               <summary class="text-destructive">Errors</summary>
-              <InlineDestructiveAlert
+              <Notice
                 class="mt-2 whitespace-pre-wrap font-mono text-xs"
                 message={JSON.stringify(item.errors, null, 2)}
               />

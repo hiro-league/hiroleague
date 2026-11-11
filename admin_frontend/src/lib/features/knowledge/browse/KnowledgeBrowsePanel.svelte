@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
+  import StickyBar from '$kit/ui/sticky-bar.svelte';
   import KnowledgeBrowseDeleteDialog from '$lib/features/knowledge/browse/KnowledgeBrowseDeleteDialog.svelte';
   import KnowledgeBrowseRemoveGraphDialog from '$lib/features/knowledge/browse/KnowledgeBrowseRemoveGraphDialog.svelte';
   import KnowledgeBrowseDocumentListSection from '$lib/features/knowledge/browse/KnowledgeBrowseDocumentListSection.svelte';
@@ -11,8 +11,7 @@
   import KnowledgeDocumentReingestDialog from '$lib/features/knowledge/browse/KnowledgeDocumentReingestDialog.svelte';
   import KnowledgeFilePreviewDialog from '$lib/features/knowledge/shared/file-preview/KnowledgeFilePreviewDialog.svelte';
   import type { KnowledgePageController } from '$lib/features/knowledge/state/knowledge-controller.svelte';
-  import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
-  import ToastHost from '$lib/ui/ToastHost.svelte';
+  import { toast } from '$kit/ui/toast.svelte';
 
   interface Props {
     ctl: KnowledgePageController;
@@ -20,14 +19,13 @@
 
   let { ctl }: Props = $props();
 
-  const toasts = createToastNotifier();
-  const ui = untrack(() => createKnowledgeBrowsePanelUi({ ctl, notify: toasts.notify }));
+  const ui = untrack(() => createKnowledgeBrowsePanelUi({ ctl, notify: toast.show }));
 </script>
 
 <section class="grid gap-4">
-  <AdminPageStickyToolbar>
+  <StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
     <KnowledgeBrowseFilterBar browse={ctl.browse} options={ctl.options} />
-  </AdminPageStickyToolbar>
+  </StickyBar>
 
   <KnowledgeBrowseDocumentListSection
     browse={ctl.browse}
@@ -78,4 +76,3 @@
   onConfirm={ui.confirmRemoveFromGraph}
 />
 
-<ToastHost toast={toasts.toast} />

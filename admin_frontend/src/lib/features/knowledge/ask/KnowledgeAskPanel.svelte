@@ -1,12 +1,12 @@
 <script lang="ts">
   import { BookText, Code, ExternalLink, LoaderCircle, Search } from '@lucide/svelte';
-  import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
+  import StickyBar from '$kit/ui/sticky-bar.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import { Badge } from '$kit/components/ui/badge/index.js';
   import KnowledgeAskFilterBar from '$lib/features/knowledge/ask/KnowledgeAskFilterBar.svelte';
   import KnowledgeAskCompareView from '$lib/features/knowledge/ask/KnowledgeAskCompareView.svelte';
   import KnowledgeCollapsibleSectionCard from '$lib/features/knowledge/shared/KnowledgeCollapsibleSectionCard.svelte';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
   import KnowledgeChunkMarkdownPreview from '$lib/features/knowledge/shared/KnowledgeChunkMarkdownPreview.svelte';
   import { graphRunPageUrl } from '$lib/features/graph-runs/graph-runs-pure';
   import type { KnowledgePageController } from '$lib/features/knowledge/state/knowledge-controller.svelte';
@@ -77,7 +77,7 @@
   // rank-based, so they're colored relative to the strongest result in the *current* set.
   type ScoreTone = 'strong' | 'ok' | 'weak';
 
-  // Reuse the design-system Badge variants (emerald / amber / neutral fill) for chip color.
+  // Reuse the design-system Badge variants (success / warning / neutral fill) for chip color.
   const TONE_VARIANT: Record<ScoreTone, 'success' | 'warning' | 'secondary'> = {
     strong: 'success',
     ok: 'warning',
@@ -85,8 +85,8 @@
   };
   // Bar-fill color for the RRF strength slider (a plain div, not a Badge).
   const TONE_BAR: Record<ScoreTone, string> = {
-    strong: 'bg-emerald-500',
-    ok: 'bg-amber-500',
+    strong: 'bg-success',
+    ok: 'bg-warning',
     weak: 'bg-muted-foreground/40'
   };
 
@@ -120,9 +120,9 @@
 </script>
 
 <section class="grid gap-4">
-  <AdminPageStickyToolbar>
+  <StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
     <KnowledgeAskFilterBar {ask} {options} />
-  </AdminPageStickyToolbar>
+  </StickyBar>
 
   <KnowledgeCollapsibleSectionCard
     title="Question"
@@ -170,7 +170,7 @@
       <!-- L3 compare-mode: render the two-leg side-by-side view. -->
       <KnowledgeAskCompareView compareResult={ask.compareResult} />
     {:else if inCompareMode}
-      <InlineEmptyState
+      <EmptyState
         message="Ask a question to compare flat vs graph-augmented retrieval side-by-side."
         hint={!ask.askRewrite
           ? 'Tip: enable Rewrite — graph mode needs entities from the rewrite step.'
@@ -178,7 +178,7 @@
         class="border-solid bg-background px-3 py-8"
       />
     {:else if ask.answerResult?.no_results}
-      <InlineEmptyState
+      <EmptyState
         message="No sources matched. Relax filters or lower the minimum score."
         class="border-solid bg-background px-3 py-8"
       />
@@ -231,7 +231,7 @@
         <p class="whitespace-pre-wrap font-sans text-sm leading-6">{ask.answerResult.answer}</p>
       </article>
     {:else}
-      <InlineEmptyState
+      <EmptyState
         message="Ask a question to retrieve cited sources."
         class="border-solid bg-background px-3 py-8"
       />

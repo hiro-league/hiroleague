@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { LoaderCircle, Plus, X } from '@lucide/svelte';
-  import * as Popover from '$lib/components/ui/popover/index.js';
+  import * as Popover from '$kit/components/ui/popover/index.js';
   import { cn } from '$lib/utils';
   import { matchesQuery } from '$lib/search/match';
 

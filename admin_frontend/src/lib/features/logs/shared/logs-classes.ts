@@ -1,4 +1,5 @@
 import { LOG_LEVELS, type LogLevel } from '$lib/api/logs';
+import { CAT } from '$kit/ui/category';
 import { cn } from '$lib/utils';
 
 /** Shared compact pill layout for log source + level filter chips (matches table tone helpers). */
@@ -7,12 +8,12 @@ export const LOGS_FILTER_CHIP_LAYOUT =
 
 /** Per-level hue (no weight) — use for icons where label stays regular body text. */
 const LEVEL_COLOR: Record<LogLevel, string> = {
-  DEBUG: 'text-sky-400',
-  FINEINFO: 'text-cyan-400',
-  INFO: 'text-emerald-500',
-  WARNING: 'text-amber-500',
-  ERROR: 'text-red-500',
-  CRITICAL: 'text-fuchsia-500'
+  DEBUG: CAT.text[1],
+  FINEINFO: CAT.text[2],
+  INFO: CAT.text[6],
+  WARNING: 'text-warning',
+  ERROR: 'text-destructive',
+  CRITICAL: CAT.text[8]
 };
 
 /** Tailwind class sets for log level text (filter chips + detail panel; severe levels stay bold). */
@@ -25,12 +26,7 @@ const LEVEL_TEXT: Record<LogLevel, string> = {
   CRITICAL: cn(LEVEL_COLOR.CRITICAL, 'font-bold')
 };
 
-const MODULE_BUCKET_TEXT = [
-  'text-sky-400',
-  'text-fuchsia-500',
-  'text-amber-500',
-  'text-emerald-500'
-] as const;
+const MODULE_BUCKET_TEXT = [CAT.text[1], CAT.text[5], CAT.text[3], CAT.text[2]] as const;
 
 function isLogLevel(value: string): value is LogLevel {
   return LOG_LEVELS.includes(value as LogLevel);

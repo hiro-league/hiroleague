@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { createCharactersPreferences } from '$lib/preferences/characters-preferences.svelte';
-import { createCharactersFormModel } from '$lib/features/characters/state/characters-form.svelte';
+vi.mock('$app/navigation', () => ({ beforeNavigate: vi.fn(), goto: vi.fn() }));
 
 // --- Mocked collaborators (API layer + stores). characters-pure stays REAL so validation /
 //     save-body construction is genuinely exercised. ---
@@ -66,31 +66,28 @@ function makePrefs(init: { activeTab?: string; detailMode?: string; characterId?
 
 function setup(prefsInit?: Parameters<typeof makePrefs>[0]) {
   const prefs = makePrefs(prefsInit);
-  const formApi = createCharactersFormModel();
   const notify = vi.fn();
   const confirmDiscard = vi.fn().mockResolvedValue(true);
   const ctrl = createCharactersPageController({
     prefs: prefs as unknown as ReturnType<typeof createCharactersPreferences>,
-    formApi,
     notify,
     confirmDiscard
   });
-  return { ctrl, prefs, formApi, notify, confirmDiscard };
+  return { ctrl, prefs, formApi: ctrl.draft, notify, confirmDiscard };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  h.listCharacters.mockResolvedValue({ data: [] });
-  h.getCharacter.mockResolvedValue({ data: { id: 'ada', name: 'Ada' } });
-  h.getCharacterResolved.mockResolvedValue({ data: { character_id: 'ada' } });
-  h.createCharacter.mockResolvedValue({ data: { warnings: [], character: { id: 'ada' } } });
-  h.updateCharacter.mockResolvedValue({ data: { warnings: [], character: { id: 'ada' } } });
-  h.deleteCharacter.mockResolvedValue({ data: {} });
-  h.listCatalogModels.mockResolvedValue({ data: { models: [] } });
-  h.listCatalogProviders.mockResolvedValue({ data: [] });
+  h.listCharacters.mockResolvedValue([]);
+  h.getCharacter.mockResolvedValue({ id: 'ada', name: 'Ada' });
+  h.getCharacterResolved.mockResolvedValue({ character_id: 'ada' });
+  h.createCharacter.mockResolvedValue({ warnings: [], character: { id: 'ada' } });
+  h.updateCharacter.mockResolvedValue({ warnings: [], character: { id: 'ada' } });
+  h.deleteCharacter.mockResolvedValue({});
+  h.listCatalogModels.mockResolvedValue({ models: [] });
+  h.listCatalogProviders.mockResolvedValue([]);
   // Phase 7b step 5: the editor's lists pick from the workspace's AI and voice profiles.
   h.getPreferences.mockResolvedValue({
-    data: {
       preferences: {
         ai: {
           profiles: {
@@ -105,13 +102,12 @@ beforeEach(() => {
           }
         }
       }
-    }
-  });
+    });
 });
 
 describe('loadCharacters', () => {
   it('populates rows on success and clears loading/error', async () => {
-    h.listCharacters.mockResolvedValueOnce({ data: [{ id: 'a', name: 'A' }] });
+    h.listCharacters.mockResolvedValueOnce([{ id: 'a', name: 'A' }]);
     const { ctrl } = setup();
     await ctrl.loadCharacters();
     expect(ctrl.rows).toHaveLength(1);
@@ -130,15 +126,13 @@ describe('loadCharacters', () => {
 
 describe('openCharacterEdit', () => {
   it('loads detail, hydrates the form, and navigates to edit', async () => {
-    h.getCharacter.mockResolvedValueOnce({
-      data: { id: 'a', name: 'A', ai_profiles: ['a-claude'], voice_profiles: ['hiro-voice'] }
-    });
+    h.getCharacter.mockResolvedValueOnce({ id: 'a', name: 'A', ai_profiles: ['a-claude'], voice_profiles: ['hiro-voice'] });
     const { ctrl, prefs, formApi } = setup();
     await ctrl.openCharacterEdit({ id: 'a', name: 'A' });
     expect(ctrl.selected?.id).toBe('a');
-    expect(formApi.form.new_id).toBe('a');
-    expect(formApi.form.ai_profiles).toEqual(['a-claude']);
-    expect(formApi.form.voice_profiles).toEqual(['hiro-voice']);
+    expect(formApi.value.new_id).toBe('a');
+    expect(formApi.value.ai_profiles).toEqual(['a-claude']);
+    expect(formApi.value.voice_profiles).toEqual(['hiro-voice']);
     expect(formApi.dirty).toBe(false);
     expect(prefs.setState).toHaveBeenCalledWith('detail', 'edit', 'a');
   });
@@ -167,7 +161,7 @@ describe('saveCharacter', () => {
       detailMode: 'edit',
       characterId: null
     });
-    formApi.form = { ...formApi.form, new_id: 'ada', name: 'Ada' };
+    formApi.value = { ...formApi.value, new_id: 'ada', name: 'Ada' };
     await ctrl.saveCharacter();
     expect(h.createCharacter).toHaveBeenCalledTimes(1);
     expect(h.updateCharacter).not.toHaveBeenCalled();
@@ -176,15 +170,13 @@ describe('saveCharacter', () => {
   });
 
   it('updates an existing character and surfaces backend warnings', async () => {
-    h.updateCharacter.mockResolvedValueOnce({
-      data: { warnings: ['heads up'], character: { id: 'ada' } }
-    });
+    h.updateCharacter.mockResolvedValueOnce({ warnings: ['heads up'], character: { id: 'ada' } });
     const { ctrl, formApi, notify } = setup({
       activeTab: 'detail',
       detailMode: 'edit',
       characterId: 'ada'
     });
-    formApi.form = { ...formApi.form, name: 'Ada' };
+    formApi.value = { ...formApi.value, name: 'Ada' };
     await ctrl.saveCharacter();
     expect(h.updateCharacter).toHaveBeenCalledWith('ada', expect.any(Object));
     expect(h.createCharacter).not.toHaveBeenCalled();
@@ -242,7 +234,7 @@ describe('profile options (Phase 7b step 5)', () => {
 
   it('saves the ordered lists as ai_profiles_json / voice_profiles_json', async () => {
     const { ctrl, formApi } = setup({ activeTab: 'detail', detailMode: 'edit', characterId: 'ada' });
-    formApi.form = { ...formApi.form, name: 'Ada', ai_profiles: ['a-claude', 'hiro-chat'], voice_profiles: [] };
+    formApi.value = { ...formApi.value, name: 'Ada', ai_profiles: ['a-claude', 'hiro-chat'], voice_profiles: [] };
     await ctrl.saveCharacter();
     const body = h.updateCharacter.mock.calls[0][1];
     expect(body.ai_profiles_json).toBe('["a-claude","hiro-chat"]');

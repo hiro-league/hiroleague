@@ -4,13 +4,7 @@
   import { characterSectionHintClass } from '$lib/features/characters/shared/character-section-classes';
   import type { CharacterForm } from '$lib/features/characters/shared/characters-pure';
 
-  let {
-    form,
-    markDirty
-  }: {
-    form: CharacterForm;
-    markDirty: () => void;
-  } = $props();
+  let { form }: { form: CharacterForm } = $props();
 </script>
 
 <CharacterSectionCard title="Character prompts">
@@ -32,14 +26,12 @@
       previewLabel="Preview"
       ariaLabel="Character prompt (markdown)"
       bind:value={form.prompt}
-      onInput={markDirty}
     />
     <MarkdownEditorPreview
       editorLabel="Backstory markdown editor"
       previewLabel="Preview"
       ariaLabel="Character backstory (markdown)"
       bind:value={form.backstory}
-      onInput={markDirty}
     />
   </div>
 </CharacterSectionCard>

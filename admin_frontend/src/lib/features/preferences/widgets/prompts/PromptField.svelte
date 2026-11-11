@@ -5,7 +5,7 @@
    * place; the dialog saves the value straight to the backend (ctrl.saveDialogEdits), so this field
    * never marks the page-level form dirty.
    */
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import FieldHelp from '$lib/components/ui/field-help.svelte';
   import { cn } from '$lib/utils';
   import { getPreferenceByPath } from '$lib/features/preferences/state/preferences-edits';
@@ -54,7 +54,7 @@
   }
 </script>
 
-<div data-pref-path={path} class="flex flex-wrap items-center justify-between gap-3">
+<div data-field-anchor={path} class="flex flex-wrap items-center justify-between gap-3">
   <div class="flex items-center gap-2">
     <span class="inline-flex items-center gap-1.5 font-sans text-[0.9375rem] font-semibold text-foreground">
 <!-- title shows the dotted preference path on hover. -->

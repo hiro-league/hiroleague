@@ -1,3 +1,4 @@
+import { errorMessage } from '$kit/api/client';
 import {
   disableChannel,
   enableChannel,
@@ -8,7 +9,7 @@ import {
   type ChannelRow
 } from '$lib/api/channels-devices';
 import { isFeatureActive } from '$lib/shell/features';
-import type { Notify } from '$lib/ui/toast-types';
+import type { Notify } from '$kit/ui/toast.svelte';
 
 export type ChannelsController = ReturnType<typeof createChannelsController>;
 
@@ -36,17 +37,17 @@ export function createChannelsController(notify: Notify) {
     error = null;
     try {
       const list = await listChannels();
-      allRows = list.data.channels;
-      mandatoryChannelName = list.data.mandatory_channel_name;
+      allRows = list.channels;
+      mandatoryChannelName = list.mandatory_channel_name;
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to load channels.';
+      error = errorMessage(err);
     } finally {
       loading = false;
     }
     // Available (installable) channels are best-effort: an older server without the
     // /channels/available route must not break the list — just hide the Install picker.
     try {
-      available = (await listAvailableChannels()).data.channels;
+      available = (await listAvailableChannels()).channels;
     } catch {
       available = [];
     }
@@ -60,11 +61,11 @@ export function createChannelsController(notify: Notify) {
     installing = name;
     try {
       const res = await installChannel(name);
-      notify('success', `Installed ${res.data.package}. Configure it, then enable.`);
+      notify('success', `Installed ${res.package}. Configure it, then enable.`);
       await load();
       return true;
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : `Failed to install '${name}'.`);
+      notify('error', errorMessage(err));
       return false;
     } finally {
       installing = null;
@@ -84,7 +85,7 @@ export function createChannelsController(notify: Notify) {
       notify('success', `Channel '${row.name}' ${row.enabled ? 'disabled' : 'enabled'}.`);
       await load();
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Channel update failed.');
+      notify('error', errorMessage(err));
     } finally {
       busyChannel = null;
     }

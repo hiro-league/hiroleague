@@ -1,8 +1,8 @@
 <script lang="ts">
   import { ArrowUpRight } from '@lucide/svelte';
   import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
   import CatalogTabActions from '$lib/features/catalog/browse/CatalogTabActions.svelte';
   import type { CatalogController } from '$lib/features/catalog/state/catalog-controller.svelte';
   import {
@@ -14,9 +14,10 @@
     modelKindUiForRow
   } from '$lib/features/catalog/shared/catalog-filter-ui';
   import { modelPricing, pricingSourceHref } from '$lib/features/catalog/shared/catalog-pricing';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
+  import Loading from '$kit/ui/loading.svelte';
+  import StatusDot from '$kit/ui/status-dot.svelte';
   import { ADMIN_SECTION_CARD, ADMIN_SECTION_HEADING_LG, ADMIN_TABLE_HEAD } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
 
@@ -47,15 +48,15 @@
          Filter-driven reloads keep the existing table mounted so the document
          height stays stable, which prevents the sticky page header from
          flickering back to expanded mode while fetching. -->
-    <InlineLoading label="Loading models…" />
+    <Loading label="Loading models…" />
   {:else if ctrl.modelsError}
-    <InlineDestructiveAlert title="Could not load models" message={ctrl.modelsError} />
+    <Notice title="Could not load models" message={ctrl.modelsError} />
   {:else if ctrl.filteredModels.length === 0}
-    <InlineEmptyState message="No models match the current filters." />
+    <EmptyState message="No models match the current filters." />
   {:else}
     <!-- min-w is shared with ProvidersTab (keep in sync) so both tabs render at the same content
          width and switching Models↔Providers doesn't jump. -->
-    <AdminTableShell stickyHead class={cn('min-w-[1540px]', ctrl.modelsLoading && 'opacity-60 transition-opacity')}>
+    <TableShell stickyHead class={cn('min-w-[1540px]', ctrl.modelsLoading && 'opacity-60 transition-opacity')}>
       <thead class={ADMIN_TABLE_HEAD}>
         <tr>
           <AdminTableHeaderCell column="online" sort={ctrl.modelSort} class="w-12 text-center">
@@ -84,23 +85,19 @@
           <tr class="border-t">
             <td class="px-2 py-3 text-center">
               {#if available}
-                <span
-                  class="inline-block size-2 rounded-full bg-green-600 dark:bg-green-500"
-                  title={isLocal
+                <StatusDot
+                  tone="ok"
+                  label={isLocal
                     ? 'Downloaded — available in this workspace'
                     : 'Online — provider configured in this workspace'}
-                  aria-hidden="true"
-                ></span>
-                <span class="sr-only">{isLocal ? 'Downloaded. ' : 'Online. '}</span>
+                />
               {:else}
-                <span
-                  class="inline-block size-2 rounded-full bg-muted-foreground/40"
-                  title={isLocal
+                <StatusDot
+                  tone="off"
+                  label={isLocal
                     ? `Not downloaded — ${model.manage_hint ?? 'manage in Settings'}`
                     : 'Offline — provider not configured in this workspace'}
-                  aria-hidden="true"
-                ></span>
-                <span class="sr-only">{isLocal ? 'Not downloaded. ' : 'Offline. '}</span>
+                />
               {/if}
             </td>
             <td class="px-3 py-3">
@@ -112,7 +109,7 @@
               <strong class="flex min-w-0 items-baseline gap-1 font-sans text-sm">
                 {#if ctrl.recommendedCatalogModelIds.has(model.id)}
                   <span
-                    class="shrink-0 text-amber-500 dark:text-amber-400"
+                    class="shrink-0 text-brand"
                     title="Recommended default in catalog for this provider and kind"
                     aria-hidden="true"
                   >★</span>
@@ -183,6 +180,6 @@
           </tr>
         {/each}
       </tbody>
-    </AdminTableShell>
+    </TableShell>
   {/if}
 </section>

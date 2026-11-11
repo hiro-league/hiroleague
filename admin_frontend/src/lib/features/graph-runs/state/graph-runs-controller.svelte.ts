@@ -11,6 +11,7 @@
  * Follows getters for `$derived` consumers (avoid returning shorthand `$derived`
  * from factory — stale capture).
  */
+import { errorMessage } from '$kit/api/client';
 import { listChatChannels, type ChatChannelRow } from '$lib/api/chat-channels';
 import { getCharacter, listCharacters, type CharacterDetail, type CharacterRow } from '$lib/api/characters';
 import { preserveStickyAnchorAround } from '$lib/components/page/table/preserve-sticky-anchor';
@@ -51,7 +52,7 @@ import { createRetrievalTraceDialogController } from './retrieval-trace-dialog.s
 import { getEvalRowByRunId } from '$lib/api/eval';
 import { rowFromPayload, type EvalRow } from '$lib/features/eval/shared/eval-row';
 import type { EvalQuestionLeg } from '$lib/features/eval/shared/eval-events';
-import type { ToastKind } from '$lib/ui/toast-types';
+import type { ToastKind } from '$kit/ui/toast.svelte';
 
 const NOOP_NOTIFY = (_kind: ToastKind, _message: string): void => {};
 
@@ -84,8 +85,8 @@ export function createGraphRunsPageController(
     evalRowLoadingRunId = runId;
     try {
       const res = await getEvalRowByRunId(runId);
-      if (res.ok && res.data?.row) {
-        activeEvalRow = rowFromPayload(res.data.row);
+      if (res.row) {
+        activeEvalRow = rowFromPayload(res.row);
       } else {
         notify(
           'error',
@@ -93,7 +94,7 @@ export function createGraphRunsPageController(
         );
       }
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Failed to load the eval row.');
+      notify('error', errorMessage(err));
     } finally {
       evalRowLoadingRunId = null;
     }
@@ -164,8 +165,8 @@ export function createGraphRunsPageController(
     retrievalLoopLoadingRunId = runId;
     try {
       const res = await getGraphRunRetrievalLoop(runId);
-      const data = res.data;
-      if (res.ok && data && (data.loop || (data.recalled?.length ?? 0) > 0 || data.answer)) {
+      const data = res;
+      if (data.loop || (data.recalled?.length ?? 0) > 0 || data.answer) {
         // Reuse the eval detail dialog in place (same activeEvalRow + rowTraces seam).
         activeEvalRow = chatEvalRowFromLoop(runId, data, row);
       } else {
@@ -175,7 +176,7 @@ export function createGraphRunsPageController(
         );
       }
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Failed to load the retrieval trajectory.');
+      notify('error', errorMessage(err));
     } finally {
       retrievalLoopLoadingRunId = null;
     }
@@ -374,7 +375,7 @@ export function createGraphRunsPageController(
     void getCharacter(cid)
       .then((res) => {
         if (cancelled) return;
-        titleCharacter = res.data;
+        titleCharacter = res;
       })
       .catch(() => {
         if (!cancelled) titleCharacter = null;
@@ -386,7 +387,7 @@ export function createGraphRunsPageController(
 
   async function loadChatChannels() {
     try {
-      chatChannels = (await listChatChannels()).data;
+      chatChannels = (await listChatChannels());
     } catch {
       // apiRequest throws on failure; leave the last loaded channels visible.
     }
@@ -394,7 +395,7 @@ export function createGraphRunsPageController(
 
   async function loadCharacters() {
     try {
-      characters = (await listCharacters()).data;
+      characters = (await listCharacters());
     } catch {
       // apiRequest throws on failure; leave the last loaded characters visible.
     }
@@ -450,7 +451,7 @@ export function createGraphRunsPageController(
     try {
       const res = await getGraphRunLangsmithUrl(runId);
       if (activeRunId !== runId) return;
-      langsmithUrlByRun[runId] = res.data.langsmith_url ?? undefined;
+      langsmithUrlByRun[runId] = res.langsmith_url ?? undefined;
     } catch {
       if (activeRunId !== runId) return;
       langsmithUrlByRun[runId] = undefined;
@@ -463,8 +464,8 @@ export function createGraphRunsPageController(
     langsmithUrlByRun = { ...langsmithUrlByRun };
     try {
       const response = await getGraphRun(runId);
-      timelineByRun[runId] = response.data.rows;
-      aggregateByRun[runId] = response.data.aggregate ?? null;
+      timelineByRun[runId] = response.rows;
+      aggregateByRun[runId] = response.aggregate ?? null;
       timelineByRun = { ...timelineByRun };
       aggregateByRun = { ...aggregateByRun };
       void resolveLangsmithUrl(runId);

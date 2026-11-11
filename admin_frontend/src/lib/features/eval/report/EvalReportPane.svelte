@@ -7,8 +7,8 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { ChevronDown, ChevronRight, Trash2 } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { fmtCost, pct } from '$lib/features/eval/shared/eval-format';
   import { orderedDifficulty } from '$lib/features/eval/shared/eval-display';
   import EvalBreakdownTable from '$lib/features/eval/report/EvalBreakdownTable.svelte';
@@ -17,9 +17,9 @@
     writeEvalReportSections,
     type EvalReportSection
   } from '$lib/features/eval/report/eval-report-prefs';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
+  import Loading from '$kit/ui/loading.svelte';
   import type { EvalTrackConfig } from '$lib/features/eval/shared/eval-tracks';
   import type { EvalModel } from '$lib/features/eval/state/eval-model.svelte';
   import { ADMIN_TABLE_HEAD } from '$lib/styling/admin-tokens';
@@ -67,10 +67,10 @@
   <!-- Benchmark overview — totals by category/difficulty + one summary row per corpus, for the
        benchmark selected on the Execute tab. Clicking a corpus row drills into its detail below. -->
   {#if eval_.benchmarkResultsLoading && !eval_.benchmarkResults}
-    <InlineLoading label="Loading benchmark results…" />
+    <Loading label="Loading benchmark results…" />
   {/if}
   {#if eval_.benchmarkResultsError}
-    <InlineDestructiveAlert message={eval_.benchmarkResultsError} class="mt-2" />
+    <Notice message={eval_.benchmarkResultsError} class="mt-2" />
   {:else if eval_.benchmarkResults}
     {@const bench = eval_.benchmarkResults}
     {#if bench.total}
@@ -110,7 +110,7 @@
       <span class="text-sm font-semibold">{bench.benchmark.label} · By corpus</span>
     </button>
     {#if !sections.benchByCorpus}
-      <AdminTableShell class="mt-1">
+      <TableShell class="mt-1">
         <thead class={ADMIN_TABLE_HEAD}>
           <tr>
             <th class="px-3 py-2 text-left">Corpus</th>
@@ -156,7 +156,7 @@
             </tr>
           </tfoot>
         {/if}
-      </AdminTableShell>
+      </TableShell>
       <p class="mt-1 font-sans text-[11px] text-muted-foreground">
         Click a corpus to load its detailed breakdown below.
       </p>
@@ -169,7 +169,7 @@
      above; always within the current benchmark). -->
 <div bind:this={reportDetailEl}>
   {#if !eval_.summary}
-    <InlineEmptyState
+    <EmptyState
       message={cfg.hasBenchmarks
         ? 'Select a corpus above to load its detailed breakdown.'
         : 'No report yet — run an eval to see the aggregate breakdown here.'}

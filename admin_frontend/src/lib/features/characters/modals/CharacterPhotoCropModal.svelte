@@ -1,8 +1,9 @@
 <script lang="ts">
   import { Upload } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import FormField from '$lib/components/ui/form-field.svelte';
-  import * as Dialog from '$lib/components/ui/dialog';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import Field from '$kit/ui/field.svelte';
+  import { Slider } from '$kit/components/ui/slider/index.js';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
   import { untrack } from 'svelte';
 
   let {
@@ -43,12 +44,6 @@
     });
   });
 
-  function readSlider(e: Event, apply: (n: number) => void) {
-    const raw = Number((e.currentTarget as HTMLInputElement).value);
-    if (Number.isNaN(raw)) return;
-    apply(raw);
-  }
-
   function handleOpenChange(next: boolean) {
     if (next || busy) return;
     onDismiss();
@@ -67,43 +62,16 @@
         height="512"
         bind:this={localCropCanvas}
       ></canvas>
-      <FormField label="Zoom">
-        {#snippet children()}
-          <input
-            min="1"
-            max="3"
-            step="0.05"
-            type="range"
-            value={cropZoom}
-            oninput={(e) => readSlider(e, onCropZoomChange)}
-          />
-        {/snippet}
-      </FormField>
+      <Field label="Zoom">
+        <Slider type="single" min={1} max={3} step={0.05} value={cropZoom} onValueChange={onCropZoomChange} aria-label="Zoom" />
+      </Field>
       <div class="grid gap-3 md:grid-cols-2">
-        <FormField label="Horizontal">
-          {#snippet children()}
-            <input
-              min="-100"
-              max="100"
-              step="1"
-              type="range"
-              value={cropX}
-              oninput={(e) => readSlider(e, onCropXChange)}
-            />
-          {/snippet}
-        </FormField>
-        <FormField label="Vertical">
-          {#snippet children()}
-            <input
-              min="-100"
-              max="100"
-              step="1"
-              type="range"
-              value={cropY}
-              oninput={(e) => readSlider(e, onCropYChange)}
-            />
-          {/snippet}
-        </FormField>
+        <Field label="Horizontal">
+          <Slider type="single" min={-100} max={100} step={1} value={cropX} onValueChange={onCropXChange} aria-label="Horizontal" />
+        </Field>
+        <Field label="Vertical">
+          <Slider type="single" min={-100} max={100} step={1} value={cropY} onValueChange={onCropYChange} aria-label="Vertical" />
+        </Field>
       </div>
     </div>
     <Dialog.Footer>

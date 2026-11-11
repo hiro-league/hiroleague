@@ -85,8 +85,7 @@ async def test_memory_list_uses_live_workspace_service(
 
     result = await memory_route.list_workspace_memories("ws-1", request)
 
-    assert result["ok"] is True
-    assert result["data"] == {
+    assert result == {
         "memory_enabled": True,
         "memories": [{"memory": "remembered"}],
     }
@@ -121,7 +120,7 @@ async def test_memory_list_orders_by_updated_desc(
 
     result = await memory_route.list_workspace_memories("ws-1", request)
 
-    assert [row["id"] for row in result["data"]["memories"]] == ["new", "created-only", "old"]
+    assert [row["id"] for row in result["memories"]] == ["new", "created-only", "old"]
 
 
 @pytest.mark.asyncio
@@ -148,8 +147,7 @@ async def test_memory_list_group_filter_reads_that_partition(
 
     result = await memory_route.list_workspace_memories("ws-1", request, group_id="kb_main")
 
-    assert result["ok"] is True
-    assert result["data"]["memories"] == [{"id": "k1", "memory": "kb fact", "source": "knowledge"}]
+    assert result["memories"] == [{"id": "k1", "memory": "kb fact", "source": "knowledge"}]
     assert service.calls == [{"group_ids": ["kb_main"]}]
 
 
@@ -176,7 +174,7 @@ async def test_memory_list_group_filter_rejects_unknown_namespace(
 
     result = await memory_route.list_workspace_memories("ws-1", request, group_id="bogus_group")
 
-    assert result["ok"] is False
+    assert result.status_code == 400
     assert service.calls == []
 
 
@@ -203,8 +201,7 @@ async def test_memory_clear_uses_live_workspace_service(
 
     result = await memory_route.clear_workspace_memories("ws-1", request)
 
-    assert result["ok"] is True
-    assert result["data"] == {"deleted_count": 2}
+    assert result == {"deleted_count": 2}
     assert service.calls == [{"clear_user_id": user_id, "character_id": None}]
 
 
@@ -241,8 +238,7 @@ async def test_memory_clear_group_wipes_validated_partition(
 
     result = await memory_route.clear_workspace_group("ws-1", request)
 
-    assert result["ok"] is True
-    assert result["data"] == {"deleted_count": 3}
+    assert result == {"deleted_count": 3}
     assert service.calls == [{"clear_group_ids": ["kb_main"]}]
 
 
@@ -262,7 +258,7 @@ async def test_memory_clear_group_requires_group_id(
 
     result = await memory_route.clear_workspace_group("ws-1", request)
 
-    assert result["ok"] is False
+    assert result.status_code == 400
     assert service.calls == []
 
 
@@ -287,8 +283,7 @@ async def test_memory_delete_uses_mem0_memory_id(
 
     result = await memory_route.delete_workspace_memory("mem-1", "ws-1", request)
 
-    assert result["ok"] is True
-    assert result["data"] == {"memory_id": "mem-1"}
+    assert result == {"memory_id": "mem-1"}
     assert service.deleted_ids == ["mem-1"]
 
 

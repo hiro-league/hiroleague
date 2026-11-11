@@ -1,4 +1,3 @@
-import type { Notify } from '$lib/ui/toast-types';
 import { featureErrorFrom } from '$lib/runtime/feature-errors';
 import type { Resource } from './types';
 
@@ -183,45 +182,5 @@ export function createListResource<Row, Id = string>(
     reconcileSelection() {
       selection.reconcile();
     }
-  };
-}
-
-export type Mutation<A extends unknown[] = [], R = unknown> = {
-  readonly busy: boolean;
-  run(...args: A): Promise<void>;
-};
-
-export function createMutation<A extends unknown[] = [], R = unknown>(
-  fn: (...args: A) => Promise<R>,
-  opts: {
-    notify: Notify;
-    successMsg?: string | ((result: R) => string | undefined);
-    errorPrefix?: string;
-    onDone?: (result: R) => void | Promise<void>;
-  }
-): Mutation<A, R> {
-  let busy = $state(false);
-
-  async function run(...args: A) {
-    busy = true;
-    try {
-      const result = await fn(...args);
-      const msg =
-        typeof opts.successMsg === 'function' ? opts.successMsg(result) : opts.successMsg;
-      if (msg) opts.notify('success', msg);
-      await opts.onDone?.(result);
-    } catch (err) {
-      const message = formatLoadError(err, opts.errorPrefix);
-      if (message) opts.notify('error', message);
-    } finally {
-      busy = false;
-    }
-  }
-
-  return {
-    get busy() {
-      return busy;
-    },
-    run
   };
 }

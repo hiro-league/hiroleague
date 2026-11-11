@@ -6,10 +6,10 @@
    * dict to the backend on Save (or discards on Cancel). The "active/used" version stays owned
    * elsewhere (eval panel / active_*_id selector); this is edit-only.
    */
-  import Button from '$lib/components/ui/button.svelte';
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import Field from '$kit/ui/field.svelte';
   import { getPreferenceByPath } from '$lib/features/preferences/state/preferences-edits';
-  import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import {
     preferenceFieldMeta,
     preferenceTitle,
@@ -19,6 +19,8 @@
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import PromptEditorDialog from './PromptEditorDialog.svelte';
   import type { PromptDialogModel, PromptSavePayload } from './prompt-editor';
+
+  const uid = $props.id();
 
   type Props = {
     ctrl: PreferencesController;
@@ -91,14 +93,17 @@
   }
 </script>
 
-<div data-pref-path={dictPath} class="flex flex-wrap items-end gap-3">
-  <FormField label="Version to edit" class="min-w-[16rem] flex-1" {hint} hintTooltip>
-    <select class={ADMIN_SELECT_LG} bind:value={selectedId}>
-      {#each entries as [id, p] (id)}
-        <option value={id}>{p.label}{p.locked ? ' 🔒' : ''}</option>
-      {/each}
-    </select>
-  </FormField>
+<div data-field-anchor={dictPath} class="flex flex-wrap items-end gap-3">
+  <Field label="Version to edit" for="{uid}-version" class="min-w-[16rem] flex-1" help={hint}>
+    <PickSelect
+      id="{uid}-version"
+      class="h-8 w-full text-sm"
+      label="Version to edit"
+      value={selectedId}
+      options={entries.map(([id, p]) => ({ value: id, label: `${p.label}${p.locked ? ' 🔒' : ''}` }))}
+      onchange={(v) => (selectedId = v)}
+    />
+  </Field>
   <Button variant="outline" size="sm" class="mb-1" onclick={() => (open = true)}>
     Edit versions
   </Button>

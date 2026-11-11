@@ -1,8 +1,10 @@
 <script lang="ts">
   import { base } from '$app/paths';
   import { Check, ChevronRight, ExternalLink, LoaderCircle } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Checkbox } from '$kit/components/ui/checkbox/index.js';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import CreatableCategorySelect from '$lib/features/knowledge/shared/CreatableCategorySelect.svelte';
   import CreatableTagsSelect from '$lib/features/knowledge/shared/CreatableTagsSelect.svelte';
   import type { KnowledgePageController } from '$lib/features/knowledge/state/knowledge-controller.svelte';
@@ -14,10 +16,9 @@
     KNOWLEDGE_FIELD_LABEL_TEXT,
     KNOWLEDGE_METADATA_SHELL,
     KNOWLEDGE_SECTION_CARD,
-    KNOWLEDGE_SECTION_TITLE,
-    KNOWLEDGE_SELECT
+    KNOWLEDGE_SECTION_TITLE
   } from '$lib/features/knowledge/shared/knowledge-ui';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
   import { cn } from '$lib/utils';
 
   type Props = {
@@ -29,6 +30,12 @@
   };
 
   let { ctl, ingest, options, expanded = $bindable(), headerSummary }: Props = $props();
+
+  const OWNER_KIND_OPTIONS = [
+    { value: 'system', label: 'System' },
+    { value: 'character', label: 'Character' },
+    { value: 'user', label: 'User' }
+  ];
 
   const INGEST_BODY_ID = 'knowledge-ingest-section';
 </script>
@@ -66,29 +73,38 @@
           <div class="flex flex-wrap items-end gap-3">
             <label class={KNOWLEDGE_FIELD_LABEL}>
               <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Owner</span>
-              <select class={cn(KNOWLEDGE_SELECT, 'w-[180px]')} bind:value={ingest.ownerKind} onchange={ingest.handleOwnerKindChange}>
-                <option value="system">System</option>
-                <option value="character">Character</option>
-                <option value="user">User</option>
-              </select>
+              <PickSelect
+                class="h-8 w-[180px] text-sm"
+                label="Owner"
+                value={ingest.ownerKind}
+                options={OWNER_KIND_OPTIONS}
+                onchange={(v) => {
+                  ingest.ownerKind = v as typeof ingest.ownerKind;
+                  ingest.handleOwnerKindChange();
+                }}
+              />
             </label>
             {#if ingest.ownerKind === 'character'}
               <label class={KNOWLEDGE_FIELD_LABEL}>
                 <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Character</span>
-                <select class={cn(KNOWLEDGE_SELECT, 'w-[220px]')} bind:value={ingest.ownerId}>
-                  {#each options.characters as character (character.id)}
-                    <option value={String(character.id)}>{character.name} ({character.id})</option>
-                  {/each}
-                </select>
+                <PickSelect
+                  class="h-8 w-[220px] text-sm"
+                  label="Character"
+                  value={ingest.ownerId}
+                  options={options.characters.map((c) => ({ value: String(c.id), label: `${c.name} (${c.id})` }))}
+                  onchange={(v) => (ingest.ownerId = v)}
+                />
               </label>
             {:else if ingest.ownerKind === 'user'}
               <label class={KNOWLEDGE_FIELD_LABEL}>
                 <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>User</span>
-                <select class={cn(KNOWLEDGE_SELECT, 'w-[220px]')} bind:value={ingest.ownerId}>
-                  {#each options.users as user (user.id)}
-                    <option value={String(user.id)}>{user.name} ({user.id})</option>
-                  {/each}
-                </select>
+                <PickSelect
+                  class="h-8 w-[220px] text-sm"
+                  label="User"
+                  value={ingest.ownerId}
+                  options={options.users.map((u) => ({ value: String(u.id), label: `${u.name} (${u.id})` }))}
+                  onchange={(v) => (ingest.ownerId = v)}
+                />
               </label>
             {/if}
             <label class={KNOWLEDGE_FIELD_LABEL}>
@@ -134,11 +150,9 @@
               class="flex shrink-0 cursor-pointer select-none items-center gap-2 self-end pb-2"
               title="After ingest, run LLM entity extraction over the new chunks and write nodes + relations into the L3 graph (one extra LLM call per chunk; costs more)"
             >
-              <input
-                type="checkbox"
-                class="size-4"
+              <Checkbox
                 checked={ingest.buildGraphAfter}
-                onchange={(e) => ingest.setBuildGraphAfter((e.currentTarget as HTMLInputElement).checked)}
+                onCheckedChange={(checked) => ingest.setBuildGraphAfter(checked)}
                 disabled={ingest.ingesting}
               />
               <span class="text-sm text-muted-foreground">Also build entity graph (L3)</span>
@@ -229,7 +243,7 @@
           {#if Object.keys(ingest.job.errors).length > 0}
             <details class="text-xs">
               <summary class="text-destructive">View errors</summary>
-              <InlineDestructiveAlert
+              <Notice
                 class="mt-2 whitespace-pre-wrap font-mono text-xs"
                 message={JSON.stringify(ingest.job.errors, null, 2)}
               />

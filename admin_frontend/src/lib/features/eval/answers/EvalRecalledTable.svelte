@@ -6,7 +6,8 @@
   Cap/trim mechanics live in eval-recall-render.ts (kept in lockstep with services/eval/judge.py).
 -->
 <script lang="ts">
-  import Badge from '$lib/components/ui/badge.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import * as Table from '$kit/components/ui/table/index.js';
   import Highlight from '$lib/search/Highlight.svelte';
   import { fmtEpisodeDate } from '$lib/features/eval/shared/eval-format';
   import type { EvalRecallRender, RecalledFact } from '$lib/features/eval/shared/eval-events';
@@ -118,12 +119,12 @@
 </script>
 
 <div class="max-h-[60vh] overflow-auto rounded-md border">
-  <table class="w-full border-collapse font-sans text-xs">
-    <thead>
-      <tr>
+  <Table.Root scroll={false} class="border-collapse font-sans text-xs">
+    <Table.Header>
+      <Table.Row class="hover:bg-transparent">
         {#each columns as col (col.key)}
-          <th
-            class="sticky top-0 z-10 cursor-pointer select-none bg-muted px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground {col.align ===
+          <Table.Head
+            class="sticky top-0 z-10 h-auto cursor-pointer select-none bg-muted px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground {col.align ===
             'right'
               ? 'text-right'
               : 'text-left'}"
@@ -132,15 +133,15 @@
             onclick={() => toggle(col.key)}
           >
             {col.label}<span class="ml-1 text-[9px] text-primary">{sortArrow(sort, col.key)}</span>
-          </th>
+          </Table.Head>
         {/each}
-      </tr>
-    </thead>
-    <tbody>
+      </Table.Row>
+    </Table.Header>
+    <Table.Body>
       {#each visible as row, i (i)}
         {@const struck = !sent.has(row)}
-        <tr
-          class="border-t align-top {dimmed(row) ? 'opacity-35' : ''} {struck
+        <Table.Row
+          class="align-top {dimmed(row) ? 'opacity-35' : ''} {struck
             ? '[&>td]:text-muted-foreground [&>td]:line-through'
             : ''}"
           title={struck ? 'Capped out — recalled but not sent to the eval answer' : undefined}
@@ -191,15 +192,15 @@
           <td class="px-2 py-1 text-right font-mono text-[11px] tabular-nums">
             {row.score != null ? row.score.toFixed(3) : '—'}
           </td>
-        </tr>
+        </Table.Row>
       {/each}
       {#if visible.length === 0}
-        <tr>
+        <Table.Row class="hover:bg-transparent">
           <td class="px-2 py-3 text-center text-muted-foreground" colspan={columns.length}>
             No items match “{search}”.
           </td>
-        </tr>
+        </Table.Row>
       {/if}
-    </tbody>
-  </table>
+    </Table.Body>
+  </Table.Root>
 </div>

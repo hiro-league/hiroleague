@@ -17,31 +17,34 @@ import {
   characterSaveBody,
   emptyForm,
   formFromCharacter,
-  validateCharacterForm
+  validateCharacterForm,
+  type CharacterForm
 } from '$lib/features/characters/shared/characters-pure';
+import { errorMessage } from '$kit/api/client';
+import { Action } from '$kit/state/action.svelte';
+import { Draft } from '$kit/state/draft.svelte';
 import type { ProfileOption } from '$lib/features/characters/shared/profile-option';
 import type { createCharactersPreferences } from '$lib/preferences/characters-preferences.svelte';
-import type { createCharactersFormModel } from '$lib/features/characters/state/characters-form.svelte';
 import { createCharactersPhotoCrop } from '$lib/features/characters/state/characters-photo-crop.svelte';
 
 type NotifyKind = 'success' | 'error' | 'info' | 'warning';
 
-/** Remote orchestration used by CharactersPage (delegates form UX to ``formApi``). Phase 7b step 5: the
+/** Remote orchestration used by CharactersPage; the character being edited is ``ctrl.draft``. Phase 7b step 5: the
  *  editor's lists pick from the workspace's AI and voice profiles (read from preferences, named with the
  *  catalog), replacing the catalog model pickers, the tuning profile and the TTS voice presets. */
 export function createCharactersPageController(opts: {
   prefs: ReturnType<typeof createCharactersPreferences>;
-  formApi: ReturnType<typeof createCharactersFormModel>;
   notify: (kind: NotifyKind, message: string) => void;
   confirmDiscard: () => Promise<boolean>;
 }) {
-  const { prefs, formApi, notify, confirmDiscard } = opts;
+  const { prefs, notify, confirmDiscard } = opts;
 
   let rows = $state<CharacterRow[]>([]);
   let selected = $state<CharacterDetail | null>(null);
   let loadingList = $state(true);
   let loadingDetail = $state(false);
-  let busy = $state(false);
+  /** Delete and photo upload (the save's busy is the draft's own); one at a time. */
+  const work = new Action();
   let listError = $state<string | null>(null);
   let detailError = $state<string | null>(null);
   let profilesReady = $state(false);
@@ -56,11 +59,10 @@ export function createCharactersPageController(opts: {
     resolvedError = null;
     try {
       const payload = await getCharacterResolved(id);
-      resolved = payload.data;
+      resolved = payload;
     } catch (err) {
       resolved = null;
-      resolvedError =
-        err instanceof Error ? err.message : 'Could not load resolved configuration.';
+      resolvedError = errorMessage(err);
     }
   }
 
@@ -69,10 +71,10 @@ export function createCharactersPageController(opts: {
     listError = null;
     try {
       const payload = await listCharacters();
-      rows = payload.data;
+      rows = payload;
     } catch (err) {
       rows = [];
-      listError = err instanceof Error ? err.message : 'Failed to load characters.';
+      listError = errorMessage(err);
     } finally {
       loadingList = false;
     }
@@ -89,8 +91,8 @@ export function createCharactersPageController(opts: {
       listCatalogProviders(),
       getPreferences()
     ]);
-    const namer = catalogModelNamer([...chat.data.models, ...tts.data.models], providers.data);
-    const saved = preferences.data.preferences;
+    const namer = catalogModelNamer([...chat.models, ...tts.models], providers);
+    const saved = preferences.preferences;
     const byLabel = (a: ProfileOption, b: ProfileOption) => a.label.localeCompare(b.label);
     aiProfileOptions = Object.entries(saved.ai?.profiles ?? {})
       .map(([id, p]) => ({
@@ -112,17 +114,16 @@ export function createCharactersPageController(opts: {
     try {
       if (mode === 'edit') await loadProfileOptions();
       const payload = await getCharacter(id);
-      selected = payload.data;
+      selected = payload;
       if (mode === 'edit') {
-        formApi.form = formFromCharacter(payload.data);
-        formApi.dirty = false;
+        draft.load(formFromCharacter(payload), true);
       }
       await loadResolvedConfig(id);
     } catch (err) {
       selected = null;
       resolved = null;
       resolvedError = null;
-      detailError = err instanceof Error ? err.message : 'Failed to load character.';
+      detailError = errorMessage(err);
     } finally {
       loadingDetail = false;
     }
@@ -133,14 +134,13 @@ export function createCharactersPageController(opts: {
     selected = null;
     resolved = null;
     resolvedError = null;
-    formApi.dirty = false;
+    draft.undo();
     await prefs.setState('browse');
     await loadCharacters();
   }
 
   async function openCharacterEdit(row: CharacterRow) {
     if (!(await confirmDiscard())) return;
-    formApi.dirty = false;
     await prefs.setState('detail', 'edit', row.id);
     await loadDetail(row.id, 'edit');
   }
@@ -151,8 +151,7 @@ export function createCharactersPageController(opts: {
     selected = null;
     resolved = null;
     resolvedError = null;
-    formApi.form = emptyForm();
-    formApi.dirty = false;
+    draft.load(emptyForm(), true);
     await prefs.setState('detail', 'edit');
   }
 
@@ -164,7 +163,7 @@ export function createCharactersPageController(opts: {
 
   async function cancelEdit() {
     if (!(await confirmDiscard())) return;
-    formApi.dirty = false;
+    draft.undo();
     if (prefs.characterId) {
       await prefs.setState('detail', 'view', prefs.characterId);
       await loadDetail(prefs.characterId, 'view');
@@ -173,29 +172,26 @@ export function createCharactersPageController(opts: {
     }
   }
 
+  /** The draft's save: validate, write, then read the character again into the draft. */
+  async function persist(form: CharacterForm) {
+    const invalid = validateCharacterForm(prefs.characterId, form);
+    if (invalid) throw new Error(invalid);
+    const id = prefs.characterId;
+    const body = characterSaveBody(id, form);
+    const payload = id ? await updateCharacter(id, body) : await createCharacter(body);
+    for (const warning of payload.warnings) notify('warning', warning);
+    const savedId = payload.character.id;
+    notify('success', 'Character saved.');
+    await prefs.setState('detail', 'edit', savedId);
+    await loadCharacters();
+    await loadDetail(savedId, 'edit');
+  }
+
+  /** The character being edited: Save and Undo, "unsaved changes" when leaving, busy and error of the save. */
+  const draft = new Draft<CharacterForm>(emptyForm(), { save: persist });
+
   async function saveCharacter() {
-    const invalid = validateCharacterForm(prefs.characterId, formApi.form);
-    if (invalid) {
-      notify('error', invalid);
-      return;
-    }
-    busy = true;
-    try {
-      const id = prefs.characterId;
-      const body = characterSaveBody(prefs.characterId, formApi.form);
-      const payload = id ? await updateCharacter(id, body) : await createCharacter(body);
-      for (const warning of payload.data.warnings) notify('warning', warning);
-      const savedId = payload.data.character.id;
-      notify('success', 'Character saved.');
-      formApi.dirty = false;
-      await prefs.setState('detail', 'edit', savedId);
-      await loadCharacters();
-      await loadDetail(savedId, 'edit');
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Save failed.');
-    } finally {
-      busy = false;
-    }
+    if (!(await draft.save())) notify('error', draft.action.error);
   }
 
   async function confirmDelete() {
@@ -205,21 +201,19 @@ export function createCharactersPageController(opts: {
       deleteOpen = false;
       return;
     }
-    busy = true;
-    try {
-      await deleteCharacter(prefs.characterId);
+    const id = prefs.characterId;
+    await work.run(async () => {
+      await deleteCharacter(id);
       notify('success', 'Character deleted.');
       deleteOpen = false;
       await openBrowse();
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Delete failed.');
-    } finally {
-      busy = false;
-    }
+    });
+    if (work.error) notify('error', work.error);
   }
 
   function isCharactersPath(pathname: string): boolean {
-    return pathname.endsWith('/characters') || pathname.endsWith('/characters/');
+    // Step 1d: pages have no trailing slash.
+    return pathname.endsWith('/characters');
   }
 
   /** Apply URL + prefs to remote state + optional edit form. */
@@ -230,7 +224,7 @@ export function createCharactersPageController(opts: {
       selected = null;
       resolved = null;
       resolvedError = null;
-      formApi.dirty = false;
+      draft.undo();
       return;
     }
     if (prefs.activeTab === 'detail') {
@@ -241,8 +235,7 @@ export function createCharactersPageController(opts: {
         selected = null;
         resolved = null;
         resolvedError = null;
-        formApi.form = emptyForm();
-        formApi.dirty = false;
+        draft.load(emptyForm(), true);
       }
     }
   }
@@ -258,9 +251,7 @@ export function createCharactersPageController(opts: {
   const photoCrop = createCharactersPhotoCrop({
     getCharacterId: () => (prefs.characterId ?? '').trim(),
     notify,
-    setBusy: (v: boolean) => {
-      busy = v;
-    },
+    work,
     onAfterPhotoUpload: async () => {
       await loadCharacters();
       const id = (prefs.characterId ?? '').trim();
@@ -282,7 +273,11 @@ export function createCharactersPageController(opts: {
       return loadingDetail;
     },
     get busy(): boolean {
-      return busy;
+      return draft.action.busy || work.busy;
+    },
+    /** The character being edited. */
+    get draft(): Draft<CharacterForm> {
+      return draft;
     },
     get listError(): string | null {
       return listError;

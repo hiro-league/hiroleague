@@ -7,8 +7,10 @@ import {
   stopGateway,
   type GatewayRow
 } from '$lib/api/server';
-import { createMutation, createResource } from '$lib/state/create-resource.svelte';
-import type { Notify } from '$lib/ui/toast-types';
+import { createResource } from '$lib/state/create-resource.svelte';
+import { Action } from '$kit/state/action.svelte';
+import { errorMessage } from '$kit/api/client';
+import type { Notify } from '$kit/ui/toast.svelte';
 
 export type GatewayDialog = 'create' | 'stop' | 'remove' | null;
 
@@ -16,7 +18,7 @@ export function createGatewayStore(notify: Notify) {
   const listResource = createResource(
     async (): Promise<GatewayRow[]> => {
       const payload = await listGateways();
-      return payload.data;
+      return payload;
     },
     {
       initial: [],
@@ -29,7 +31,8 @@ export function createGatewayStore(notify: Notify) {
   let hydrated = $state(false);
   let dialog = $state<GatewayDialog>(null);
   let selected = $state<GatewayRow | null>(null);
-  let busy = $state(false);
+  /** One thing at a time: the create / start / stop / remove in progress (its failure is told by a toast). */
+  const work = new Action();
 
   let createForm = $state({
     name: '',
@@ -49,7 +52,7 @@ export function createGatewayStore(notify: Notify) {
   }
 
   async function load(options: { silent?: boolean } = {}) {
-    if (options.silent && busy) return;
+    if (options.silent && work.busy) return;
     await listResource.load({ silent: options.silent });
     if (!options.silent) {
       error = listResource.error;
@@ -66,7 +69,7 @@ export function createGatewayStore(notify: Notify) {
   }
 
   function closeDialog() {
-    if (busy) return;
+    if (work.busy) return;
     resetDialog();
   }
 
@@ -100,94 +103,60 @@ export function createGatewayStore(notify: Notify) {
   }
 
   async function submitCreate() {
-    busy = true;
-    try {
-      await createMutation(
-        () =>
-          createGateway({
-            name: createForm.name,
-            desktop_public_key: createForm.desktopPublicKey,
-            port: Number(createForm.port),
-            host: createForm.host.trim() || '0.0.0.0',
-            make_default: createForm.makeDefault,
-            skip_autostart: createForm.skipAutostart,
-            elevated_task: createForm.elevatedTask
-          }),
-        {
-          notify,
-          successMsg: (result) => result.data ?? 'Gateway created.',
-          errorPrefix: 'Create gateway failed.',
-          onDone: async () => {
-            resetDialog();
-            await load();
-          }
-        }
-      ).run();
-    } finally {
-      busy = false;
-    }
+    const result = await work.run(async () => {
+      const done = await createGateway({
+        name: createForm.name,
+        desktop_public_key: createForm.desktopPublicKey,
+        port: Number(createForm.port),
+        host: createForm.host.trim() || '0.0.0.0',
+        make_default: createForm.makeDefault,
+        skip_autostart: createForm.skipAutostart,
+        elevated_task: createForm.elevatedTask
+      });
+      resetDialog();
+      await load();
+      return done;
+    });
+    if (work.error) notify('error', work.error);
+    else notify('success', result ?? 'Gateway created.');
   }
 
   async function start(row: GatewayRow) {
-    busy = true;
-    try {
-      await createMutation(() => startGateway(row.name), {
-        notify,
-        successMsg: (result) =>
-          result.data.already_running
-            ? undefined
-            : `Gateway '${row.name}' started (PID ${result.data.pid}).`,
-        errorPrefix: 'Start gateway failed.',
-        onDone: async (result) => {
-          if (result.data.already_running) {
-            notify('warning', `Gateway '${row.name}' is already running.`);
-          }
-          await load();
-        }
-      }).run();
-    } finally {
-      busy = false;
-    }
+    const result = await work.run(async () => {
+      const started = await startGateway(row.name);
+      await load();
+      return started;
+    });
+    if (work.error) notify('error', work.error);
+    else if (result?.already_running) notify('warning', `Gateway '${row.name}' is already running.`);
+    else if (result) notify('success', `Gateway '${row.name}' started (PID ${result.pid}).`);
   }
 
   async function submitStop() {
     if (!selected) return;
-    busy = true;
-    try {
-      await createMutation(() => stopGateway(selected!.name), {
-        notify,
-        successMsg: (result) =>
-          result.data ? `Gateway '${selected!.name}' stopped.` : undefined,
-        errorPrefix: 'Stop gateway failed.',
-        onDone: async (result) => {
-          if (!result.data) {
-            notify('warning', `Gateway '${selected!.name}' was not running.`);
-          }
-          resetDialog();
-          await load();
-        }
-      }).run();
-    } finally {
-      busy = false;
-    }
+    const { name } = selected;
+    const stopped = await work.run(async () => {
+      const result = await stopGateway(name);
+      resetDialog();
+      await load();
+      return result;
+    });
+    if (work.error) notify('error', work.error);
+    else if (stopped) notify('success', `Gateway '${name}' stopped.`);
+    else notify('warning', `Gateway '${name}' was not running.`);
   }
 
   async function submitRemove() {
     if (!selected) return;
-    busy = true;
-    try {
-      await createMutation(() => removeGateway(selected!.name, removeForm.purge), {
-        notify,
-        successMsg: (result) => result.data ?? 'Gateway removed.',
-        errorPrefix: 'Remove gateway failed.',
-        onDone: async () => {
-          resetDialog();
-          await load();
-        }
-      }).run();
-    } finally {
-      busy = false;
-    }
+    const { name } = selected;
+    const result = await work.run(async () => {
+      const done = await removeGateway(name, removeForm.purge);
+      resetDialog();
+      await load();
+      return done;
+    });
+    if (work.error) notify('error', work.error);
+    else notify('success', result ?? 'Gateway removed.');
   }
 
   async function openStderrLog(row: GatewayRow) {
@@ -196,7 +165,7 @@ export function createGatewayStore(notify: Notify) {
       await openPath(row.stderr_log_path);
       notify('info', `Opening stderr log: ${row.stderr_log_path}`);
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Open stderr log failed.');
+      notify('error', errorMessage(err));
     }
   }
 
@@ -205,7 +174,7 @@ export function createGatewayStore(notify: Notify) {
       await openPath(row.path);
       notify('info', `Opening folder: ${row.path}`);
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Open folder failed.');
+      notify('error', errorMessage(err));
     }
   }
 
@@ -217,7 +186,7 @@ export function createGatewayStore(notify: Notify) {
       return !hydrated;
     },
     get busy() {
-      return busy;
+      return work.busy;
     },
     get error() {
       return error;

@@ -10,6 +10,7 @@
 #   - admin_frontend: generated files (preferences types and the features registry, made from hiroserver's code);
 #   - admin_frontend: svelte-check;
 #   - admin_frontend: unit tests (vitest);
+#   - ui-kit: the shared UI kit's own check (svelte-check, ESLint, vitest);
 #   - hiroserver: the whole pytest suite over the uv workspace (scripts/run-tests.sh: Ctrl-C won't stop it, use
 #     Ctrl-Break or close the terminal; a running Hiro server may hold the venv's lock: `hiro stop` first).
 #
@@ -19,7 +20,7 @@
 # Files nothing here checks (device_apps, docs, *.md outside these folders...) never start a part. After changing a
 # part's command in this script, run it with --all.
 #
-# It installs nothing: admin_frontend's packages come from `npm install` (first-time setup); `uv run` keeps the
+# It installs nothing: admin_frontend's and ui-kit's packages come from `npm install` in each (first-time setup); `uv run` keeps the
 # Python workspace in sync by itself.
 
 set -uo pipefail
@@ -95,6 +96,10 @@ part "admin_frontend: svelte-check" "admin_frontend" \
     bash -c "cd '${REPO_ROOT}/admin_frontend' && npm run check:svelte"
 part "admin_frontend: unit tests" "admin_frontend" \
     bash -c "cd '${REPO_ROOT}/admin_frontend' && npm run test:unit"
+# The shared UI kit (@hiroleague/ui): its own svelte-check, ESLint and tests. HomeHiro, NetHiro and TrainHiro read
+# ui-kit/src/lib as source, so a change there is checked here before it reaches them.
+part "ui-kit: check" "ui-kit" \
+    bash -c "cd '${REPO_ROOT}/ui-kit' && npm run check"
 part "hiroserver: pytest" "hiroserver scripts/run-tests.sh" \
     "${REPO_ROOT}/scripts/run-tests.sh"
 

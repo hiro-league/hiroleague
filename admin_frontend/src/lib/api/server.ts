@@ -1,4 +1,4 @@
-import { apiRequest, type ApiResponse } from './client';
+import { apiRequest } from './client';
 
 export type WorkspaceRow = {
   id: string;
@@ -58,8 +58,11 @@ export type GatewayStartResult = {
   pid: number | null;
 };
 
-export async function listWorkspaces(): Promise<ApiResponse<WorkspaceRow[]>> {
-  return apiRequest<WorkspaceRow[]>('/workspaces');
+/** The registry's workspaces, and which one this admin runs in (null when unknown). */
+export type WorkspacesAnswer = { workspaces: WorkspaceRow[]; hosting_workspace_id: string | null };
+
+export async function listWorkspaces(): Promise<WorkspacesAnswer> {
+  return apiRequest<WorkspacesAnswer>('/workspaces');
 }
 
 export async function createWorkspace(body: { name: string; path?: string | null }) {

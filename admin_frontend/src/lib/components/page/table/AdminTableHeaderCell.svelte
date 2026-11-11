@@ -1,5 +1,6 @@
 <script lang="ts" generics="TCol extends string">
   import { ArrowDown, ArrowUp } from '@lucide/svelte';
+  import * as Table from '$kit/components/ui/table/index.js';
   import { cn } from '$lib/utils';
   import type { TableSortController } from './use-table-sort.svelte';
 
@@ -15,7 +16,10 @@
   let { column, sort, class: className, sortable = true, title = '', children }: Props = $props();
 </script>
 
-<th class={cn('px-3 py-2 text-left', className)} aria-sort={sortable ? sort.ariaSort(column) : undefined}>
+<Table.Head
+  class={cn('h-auto px-3 py-2 text-left font-bold whitespace-normal text-inherit', className)}
+  aria-sort={sortable ? sort.ariaSort(column) : undefined}
+>
   {#if sortable}
     <button
       type="button"
@@ -35,4 +39,4 @@
   {:else}
     {@render children()}
   {/if}
-</th>
+</Table.Head>

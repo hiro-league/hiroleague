@@ -1,13 +1,14 @@
 <script lang="ts">
   import type { Component, Snippet } from 'svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import { cn } from '$lib/utils';
+  import StatusDot, { type DotTone } from '$kit/ui/status-dot.svelte';
 
   export type AdminIconToggleOption = {
     value: string;
     label: string;
     Icon?: Component<{ size?: number; strokeWidth?: number; class?: string }>;
-    dotClass?: string;
+    dotTone?: DotTone;
   };
 
   let {
@@ -75,8 +76,8 @@
         >
           {#if optionContent}
             {@render optionContent(option, on)}
-          {:else if option.dotClass}
-            <span class={cn('size-2 rounded-full', option.dotClass)} aria-hidden="true"></span>
+          {:else if option.dotTone}
+            <StatusDot tone={option.dotTone} />
           {:else if option.Icon}
             <span aria-hidden="true">
               <option.Icon size={16} strokeWidth={on ? 2.25 : 2} />

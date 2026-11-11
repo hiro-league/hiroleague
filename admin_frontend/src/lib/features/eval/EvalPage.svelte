@@ -2,15 +2,15 @@
   import { afterNavigate } from '$app/navigation';
   import { onMount } from 'svelte';
   import { Brain, Database } from '@lucide/svelte';
-  import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
-  import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
-  import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import PageHeader from '$kit/ui/page-header.svelte';
+  import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
+  import PageTabs from '$kit/ui/page-tabs.svelte';
+  import type { PageTab } from '$kit/ui/page-tabs.svelte';
+  import Notice from '$kit/ui/notice.svelte';
   import EvalPanel from '$lib/features/eval/EvalPanel.svelte';
   import LiveDegradedBanner from '$lib/live/LiveDegradedBanner.svelte';
   import { createEvalPreferences } from '$lib/preferences/eval-preferences.svelte';
-  import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
-  import ToastHost from '$lib/ui/ToastHost.svelte';
+  import { toast } from '$kit/ui/toast.svelte';
   import {
     createEvalModel,
     type EvalTrack
@@ -25,7 +25,6 @@
    */
   let error = $state<string | null>(null);
   const tabPrefs = createEvalPreferences();
-  const toasts = createToastNotifier();
   const eval_ = createEvalModel({ setError: (msg) => (error = msg) });
 
   onMount(() => {
@@ -48,13 +47,13 @@
   const trackTabIcons = {
     memory: Brain,
     knowledge: Database
-  } as const satisfies Record<EvalTrack, AdminTabDescriptor<EvalTrack>['icon']>;
+  } as const satisfies Record<EvalTrack, PageTab<EvalTrack>['icon']>;
 
   // Switching the track resets the corpus picker + rescans, so lock the tabs while a
   // run is in flight (mirrors the inline pill tablist this strip replaced).
   const isBusy = $derived(eval_.status === 'starting' || eval_.status === 'running');
 
-  const tabDescriptors: AdminTabDescriptor<EvalTrack>[] = $derived([
+  const tabDescriptors: PageTab<EvalTrack>[] = $derived([
     { id: 'memory', label: 'Memory', kind: 'pane', icon: trackTabIcons.memory, disabled: isBusy },
     { id: 'knowledge', label: 'Knowledge', kind: 'pane', icon: trackTabIcons.knowledge, disabled: isBusy }
   ]);
@@ -69,28 +68,25 @@
   <title>Eval - Hiro Admin</title>
 </svelte:head>
 
-<AdminPageHeader
-  kicker="Evaluation"
-  title="Eval"
-  subtitle="Memory & knowledge retrieval evals"
-  sticky
->
-  {#snippet tabs()}
-    <AdminTabStrip
-      ariaLabel="Eval track"
+<section class={ADMIN_PAGE_MAX_W}>
+  <PageHeader title="Eval" description="Memory & knowledge retrieval evals">
+    {#snippet tabs()}
+    <PageTabs
+      label="Eval track"
       tabs={tabDescriptors}
-      active={eval_.track}
-      onSelect={selectTrack}
+      value={eval_.track}
+      onchange={selectTrack}
     />
-  {/snippet}
+    {/snippet}
+  </PageHeader>
+  
 
   {#if error}
-    <InlineDestructiveAlert message={error} />
+    <Notice message={error} />
   {/if}
 
   <LiveDegradedBanner />
 
-  <EvalPanel {eval_} notify={toasts.notify} />
-</AdminPageHeader>
+  <EvalPanel {eval_} notify={toast.show} />
+</section>
 
-<ToastHost toast={toasts.toast} />

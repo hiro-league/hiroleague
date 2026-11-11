@@ -4,7 +4,7 @@
    * grace window (usually the browser connection budget is exhausted).
    */
   import { knowledgeEventStream } from '$lib/features/knowledge/shared/knowledge-event-stream.svelte';
-  import InlineWarningAlert from '$lib/ui/InlineWarningAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
 
   type Props = {
     class?: string;
@@ -17,5 +17,5 @@
 </script>
 
 {#if knowledgeEventStream.degraded}
-  <InlineWarningAlert {message} class={className} />
+  <Notice tone="warning" {message} class={className} />
 {/if}

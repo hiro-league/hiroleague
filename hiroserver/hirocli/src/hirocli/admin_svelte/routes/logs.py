@@ -11,23 +11,23 @@ from starlette.concurrency import run_in_threadpool
 from hirocli.admin.features.logs.service import LogsService
 from hirocli.admin_svelte.deps import SelectedWorkspaceIdDep
 from hirocli.admin_svelte.logs_support import _logs_layout, _shape_log_rows
-from hirocli.admin_svelte.result_payload import _api_from_result
+from hirocli.admin_svelte.result_payload import _api_data
 from hirocli.admin_svelte.schemas import LogsTailRequest
 
 logs_router = APIRouter()
 
 
 @logs_router.get("/logs/layout")
-async def get_logs_layout(workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+async def get_logs_layout(workspace_id: SelectedWorkspaceIdDep) -> Any:
     result = await run_in_threadpool(_logs_layout, workspace_id)
-    return _api_from_result(result)
+    return _api_data(result)
 
 
 @logs_router.post("/logs/tail")
 async def tail_logs(
     body: LogsTailRequest,
     workspace_id: SelectedWorkspaceIdDep,
-) -> dict[str, Any]:
+) -> Any:
     service = LogsService()
     if body.after_offsets:
         result = await run_in_threadpool(
@@ -47,15 +47,11 @@ async def tail_logs(
             )
         )
     if not result.ok or result.data is None:
-        return _api_from_result(result)
+        return _api_data(result)
     return {
-        "ok": True,
-        "error": None,
-        "data": {
             "rows": _shape_log_rows(result.data.rows, service),
             "file_offsets": result.data.file_offsets,
-        },
-    }
+        }
 
 
 @logs_router.get("/logs/search")
@@ -66,7 +62,7 @@ async def search_logs(
     msg_id: str | None = None,
     method: str | None = None,
     traffic_class: str | None = None,
-) -> dict[str, Any]:
+) -> Any:
     service = LogsService()
     result = await run_in_threadpool(
         service.search_filtered,
@@ -78,48 +74,36 @@ async def search_logs(
         traffic_class=traffic_class,
     )
     if not result.ok:
-        return _api_from_result(result)
-    return {
-        "ok": True,
-        "error": None,
-        "data": {"rows": _shape_log_rows(result.data or [], service)},
-    }
+        return _api_data(result)
+    return {"rows": _shape_log_rows(result.data or [], service)}
 
 
 @logs_router.get("/logs/methods")
-async def discover_log_methods(workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+async def discover_log_methods(workspace_id: SelectedWorkspaceIdDep) -> Any:
     """Distinct JSON-RPC ``method`` values seen in the recent log tail (scope popup)."""
     service = LogsService()
     result = await run_in_threadpool(
         service.discover_methods,
         workspace_id,
     )
-    return _api_from_result(result)
+    return _api_data(result)
 
 
 @logs_router.get("/logs/traffic-classes")
-async def list_log_traffic_classes() -> dict[str, Any]:
+async def list_log_traffic_classes() -> Any:
     """Static enum: the operational traffic_class taxonomy used by comm-path logs."""
     from hiro_channel_sdk.log_scope_fields import TRAFFIC_CLASSES
 
-    return {
-        "ok": True,
-        "error": None,
-        "data": list(TRAFFIC_CLASSES),
-    }
+    return list(TRAFFIC_CLASSES)
 
 
 @logs_router.post("/logs/clear")
-async def clear_logs(workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+async def clear_logs(workspace_id: SelectedWorkspaceIdDep) -> Any:
     service = LogsService()
     result = await run_in_threadpool(
         service.clear_all,
         workspace_id,
     )
     if not result.ok or result.data is None:
-        return _api_from_result(result)
-    return {
-        "ok": True,
-        "error": None,
-        "data": {"cleared_files": result.data.cleared_files},
-    }
+        return _api_data(result)
+    return {"cleared_files": result.data.cleared_files}

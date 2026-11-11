@@ -1,5 +1,4 @@
 export const PREF_KEYS = {
-  theme: 'hiro.admin.theme',
   sidebarCollapsed: 'hiro.admin.sidebar.collapsed',
   selectedWorkspace: 'hiro.admin.selectedWorkspace',
   serverActiveTab: 'hiro.admin.server.activeTab',
@@ -100,7 +99,6 @@ export const PREF_KEYS = {
   knowledgeGraphOptionSections: 'hiro.admin.knowledge.graphOptionSections'
 } as const;
 
-export type ThemePreference = 'light' | 'dark';
 export type ServerTabPreference = 'workspaces' | 'gateways' | 'metrics';
 export type ChannelsDevicesTabPreference = 'channels' | 'devices';
 export type ChatChannelsTabPreference = 'channels' | 'messages';

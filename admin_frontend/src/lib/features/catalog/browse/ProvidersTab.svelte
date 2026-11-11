@@ -2,17 +2,18 @@
   import type { Snippet } from 'svelte';
   import { Filter, Plus, RefreshCw, Search, Trash2 } from '@lucide/svelte';
   import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
   import CatalogTabActions from '$lib/features/catalog/browse/CatalogTabActions.svelte';
   import type { CatalogController } from '$lib/features/catalog/state/catalog-controller.svelte';
   import ActiveProvidersAddDialog from '$lib/catalog/active-providers/active-providers-add-dialog.svelte';
   import ActiveProvidersRemoveDialog from '$lib/catalog/active-providers/active-providers-remove-dialog.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
   import ProviderFreeOffersBadge from '$lib/features/catalog/shared/ProviderFreeOffersBadge.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import Loading from '$kit/ui/loading.svelte';
+  import StatusDot from '$kit/ui/status-dot.svelte';
   import { AVAILABILITY_FILTER_UI, formatProviderKindsLabel } from '$lib/features/catalog/shared/catalog-filter-ui';
   import { ADMIN_SECTION_CARD, ADMIN_SECTION_HEADING_LG, ADMIN_TABLE_HEAD } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
@@ -103,18 +104,18 @@
 
   {#if ctrl.providersLoading && ctrl.providers.length === 0}
     <!-- See ModelsTab — keep existing rows mounted on refresh to avoid header flicker. -->
-    <InlineLoading label="Loading providers…" />
+    <Loading label="Loading providers…" />
   {:else if ctrl.providersError}
-    <InlineDestructiveAlert title="Could not load providers" message={ctrl.providersError} />
+    <Notice title="Could not load providers" message={ctrl.providersError} />
   {:else if visibleProviders.length === 0}
-    <InlineEmptyState
+    <EmptyState
       message={activeOnly ? 'No active (online) providers.' : 'No providers in the bundled catalog.'}
       hint={activeOnly ? 'Add a provider or turn off the active-only filter.' : undefined}
     />
   {:else}
     <!-- min-w is shared with ModelsTab (keep in sync) so both tabs render at the same content width
          and switching Providers↔Models doesn't jump. Sized just above the wider table's natural width. -->
-    <AdminTableShell stickyHead class={cn('min-w-[1540px]', ctrl.providersLoading && 'opacity-60 transition-opacity')}>
+    <TableShell stickyHead class={cn('min-w-[1540px]', ctrl.providersLoading && 'opacity-60 transition-opacity')}>
       <thead class={ADMIN_TABLE_HEAD}>
         <tr>
           <AdminTableHeaderCell column="online" sort={ctrl.providerSort} class="w-12 text-center">
@@ -139,31 +140,22 @@
           <tr class="border-t">
             <td class="px-2 py-3 text-center">
               {#if isOnline}
-                <span
-                  class="inline-block size-2 rounded-full {AVAILABILITY_FILTER_UI.online.circleClass}"
-                  title={AVAILABILITY_FILTER_UI.online.title}
-                  aria-hidden="true"
-                ></span>
-                <span class="sr-only">Online. </span>
+                <StatusDot tone={AVAILABILITY_FILTER_UI.online.tone} label={AVAILABILITY_FILTER_UI.online.title} />
               {:else}
-                <span
-                  class="inline-block size-2 rounded-full {AVAILABILITY_FILTER_UI.offline.circleClass}"
-                  title={AVAILABILITY_FILTER_UI.offline.title}
-                  aria-hidden="true"
-                ></span>
-                <span class="sr-only">Offline. </span>
+                <StatusDot tone={AVAILABILITY_FILTER_UI.offline.tone} label={AVAILABILITY_FILTER_UI.offline.title} />
               {/if}
             </td>
             <td class="min-w-0 px-3 py-3">
               <div class="inline-flex max-w-full items-center gap-1">
-                <button
-                  class="min-w-0 truncate text-left font-sans text-sm font-semibold text-primary hover:underline"
-                  type="button"
+                <Button
+                  variant="link"
+                  size="inline"
+                  class="min-w-0 justify-start font-semibold"
                   onclick={() => void ctrl.openModelsForProvider(provider.id)}
                   title={`View models for ${provider.display_name}`}
                 >
-                  {provider.display_name}
-                </button>
+                  <span class="truncate">{provider.display_name}</span>
+                </Button>
                 <ProviderFreeOffersBadge
                   providerDisplayName={provider.display_name}
                   offers={provider.free_offers ?? []}
@@ -177,12 +169,12 @@
                     <span class="text-muted-foreground">Checking…</span>
                   {:else if st?.result?.online}
                     {@const pulled = st.result.catalog_status.filter((m) => m.pulled).length}
-                    <span class="text-green-700 dark:text-green-500">● online</span>
+                    <span class="text-success">● online</span>
                     <span class="text-muted-foreground">
                       · {pulled}/{st.result.catalog_status.length} models pulled
                     </span>
                   {:else if st?.result}
-                    <span class="text-amber-600 dark:text-amber-500" title={st.result.error ?? ''}>
+                    <span class="text-warning" title={st.result.error ?? ''}>
                       ● offline
                     </span>
                   {:else}
@@ -223,14 +215,15 @@
                   {/each}
                 </ul>
                 {#if entries.length > 1}
-                  <button
-                    type="button"
-                    class="mt-1 text-xs font-medium text-primary hover:underline"
+                  <Button
+                    variant="link"
+                    size="sm"
+                    class="mt-1 h-auto px-0 text-xs"
                     onclick={() =>
                       (expandedRecommended = { ...expandedRecommended, [provider.id]: !expanded })}
                   >
                     {expanded ? 'Show less' : `+${entries.length - 1} more`}
-                  </button>
+                  </Button>
                 {/if}
               {:else}
                 <span class="text-xs text-muted-foreground">-</span>
@@ -281,7 +274,7 @@
         {/each}
         {@render extraRows?.(activeOnly)}
       </tbody>
-    </AdminTableShell>
+    </TableShell>
   {/if}
 </section>
 

@@ -23,6 +23,7 @@
     telemetryBreakdownTitle
   } from '$lib/features/chat-channels/messages/agent-message-meta';
   import { cn } from '$lib/utils';
+  import { CAT } from '$kit/ui/category';
 
   type Props = {
     message: ChatHistoryMessage;
@@ -111,10 +112,8 @@
             {elapsedLabel}
             animate={tokenCountAnimates}
             tooltip={tokenTooltip}
-            className={isUser ? 'text-amber-100' : 'text-emerald-700 dark:text-emerald-300'}
-            costClassName={isUser
-              ? 'font-semibold text-cyan-200'
-              : 'font-semibold text-violet-600 dark:text-violet-400'}
+            className={isUser ? 'text-primary-foreground/85' : CAT.text[6]}
+            costClassName={cn('font-semibold', isUser ? 'text-primary-foreground' : CAT.text[5])}
           />
         {/if}
         {#if message.created_at}

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ExternalLink, Gift } from '@lucide/svelte';
-  import * as Dialog from '$lib/components/ui/dialog';
-  import Button from '$lib/components/ui/button.svelte';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
   import type { CatalogProviderFreeOffer } from '$lib/api/catalog';
   import { catalogMultilineParagraphs } from '$lib/features/catalog/shared/format-catalog-multiline';
 
@@ -32,7 +32,7 @@
     type="button"
     variant="ghost"
     size="icon"
-    class="relative size-7 shrink-0 text-amber-600 hover:bg-amber-500/10 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
+    class="relative size-7 shrink-0 text-brand hover:bg-brand/10 hover:text-brand"
     title={badgeTitle}
     aria-label={`Free offers for ${providerDisplayName}`}
     onclick={(event) => {
@@ -43,7 +43,7 @@
     <Gift size={15} aria-hidden="true" />
     {#if offers.length > 1}
       <span
-        class="pointer-events-none absolute -right-0.5 -top-0.5 flex size-3.5 items-center justify-center rounded-full bg-amber-600 text-[9px] font-semibold text-white dark:bg-amber-500"
+        class="pointer-events-none absolute -right-0.5 -top-0.5 flex size-3.5 items-center justify-center rounded-full bg-brand text-[9px] font-semibold text-white"
         aria-hidden="true"
       >
         {offers.length}

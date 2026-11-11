@@ -11,6 +11,7 @@ import pytest
 
 from hirocli.domain.admin_sign_in import give_sign_in
 from hirocli.domain.events import DomainEvent, DomainEventType, get_domain_event_bus
+from hirocli.domain.extensions import add_paired_extension
 from hirocli.domain.people import add_person
 from hirocli.runtime.people_for_extensions import (
     handle_people_add,
@@ -24,8 +25,14 @@ from hirocli.runtime.request_handler import RequestRefused
 
 
 def _ctx(workspace: Path) -> SimpleNamespace:
+    # Phase 9a: people.list answers in the calling extension's terms, so the caller is a paired extension.
+    home = add_paired_extension(workspace, name="home", public_key="k", info={"name": "home"})
     server_ctx = SimpleNamespace(workspace_path=workspace, extension_manager=None)
-    return SimpleNamespace(server_ctx=server_ctx, msg=SimpleNamespace(routing=SimpleNamespace(sender_id="ext-home")))
+    return SimpleNamespace(
+        server_ctx=server_ctx,
+        workspace_path=workspace,
+        msg=SimpleNamespace(routing=SimpleNamespace(sender_id=home.extension_id)),
+    )
 
 
 def test_the_list_has_people_and_roles_without_sign_in_details(tmp_path: Path) -> None:

@@ -1,3 +1,4 @@
+import { errorMessage } from '$kit/api/client';
 import { tick, untrack } from 'svelte';
 import { listDevices, type DeviceRow } from '$lib/api/channels-devices';
 import {
@@ -13,7 +14,7 @@ import {
   type LogsLayout
 } from '$lib/api/logs';
 import { openWorkspaceFolder } from '$lib/api/server';
-import type { Notify } from '$lib/ui/toast-types';
+import type { Notify } from '$kit/ui/toast.svelte';
 import type { LogsPreferences } from '$lib/preferences/logs-preferences.svelte';
 import {
   compareLogRows,
@@ -174,7 +175,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     try {
       await reloadRows();
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to reload logs.';
+      error = errorMessage(err);
     } finally {
       loading = false;
     }
@@ -210,7 +211,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     error = null;
     try {
       const layoutPayload = await getLogsLayout();
-      const nextLayout = layoutPayload.data;
+      const nextLayout = layoutPayload;
       layout = nextLayout;
       const validSources = sourcesForLayout(nextLayout);
       const restoredSources = prefs.activeSources.filter((source) => validSources.includes(source));
@@ -224,15 +225,15 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
           discoverLogMethods(),
           listDevices()
         ]);
-        logMethods = methodsPayload.data ?? [];
-        pairedDevices = devicesPayload.data ?? [];
+        logMethods = methodsPayload ?? [];
+        pairedDevices = devicesPayload ?? [];
       } catch {
         logMethods = [];
         pairedDevices = [];
       }
       await reloadRows();
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to load logs.';
+      error = errorMessage(err);
       rows = [];
     } finally {
       loading = false;
@@ -296,8 +297,8 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     }
     const prevRowKey = rowSelection.selectedId;
     const payload = await tailLogs(buildTailRequestBody());
-    rows = withRenderKeys(payload.data.rows);
-    fileOffsets = payload.data.file_offsets;
+    rows = withRenderKeys(payload.rows);
+    fileOffsets = payload.file_offsets;
     reconcileActiveRowAfterTailReload(prevRowKey, rows);
   }
 
@@ -316,12 +317,12 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
         method: prefs.scopeMethod.trim() || undefined
       });
       if (myGen !== searchFetchGeneration) return;
-      rows = withRenderKeys(payload.data.rows);
+      rows = withRenderKeys(payload.rows);
       fileOffsets = {};
       rowSelection.select(rows[0]?._rowKey ?? null);
     } catch (err) {
       if (myGen !== searchFetchGeneration) return;
-      error = err instanceof Error ? err.message : 'Search failed.';
+      error = errorMessage(err);
       rows = [];
       rowSelection.select(null);
     } finally {
@@ -344,13 +345,13 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     try {
       const payload = await tailLogs(buildTailRequestBody(fileOffsets));
       pollError = null;
-      fileOffsets = payload.data.file_offsets;
-      if (payload.data.rows.length > 0) {
-        rows = [...rows, ...withRenderKeys(payload.data.rows, rows.length)];
+      fileOffsets = payload.file_offsets;
+      if (payload.rows.length > 0) {
+        rows = [...rows, ...withRenderKeys(payload.rows, rows.length)];
       }
       trimRowsToRollingWindow();
     } catch (err) {
-      pollError = err instanceof Error ? err.message : 'Live log polling failed.';
+      pollError = errorMessage(err);
     } finally {
       polling = false;
     }
@@ -365,7 +366,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
       try {
         await reloadRows();
       } catch (err) {
-        error = err instanceof Error ? err.message : 'Failed to reload logs.';
+        error = errorMessage(err);
       } finally {
         loading = false;
       }
@@ -397,7 +398,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     try {
       await reloadRows();
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to reload logs.';
+      error = errorMessage(err);
     } finally {
       loading = false;
     }
@@ -416,7 +417,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
       rowSelection.select(null);
       await reloadRows();
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to clear logs.';
+      error = errorMessage(err);
     } finally {
       loading = false;
       clearingLogs = false;
@@ -458,7 +459,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
     try {
       await reloadRows();
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to reload logs.';
+      error = errorMessage(err);
     } finally {
       loading = false;
     }
@@ -490,7 +491,7 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
       await openWorkspaceFolder(dir);
       notify('info', `Opening folder: ${dir}`);
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Open folder failed.');
+      notify('error', errorMessage(err));
     }
   }
 

@@ -1,13 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { RefreshCw } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import { liveStatus } from '$lib/live/status.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
-  import type { Notify } from '$lib/ui/toast-types';
+  import Notice from '$kit/ui/notice.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
+  import Loading from '$kit/ui/loading.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
+  import type { Notify } from '$kit/ui/toast.svelte';
   import { createGatewayStore } from '../state/gateway-store.svelte';
   import GatewayRow from './GatewayRow.svelte';
   import GatewayCreateDialog from '../dialogs/GatewayCreateDialog.svelte';
@@ -51,13 +51,13 @@
   </div>
 
   {#if gateway.loading}
-    <InlineLoading label="Loading gateways…" />
+    <Loading label="Loading gateways…" />
   {:else if gateway.error}
-    <InlineDestructiveAlert title="Could not load gateways" message={gateway.error} />
+    <Notice title="Could not load gateways" message={gateway.error} />
   {:else if gateway.rows.length === 0}
-    <InlineEmptyState message="No gateway instances configured yet." />
+    <EmptyState message="No gateway instances configured yet." />
   {:else}
-    <AdminTableShell layout="grid" minWidth={880} gridColumns={GATEWAY_GRID}>
+    <TableShell layout="grid" minWidth={880} gridColumns={GATEWAY_GRID}>
       {#snippet headRow()}
         <span>Name</span>
         <span>Status</span>
@@ -70,7 +70,7 @@
           <GatewayRow {row} {gateway} grid={GATEWAY_GRID} />
         {/each}
       {/snippet}
-    </AdminTableShell>
+    </TableShell>
   {/if}
 </section>
 

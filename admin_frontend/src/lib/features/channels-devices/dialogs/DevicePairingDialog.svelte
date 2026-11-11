@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Check, Copy, Link2 } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import * as Dialog from '$lib/components/ui/dialog';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
   import type { DevicesController } from '../state/devices-controller.svelte';
   import { formatDeviceTimestamp } from '../shared/channels-devices-format';
   import { sanitizePairingQrSvg } from '../shared/sanitize-pairing-qr-svg';
@@ -50,7 +50,7 @@
     <Dialog.Footer>
       <Button variant="outline" onclick={() => void ctrl.copyPairingPayload()}>
         {#if ctrl.copied}
-          <Check class="text-emerald-500" size={15} />
+          <Check class="text-success" size={15} />
         {:else}
           <Copy size={15} />
         {/if}

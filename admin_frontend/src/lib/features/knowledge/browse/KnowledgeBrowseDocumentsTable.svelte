@@ -1,8 +1,10 @@
 <script lang="ts">
   import { Search } from '@lucide/svelte';
   import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import { Checkbox } from '$kit/components/ui/checkbox/index.js';
   import type { KnowledgeDocument } from '$lib/api/knowledge';
   import { formatChatTimestamp } from '$lib/features/chat-channels/chat-datetime';
   import type { KnowledgeBrowseModel } from '$lib/features/knowledge/state/knowledge-browse.svelte';
@@ -24,8 +26,6 @@
 
   let { browse, options, onPreview, onOpenChunks }: Props = $props();
 
-  let selectAllCheckboxEl = $state<HTMLInputElement | null>(null);
-
   const documentSort = $derived(browse.documentSort);
   const selectAllCheckboxTooltip = $derived(
     browse.sortedDocuments.length === 0
@@ -34,26 +34,19 @@
         ? 'Deselect all documents'
         : 'Select all documents'
   );
-
-  $effect(() => {
-    if (selectAllCheckboxEl) {
-      selectAllCheckboxEl.indeterminate = browse.someDocumentsSelected;
-    }
-  });
 </script>
 
-<AdminTableShell stickyHead maxBodyHeight="280px">
+<TableShell stickyHead maxBodyHeight="280px">
   <thead class={KNOWLEDGE_TABLE_HEAD}>
     <tr>
       <th class="w-10 px-3 py-2">
-        <input
-          bind:this={selectAllCheckboxEl}
-          type="checkbox"
+        <Checkbox
           aria-label={selectAllCheckboxTooltip}
           title={selectAllCheckboxTooltip}
           disabled={browse.sortedDocuments.length === 0}
           checked={browse.allDocumentsSelected}
-          onchange={browse.toggleSelectAllDocuments}
+          indeterminate={browse.someDocumentsSelected}
+          onCheckedChange={browse.toggleSelectAllDocuments}
         />
       </th>
       <AdminTableHeaderCell column="title" sort={documentSort}>Title</AdminTableHeaderCell>
@@ -72,13 +65,10 @@
     {#each browse.sortedDocuments as doc (doc.id)}
       <tr class="border-t">
         <td class="px-3 py-2">
-          <input
-            type="checkbox"
+          <Checkbox
             aria-label={`Select ${doc.title}`}
             checked={!!browse.selectedDocuments[doc.id]}
-            onchange={(event) => {
-              browse.toggleDocumentSelection(doc.id, event.currentTarget.checked);
-            }}
+            onCheckedChange={(checked) => browse.toggleDocumentSelection(doc.id, checked)}
           />
         </td>
         <td class="max-w-[280px] truncate px-3 py-2 font-medium">
@@ -112,15 +102,16 @@
           {/if}
         </td>
         <td class="px-3 py-2">
-          <button
-            type="button"
-            class="rounded-sm px-1 py-0.5 font-sans text-sm tabular-nums text-primary hover:bg-primary/10 hover:underline"
+          <Button
+            variant="link"
+            size="sm"
+            class="h-auto px-1 py-0.5 font-sans text-sm tabular-nums"
             aria-label={`View chunks for ${doc.title}`}
             title={`View chunks for ${doc.title}`}
             onclick={() => void onOpenChunks(doc)}
           >
             {doc.chunk_count ?? '—'}
-          </button>
+          </Button>
         </td>
         <td class="whitespace-nowrap px-3 py-2 text-muted-foreground">
           {formatChatTimestamp(doc.ingested_at)}
@@ -142,4 +133,4 @@
       </tr>
     {/each}
   </tbody>
-</AdminTableShell>
+</TableShell>

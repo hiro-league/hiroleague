@@ -1,13 +1,13 @@
 <script lang="ts">
-  import Button from '$lib/components/ui/button.svelte';
-  import FormField from '$lib/components/ui/form-field.svelte';
-  import SectionCard from '$lib/components/page/SectionCard.svelte';
-  import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineWarningAlert from '$lib/ui/InlineWarningAlert.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import Field from '$kit/ui/field.svelte';
+  import Panel from '$kit/ui/panel.svelte';
+  import { Input } from '$kit/components/ui/input/index.js';
+  import Notice from '$kit/ui/notice.svelte';
   import type { ExtensionsController } from '../state/extensions-controller.svelte';
 
   let { ctrl }: { ctrl: ExtensionsController } = $props();
+  const uid = $props.id();
 
   const listen = $derived(ctrl.listen);
   // The running server still listens on the old address until it restarts.
@@ -16,7 +16,7 @@
   );
 </script>
 
-<SectionCard class="grid gap-4">
+<Panel class="grid gap-4">
   <div>
     <h3 class="text-lg font-semibold">Where extensions connect</h3>
     <p class="font-sans text-sm text-muted-foreground">
@@ -34,16 +34,16 @@
       {/if}
     </div>
     {#if listen.error}
-      <InlineDestructiveAlert
+      <Notice
         title="Extensions can't connect"
         message="The server couldn't listen on {listen.live_host}:{listen.port}: {listen.error}"
       />
     {/if}
     {#if restartPending}
-      <InlineWarningAlert message="Restart the server for the new address to take effect." />
+      <Notice tone="warning" message="Restart the server for the new address to take effect." />
     {/if}
     {#if listen.note}
-      <InlineWarningAlert title="Not encrypted" message={listen.note} />
+      <Notice tone="warning" title="Not encrypted" message={listen.note} />
     {/if}
   {/if}
 
@@ -54,11 +54,11 @@
       void ctrl.saveAddress();
     }}
   >
-    <FormField label="Listen address" class="md:w-72">
-      <input class={ADMIN_INPUT} bind:value={ctrl.hostDraft} placeholder="127.0.0.1" spellcheck="false" />
-    </FormField>
-    <Button type="submit" variant="outline" disabled={ctrl.busy || ctrl.hostDraft.trim() === listen?.host}>
+    <Field label="Listen address" for="{uid}-host" class="md:w-72">
+      <Input id="{uid}-host" bind:value={ctrl.host.value} placeholder="127.0.0.1" spellcheck="false" />
+    </Field>
+    <Button type="submit" variant="outline" disabled={ctrl.busy || !ctrl.host.dirty}>
       Save
     </Button>
   </form>
-</SectionCard>
+</Panel>

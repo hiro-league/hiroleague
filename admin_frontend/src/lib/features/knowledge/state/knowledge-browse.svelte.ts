@@ -1,3 +1,4 @@
+import { errorMessage } from '$kit/api/client';
 import {
   deleteKnowledgeDocument,
   getKnowledgeDocument,
@@ -118,8 +119,7 @@ export function createKnowledgeBrowseModel(deps: {
     selectedDocuments = {};
   }
 
-  function toggleSelectAllDocuments(event: Event) {
-    const checked = (event.currentTarget as HTMLInputElement).checked;
+  function toggleSelectAllDocuments(checked: boolean) {
     if (checked) selectAllDocuments();
     else deselectAllDocuments();
   }
@@ -193,8 +193,8 @@ export function createKnowledgeBrowseModel(deps: {
         title: f.kb_title,
         limit: 100
       });
-      documents = payload.data.documents;
-      documentTotal = payload.data.total;
+      documents = payload.documents;
+      documentTotal = payload.total;
       pruneDocumentSelection();
       if (!activeDocumentId && documents[0]) {
         await openDocument(documents[0].id);
@@ -202,7 +202,7 @@ export function createKnowledgeBrowseModel(deps: {
         await openDocument(activeDocumentId);
       }
     } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Could not load documents.');
+      deps.setError(errorMessage(err));
     } finally {
       loadingDocs = false;
     }
@@ -227,14 +227,14 @@ export function createKnowledgeBrowseModel(deps: {
     chunkNextOffset = null;
     try {
       const payload = await getKnowledgeDocument(documentId, { chunkLimit: KNOWLEDGE_CHUNK_FETCH_SIZE });
-      activeDocument = payload.data.document;
-      applyFetchedChunks(payload.data.chunks, payload.data.chunk_next_offset, false);
-      const apiTags = payload.data.document?.tags ?? [];
-      const chunkTags = tagsFromChunks(payload.data.chunks);
+      activeDocument = payload.document;
+      applyFetchedChunks(payload.chunks, payload.chunk_next_offset, false);
+      const apiTags = payload.document?.tags ?? [];
+      const chunkTags = tagsFromChunks(payload.chunks);
       const listTags = documents.find((document) => document.id === documentId)?.tags ?? [];
       detailTags = [...(apiTags.length > 0 ? apiTags : chunkTags.length > 0 ? chunkTags : listTags)];
     } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Could not load document.');
+      deps.setError(errorMessage(err));
     }
   }
 
@@ -246,9 +246,9 @@ export function createKnowledgeBrowseModel(deps: {
         chunkLimit: KNOWLEDGE_CHUNK_FETCH_SIZE,
         chunkOffset: chunkNextOffset
       });
-      applyFetchedChunks(payload.data.chunks, payload.data.chunk_next_offset, true);
+      applyFetchedChunks(payload.chunks, payload.chunk_next_offset, true);
     } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Could not load more chunks.');
+      deps.setError(errorMessage(err));
     } finally {
       loadingMoreChunks = false;
     }
@@ -278,7 +278,7 @@ export function createKnowledgeBrowseModel(deps: {
         }
       } catch (err) {
         failed++;
-        deps.setError(err instanceof Error ? err.message : 'Delete failed.');
+        deps.setError(errorMessage(err));
       }
     }
     if (deleted > 0) {
@@ -323,7 +323,7 @@ export function createKnowledgeBrowseModel(deps: {
         saved++;
       } catch (err) {
         failed++;
-        deps.setError(err instanceof Error ? err.message : 'Metadata update failed.');
+        deps.setError(errorMessage(err));
       }
     }
     if (saved > 0) {

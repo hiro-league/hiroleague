@@ -11,6 +11,7 @@
  */
 import { listCatalogModels, type CatalogModelRow } from '$lib/api/catalog';
 import { listPeople, type Person } from '$lib/api/people';
+import { errorMessage } from '$kit/api/client';
 import { getPreferences, patchPreferences } from '$lib/api/preferences';
 import {
   getVoiceCatalog,
@@ -63,64 +64,67 @@ export class VoiceController {
 
   load = async () => {
     this.loading = true;
+    // Step 1d: a failed request throws (answers are the data itself; there is no {ok, error} to test).
+    // Only the profiles' failure is shown; any other failed read keeps what the page had.
+    let profilesError: string | null = null;
     const [profiles, catalog, uses, people, prefs, speech] = await Promise.all([
-      listVoiceProfiles(),
-      getVoiceCatalog(),
-      listVoiceUses(),
-      listPeople(),
+      listVoiceProfiles().catch((err) => {
+        profilesError = errorMessage(err);
+        return null;
+      }),
+      getVoiceCatalog().catch(() => null),
+      listVoiceUses().catch(() => null),
+      listPeople().catch(() => null),
       // Hiro's voice lives in preferences; a failed read leaves it as it was (not "none").
       getPreferences().catch(() => null),
       // Speech models for the picker; a failed read keeps the last list.
       listCatalogModels({ model_kind: 'tts' }).catch(() => null)
     ]);
-    if (speech?.ok && speech.data)
-      this.speechModels = speech.data.models.filter((m) => m.model_kind === 'tts' && /^(google|openai):/.test(m.id));
+    if (speech)
+      this.speechModels = speech.models.filter((m) => m.model_kind === 'tts' && /^(google|openai):/.test(m.id));
     this.speechModelsLoaded = true;
-    if (prefs?.ok && prefs.data) this.hiroProfile = prefs.data.preferences.voice?.hiro_profile ?? null;
+    if (prefs) this.hiroProfile = prefs.preferences.voice?.hiro_profile ?? null;
     this.loading = false;
-    this.error = !profiles.ok ? (profiles.error ?? 'Voice profiles could not be read.') : null;
-    if (profiles.ok && profiles.data) this.profiles = profiles.data.profiles;
-    if (catalog.ok && catalog.data) this.catalog = catalog.data;
-    if (uses.ok && uses.data) this.uses = uses.data;
-    if (people.ok && people.data) this.people = people.data.people.filter((p) => !!p.whatsapp);
+    this.error = profilesError;
+    if (profiles) this.profiles = profiles.profiles;
+    if (catalog) this.catalog = catalog;
+    if (uses) this.uses = uses;
+    if (people) this.people = people.people.filter((p) => !!p.whatsapp);
   };
 
-  /** Save a profile (new: `id` null → an id from its name). The answer is the error, or null. */
-  save = async (id: string | null, fields: VoiceProfileFields): Promise<{ id: string } | { error: string }> => {
+  /** Save a profile (new: `id` null → an id from its name). Resolves with its id; a refused save throws. */
+  save = async (id: string | null, fields: VoiceProfileFields): Promise<string> => {
     const pid = id ?? voiceProfileId(fields.label, new Set(this.profiles.map((p) => p.id)));
-    const res = await patchPreferences({ [`voice.profiles.${pid}`]: fields });
-    if (!res.ok) return { error: res.error ?? 'Not saved.' };
+    await patchPreferences({ [`voice.profiles.${pid}`]: fields });
     await this.load();
-    return { id: pid };
+    return pid;
   };
 
-  /** Delete a profile: the whole map without it, and the uses that pointed at it cleared. */
-  remove = async (id: string): Promise<string | null> => {
+  /** Delete a profile: the whole map without it, and the uses that pointed at it cleared. A refused delete throws. */
+  remove = async (id: string): Promise<void> => {
     const rest = Object.fromEntries(this.profiles.filter((p) => p.id !== id).map((p) => [p.id, fieldsOf(p)]));
     const uses = Object.fromEntries(
       this.uses.extensions.flatMap((e) => e.uses.map((u) => [u.key, u.profile_id === id ? null : u.profile_id]))
     );
     // Phase 7b step 5: Hiro's voice can't name a missing profile; it goes to none with it.
     const hiro = this.hiroProfile === id ? { 'voice.hiro_profile': null } : {};
-    const res = await patchPreferences({ 'voice.profiles': rest, 'voice.uses': uses, ...hiro });
-    if (!res.ok) return res.error ?? 'Not deleted.';
+    await patchPreferences({ 'voice.profiles': rest, 'voice.uses': uses, ...hiro });
     await this.load();
-    return null;
   };
 
   /** Phase 7b step 5: Hiro's own voice (`voice.hiro_profile`); null = Hiro doesn't speak its replies.
-   *  The answer is the error, or null. */
-  setHiroProfile = async (profileId: string | null): Promise<string | null> => {
-    // patchPreferences answers { ok, error } rather than throwing: a refused save must not look saved.
-    const res = await patchPreferences({ 'voice.hiro_profile': profileId });
-    if (!res.ok) return res.error ?? 'Not saved.';
+   *  A refused save throws, and must not look saved. */
+  setHiroProfile = async (profileId: string | null): Promise<void> => {
+    await patchPreferences({ 'voice.hiro_profile': profileId });
     this.hiroProfile = profileId;
-    return null;
   };
 
   setUse = async (key: string, profileId: string | null): Promise<string | null> => {
-    const res = await setVoiceUse(key, profileId);
-    if (!res.ok) return res.error ?? 'Not saved.';
+    try {
+      await setVoiceUse(key, profileId);
+    } catch (err) {
+      return errorMessage(err);
+    }
     await this.load();
     return null;
   };

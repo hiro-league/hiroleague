@@ -1,11 +1,11 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { RefreshCw } from '@lucide/svelte';
-  import SectionCard from '$lib/components/page/SectionCard.svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import Panel from '$kit/ui/panel.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import Notice from '$kit/ui/notice.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
+  import Loading from '$kit/ui/loading.svelte';
 
   type Props = {
     title: string;
@@ -34,7 +34,7 @@
   }: Props = $props();
 </script>
 
-<SectionCard class="grid gap-4">
+<Panel class="grid gap-4">
   <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
     <div>
       <h3 class="text-lg font-semibold">{title}</h3>
@@ -46,12 +46,12 @@
   </div>
 
   {#if loading}
-    <InlineLoading label={loadingLabel} />
+    <Loading label={loadingLabel} />
   {:else if error}
-    <InlineDestructiveAlert title={errorTitle} message={error} />
+    <Notice title={errorTitle} message={error} />
   {:else if empty}
-    <InlineEmptyState message={emptyMessage} />
+    <EmptyState message={emptyMessage} />
   {:else}
     {@render children?.()}
   {/if}
-</SectionCard>
+</Panel>

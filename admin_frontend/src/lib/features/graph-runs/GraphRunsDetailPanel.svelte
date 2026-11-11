@@ -408,13 +408,13 @@
       /* Stay pinned beside the page-scrolled nodes table (top matches the sticky chrome offset). */
       position: sticky;
       top: calc(
-        4rem + var(--admin-page-header-h, 0px) + var(--admin-page-sticky-toolbar-h, 0px) + 0.75rem
+        var(--app-top, 0px) + var(--page-header, 0px) + var(--sticky-bar, 0px) + 0.75rem
       );
       min-height: 340px;
       /* Fill the viewport height left below the sticky chrome (grows as the header compacts on
          scroll-up). Trailing 1.5rem = the 0.75rem sticky-top gap + 0.75rem bottom breathing room. */
       max-height: calc(
-        100dvh - 4rem - var(--admin-page-header-h, 0px) - var(--admin-page-sticky-toolbar-h, 0px) -
+        100dvh - var(--app-top, 0px) - var(--page-header, 0px) - var(--sticky-bar, 0px) -
           1.5rem
       );
     }

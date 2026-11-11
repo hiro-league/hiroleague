@@ -200,7 +200,7 @@
 
       {#if note}
         <!-- Perf heads-up for very large lists: the list still searches/scrolls all of them. -->
-        <p class="mt-1 rounded-sm bg-amber-500/10 px-2 py-1 text-xs text-amber-600 dark:text-amber-400">
+        <p class="mt-1 rounded-sm bg-warning/10 px-2 py-1 text-xs text-warning">
           {note}
         </p>
       {/if}

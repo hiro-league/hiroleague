@@ -1,30 +1,29 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
-  import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
-  import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
+  import PageHeader from '$kit/ui/page-header.svelte';
+  import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
+  import PageTabs from '$kit/ui/page-tabs.svelte';
+  import type { PageTab } from '$kit/ui/page-tabs.svelte';
   import { createServerPreferences } from '$lib/preferences/server-preferences.svelte';
   import type { ServerTabPreference } from '$lib/preferences/keys';
   import { isFeatureActive } from '$lib/shell/features';
-  import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
-  import ToastHost from '$lib/ui/ToastHost.svelte';
+  import { toast } from '$kit/ui/toast.svelte';
   import MetricsTab from '$lib/features/metrics/MetricsTab.svelte';
   import GatewaysTab from './view/GatewaysTab.svelte';
   import WorkspacesTab from './view/WorkspacesTab.svelte';
 
   const prefs = createServerPreferences();
-  const toasts = createToastNotifier();
 
   // The Gateways and Metrics subtabs are each gated by their feature (features.ts). When hidden a
   // tab is dropped here and from the allowed-tab whitelist (server-preferences), so a hidden
   // `?tab=gateways`/`?tab=metrics` falls back to the default (Workspaces) tab.
-  const tabDescriptors: readonly AdminTabDescriptor<ServerTabPreference>[] = [
+  const tabDescriptors: readonly PageTab<ServerTabPreference>[] = [
     { id: 'workspaces', label: 'Workspaces', kind: 'pane' },
     ...(isFeatureActive('gateway')
-      ? [{ id: 'gateways', label: 'Gateways', kind: 'pane' } as AdminTabDescriptor<ServerTabPreference>]
+      ? [{ id: 'gateways', label: 'Gateways', kind: 'pane' } as PageTab<ServerTabPreference>]
       : []),
     ...(isFeatureActive('metrics')
-      ? [{ id: 'metrics', label: 'Metrics', kind: 'pane' } as AdminTabDescriptor<ServerTabPreference>]
+      ? [{ id: 'metrics', label: 'Metrics', kind: 'pane' } as PageTab<ServerTabPreference>]
       : [])
   ];
 
@@ -33,23 +32,25 @@
   });
 </script>
 
-<AdminPageHeader kicker="Server operations" title="Server" sticky>
-  {#snippet tabs()}
-    <AdminTabStrip
-      ariaLabel="Server sections"
+<section class={ADMIN_PAGE_MAX_W}>
+  <PageHeader title="Server">
+    {#snippet tabs()}
+    <PageTabs
+      label="Server sections"
       tabs={tabDescriptors}
-      active={prefs.activeTab}
-      onSelect={(id) => prefs.setActiveTab(id)}
+      value={prefs.activeTab}
+      onchange={(id) => prefs.setActiveTab(id)}
     />
-  {/snippet}
+    {/snippet}
+  </PageHeader>
+  
 
   {#if prefs.activeTab === 'gateways' && isFeatureActive('gateway')}
-    <GatewaysTab notify={toasts.notify} />
+    <GatewaysTab notify={toast.show} />
   {:else if prefs.activeTab === 'metrics' && isFeatureActive('metrics')}
-    <MetricsTab notify={toasts.notify} />
+    <MetricsTab notify={toast.show} />
   {:else}
-    <WorkspacesTab notify={toasts.notify} />
+    <WorkspacesTab notify={toast.show} />
   {/if}
-</AdminPageHeader>
+</section>
 
-<ToastHost toast={toasts.toast} />

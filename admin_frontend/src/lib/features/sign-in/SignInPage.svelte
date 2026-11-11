@@ -9,17 +9,19 @@
    * ?signin_error= says why the last try didn't work.
    */
   import { base } from '$app/paths';
+  import { Action } from '$kit/state/action.svelte';
   import { page } from '$app/state';
   import { House, LogIn, TriangleAlert } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import FormField from '$lib/components/ui/form-field.svelte';
-  import { Input } from '$lib/components/ui/input';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import Field from '$kit/ui/field.svelte';
+  import { Input } from '$kit/components/ui/input/index.js';
   import { backToAppUrl, offeredSignInUrl } from '$lib/api/auth';
   import { adminSession } from '$lib/runtime/admin-session.svelte';
 
+  const uid = $props.id();
   let name = $state('');
   let password = $state('');
-  let busy = $state(false);
+  const signing = new Action();
   let error = $state<string | null>(null);
 
   const forApp = $derived(page.url.searchParams.get('for'));
@@ -31,9 +33,8 @@
   async function submit(event: SubmitEvent) {
     event.preventDefault();
     if (!name.trim() || !password) return;
-    busy = true;
-    error = await adminSession.signIn(name.trim(), password);
-    busy = false;
+    const refused = await signing.run(() => adminSession.signIn(name.trim(), password));
+    error = refused || signing.error || null;
     if (error) {
       password = '';
     } else if (forApp) {
@@ -63,7 +64,7 @@
     {/if}
 
     {#if !adminSession.anyoneSignsIn}
-      <div class="grid gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 text-sm">
+      <div class="grid gap-2 rounded-lg border border-warning/30 bg-warning/5 p-4 text-sm">
         <p class="font-semibold">Nobody can sign in yet.</p>
         <p class="text-muted-foreground">On the computer that runs Hiro, set the owner's sign-in:</p>
         <code class="rounded bg-muted px-2 py-1 font-mono text-xs">hiro people owner</code>
@@ -86,16 +87,16 @@
         </div>
       {/if}
       <form class="grid gap-4" onsubmit={submit}>
-        <FormField label="Name">
-          <Input bind:value={name} autocomplete="username" autocapitalize="none" spellcheck={false} required />
-        </FormField>
-        <FormField label="Password">
-          <Input bind:value={password} type="password" autocomplete="current-password" required />
-        </FormField>
+        <Field label="Name" for="{uid}-name">
+          <Input id="{uid}-name" bind:value={name} autocomplete="username" autocapitalize="none" spellcheck={false} required />
+        </Field>
+        <Field label="Password" for="{uid}-password">
+          <Input id="{uid}-password" bind:value={password} type="password" autocomplete="current-password" required />
+        </Field>
         {#if error}
           <p class="text-sm text-destructive" role="alert">{error}</p>
         {/if}
-        <Button type="submit" disabled={busy || !name.trim() || !password}>
+        <Button type="submit" disabled={signing.busy || !name.trim() || !password}>
           <LogIn size={15} /> Sign in
         </Button>
       </form>

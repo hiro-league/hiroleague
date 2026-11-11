@@ -10,16 +10,17 @@
    */
   import { Copy, Pencil, Plus, RotateCcw, Trash2 } from '@lucide/svelte';
   import FieldHelp from '$lib/components/ui/field-help.svelte';
-  import SourceFilter, { type SourceOption } from '$lib/components/page/SourceFilter.svelte';
-  import SectionCard from '$lib/components/page/SectionCard.svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import Segmented from '$kit/ui/segmented.svelte';
+  import Panel from '$kit/ui/panel.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
-  import Badge from '$lib/components/ui/badge.svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import * as Dialog from '$lib/components/ui/dialog';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
+  import ConfirmDialog from '$kit/ui/confirm-dialog.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
+  import Loading from '$kit/ui/loading.svelte';
   import { ADMIN_SECTION_HEADING_LG } from '$lib/styling/admin-tokens';
   import AiProfileEditorDialog from './AiProfileEditorDialog.svelte';
   import type { AiController } from './ai-controller.svelte';
@@ -53,11 +54,11 @@
   const extensions = $derived(ai.useGroups.map((g) => g.extension).filter((e) => e !== HIRO));
   const isUnused = (id: string) => !ai.usedBy(id).length && !ai.jobsUsing(id).length;
   const unused = $derived(ai.profiles.filter((p) => isUnused(p.id)));
-  const sourceOptions = $derived<SourceOption[]>([
-    { id: 'all', label: 'All', count: ai.profiles.length },
-    { id: HIRO, label: 'Hiro', count: ai.profiles.filter((p) => sourcesOf(p.id).has(HIRO)).length },
-    ...extensions.map((e) => ({ id: e, label: e, count: ai.profiles.filter((p) => sourcesOf(p.id).has(e)).length })),
-    { id: 'unused', label: 'Unused', count: unused.length }
+  const sourceOptions = $derived([
+    { value: 'all', label: 'All', count: ai.profiles.length },
+    { value: HIRO, label: 'Hiro', count: ai.profiles.filter((p) => sourcesOf(p.id).has(HIRO)).length },
+    ...extensions.map((e) => ({ value: e, label: e, count: ai.profiles.filter((p) => sourcesOf(p.id).has(e)).length })),
+    { value: 'unused', label: 'Unused', count: unused.length }
   ]);
   const shownProfiles = $derived(
     source === 'all' ? ai.profiles : source === 'unused' ? unused : ai.profiles.filter((p) => sourcesOf(p.id).has(source))
@@ -75,7 +76,7 @@
   });
 </script>
 
-<SectionCard class="grid gap-4">
+<Panel class="grid gap-4">
   <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
     <div>
       <h3 class={ADMIN_SECTION_HEADING_LG}>AI profiles</h3>
@@ -86,19 +87,19 @@
     </div>
     <div class="flex flex-wrap items-center gap-2">
       <!-- Hiro's profiles, each extension's, or the unused ones — never all mixed unless asked. -->
-      <SourceFilter options={sourceOptions} value={source} onchange={(id) => (source = id)} />
+      <Segmented class="flex-wrap" label="Show profiles for" options={sourceOptions} value={source} onchange={(id) => (source = id)} />
       <Button onclick={() => ai.newProfile()}><Plus size={15} /> New profile</Button>
     </div>
   </div>
 
   {#if ai.profilesLoading && ai.profiles.length === 0}
-    <InlineLoading label="Loading AI profiles…" />
+    <Loading label="Loading AI profiles…" />
   {:else if ai.profilesError}
-    <InlineDestructiveAlert title="Could not load AI profiles" message={ai.profilesError} />
+    <Notice title="Could not load AI profiles" message={ai.profilesError} />
   {:else if ai.profiles.length === 0}
-    <InlineEmptyState message="No AI profiles yet." hint="Make one with New profile." />
+    <EmptyState message="No AI profiles yet." hint="Make one with New profile." />
   {:else}
-    <AdminTableShell layout="grid" minWidth={1260} gridColumns={GRID}>
+    <TableShell layout="grid" minWidth={1260} gridColumns={GRID}>
       {#snippet headRow()}
         <span>Name</span>
         <span>Model</span>
@@ -143,7 +144,7 @@
               </span>
               <span class="truncate text-xs text-muted-foreground">{profile.server?.providerLabel || found.provider?.label || 'Unknown provider'}</span>
               {#if notReady}
-                <span class="text-xs text-amber-700 dark:text-amber-300">{notReady}</span>
+                <span class="text-xs text-warning">{notReady}</span>
               {/if}
             </span>
             <span class="text-sm">{thinkingWords(profile.thinking)}</span>
@@ -153,7 +154,7 @@
               {#if share !== null}
                 <span class="h-1.5 w-full max-w-48 overflow-hidden rounded-full bg-muted" aria-hidden="true">
                   <span
-                    class="block h-full rounded-full {share >= 0.9 ? 'bg-destructive' : share >= 0.6 ? 'bg-amber-500' : 'bg-primary'}"
+                    class="block h-full rounded-full {share >= 0.9 ? 'bg-destructive' : share >= 0.6 ? 'bg-warning' : 'bg-primary'}"
                     style:width="{Math.round(share * 100)}%"
                   ></span>
                 </span>
@@ -178,7 +179,7 @@
                   <RotateCcw size={13} /> Restore default
                 </Button>
               {:else}
-                <Button size="sm" variant="destructive-outline" onclick={() => ai.askDelete(profile.id)}>
+                <Button size="sm" variant="destructive" onclick={() => ai.askDelete(profile.id)}>
                   <Trash2 size={13} /> Delete
                 </Button>
               {/if}
@@ -186,13 +187,13 @@
           </div>
         {/each}
       {/snippet}
-    </AdminTableShell>
+    </TableShell>
   {/if}
-</SectionCard>
+</Panel>
 
 <AiProfileEditorDialog {ai} />
 
-<Dialog.ConfirmDialog
+<ConfirmDialog
   open={!!deleting}
   onOpenChange={(next) => {
     if (!next) ai.cancelDelete();
@@ -204,7 +205,7 @@
   onConfirm={() => ai.confirmDelete()}
 />
 
-<Dialog.ConfirmDialog
+<ConfirmDialog
   open={!!restoringProfile}
   onOpenChange={(next) => {
     if (!next) ai.cancelRestore();

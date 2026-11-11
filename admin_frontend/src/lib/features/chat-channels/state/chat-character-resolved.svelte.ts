@@ -1,3 +1,4 @@
+import { errorMessage } from '$kit/api/client';
 import { getCharacterResolved, type CharacterResolvedPayload } from '$lib/api/characters';
 import type { ChatChannelRow } from '$lib/api/chat-channels';
 import {
@@ -46,15 +47,15 @@ export function createChatCharacterResolved(opts: ChatCharacterResolvedOptions) 
     try {
       const res = await getCharacterResolved(cid);
       if (seq !== fetchSeq) return;
-      payload = res.data;
+      payload = res;
       error = null;
-      if (!characterResolvedAllowsVoiceRequest(res.data)) {
+      if (!characterResolvedAllowsVoiceRequest(res)) {
         uiPrefs.clearVoiceReplyTransient();
       }
     } catch (e) {
       if (seq !== fetchSeq) return;
       payload = null;
-      error = e instanceof Error ? e.message : 'Request failed.';
+      error = errorMessage(e);
       uiPrefs.clearVoiceReplyTransient();
     } finally {
       if (seq === fetchSeq) loading = false;

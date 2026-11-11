@@ -1,3 +1,4 @@
+import { errorMessage } from '$kit/api/client';
 import {
   answerKnowledge,
   isAnswerCompareData,
@@ -122,15 +123,15 @@ export function createKnowledgeAskModel(deps: {
       // Server returns one of two shapes depending on graph_mode — use the type
       // guard to populate the right slot. The opposite-slot cache stays so
       // toggling modes doesn't blow away the other view.
-      if (isAnswerCompareData(payload.data)) {
-        compareResult = payload.data;
-        writePersistedKnowledgeAskCompareResult(payload.data);
+      if (isAnswerCompareData(payload)) {
+        compareResult = payload;
+        writePersistedKnowledgeAskCompareResult(payload);
       } else {
-        answerResult = payload.data;
-        writePersistedKnowledgeAskResult(payload.data);
+        answerResult = payload;
+        writePersistedKnowledgeAskResult(payload);
       }
     } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Ask failed.');
+      deps.setError(errorMessage(err));
     } finally {
       searching = false;
     }

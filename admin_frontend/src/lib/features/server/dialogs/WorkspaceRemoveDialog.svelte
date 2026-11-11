@@ -1,5 +1,6 @@
 <script lang="ts">
-  import ConfirmDialog from '$lib/components/ui/dialog/ConfirmDialog.svelte';
+  import { Checkbox } from '$kit/components/ui/checkbox/index.js';
+  import ConfirmDialog from '$kit/ui/confirm-dialog.svelte';
   import type { createWorkspaceStore } from '../state/workspace-store.svelte';
 
   let { workspace }: { workspace: ReturnType<typeof createWorkspaceStore> } = $props();
@@ -19,7 +20,7 @@
 >
   {#snippet children()}
     <label class="flex items-center gap-2 font-sans text-sm">
-      <input type="checkbox" bind:checked={workspace.removeForm.purge} />
+      <Checkbox bind:checked={workspace.removeForm.purge} />
       Also delete workspace folder from disk
     </label>
   {/snippet}

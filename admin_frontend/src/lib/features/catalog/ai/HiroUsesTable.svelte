@@ -7,12 +7,13 @@
    * extensions' groups. A job can't use a plan tool's model (claude_code:* / codex:*), so those
    * profiles aren't offered.
    */
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
-  import Badge from '$lib/components/ui/badge.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
   import { isPlanModel } from '$lib/catalog/hiro-jobs';
-  import { ADMIN_SELECT } from '$lib/styling/admin-tokens';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import PickSelect from '$kit/ui/pick-select.svelte';
+  import { Action } from '$kit/state/action.svelte';
   import { cn } from '$lib/utils';
   import type { VoiceController } from '$lib/features/catalog/voice/voice-controller.svelte';
   import type { AiController } from './ai-controller.svelte';
@@ -30,8 +31,7 @@
   };
 
   const jobProfiles = $derived(ai.profiles.filter((p) => !isPlanModel(p.model)));
-  let voiceError = $state<string | null>(null);
-  let voiceBusy = $state(false);
+  const pickHiroVoice = new Action();
 
   function modelWords(model: string | null): string {
     if (!model) return '';
@@ -61,9 +61,7 @@
   const hiroVoice = $derived(voice.profiles.find((p) => p.id === voice.hiroProfile));
 
   async function pickVoice(id: string) {
-    voiceBusy = true;
-    voiceError = await voice.setHiroProfile(id || null);
-    voiceBusy = false;
+    await pickHiroVoice.run(() => voice.setHiroProfile(id || null));
   }
 </script>
 
@@ -76,7 +74,7 @@
       The core's own work. Each job asks with one AI profile; not set, it borrows the profile of the job it falls back to.
     </p>
   </div>
-  <AdminTableShell layout="grid" minWidth={900} gridColumns={GRID}>
+  <TableShell layout="grid" minWidth={900} gridColumns={GRID}>
     {#snippet headRow()}
       <span>Job</span>
       <span>Needs</span>
@@ -95,27 +93,26 @@
             {/each}
           </span>
           <span>
-            <select
-              class={cn(ADMIN_SELECT, 'w-full')}
-              aria-label={`Profile for ${job.label}`}
+            <PickSelect
+              class="h-9 w-full text-sm"
+              label={`Profile for ${job.label}`}
               value={job.profileId ?? ''}
-              disabled={ai.jobBusy[job.id]}
-              onchange={(event) => void ai.setJobProfile(job.id, event.currentTarget.value)}
-            >
-              <option value="">Not set</option>
-              {#each jobProfiles as p (p.id)}
-                <option value={p.id}>{p.name}</option>
-              {/each}
-              {#if !known}<option value={job.profileId}>{job.profileId} (missing)</option>{/if}
-            </select>
+              disabled={ai.jobBusy(job.id)}
+              options={[
+                { value: '', label: 'Not set' },
+                ...jobProfiles.map((p) => ({ value: p.id, label: p.name })),
+                ...(!known && job.profileId ? [{ value: job.profileId, label: `${job.profileId} (missing)` }] : [])
+              ]}
+              onchange={(v) => void ai.setJobProfile(job.id, v)}
+            />
           </span>
-          <span class={cn('text-sm', n.warn ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground')}>
+          <span class={cn('text-sm', n.warn ? 'text-warning' : 'text-muted-foreground')}>
             {n.text}
           </span>
         </div>
       {/each}
     {/snippet}
-  </AdminTableShell>
+  </TableShell>
 
   <div class="mt-3">
     <h4 class="font-sans text-base font-semibold text-primary">
@@ -125,8 +122,8 @@
       The voice profile Hiro speaks its voice replies with. A character with voice profiles of its own speaks with those first.
     </p>
   </div>
-  {#if voiceError}<InlineDestructiveAlert message={voiceError} />{/if}
-  <AdminTableShell layout="grid" minWidth={900} gridColumns={GRID}>
+  {#if pickHiroVoice.error}<Notice message={pickHiroVoice.error} />{/if}
+  <TableShell layout="grid" minWidth={900} gridColumns={GRID}>
     {#snippet headRow()}
       <span>Use</span>
       <span>Needs</span>
@@ -138,24 +135,23 @@
         <span class="font-sans text-sm font-semibold">Hiro's voice</span>
         <span><Badge variant="secondary">a voice clip</Badge></span>
         <span>
-          <select
-            class={cn(ADMIN_SELECT, 'w-full')}
-            aria-label="Voice for Hiro's voice replies"
+          <PickSelect
+            class="h-9 w-full text-sm"
+            label="Voice for Hiro's voice replies"
             value={voice.hiroProfile ?? ''}
-            disabled={voiceBusy}
-            onchange={(e) => void pickVoice(e.currentTarget.value)}
-          >
-            <option value="">None</option>
-            {#each voice.profiles as vp (vp.id)}<option value={vp.id}>{vp.label}</option>{/each}
-            {#if voice.hiroProfile && !hiroVoice}
-              <option value={voice.hiroProfile}>{voice.hiroProfile} (missing)</option>
-            {/if}
-          </select>
+            disabled={pickHiroVoice.busy}
+            options={[
+              { value: '', label: 'None' },
+              ...voice.profiles.map((vp) => ({ value: vp.id, label: vp.label })),
+              ...(voice.hiroProfile && !hiroVoice ? [{ value: voice.hiroProfile, label: `${voice.hiroProfile} (missing)` }] : [])
+            ]}
+            onchange={(v) => void pickVoice(v)}
+          />
         </span>
         <span class="text-sm text-muted-foreground">
           {#if hiroVoice}{hiroVoice.line}{:else}Hiro doesn't speak its replies until a voice is picked.{/if}
         </span>
       </div>
     {/snippet}
-  </AdminTableShell>
+  </TableShell>
 </div>

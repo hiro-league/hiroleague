@@ -1,5 +1,7 @@
 import { tick } from 'svelte';
 import { uploadCharacterPhoto } from '$lib/api/characters';
+import type { Action } from '$kit/state/action.svelte';
+import { errorMessage } from '$kit/api/client';
 
 type NotifyKind = 'success' | 'error' | 'info' | 'warning';
 
@@ -7,10 +9,11 @@ type NotifyKind = 'success' | 'error' | 'info' | 'warning';
 export function createCharactersPhotoCrop(opts: {
   getCharacterId: () => string;
   notify: (kind: NotifyKind, message: string) => void;
-  setBusy: (busy: boolean) => void;
+  /** The upload in progress (busy, error); shared with the page's other server changes. */
+  work: Action;
   onAfterPhotoUpload: () => Promise<void>;
 }) {
-  const { getCharacterId, notify, setBusy, onAfterPhotoUpload } = opts;
+  const { getCharacterId, notify, work, onAfterPhotoUpload } = opts;
 
   let avatarCropModalOpen = $state(false);
   let cropZoom = $state(1);
@@ -58,7 +61,7 @@ export function createCharactersPhotoCrop(opts: {
       };
       img.src = dataUrl;
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Failed to read image file.');
+      notify('error', errorMessage(err));
     }
   }
 
@@ -84,17 +87,13 @@ export function createCharactersPhotoCrop(opts: {
     const canvas = cropCanvas;
     const characterId = getCharacterId().trim();
     if (!canvas || !characterId) return;
-    setBusy(true);
-    try {
+    await work.run(async () => {
       const payload = await uploadCharacterPhoto(characterId, canvas.toDataURL('image/png'));
-      notify('success', `Photo updated (${payload.data}).`);
+      notify('success', `Photo updated (${payload}).`);
       avatarCropModalOpen = false;
       await onAfterPhotoUpload();
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Upload failed.');
-    } finally {
-      setBusy(false);
-    }
+    });
+    if (work.error) notify('error', work.error);
   }
 
   function dismissCropModal() {

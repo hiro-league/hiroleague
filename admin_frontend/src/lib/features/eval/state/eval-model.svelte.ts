@@ -9,6 +9,7 @@
  * on mount we subscribe (so an in-flight run keeps streaming) then hydrate from the server, which
  * makes the panel survive navigation mid-run and show the SAME run across origins (Vite vs packaged).
  */
+import { errorMessage } from '$kit/api/client';
 import { runKnowledgeEval } from '$lib/api/eval';
 import { buildEvalRunRequest } from '$lib/features/eval/shared/eval-request';
 import { EVAL_ALL_LEGS } from '$lib/features/eval/shared/eval-legs';
@@ -199,12 +200,12 @@ export function createEvalModel(deps: { setError: (message: string | null) => vo
         questionConcurrency: setup.questionConcurrency
       });
       const res = await runKnowledgeEval(req);
-      run.setRunId(res.data.run_id);
+      run.setRunId(res.run_id);
       // Auto-disarm the Clear Graph wipe as soon as an ingest run is accepted: the next batch must
       // NOT silently wipe the graph we just built. The flag is per-run; users opt in again per wipe.
       if (track === 'memory' && ingesting && setup.clearBefore) setup.disarmClearBefore();
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to start eval run.';
+      const message = errorMessage(err);
       run.markFailed(message);
       deps.setError(message);
     }

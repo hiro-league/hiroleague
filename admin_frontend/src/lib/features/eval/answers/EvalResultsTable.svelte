@@ -6,8 +6,9 @@
 -->
 <script lang="ts">
   import { ChevronRight, CircleSlash, Flag, LoaderCircle } from '@lucide/svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Checkbox } from '$kit/components/ui/checkbox/index.js';
   import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
   import type { TableSortController } from '$lib/components/page/table/use-table-sort.svelte';
   import Highlight from '$lib/search/Highlight.svelte';
@@ -86,8 +87,6 @@
     bulkTextTick
   }: Props = $props();
 
-  let selectAllCheckboxEl = $state<HTMLInputElement | null>(null);
-
   const selectAllCheckboxTooltip = $derived(
     filteredCount === 0
       ? 'No filtered questions'
@@ -95,21 +94,13 @@
         ? 'Deselect all filtered questions'
         : 'Select all filtered questions'
   );
-
-  $effect(() => {
-    if (selectAllCheckboxEl) {
-      selectAllCheckboxEl.indeterminate = someFilteredSelected;
-    }
-  });
 </script>
 
 <!-- Judge recall-sufficiency flag — green = sufficient, rose = miss; nothing when not judged. -->
 {#snippet recallFlag(sufficient: boolean | undefined)}
   {#if sufficient !== undefined}
     <span
-      class="inline-flex {sufficient
-        ? 'text-emerald-600 dark:text-emerald-400'
-        : 'text-rose-600 dark:text-rose-400'}"
+      class="inline-flex {sufficient ? 'text-success' : 'text-destructive'}"
       title={sufficient
         ? 'Recall sufficient — the recalled facts/entities/episodes contained what was needed to answer'
         : 'Recall miss — the needed fact was not in the recalled context'}
@@ -122,19 +113,18 @@
 {/snippet}
 
 <!-- No overflow wrapper on the shell: a scroll container would trap the sticky header. -->
-<AdminTableShell stickyHead stickyTop={EVAL_ANSWERS_TABLE_STICKY_TOP}>
+<TableShell stickyHead stickyTop={EVAL_ANSWERS_TABLE_STICKY_TOP}>
   <thead class={ADMIN_TABLE_HEAD}>
     <tr>
       <th class="w-10 px-3 py-2 text-center">
-        <input
-          bind:this={selectAllCheckboxEl}
-          type="checkbox"
+        <Checkbox
           class="size-3.5"
           aria-label={selectAllCheckboxTooltip}
           title={selectAllCheckboxTooltip}
           disabled={selectAllDisabled || filteredCount === 0}
           checked={allFilteredSelected}
-          onchange={onToggleSelectAllFiltered}
+          indeterminate={someFilteredSelected}
+          onCheckedChange={() => onToggleSelectAllFiltered()}
         />
       </th>
       <th class="px-3 py-2 text-left">#</th>
@@ -192,11 +182,10 @@
       {@const isExpanded = expandedRows.has(r.index)}
       <tr class="border-t align-top {eval_.isSelected(r.id) ? 'bg-primary/5' : ''}">
         <td class="px-3 py-1.5 text-center">
-          <input
-            type="checkbox"
+          <Checkbox
             class="size-3.5"
             checked={eval_.isSelected(r.id)}
-            onchange={() => eval_.toggleQuestion(r.id)}
+            onCheckedChange={() => eval_.toggleQuestion(r.id)}
             title="Select for run"
             aria-label="Select question for run"
           />
@@ -346,4 +335,4 @@
       </tr>
     {/if}
   </tbody>
-</AdminTableShell>
+</TableShell>

@@ -1,8 +1,9 @@
 <script lang="ts">
+  import { errorMessage } from '$kit/api/client';
   import { Copy } from '@lucide/svelte';
   import DetailPanelShell from '$lib/components/page/DetailPanelShell.svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import type { Notify } from '$lib/ui/toast-types';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import type { Notify } from '$kit/ui/toast.svelte';
   import LogExtraSegments from './LogExtraSegments.svelte';
   import { LOGS_DETAIL_PANEL_ID } from './shared/logs-a11y';
   import { logLevelTextClass, logModuleTextClass } from './shared/logs-classes';
@@ -36,7 +37,7 @@
     } catch (err) {
       onNotify(
         'error',
-        err instanceof Error ? err.message : 'Could not copy log details.'
+        errorMessage(err)
       );
     }
   }

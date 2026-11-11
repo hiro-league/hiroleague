@@ -1,49 +1,76 @@
 <script lang="ts">
-  /** People (Phase 6): one family list in the core, read by extensions such as HomeHiro. */
-  import { onMount } from 'svelte';
+  /**
+   * People (Phase 6): one family list in the core, read by extensions such as HomeHiro.
+   * Phase 9a: two tabs — People (the list) and Roles (what each role may do in HiroLeague and each app).
+   */
   import { UserPlus } from '@lucide/svelte';
-  import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
-  import SectionCard from '$lib/components/page/SectionCard.svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import ConfirmDialog from '$lib/components/ui/dialog/ConfirmDialog.svelte';
-  import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
-  import ToastHost from '$lib/ui/ToastHost.svelte';
+  import { page } from '$app/state';
+  import PageHeader from '$kit/ui/page-header.svelte';
+  import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
+  import Panel from '$kit/ui/panel.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import ConfirmDialog from '$kit/ui/confirm-dialog.svelte';
+  import { toast } from '$kit/ui/toast.svelte';
   import PersonDialog from './dialogs/PersonDialog.svelte';
   import SignInDialog from './dialogs/SignInDialog.svelte';
   import { createPeopleController } from './state/people-controller.svelte';
   import PeopleListCard from './view/PeopleListCard.svelte';
-  import RolesCard from './view/RolesCard.svelte';
+  import PageTabs from '$kit/ui/page-tabs.svelte';
+  import NewRoleDialog from './dialogs/NewRoleDialog.svelte';
+  import { createRolesController } from './state/roles-controller.svelte';
+  import RolesTab from './view/RolesTab.svelte';
 
-  const toasts = createToastNotifier();
-  const ctrl = createPeopleController(toasts.notify);
+  // Phase 9a: an app's Edit link opens People → Roles at one role (?tab=roles&role=kid).
+  const asked = page.url.searchParams;
+  const ctrl = createPeopleController(toast.show);
+  // A role added, renamed or removed changes the People tab's role names too.
+  const roles = createRolesController(toast.show, () => ctrl.load(), asked.get('role'));
 
-  onMount(() => {
-    void ctrl.load();
-  });
+  let tab = $state<'people' | 'roles'>(asked.get('tab') === 'roles' ? 'roles' : 'people');
+  const tabDescriptors = [
+    { id: 'people' as const, label: 'People' },
+    { id: 'roles' as const, label: 'Roles' }
+  ];
 </script>
 
-<AdminPageHeader
-  kicker="Core"
-  title="People"
-  subtitle="The family: who they are, what Hiro calls them, how to reach them, their role. HomeHiro reads this list."
->
+<section class={ADMIN_PAGE_MAX_W}>
+  <PageHeader title="People" description="The family: who they are, what Hiro calls them, how to reach them, their role. HomeHiro reads this list.">
+    {#snippet tabs()}
+    <PageTabs label="People sections" tabs={tabDescriptors} value={tab} onchange={(id) => (tab = id)} />
+    {/snippet}
+  </PageHeader>
+  
+  {#if tab === 'roles'}
+    <RolesTab ctrl={roles} people={ctrl.people} />
+  {:else}
   <section class="grid gap-4">
-    <SectionCard class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+    <Panel class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
       <p class="font-sans text-sm text-muted-foreground">
         One sign-in for HiroLeague and its apps: a password given here, or Home Assistant's login while Home
-        is connected. Roles below say who can open HiroLeague's settings.
+        is connected. Roles says what each role may do here and in each app.
       </p>
       <Button disabled={ctrl.busy} onclick={() => ctrl.openAdd()}>
         <UserPlus size={15} /> Add person
       </Button>
-    </SectionCard>
+    </Panel>
     <PeopleListCard {ctrl} />
-    <!-- Phase 8: one switch per role, "Can open HiroLeague's settings". -->
-    <RolesCard {ctrl} />
   </section>
-</AdminPageHeader>
+  {/if}
+</section>
 
 <PersonDialog {ctrl} />
+<NewRoleDialog ctrl={roles} />
+<ConfirmDialog
+  open={roles.removeTarget !== null}
+  onOpenChange={(next) => {
+    if (!next) roles.removeTarget = null;
+  }}
+  title="Remove the role {roles.removeTarget?.name ?? ''}?"
+  message="It goes from HiroLeague and every app. Nobody has it, so nobody loses access."
+  confirmLabel="Remove"
+  pending={roles.busy}
+  onConfirm={() => void roles.submitRemove()}
+/>
 <SignInDialog {ctrl} />
 <ConfirmDialog
   open={ctrl.removeTarget !== null}
@@ -67,4 +94,3 @@
   pending={ctrl.busy}
   onConfirm={() => void ctrl.submitRemoveSignIn()}
 />
-<ToastHost toast={toasts.toast} />

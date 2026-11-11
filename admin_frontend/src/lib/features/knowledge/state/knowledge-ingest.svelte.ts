@@ -1,3 +1,4 @@
+import { errorMessage } from '$kit/api/client';
 import {
   ingestKnowledge,
   listKnowledgeDocuments,
@@ -151,7 +152,7 @@ export function createKnowledgeIngestModel(deps: {
       // overflow simply doesn't get auto-graphed (they can re-ingest later).
       const pathSet = new Set(paths.map((p) => p.replace(/\\/g, '/')));
       const docs = await listKnowledgeDocuments({ limit: 500 });
-      const docIds = docs.data.documents
+      const docIds = docs.documents
         .filter((d) => pathSet.has(String(d.source_uri).replace(/\\/g, '/')))
         .map((d) => d.id);
       if (docIds.length === 0) {
@@ -160,11 +161,11 @@ export function createKnowledgeIngestModel(deps: {
         return;
       }
       const result = await runKnowledgeGraphIngestBatch(docIds);
-      graphBuildResult = result.data;
+      graphBuildResult = result;
       graphBuildStatus = 'completed';
     } catch (err) {
       graphBuildStatus = 'failed';
-      graphBuildError = err instanceof Error ? err.message : 'Graph build failed.';
+      graphBuildError = errorMessage(err);
     }
   }
 
@@ -183,8 +184,8 @@ export function createKnowledgeIngestModel(deps: {
   async function loadJobs() {
     try {
       const payload = await listKnowledgeJobs(10);
-      recentJobs = payload.data.jobs;
-      const running = payload.data.jobs.find((item) => item.status === 'running');
+      recentJobs = payload.jobs;
+      const running = payload.jobs.find((item) => item.status === 'running');
       if (running && !job) {
         job = {
           job_id: running.id,
@@ -194,7 +195,7 @@ export function createKnowledgeIngestModel(deps: {
         };
       }
     } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Could not load knowledge jobs.');
+      deps.setError(errorMessage(err));
     }
   }
 
@@ -215,13 +216,13 @@ export function createKnowledgeIngestModel(deps: {
     deps.setError(null);
     try {
       const payload = await pickKnowledgeFolder(folder.trim() || undefined);
-      if (payload.data.folder) {
-        folder = payload.data.folder;
+      if (payload.folder) {
+        folder = payload.folder;
         persistFolder(folder);
         await scan();
       }
     } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Folder picker failed.');
+      deps.setError(errorMessage(err));
     } finally {
       pickingFolder = false;
     }
@@ -247,7 +248,7 @@ export function createKnowledgeIngestModel(deps: {
     try {
       await openWorkspaceFolder(path);
     } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Open folder failed.');
+      deps.setError(errorMessage(err));
     }
   }
 
@@ -258,11 +259,11 @@ export function createKnowledgeIngestModel(deps: {
     try {
       persistFolder();
       const payload = await scanKnowledgeFolder(folder.trim(), true);
-      files = payload.data.files;
+      files = payload.files;
       selected = {};
       hasScanned = true;
     } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Folder scan failed.');
+      deps.setError(errorMessage(err));
     } finally {
       scanning = false;
     }
@@ -297,9 +298,9 @@ export function createKnowledgeIngestModel(deps: {
         selectedPaths,
         buildIngestMetadata({ ownerKind, ownerId, categoryId, subcategoryId, tags: ingestTags })
       );
-      applyJobUpdate(payload.data);
+      applyJobUpdate(payload);
     } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Ingest failed.');
+      deps.setError(errorMessage(err));
       lastOwnedIngestPaths = [];  // ingest failed → don't trigger graph build later
     } finally {
       ingesting = false;
@@ -311,10 +312,10 @@ export function createKnowledgeIngestModel(deps: {
     deps.setError(null);
     try {
       const payload = await reingestKnowledgeDocument(documentId);
-      applyJobUpdate(payload.data);
-      return payload.data;
+      applyJobUpdate(payload);
+      return payload;
     } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Re-ingest failed.');
+      deps.setError(errorMessage(err));
       return null;
     } finally {
       ingesting = false;
@@ -380,9 +381,9 @@ export function createKnowledgeIngestModel(deps: {
         subcategory_id: params.subcategory_id ?? null,
         tags: Array.isArray(params.tags) ? params.tags : []
       });
-      applyJobUpdate(payload.data);
+      applyJobUpdate(payload);
     } catch (err) {
-      deps.setError(err instanceof Error ? err.message : 'Retry failed.');
+      deps.setError(errorMessage(err));
     } finally {
       ingesting = false;
     }

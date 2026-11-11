@@ -125,15 +125,22 @@ NOTIFY_MAX_RECIPIENTS: int = 10
 
 # Phase 6: the family lives in the core.
 #   people.list      extension → core, {} → {"people": [{person_id, name, calls_them, whatsapp,
-#                    role_id}], "roles": [{role_id, name, built_in}]}. whatsapp = digits with the
-#                    country code ("" = none); calls_them "" = their name. What a role may do inside
-#                    an extension is the extension's own.
+#                    role_id}], "roles": [{role_id, name, built_in, says, rights}]}. whatsapp = digits with the
+#                    country code ("" = none); calls_them "" = their name.
 #   people.add       extension → core, {name, role_id, calls_them?, whatsapp?} → {"person": {...}}
 #   people.update    extension → core, {person_id, name?, role_id?, calls_them?, whatsapp?}
 #                    → {"person": {...}}; a field left out stays as it is.
 #   roles.add        extension → core, {name} → {"role": {...}}
 #   roles.rename     extension → core, {role_id, name} → {"role": {...}}
 #   roles.remove     extension → core, {role_id} → {} (refused while someone has it)
+#   Phase 9a: each role in people.list also carries ``says`` (one line on what it is for) and ``rights``: the
+#                    right keys ("<feature>.<right>") the core grants it in the calling extension, from the features
+#                    the extension declared (ExtensionInfo.features; hiro_channel_sdk.access checks them).
+#   roles.import_rights extension → core, {roles: {role_id: {rights: [...], says?: str}}} → {"imported": [role_id]}:
+#                    once, an extension's own grants from before Phase 9a; only fills roles the core has no rights
+#                    for in this extension yet (and an empty ``says``), never overwrites what the admin set.
+#                    Or {copy_from: "<another extension's name>"} (Phase 9b): an app taking features over from another
+#                    gets, for each role with none here yet, its rights there in the features this app declares.
 #   people.changed   core → every connected extension, an event with {}: read people.list again.
 #                    Events aren't queued: an extension also reads the list when it connects.
 #   A refused change answers error code "invalid_params" with the reason for people.
@@ -143,6 +150,7 @@ METHOD_PEOPLE_UPDATE: str = "people.update"
 METHOD_ROLES_ADD: str = "roles.add"
 METHOD_ROLES_RENAME: str = "roles.rename"
 METHOD_ROLES_REMOVE: str = "roles.remove"
+METHOD_ROLES_IMPORT_RIGHTS: str = "roles.import_rights"
 EVENT_PEOPLE_CHANGED: str = "people.changed"
 
 # core.info answers {name, version, workspace, admin_port, repo}: admin_port (Phase 7b) is the core's admin web port, so
@@ -213,6 +221,18 @@ AUTH_CODE_SECONDS: int = 60
 #                     its ExtensionInfo.repo ("" = not said). Extensions only.
 METHOD_EXTENSIONS_LIST: str = "extensions.list"
 CORE_REPO: str = "hiroleague"
+
+# Phase 9b: extensions ask each other, through the core (never directly).
+#   An extension offers what it answers in ExtensionInfo.offers: `knows` (questions) and `can_do` (actions), each
+#   {"method": "<its request method>", "name": "...", "says": "..."}, and answers them with register_request().
+#   extensions.ask  extension -> core, {to: "<extension name>", method, params?, timeout?} -> the asked extension's
+#                   answer as it is. The core passes it on only when `to` is connected and offers `method`; the
+#                   asked extension gets params plus ASKED_BY ("<asker's name>"). Errors: not_connected (to isn't
+#                   connected), not_offered (to doesn't offer method), timeout, and the asked extension's own errors.
+METHOD_EXTENSIONS_ASK: str = "extensions.ask"
+ASKED_BY: str = "_asked_by"  # added to the params the asked extension gets: who asked
+ASK_ERROR_NOT_OFFERED: str = "not_offered"
+ASK_TIMEOUT_MAX_SECONDS: float = 60.0
 
 # An app's LAN name, set up by the core (docs/site-names-design.md in hiroleague). The extension's address setting
 # claims a name; the core checks it is free, publishes it on the LAN (mDNS) and points the web proxy at the port the

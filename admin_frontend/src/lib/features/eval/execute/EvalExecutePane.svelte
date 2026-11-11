@@ -8,7 +8,8 @@
 <script lang="ts">
   import { base } from '$app/paths';
   import { Download, LoaderCircle, Play, Settings2, Square } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import { Checkbox } from '$kit/components/ui/checkbox/index.js';
   import KnowledgeCollapsibleSectionCard from '$lib/features/knowledge/shared/KnowledgeCollapsibleSectionCard.svelte';
   import EvalTerminal from '$lib/features/eval/view/EvalTerminal.svelte';
   import EvalRebuildConfirmDialog from '$lib/features/eval/view/EvalRebuildConfirmDialog.svelte';
@@ -247,7 +248,7 @@
       class="flex select-none items-center gap-2 font-sans text-sm {isBusy ? 'opacity-50' : 'cursor-pointer'}"
       title="Wipe this corpus's prior graph, then rebuild it from the ingested chunks. Leave off to reuse the existing graph."
     >
-      <input type="checkbox" class="size-4" bind:checked={eval_.buildGraph} disabled={isBusy} />
+      <Checkbox bind:checked={eval_.buildGraph} disabled={isBusy} />
       <span>Rebuild graph</span>
     </label>
   {:else}
@@ -282,9 +283,7 @@
         ? 'Clear the graph before ingesting (WARNING: deletes every previously ingested episode for this corpus)'
         : 'No graph to clear yet — ingest first'}
     >
-      <input
-        type="checkbox"
-        class="size-4"
+      <Checkbox
         bind:checked={eval_.clearBefore}
         disabled={isBusy || !eval_.selectedCorpusHasGraph}
       />
@@ -325,9 +324,7 @@
       ? 'Select questions to enable the LLM judge'
       : 'Grade each answer against the ideal with the LLM judge (off = recall results only)'}
   >
-    <input
-      type="checkbox"
-      class="size-4"
+    <Checkbox
       bind:checked={eval_.judge}
       disabled={isBusy || eval_.selectedCount === 0}
     />

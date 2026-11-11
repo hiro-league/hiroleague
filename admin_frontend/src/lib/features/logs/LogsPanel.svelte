@@ -1,13 +1,12 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { page } from '$app/state';
-  import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
-  import AdminMasterDetail from '$lib/components/page/table/AdminMasterDetail.svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import * as Dialog from '$lib/components/ui/dialog';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineWarningAlert from '$lib/ui/InlineWarningAlert.svelte';
-  import type { ToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
+  import StickyBar from '$kit/ui/sticky-bar.svelte';
+  import MasterDetail from '$kit/ui/master-detail.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
+  import Notice from '$kit/ui/notice.svelte';
+  import type { Notify } from '$kit/ui/toast.svelte';
   import type { LogsPageController } from './state/logs-controller.svelte';
   import type { LogsPreferences } from '$lib/preferences/logs-preferences.svelte';
   import LogsDetailPanel from './LogsDetailPanel.svelte';
@@ -25,7 +24,7 @@
     ctrl,
     prefs,
     notify
-  }: { ctrl: LogsPageController; prefs: LogsPreferences; notify: ToastNotifier['notify'] } = $props();
+  }: { ctrl: LogsPageController; prefs: LogsPreferences; notify: Notify } = $props();
 
   // Auto-follow new logs only while pinned to the very top (newest-first feed); once
   // the user scrolls down to read, stop yanking them back to the top.
@@ -39,7 +38,7 @@
   // toolbar always keeps a real, nonzero height — removing one row reliably re-fires
   // ResizeObserver, so we can read the published var directly without gating on the flag.
   const tableStickyTop = $derived(
-    `calc(4rem + var(--admin-page-header-h, 0px) + var(--admin-page-sticky-toolbar-h, 0px))`
+    `calc(var(--app-top, 0px) + var(--page-header, 0px) + var(--sticky-bar, 0px))`
   );
   const detailStickyTop = $derived(`calc(${tableStickyTop} + 0.75rem)`);
   // Fixed height (not just max-height) so the panel always fills the visible page
@@ -98,21 +97,21 @@
      remains visible and sticky even when filters are collapsed; only the second line
      (secondary filters) collapses. The collapse chevron sits at the far right of the
      first line and targets the second line's region via aria-controls. -->
-<AdminPageStickyToolbar>
+<StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
   <LogsToolbar {prefs} {ctrl} onRequestClearLogs={requestClearLogs}>
     {#snippet filters()}
       <LogsFiltersPanel {prefs} {ctrl} />
     {/snippet}
   </LogsToolbar>
-</AdminPageStickyToolbar>
+</StickyBar>
 
 {#if ctrl.error}
-  <InlineDestructiveAlert message={ctrl.error} class="px-3 py-2 text-sm" />
+  <Notice message={ctrl.error} class="px-3 py-2 text-sm" />
 {:else if ctrl.pollError}
-  <InlineWarningAlert message={ctrl.pollError} class="px-3 py-2 text-sm" />
+  <Notice tone="warning" message={ctrl.pollError} class="px-3 py-2 text-sm" />
 {/if}
 
-<AdminMasterDetail bind:detailOpen={prefs.detailPanelOpen} scroll="page">
+<MasterDetail bind:detailOpen={prefs.detailPanelOpen} scroll="page">
   {#snippet list()}
     <LogsTablePanel
       {ctrl}
@@ -138,7 +137,7 @@
       style="top: {detailStickyTop}; height: {detailHeight};"
     />
   {/snippet}
-</AdminMasterDetail>
+</MasterDetail>
 
 <Dialog.Root
   open={clearLogsConfirmOpen}

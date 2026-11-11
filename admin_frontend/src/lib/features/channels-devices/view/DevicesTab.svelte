@@ -1,8 +1,8 @@
 <script lang="ts">
   import { Link2, Link2Off } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import SectionCard from '$lib/components/page/SectionCard.svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import Panel from '$kit/ui/panel.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import DevicePairingDialog from '../dialogs/DevicePairingDialog.svelte';
   import DeviceRevokeDialog from '../dialogs/DeviceRevokeDialog.svelte';
@@ -16,7 +16,7 @@
 </script>
 
 <section class="grid gap-4">
-  <SectionCard class="grid gap-4">
+  <Panel class="grid gap-4">
     <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
       <div>
         <h3 class="text-lg font-semibold">Pair new device</h3>
@@ -28,7 +28,7 @@
         <Link2 size={15} /> Generate pairing code
       </Button>
     </div>
-  </SectionCard>
+  </Panel>
 
   <RefreshableSectionCard
     title="Approved devices"
@@ -41,7 +41,7 @@
     emptyMessage="No paired devices. Use the button above to generate a pairing code."
     onRefresh={() => void ctrl.load()}
   >
-    <AdminTableShell layout="grid" minWidth={920} gridColumns={DEVICE_GRID} stickyHead>
+    <TableShell layout="grid" minWidth={920} gridColumns={DEVICE_GRID} stickyHead>
       {#snippet headRow()}
         <span>Name</span>
         <span>Device ID</span>
@@ -78,7 +78,7 @@
           </div>
         {/each}
       {/snippet}
-    </AdminTableShell>
+    </TableShell>
   </RefreshableSectionCard>
 </section>
 

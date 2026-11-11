@@ -1,11 +1,11 @@
 <script lang="ts">
   /**
    * Graph Runs second-level strip: ledger list + dynamic run inspectors + toolbar.
-   * Primary pill tabs live in `<AdminPageHeader tabs>`.
+   * Primary pill tabs live in the page header's `tabs`.
    */
   import { ChevronDown, ChevronUp, RefreshCw, X } from '@lucide/svelte';
-  import AdminSubtabStrip from '$lib/components/page/AdminSubtabStrip.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import Subtabs from '$kit/ui/subtabs.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import { cn } from '$lib/utils';
   import {
     graphRunTabId,
@@ -51,7 +51,7 @@
   ] as const;
 </script>
 
-<AdminSubtabStrip
+<Subtabs
   ariaLabel={GRAPH_RUNS_SUBTAB_TABLIST_LABEL}
   tabs={browseTab}
   active={activePane}
@@ -139,4 +139,4 @@
       </Button>
     {/if}
   {/snippet}
-</AdminSubtabStrip>
+</Subtabs>

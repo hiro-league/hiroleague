@@ -12,14 +12,14 @@
   import { onMount } from 'svelte';
   import { afterNavigate } from '$app/navigation';
   import { FolderSearch, LoaderCircle, RefreshCw } from '@lucide/svelte';
-  import AdminSubtabStrip from '$lib/components/page/AdminSubtabStrip.svelte';
-  import type { AdminSubtabDescriptor } from '$lib/components/page/tab-types';
+  import Subtabs from '$kit/ui/subtabs.svelte';
+  import type { SubtabDescriptor } from '$kit/ui/subtabs-types';
   import { ADMIN_SHELL_STICKY_BLEED } from '$lib/styling/admin-tokens';
   import { setupStickyHeightVar } from '$lib/styling/sticky-height';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
   import { createEvalSubtabPreferences } from '$lib/preferences/eval-preferences.svelte';
   import type { EvalSubtabPreference } from '$lib/preferences/keys';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import EvalCorpusReview from '$lib/features/eval/view/EvalCorpusReview.svelte';
   import EvalClearResultsConfirmDialog from '$lib/features/eval/view/EvalClearResultsConfirmDialog.svelte';
   import EvalSwitchCorpusConfirmDialog from '$lib/features/eval/view/EvalSwitchCorpusConfirmDialog.svelte';
@@ -27,6 +27,7 @@
   import EvalCorpusPane from '$lib/features/eval/corpus/EvalCorpusPane.svelte';
   import EvalAnswersPane from '$lib/features/eval/answers/EvalAnswersPane.svelte';
   import EvalReportPane from '$lib/features/eval/report/EvalReportPane.svelte';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import GraphRunsRetrievalTraceDialog from '$lib/features/graph-runs/GraphRunsRetrievalTraceDialog.svelte';
   import GraphRunsIngestTraceDialog from '$lib/features/graph-runs/GraphRunsIngestTraceDialog.svelte';
   import { ingestState } from '$lib/features/eval/shared/eval-display';
@@ -35,8 +36,8 @@
   import { createEvalTraces } from '$lib/features/eval/state/eval-traces.svelte';
   import { getPreferences, type WorkspacePreferences } from '$lib/api/preferences';
   import type { EvalModel } from '$lib/features/eval/state/eval-model.svelte';
-  import type { ToastKind } from '$lib/ui/toast-types';
-  import { ADMIN_INPUT, ADMIN_SELECT } from '$lib/styling/admin-tokens';
+  import type { ToastKind } from '$kit/ui/toast.svelte';
+  import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
 
   interface Props {
@@ -60,7 +61,7 @@
   async function loadPrefs() {
     try {
       const res = await getPreferences();
-      prefs = res.data.preferences;
+      prefs = res.preferences;
     } catch {
       prefs = null; // non-fatal — the panes still work without the params strip
     }
@@ -93,7 +94,7 @@
   const activeSubtab = $derived(subPrefs.activeTab);
   const selectSubtab = (id: EvalSubtabPreference) => void subPrefs.setActiveTab(id);
   afterNavigate(() => subPrefs.syncActiveTabFromUrl());
-  const subtabs = $derived<AdminSubtabDescriptor<EvalSubtabPreference>[]>([
+  const subtabs = $derived<SubtabDescriptor<EvalSubtabPreference>[]>([
     { id: 'execute', label: 'Execute' },
     ...(cfg.hasCorpusReview
       ? [{ id: 'corpus' as const, label: 'Corpus', count: eval_.selectedCorpus?.item_count }]
@@ -189,10 +190,10 @@
 <section class="grid gap-4">
   <!-- Error banners — above the sub-tabs so transport/scan failures stay visible. -->
   {#if eval_.status === 'failed' && eval_.failureMessage}
-    <InlineDestructiveAlert title="Eval run failed" message={eval_.failureMessage} />
+    <Notice title="Eval run failed" message={eval_.failureMessage} />
   {/if}
   {#if eval_.corpusesError}
-    <InlineDestructiveAlert message={eval_.corpusesError} />
+    <Notice message={eval_.corpusesError} />
   {/if}
 
   <!-- Corpus selector — shared context for every sub-tab. Scrolls away normally; only the sub-tab
@@ -236,40 +237,30 @@
     {#if eval_.benchmarks.length > 0}
       <label class="flex select-none items-center gap-2 font-sans text-sm">
         <span class="text-muted-foreground">Benchmark</span>
-        <select
-          class={cn(ADMIN_SELECT, 'h-8 min-w-40 disabled:opacity-50')}
+        <PickSelect
+          class="h-8 min-w-40 text-sm"
+          label="Benchmark"
           value={eval_.selectedBenchmarkId}
-          onchange={(e) => onBenchmarkChange(e.currentTarget.value)}
+          onchange={onBenchmarkChange}
           disabled={isBusy}
-        >
-          {#each eval_.benchmarks as b (b.id)}
-            <option value={b.id}>{b.label}</option>
-          {/each}
-        </select>
+          options={eval_.benchmarks.map((b) => ({ value: b.id, label: b.label }))}
+        />
       </label>
     {/if}
     <label class="flex select-none items-center gap-2 font-sans text-sm">
       <span class="text-muted-foreground">Corpus</span>
-      <select
-        class={cn(ADMIN_SELECT, 'h-8 min-w-48 disabled:opacity-50')}
+      <PickSelect
+        class="h-8 min-w-48 text-sm"
+        label="Corpus"
         value={eval_.selectedCorpusId}
-        onchange={(e) => void requestSelectCorpus(e.currentTarget.value)}
+        onchange={(v) => void requestSelectCorpus(v)}
         disabled={isBusy || eval_.visibleCorpuses.length === 0}
-      >
-        {#if eval_.visibleCorpuses.length === 0}
-          <option value="">No corpuses found</option>
-        {:else if cfg.tracksIngestion}
-          {#each eval_.visibleCorpuses as c (c.id)}
-            <option value={c.id} title={ingestState(c).word}>
-              {ingestState(c).dot} {c.label ?? c.name}
-            </option>
-          {/each}
-        {:else}
-          {#each eval_.visibleCorpuses as c (c.id)}
-            <option value={c.id}>{c.label ?? c.name}</option>
-          {/each}
-        {/if}
-      </select>
+        options={eval_.visibleCorpuses.length === 0
+          ? [{ value: '', label: 'No corpuses found' }]
+          : cfg.tracksIngestion
+            ? eval_.visibleCorpuses.map((c) => ({ value: c.id, label: `${ingestState(c).dot} ${c.label ?? c.name}`, title: ingestState(c).word }))
+            : eval_.visibleCorpuses.map((c) => ({ value: c.id, label: c.label ?? c.name }))}
+      />
     </label>
   </div>
 
@@ -277,9 +268,9 @@
   <div
     bind:this={subtabsEl}
     class="sticky z-10 bg-background/95 py-1 backdrop-blur supports-[backdrop-filter]:bg-background/85 {ADMIN_SHELL_STICKY_BLEED}"
-    style="top: calc(4rem + var(--admin-page-header-h, 0px) + var(--admin-page-sticky-toolbar-h, 0px));"
+    style="top: calc(var(--app-top, 0px) + var(--page-header, 0px) + var(--sticky-bar, 0px));"
   >
-    <AdminSubtabStrip
+    <Subtabs
       ariaLabel="Eval section"
       tabs={subtabs}
       active={activeSubtab}

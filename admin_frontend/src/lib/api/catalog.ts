@@ -1,4 +1,4 @@
-import { apiRequest, type ApiResponse } from './client';
+import { apiRequest } from './client';
 
 /** Preset voice id for a provider's bundled TTS API (matches catalog.yaml tts_voices). */
 export type CatalogTtsVoiceRow = {
@@ -119,17 +119,17 @@ function queryString(params: Record<string, string | undefined>) {
   return text ? `?${text}` : '';
 }
 
-export async function listCatalogProviders(hosting?: string): Promise<ApiResponse<CatalogProviderRow[]>> {
+export async function listCatalogProviders(hosting?: string): Promise<CatalogProviderRow[]> {
   return apiRequest<CatalogProviderRow[]>(`/catalog/providers${queryString({ hosting })}`);
 }
 
 export async function listCatalogModels(
   filters: CatalogModelFilters = {}
-): Promise<ApiResponse<CatalogModelsResponse>> {
+): Promise<CatalogModelsResponse> {
   return apiRequest<CatalogModelsResponse>(`/catalog/models${queryString(filters)}`);
 }
 
-export async function reloadModelCatalog(): Promise<ApiResponse<CatalogReloadData>> {
+export async function reloadModelCatalog(): Promise<CatalogReloadData> {
   return apiRequest<CatalogReloadData>('/catalog/reload', { method: 'POST' });
 }
 
@@ -157,7 +157,7 @@ export async function listLocalCatalogModels(modelKind?: string): Promise<Catalo
   const payload = await apiRequest<{ models: LocalModelApiRow[] }>(
     `/catalog/local-models${queryString({ model_kind: modelKind })}`
   );
-  return (payload.data.models ?? []).map((m) => ({
+  return (payload.models ?? []).map((m) => ({
     id: m.id,
     provider_id: m.provider_id,
     display_name: m.display_name,
@@ -178,11 +178,11 @@ export async function listLocalCatalogModels(modelKind?: string): Promise<Catalo
   }));
 }
 
-export async function listActiveProviders(): Promise<ApiResponse<ActiveProviderRow[]>> {
+export async function listActiveProviders(): Promise<ActiveProviderRow[]> {
   return apiRequest<ActiveProviderRow[]>('/providers');
 }
 
-export async function listAddableProviders(): Promise<ApiResponse<AddableProviderRow[]>> {
+export async function listAddableProviders(): Promise<AddableProviderRow[]> {
   return apiRequest<AddableProviderRow[]>('/providers/addable');
 }
 
@@ -232,7 +232,7 @@ export type ProviderCheckResult = {
 export async function checkProviderEndpoint(
   providerId: string,
   baseUrl?: string
-): Promise<ApiResponse<ProviderCheckResult>> {
+): Promise<ProviderCheckResult> {
   return apiRequest<ProviderCheckResult>('/providers/check', {
     method: 'POST',
     body: {
@@ -242,11 +242,11 @@ export async function checkProviderEndpoint(
   });
 }
 
-export async function scanProviderEnvironment(): Promise<ApiResponse<number>> {
+export async function scanProviderEnvironment(): Promise<number> {
   return apiRequest<number>('/providers/scan-env', { method: 'POST' });
 }
 
-export async function removeProvider(providerId: string): Promise<ApiResponse<boolean>> {
+export async function removeProvider(providerId: string): Promise<boolean> {
   return apiRequest<boolean>(`/providers/${encodeURIComponent(providerId)}`, {
     method: 'DELETE'
   });

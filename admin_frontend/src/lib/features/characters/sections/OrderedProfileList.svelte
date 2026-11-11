@@ -6,9 +6,8 @@
    * Empty means Hiro's own: its chat profile / its voice. Replaced the catalog model pickers.
    */
   import { ArrowDown, ArrowUp, ExternalLink, Plus, X } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import { ADMIN_SELECT } from '$lib/styling/admin-tokens';
-  import { cn } from '$lib/utils';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import { moveInList } from '$lib/features/characters/shared/characters-pure';
   import type { ProfileOption } from '$lib/features/characters/shared/profile-option';
 
@@ -48,10 +47,10 @@
           <span class="font-sans text-sm font-semibold">{option?.label ?? id}</span>
           {#if option}
             <span class="truncate text-xs text-muted-foreground" title={option.line}>{option.line}</span>
-            {#if option.note}<span class="text-xs text-amber-700 dark:text-amber-300">{option.note}</span>{/if}
+            {#if option.note}<span class="text-xs text-warning">{option.note}</span>{/if}
           {:else}
             <!-- Deleted in Catalog → Profiles since: skipped when it's this one's turn; remove it here. -->
-            <span class="text-xs text-amber-700 dark:text-amber-300">No {noun} "{id}" any more: it is skipped.</span>
+            <span class="text-xs text-warning">No {noun} "{id}" any more: it is skipped.</span>
           {/if}
         </span>
         <Button
@@ -86,19 +85,21 @@
     {/each}
   </ol>
   <div class="flex flex-wrap items-center gap-2">
-    <select
-      class={cn(ADMIN_SELECT, 'w-64')}
-      aria-label={`Add ${noun}`}
-      bind:value={adding}
+    <PickSelect
+      class="h-9 w-64 text-sm"
+      label={`Add ${noun}`}
+      value={adding}
+      onchange={(v) => (adding = v)}
       disabled={disabled || addable.length === 0}
-    >
-      <option value="">{addable.length ? `Add ${kind === 'ai' ? 'an' : 'a'} ${noun}…` : `No other ${noun}s`}</option>
-      {#each addable as option (option.id)}<option value={option.id}>{option.label}</option>{/each}
-    </select>
+      options={[
+        { value: '', label: addable.length ? `Add ${kind === 'ai' ? 'an' : 'a'} ${noun}…` : `No other ${noun}s` },
+        ...addable.map((option) => ({ value: option.id, label: option.label }))
+      ]}
+    />
     <Button size="sm" variant="outline" disabled={disabled || !adding} onclick={add}><Plus size={13} /> Add</Button>
     <a
       class="inline-flex items-center gap-1 font-sans text-xs text-primary hover:underline"
-      href={kind === 'ai' ? '/catalog/?tab=profiles' : '/catalog/?tab=voices'}
+      href={kind === 'ai' ? '/catalog?tab=profiles' : '/catalog?tab=voices'}
       >Edit in Catalog → Profiles <ExternalLink size={11} aria-hidden="true" /></a
     >
   </div>

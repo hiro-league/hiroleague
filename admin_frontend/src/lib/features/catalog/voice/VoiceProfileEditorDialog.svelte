@@ -7,18 +7,23 @@
    * right. A profile whose designed voice Google no longer has says so. Designing a voice happens inside
    * the Voice section (My voices), as in HomeHiro. Saved through the preferences API (`voice.profiles`).
    */
+  import { untrack } from 'svelte';
   import type { CatalogProviderRow } from '$lib/api/catalog';
+  import { Action } from '$kit/state/action.svelte';
+  import { Draft } from '$kit/state/draft.svelte';
   import { Copy, Trash2, TriangleAlert } from '@lucide/svelte';
-  import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import * as Dialog from '$lib/components/ui/dialog';
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import Section from '$kit/ui/section.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
+  import { Input } from '$kit/components/ui/input/index.js';
+  import { Textarea } from '$kit/components/ui/textarea/index.js';
+  import Field from '$kit/ui/field.svelte';
   import SingleModelPicker from '$lib/features/preferences/SingleModelPicker.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import PickSelect from '$kit/ui/pick-select.svelte';
+  import SliderField from '$kit/ui/slider-field.svelte';
   import type { VoiceProfileFields, VoiceProfileRow } from '$lib/api/voice';
-  import { ADMIN_SELECT } from '$lib/styling/admin-tokens';
-  import { cn } from '$lib/utils';
   import GeminiVoicePicker from './GeminiVoicePicker.svelte';
   import VoiceTryIt from './VoiceTryIt.svelte';
   import { fieldsOf, type VoiceController } from './voice-controller.svelte';
@@ -42,6 +47,8 @@
     onsaved?: (id: string) => void;
   } = $props();
 
+  const uid = $props.id();
+
   const NEW: VoiceProfileFields = {
     label: 'New voice profile',
     model: 'google:gemini-3.8-flash-tts',
@@ -50,13 +57,27 @@
     style: '',
     speed: 1
   };
-  let d = $state<VoiceProfileFields>({ ...NEW });
-  let base = $state('');
+  // The profile being edited. It asks nothing on leaving the page (the dialog has no unsaved-changes question).
+  const form = new Draft<VoiceProfileFields>(
+    { ...NEW },
+    {
+      guard: false,
+      save: async (fields) => {
+        const id = await ctrl.save(editingId, { ...fields, speed: fields.model.startsWith('openai:') ? fields.speed : 1 });
+        open = false;
+        onsaved?.(id);
+      }
+    }
+  );
+  const d = $derived(form.value);
+  // Counts the times the dialog opened: the voice picker starts afresh each time.
+  let opened = $state(0);
   // The saved profile being edited; null for a new one (or after Duplicate, which saves a new profile).
   let editingId = $state<string | null>(null);
-  let saving = $state(false);
+  const removing = new Action();
   let confirmDelete = $state(false);
-  let error = $state<string | null>(null);
+  const saving = $derived(form.action.busy || removing.busy);
+  const error = $derived(form.action.error || removing.error || null);
 
   // A fresh draft each time the dialog opens.
   $effect(() => {
@@ -66,14 +87,17 @@
       : copyOf
         ? { ...fieldsOf(copyOf), label: `${copyOf.label} (copy)` }
         : { ...NEW };
-    // Built from `next`, not by reading `d` back: reading the draft here made the effect re-run on every edit.
-    d = next;
-    base = JSON.stringify(next);
-    editingId = profile?.id ?? null;
-    error = null;
-    confirmDelete = false;
+    // Built from `next`, not by reading the draft back: reading it here made the effect re-run on every edit.
+    untrack(() => {
+      form.load(next, true);
+      opened += 1;
+      editingId = profile?.id ?? null;
+      form.action.clear();
+      removing.clear();
+      confirmDelete = false;
+    });
   });
-  const dirty = $derived(JSON.stringify(d) !== base);
+  const dirty = $derived(form.dirty);
   const isOpenAi = $derived(d.model.startsWith('openai:'));
   const openAiVoices = $derived(ctrl.catalog?.openai_voices ?? []);
   const current = $derived(ctrl.profiles.find((p) => p.id === editingId) ?? null);
@@ -85,28 +109,11 @@
     current ? [...(ctrl.hiroProfile === current.id ? ["Hiro's voice"] : []), ...current.used_by.map(ctrl.useLabel)] : []
   );
 
-  async function save() {
-    saving = true;
-    const res = await ctrl.save(editingId, { ...d, speed: isOpenAi ? d.speed : 1 });
-    saving = false;
-    if ('error' in res) {
-      error = res.error;
-      return;
-    }
-    open = false;
-    onsaved?.(res.id);
-  }
-
   async function remove() {
     if (!current) return;
-    saving = true;
-    const err = await ctrl.remove(current.id);
-    saving = false;
-    if (err) {
-      error = err;
-      return;
-    }
-    open = false;
+    const id = current.id;
+    await removing.run(() => ctrl.remove(id));
+    if (!removing.error) open = false;
   }
 </script>
 
@@ -124,9 +131,9 @@
 
     <div class="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
       <div class="grid content-start gap-4">
-        <FormField label="Name"><input bind:value={d.label} maxlength="80" placeholder="e.g. Door alert" /></FormField>
+        <Field label="Name" for="{uid}-name"><Input id="{uid}-name" bind:value={d.label} maxlength={80} placeholder="e.g. Door alert" /></Field>
 
-        <SectionCardMuted title="Model">
+        <Section title="Model">
           <SingleModelPicker
             embedded
             label="Speech model"
@@ -153,9 +160,9 @@
               d.model = id;
             }}
           />
-        </SectionCardMuted>
+        </Section>
 
-        <SectionCardMuted title="Voice">
+        <Section title="Voice">
           <div class="flex items-baseline justify-end">
             <span class="text-xs text-muted-foreground">Using <span class="font-medium text-foreground">{d.voice_label || d.voice}</span></span>
           </div>
@@ -165,18 +172,18 @@
             </p>
           {/if}
           {#if isOpenAi}
-            <select
-              class={cn(ADMIN_SELECT, 'sm:w-1/2')}
+            <PickSelect
+              class="h-8 w-full text-sm sm:w-1/2"
+              label="Voice"
               value={d.voice}
-              onchange={(e) => {
-                d.voice = e.currentTarget.value;
-                d.voice_label = e.currentTarget.value;
+              options={openAiVoices.map((v) => ({ value: v, label: v }))}
+              onchange={(v) => {
+                d.voice = v;
+                d.voice_label = v;
               }}
-            >
-              {#each openAiVoices as v (v)}<option>{v}</option>{/each}
-            </select>
+            />
           {:else}
-            {#key base}
+            {#key opened}
               <GeminiVoicePicker
                 value={d.voice}
                 designLanguages={ctrl.catalog?.design_languages ?? []}
@@ -187,26 +194,24 @@
               />
             {/key}
           {/if}
-        </SectionCardMuted>
+        </Section>
 
-        <FormField label="Speaking style" hint="Tone, pace, accent and emotion, in plain words. It is never read aloud.">
-          <textarea rows="3" bind:value={d.style} maxlength="2000" placeholder="e.g. Warm and calm, medium pace, a slight smile in the voice."></textarea>
-        </FormField>
+        <Field label="Speaking style" for="{uid}-style" hint="Tone, pace, accent and emotion, in plain words. It is never read aloud.">
+          <Textarea id="{uid}-style" rows={3} bind:value={d.style} maxlength={2000} placeholder="e.g. Warm and calm, medium pace, a slight smile in the voice." />
+        </Field>
 
         {#if isOpenAi}
-          <FormField label="Speed">
-            <span class="grid gap-1">
-              <span class="flex items-center gap-3">
-                <input type="range" min="0.25" max="4" step="0.05" bind:value={d.speed} class="h-1.5 w-full cursor-pointer accent-primary" />
-                <span class="w-16 shrink-0 text-right font-mono text-sm tabular-nums">{d.speed.toFixed(2)}×</span>
-              </span>
-              <span class="flex justify-between pr-[4.75rem] text-xs text-muted-foreground">
-                <span>0.25×</span>
-                <button type="button" class="underline" onclick={() => (d.speed = 1)}>reset to 1×</button>
-                <span>4×</span>
-              </span>
-            </span>
-          </FormField>
+          <SliderField
+            label="Speed"
+            hint="0.25× to 4×."
+            value={d.speed}
+            onchange={(v) => (d.speed = v)}
+            min={0.25}
+            max={4}
+            step={0.05}
+            reset={1}
+            format={(v) => `${v.toFixed(2)}×`}
+          />
         {/if}
       </div>
 
@@ -215,31 +220,31 @@
       </div>
     </div>
 
-    {#if error}<InlineDestructiveAlert message={error} />{/if}
+    {#if error}<Notice message={error} />{/if}
     {#if confirmDelete && current}
       <div class="flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 px-3 py-2 text-sm">
         <span class="flex-1">
           Delete "{current.label}"?{usedBy.length ? ` ${usedBy.join(', ')} will have no voice until another is picked.` : ''}
         </span>
-        <Button size="sm" variant="destructive-outline" disabled={saving} onclick={remove}>Delete</Button>
+        <Button size="sm" variant="destructive" disabled={saving} onclick={remove}>Delete</Button>
         <Button size="sm" variant="ghost" onclick={() => (confirmDelete = false)}>Cancel</Button>
       </div>
     {/if}
 
     <Dialog.Footer class="sm:justify-between">
-      <Button variant="destructive-outline" disabled={!current || saving} onclick={() => (confirmDelete = true)}><Trash2 size={13} /> Delete</Button>
+      <Button variant="destructive" disabled={!current || saving} onclick={() => (confirmDelete = true)}><Trash2 size={13} /> Delete</Button>
       <span class="flex gap-2">
         <Button
           variant="outline"
           disabled={!current}
           onclick={() => {
             // Duplicate: the same settings as a new profile (saved under a new name).
-            d = { ...d, label: `${d.label} (copy)` };
+            form.value.label = `${d.label} (copy)`;
             editingId = null;
           }}><Copy size={13} /> Duplicate</Button
         >
         <Button variant="outline" onclick={() => (open = false)}>Cancel</Button>
-        <Button onclick={save} disabled={saving || !d.label.trim() || !d.voice.trim() || (!!current && !dirty)}>Save</Button>
+        <Button onclick={form.save} disabled={saving || !d.label.trim() || !d.voice.trim() || (!!current && !dirty)}>Save</Button>
       </span>
     </Dialog.Footer>
   </Dialog.Content>

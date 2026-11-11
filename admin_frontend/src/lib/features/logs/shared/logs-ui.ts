@@ -10,6 +10,7 @@ import {
   type TrafficClass
 } from '$lib/api/logs';
 import type { DeviceRow } from '$lib/api/channels-devices';
+import { CAT } from '$kit/ui/category';
 
 /** Sortable table columns (Date/Time both map to the chronological `time` key). */
 export type LogSortColumn = 'time' | 'level' | 'source' | 'module' | 'class' | 'subclass' | 'message';
@@ -249,13 +250,13 @@ export const TRAFFIC_CLASS_LABELS: Record<TrafficClass, string> = {
 /** Tailwind class for the traffic_class chip in the table column. Cool=in, warm=out, neutral=infra/stream. */
 export function trafficClassChipClass(tc: string): string {
   if (tc.startsWith('inbound.')) {
-    return 'border-sky-400/40 bg-sky-500/15 text-sky-700 dark:text-sky-300';
+    return CAT.chip[1];
   }
   if (tc.startsWith('outbound.')) {
-    return 'border-amber-400/40 bg-amber-500/15 text-amber-700 dark:text-amber-300';
+    return CAT.chip[3];
   }
   if (tc === 'stream.chunk') {
-    return 'border-violet-400/40 bg-violet-500/10 text-violet-700 dark:text-violet-300';
+    return CAT.chip[5];
   }
   return 'border-border/70 bg-muted text-muted-foreground';
 }

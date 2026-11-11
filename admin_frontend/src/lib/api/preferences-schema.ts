@@ -1,4 +1,4 @@
-import { apiRequest, type ApiResponse } from './client';
+import { apiRequest } from './client';
 
 export type PreferenceFieldMeta = {
   path: string;
@@ -33,6 +33,6 @@ export type PreferencesSchemaPayload = {
   fields: Record<string, PreferenceFieldMeta>;
 };
 
-export async function getPreferencesSchema(): Promise<ApiResponse<PreferencesSchemaPayload>> {
+export async function getPreferencesSchema(): Promise<PreferencesSchemaPayload> {
   return apiRequest<PreferencesSchemaPayload>('/preferences/schema');
 }

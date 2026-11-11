@@ -3,7 +3,7 @@ import type { CharacterResolvedPayload } from '$lib/api/characters';
 import {
   appliedTuningLine,
   llmCollapsedSummary,
-  resolvedRowDotClass,
+  resolvedRowDotTone,
   resolvedRowTooltip,
   voiceCollapsedSummary
 } from '$lib/features/characters/shared/characters-resolved-pure';
@@ -91,12 +91,12 @@ describe('resolvedRowTooltip', () => {
   });
 });
 
-describe('resolvedRowDotClass', () => {
+describe('resolvedRowDotTone', () => {
   it('colors usable, skipped and plan-tool rows distinctly', () => {
-    expect(resolvedRowDotClass('available')).toBe('bg-emerald-500');
-    expect(resolvedRowDotClass('unavailable')).toBe('bg-red-500');
-    expect(resolvedRowDotClass('no_key')).toBe('bg-red-500');
-    expect(resolvedRowDotClass('missing')).toBe('bg-red-500');
-    expect(resolvedRowDotClass('plan')).toBe('bg-amber-500');
+    expect(resolvedRowDotTone('available')).toBe('ok');
+    expect(resolvedRowDotTone('unavailable')).toBe('error');
+    expect(resolvedRowDotTone('no_key')).toBe('error');
+    expect(resolvedRowDotTone('missing')).toBe('error');
+    expect(resolvedRowDotTone('plan')).toBe('warn');
   });
 });

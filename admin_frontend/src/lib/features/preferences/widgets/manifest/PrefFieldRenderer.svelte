@@ -15,7 +15,7 @@
     preferenceHint
   } from '$lib/features/preferences/shared/preferences-schema';
   import type { CustomFieldKey, PrefFieldSpec } from './manifest-types';
-  import Badge from '$lib/components/ui/badge.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
   import PrefFieldGrid from '$lib/features/preferences/widgets/PrefFieldGrid.svelte';
   import PrefNumberField from '$lib/features/preferences/widgets/PrefNumberField.svelte';
   import PrefTextField from '$lib/features/preferences/widgets/PrefTextField.svelte';

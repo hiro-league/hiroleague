@@ -1,7 +1,9 @@
 <script lang="ts">
   import type { KnowledgeDocument, KnowledgeIngestMetadata } from '$lib/api/knowledge';
-  import Button from '$lib/components/ui/button.svelte';
-  import * as Dialog from '$lib/components/ui/dialog';
+  import { Action } from '$kit/state/action.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import CreatableCategorySelect from '$lib/features/knowledge/shared/CreatableCategorySelect.svelte';
   import CreatableTagsSelect from '$lib/features/knowledge/shared/CreatableTagsSelect.svelte';
   import KnowledgeAffectedDocumentsList from '$lib/features/knowledge/browse/KnowledgeAffectedDocumentsList.svelte';
@@ -13,10 +15,8 @@
     KNOWLEDGE_BROWSE_BULK_DIALOG_AFFECTED_LIST,
     KNOWLEDGE_BROWSE_BULK_DIALOG_BODY,
     KNOWLEDGE_FIELD_LABEL,
-    KNOWLEDGE_FIELD_LABEL_TEXT,
-    KNOWLEDGE_SELECT
+    KNOWLEDGE_FIELD_LABEL_TEXT
   } from '$lib/features/knowledge/shared/knowledge-ui';
-  import { cn } from '$lib/utils';
 
   type Props = {
     open: boolean;
@@ -33,7 +33,8 @@
   let categoryId = $state('');
   let subcategoryId = $state('');
   let tags = $state<string[]>([]);
-  let saving = $state(false);
+  const save = new Action();
+  const saving = $derived(save.busy);
   let saveError = $state<string | null>(null);
 
   const documentCount = $derived(documents.length);
@@ -49,7 +50,6 @@
     categoryId = document.category_id != null ? String(document.category_id) : '';
     subcategoryId = document.subcategory_id != null ? String(document.subcategory_id) : '';
     tags = [...(document.tags ?? [])];
-    saving = false;
     saveError = null;
   });
 
@@ -65,24 +65,24 @@
 
   async function handleSave() {
     if (documents.length === 0 || saving) return;
-    saving = true;
     saveError = null;
-    const result = await browse.saveDocumentsMetadata(
-      documents.map((document) => document.id),
-      {
-        owner_kind: ownerKind,
-        owner_id: ownerId,
-        category_id: optionalInt(categoryId),
-        subcategory_id: optionalInt(subcategoryId),
-        tags
-      }
+    const result = await save.run(() =>
+      browse.saveDocumentsMetadata(
+        documents.map((document) => document.id),
+        {
+          owner_kind: ownerKind,
+          owner_id: ownerId,
+          category_id: optionalInt(categoryId),
+          subcategory_id: optionalInt(subcategoryId),
+          tags
+        }
+      )
     );
-    saving = false;
-    if (result.saved > 0) {
+    if (result && result.saved > 0) {
       open = false;
       onSaved?.(result);
     } else {
-      saveError = 'Metadata update failed.';
+      saveError = save.error || 'Metadata update failed.';
     }
   }
 </script>
@@ -107,34 +107,45 @@
       <div class="flex flex-wrap items-end gap-3">
         <label class={KNOWLEDGE_FIELD_LABEL}>
           <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Owner</span>
-          <select
-            class={cn(KNOWLEDGE_SELECT, 'w-[180px]')}
-            bind:value={ownerKind}
+          <PickSelect
+            class="h-9 w-[180px] text-sm"
+            label="Owner"
+            value={ownerKind}
             disabled={saving}
-            onchange={handleOwnerKindChange}
-          >
-            <option value="system">System</option>
-            <option value="character">Character</option>
-            <option value="user">User</option>
-          </select>
+            options={[
+              { value: 'system', label: 'System' },
+              { value: 'character', label: 'Character' },
+              { value: 'user', label: 'User' }
+            ]}
+            onchange={(v) => {
+              ownerKind = v as KnowledgeIngestMetadata['owner_kind'];
+              handleOwnerKindChange();
+            }}
+          />
         </label>
         {#if ownerKind === 'character'}
           <label class={KNOWLEDGE_FIELD_LABEL}>
             <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Character</span>
-            <select class={cn(KNOWLEDGE_SELECT, 'w-[220px]')} bind:value={ownerId} disabled={saving}>
-              {#each options.characters as character (character.id)}
-                <option value={String(character.id)}>{character.name} ({character.id})</option>
-              {/each}
-            </select>
+            <PickSelect
+              class="h-9 w-[220px] text-sm"
+              label="Character"
+              value={ownerId}
+              disabled={saving}
+              options={options.characters.map((character) => ({ value: String(character.id), label: `${character.name} (${character.id})` }))}
+              onchange={(v) => (ownerId = v)}
+            />
           </label>
         {:else if ownerKind === 'user'}
           <label class={KNOWLEDGE_FIELD_LABEL}>
             <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>User</span>
-            <select class={cn(KNOWLEDGE_SELECT, 'w-[220px]')} bind:value={ownerId} disabled={saving}>
-              {#each options.users as user (user.id)}
-                <option value={String(user.id)}>{user.name} ({user.id})</option>
-              {/each}
-            </select>
+            <PickSelect
+              class="h-9 w-[220px] text-sm"
+              label="User"
+              value={ownerId}
+              disabled={saving}
+              options={options.users.map((user) => ({ value: String(user.id), label: `${user.name} (${user.id})` }))}
+              onchange={(v) => (ownerId = v)}
+            />
           </label>
         {/if}
         <label class={KNOWLEDGE_FIELD_LABEL}>

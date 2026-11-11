@@ -1,8 +1,8 @@
 <script lang="ts">
   import { Check, Copy } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import * as Dialog from '$lib/components/ui/dialog';
-  import { humanDateTime } from '$lib/format/human-datetime';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
+  import { dateTime } from '$lib/format/time';
   import type { ExtensionsController } from '../state/extensions-controller.svelte';
 
   let { ctrl }: { ctrl: ExtensionsController } = $props();
@@ -30,14 +30,14 @@
           <span class="font-mono text-5xl font-bold tracking-widest text-primary">{ctrl.pairing.code}</span>
         </div>
         <p class="font-sans text-sm text-muted-foreground">
-          Works once, until {humanDateTime(ctrl.pairing.expires_at)}.
+          Works once, until {dateTime(ctrl.pairing.expires_at)}.
         </p>
       </div>
     {/if}
     <Dialog.Footer>
       <Button variant="outline" onclick={() => void ctrl.copyPairing()}>
         {#if ctrl.copied}
-          <Check class="text-emerald-500" size={15} />
+          <Check class="text-success" size={15} />
         {:else}
           <Copy size={15} />
         {/if}

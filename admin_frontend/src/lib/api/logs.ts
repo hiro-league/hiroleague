@@ -1,4 +1,4 @@
-import { apiRequest, type ApiResponse } from './client';
+import { apiRequest } from './client';
 
 export const LOG_LEVELS = ['DEBUG', 'FINEINFO', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'] as const;
 
@@ -106,7 +106,7 @@ export type LogsClearResponse = {
   cleared_files: string[];
 };
 
-export async function getLogsLayout(): Promise<ApiResponse<LogsLayout>> {
+export async function getLogsLayout(): Promise<LogsLayout> {
   return apiRequest<LogsLayout>('/logs/layout');
 }
 
@@ -115,7 +115,7 @@ export async function tailLogs(body: {
   lines?: number | null;
   last_session_only?: boolean;
   since_seconds_ago?: number | null;
-}): Promise<ApiResponse<LogsTailResponse>> {
+}): Promise<LogsTailResponse> {
   return apiRequest<LogsTailResponse>('/logs/tail', {
     method: 'POST',
     body
@@ -131,7 +131,7 @@ export type LogsSearchParams = {
 };
 
 /** Full-text search plus optional structured scope filters (AND). Requires at least one filter. */
-export async function searchLogs(params: LogsSearchParams): Promise<ApiResponse<LogsSearchResponse>> {
+export async function searchLogs(params: LogsSearchParams): Promise<LogsSearchResponse> {
   const sp = new URLSearchParams();
   const q = params.query?.trim();
   const deviceId = params.deviceId?.trim();
@@ -148,10 +148,10 @@ export async function searchLogs(params: LogsSearchParams): Promise<ApiResponse<
 }
 
 /** Distinct JSON-RPC ``method`` values seen in the recent log tail window. */
-export async function discoverLogMethods(): Promise<ApiResponse<string[]>> {
+export async function discoverLogMethods(): Promise<string[]> {
   return apiRequest<string[]>('/logs/methods');
 }
 
-export async function clearLogs(): Promise<ApiResponse<LogsClearResponse>> {
+export async function clearLogs(): Promise<LogsClearResponse> {
   return apiRequest<LogsClearResponse>('/logs/clear', { method: 'POST' });
 }

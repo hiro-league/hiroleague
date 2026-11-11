@@ -1,3 +1,4 @@
+import { errorMessage } from '$kit/api/client';
 import {
   getPreferences,
   normalizeWorkspacePreferences,
@@ -22,7 +23,7 @@ import {
 import { PREFERENCES_FIELD_SCHEMA } from '$lib/api/preferences-field-schema';
 import type { PreferencesSchemaMap } from '$lib/features/preferences/shared/preferences-schema';
 import { createUnsavedGuard } from '$lib/navigation/unsaved-guard.svelte';
-import type { ToastKind } from '$lib/ui/toast-types';
+import type { ToastKind } from '$kit/ui/toast.svelte';
 
 type Notify = (kind: ToastKind, message: string) => void;
 
@@ -111,19 +112,19 @@ export function createPreferencesController(notify: Notify) {
     busy = true;
     try {
       const payload = await patchPreferences(edits);
-      const saved = payload.data.preferences;
+      const saved = payload.preferences;
       for (const path of Object.keys(edits)) {
         const value = getPreferenceByPath(saved, path);
         // Clone so baseline and draft never share a mutable reference for the committed path.
         setPreferenceByPath(baseline, path, JSON.parse(JSON.stringify(value ?? null)));
         setPreferenceByPath(draft, path, JSON.parse(JSON.stringify(value ?? null)));
       }
-      promptDefaults = payload.data.prompt_defaults ?? promptDefaults;
-      sections = payload.data.sections ?? sections;
+      promptDefaults = payload.prompt_defaults ?? promptDefaults;
+      sections = payload.sections ?? sections;
       notify('success', 'Prompt saved.');
       return true;
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Save failed.');
+      notify('error', errorMessage(err));
       return false;
     } finally {
       busy = false;
@@ -138,16 +139,16 @@ export function createPreferencesController(notify: Notify) {
         getPreferences(),
         getPreferencesSchema()
       ]);
-      sections = prefsPayload.data.sections ?? [];
-      promptDefaults = prefsPayload.data.prompt_defaults ?? {};
-      fieldSchema = schemaPayload.ok ? (schemaPayload.data.fields ?? null) : null;
-      const prefs = prefsPayload.data.preferences;
+      sections = prefsPayload.sections ?? [];
+      promptDefaults = prefsPayload.prompt_defaults ?? {};
+      fieldSchema = schemaPayload.fields ?? null;
+      const prefs = prefsPayload.preferences;
       setDraftFromServer(prefs);
       // Catalog lists no longer depend on prefs (a saved id missing from the catalog is flagged by
       // the picker, not merged into the options); fetch them with the download-status rows.
       await Promise.all([catalog.load(), downloads.load()]);
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to load preferences.';
+      error = errorMessage(err);
     } finally {
       loading = false;
     }
@@ -160,12 +161,12 @@ export function createPreferencesController(notify: Notify) {
     busy = true;
     try {
       const payload = await patchPreferences(edits);
-      sections = payload.data.sections ?? [];
-      promptDefaults = payload.data.prompt_defaults ?? promptDefaults;
-      setDraftFromServer(payload.data.preferences);
+      sections = payload.sections ?? [];
+      promptDefaults = payload.prompt_defaults ?? promptDefaults;
+      setDraftFromServer(payload.preferences);
       notify('success', 'Workspace preferences saved.');
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Save failed.');
+      notify('error', errorMessage(err));
     } finally {
       busy = false;
     }

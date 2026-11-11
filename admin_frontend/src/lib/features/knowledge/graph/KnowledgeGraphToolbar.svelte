@@ -6,6 +6,7 @@
    * / reframe / fullscreen). Search orchestration (debounce + backend lookup) lives in the
    * model; this just binds the input to graph.search / graph.clearSearch.
    */
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import SearchInput from '$lib/search/SearchInput.svelte';
   import { cn } from '$lib/utils';
   import type { GraphEpisode } from '$lib/api/knowledge';
@@ -92,17 +93,13 @@
       <!-- Partition selector: lists whatever graph partitions exist (knowledge / conversation
            memory / eval), shown by logical name. Rendered whenever ≥1 partition is present so
            a single data-bearing group is never hidden. -->
-      <select
+      <PickSelect
+        class="h-8 max-w-[12rem] text-xs"
+        label="Graph partition"
         value={graph.activeGroupId() ?? knowledgeGroupId}
-        onchange={(e) => onSelectGroup(e.currentTarget.value)}
-        class="h-8 max-w-[12rem] rounded-md border bg-background px-2 text-xs text-foreground outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-        aria-label="Graph partition"
-        title="Choose which graph to view (knowledge or a conversation memory)"
-      >
-        {#each graph.groups() as g (g.id)}
-          <option value={g.id}>{g.label}</option>
-        {/each}
-      </select>
+        options={graph.groups().map((g) => ({ value: g.id, label: g.label }))}
+        onchange={onSelectGroup}
+      />
     {/if}
     {#if episodeOptions.length > 0}
       <!-- Episode filter: a scoping control (sibling of the partition selector). Selecting

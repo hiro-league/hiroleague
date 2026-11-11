@@ -5,18 +5,15 @@
  * copies) so the logic has one home and can be unit-tested.
  */
 import { formatBytes } from '$lib/format/bytes';
+import { clock, shortDate } from '$lib/format/time';
 
 /** Compact "Mon D, h:mm AM" stamp for a stderr-log mtime; `''` when missing/invalid. */
 export function formatStderrTime(value: string | null): string {
   if (!value) return '';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleString([], {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit'
-  });
+  // Step 1d: the one formatter, not the browser's locale (which can be 24-hour).
+  return `${shortDate(date)}, ${clock(date)}`;
 }
 
 /** Hover title for a stderr-log button: name, last-updated time (if any), and size. */

@@ -3,6 +3,7 @@
   import { cn } from '$lib/utils';
   import FieldHelp from '$lib/components/ui/field-help.svelte';
   import ResetDot from '$lib/components/ui/reset-dot.svelte';
+  import { Checkbox } from '$kit/components/ui/checkbox/index.js';
 
   type Props = {
     label: string;
@@ -36,20 +37,14 @@
 </script>
 
 <label
-  data-pref-path={anchor}
+  data-field-anchor={anchor}
   class={cn(
     'group flex gap-3 rounded-md border border-border/50 bg-card/45 px-3',
     details ? 'items-start py-2.5' : 'min-h-10 items-center',
     className
   )}
 >
-  <input
-    type="checkbox"
-    class={details ? 'mt-0.5' : undefined}
-    bind:checked
-    {disabled}
-    onchange={() => onchange?.()}
-  />
+  <Checkbox class={details ? 'mt-0.5' : undefined} bind:checked {disabled} onCheckedChange={() => onchange?.()} />
   {#snippet labelRow()}
     <span class="inline-flex items-center gap-1.5 font-sans text-sm font-medium">
 <!-- title shows the dotted preference path on hover. -->
@@ -58,7 +53,7 @@
         <FieldHelp text={hint} />
       {/if}
       {#if showReset && onReset}
-        <!-- Hidden until the toggle row is hovered/focused (see FormField) to avoid icon clutter. -->
+        <!-- Hidden until the toggle row is hovered/focused (see the kit's Field) to avoid icon clutter. -->
         <ResetDot
           {onReset}
           class="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"

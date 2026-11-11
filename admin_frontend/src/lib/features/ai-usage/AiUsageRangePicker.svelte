@@ -5,8 +5,8 @@
   import { CalendarDate, type DateValue } from '@internationalized/date';
   import type { DateRange } from 'bits-ui';
   import { CalendarDays, ChevronLeft, ChevronRight } from '@lucide/svelte';
-  import * as Popover from '$lib/components/ui/popover';
-  import { RangeCalendar } from '$lib/components/ui/range-calendar/index.js';
+  import * as Popover from '$kit/components/ui/popover/index.js';
+  import { RangeCalendar } from '$kit/components/ui/range-calendar/index.js';
   import { dayLabel, spanLabel, type Span } from './ai-usage';
 
   let {

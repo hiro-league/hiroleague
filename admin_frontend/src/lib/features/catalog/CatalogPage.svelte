@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
-  import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
-  import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
-  import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
+  import PageHeader from '$kit/ui/page-header.svelte';
+  import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
+  import StickyBar from '$kit/ui/sticky-bar.svelte';
+  import PageTabs from '$kit/ui/page-tabs.svelte';
+  import type { PageTab } from '$kit/ui/page-tabs.svelte';
   import ModelsFilterBar from '$lib/features/catalog/browse/ModelsFilterBar.svelte';
   import ModelsTab from '$lib/features/catalog/browse/ModelsTab.svelte';
   import ProvidersTab from '$lib/features/catalog/browse/ProvidersTab.svelte';
@@ -16,15 +17,13 @@
   import { LOCAL_SERVER_IDS } from '$lib/features/catalog/ai/ai-profile-rules';
   import { createCatalogController } from '$lib/features/catalog/state/catalog-controller.svelte';
   import type { CatalogTabPreference } from '$lib/preferences/keys';
-  import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
-  import ToastHost from '$lib/ui/ToastHost.svelte';
+  import { toast } from '$kit/ui/toast.svelte';
 
-  const toasts = createToastNotifier();
-  const ctrl = createCatalogController(toasts.notify);
+  const ctrl = createCatalogController(toast.show);
   // Phase 7a: AI profiles, uses, local servers and plan tools (`/api/ai`).
-  const ai = createAiController(toasts.notify, ctrl);
+  const ai = createAiController(toast.show, ctrl);
 
-  const tabDescriptors: readonly AdminTabDescriptor<CatalogTabPreference>[] = [
+  const tabDescriptors: readonly PageTab<CatalogTabPreference>[] = [
     // Providers tab merges the former Active + Catalog provider tabs into one list.
     { id: 'providers', label: 'Providers', kind: 'pane' },
     { id: 'models', label: 'Models', kind: 'pane' },
@@ -46,20 +45,23 @@
   });
 </script>
 
-<AdminPageHeader sticky kicker="Configuration" title="Providers/Models">
-  {#snippet tabs()}
-    <AdminTabStrip
-      ariaLabel="Providers and models sections"
+<section class={ADMIN_PAGE_MAX_W}>
+  <PageHeader title="Providers/Models">
+    {#snippet tabs()}
+    <PageTabs
+      label="Providers and models sections"
       tabs={tabDescriptors}
-      active={inProfiles ? 'profiles' : ctrl.activeTab}
-      onSelect={(id) => void ctrl.switchTab(id)}
+      value={inProfiles ? 'profiles' : ctrl.activeTab}
+      onchange={(id) => void ctrl.switchTab(id)}
     />
-  {/snippet}
+    {/snippet}
+  </PageHeader>
+  
 
   {#if ctrl.activeTab === 'models'}
-    <AdminPageStickyToolbar>
+    <StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
       <ModelsFilterBar {ctrl} />
-    </AdminPageStickyToolbar>
+    </StickyBar>
     <ModelsTab {ctrl} />
   {:else if inProfiles}
     <ProfilesTab
@@ -80,6 +82,5 @@
     <LocalServerDialog {ai} />
     <PlanToolDialog {ai} />
   {/if}
-</AdminPageHeader>
+</section>
 
-<ToastHost toast={toasts.toast} />

@@ -4,24 +4,48 @@ import {
   listExtensions,
   removeExtension,
   setExtensionAddress,
-  type ExtensionListen,
   type ExtensionPairingData,
   type ExtensionRow
 } from '$lib/api/extensions';
-import type { Notify } from '$lib/ui/toast-types';
+import { Action } from '$kit/state/action.svelte';
+import { Draft } from '$kit/state/draft.svelte';
+import { Resource } from '$kit/state/resource.svelte';
+import type { Notify } from '$kit/ui/toast.svelte';
 
 export type ExtensionsController = ReturnType<typeof createExtensionsController>;
 
 /** Extensions page state: the paired list (with live status), pairing, removal, the address. */
 export function createExtensionsController(notify: Notify) {
-  let rows = $state<ExtensionRow[]>([]);
-  let listen = $state<ExtensionListen | null>(null);
-  let loading = $state(true);
-  let busy = $state(false);
-  let error = $state<string | null>(null);
+  const list = new Resource(listExtensions);
+  const rows = $derived(list.data?.extensions ?? []);
+  const listen = $derived(list.data?.listen ?? null);
+  /** One action per kind of change; `busy` is any of them, so one button waits for all. */
+  const pairingAction = new Action();
+  const removeAction = new Action();
+  const testAction = new Action();
+  /** The listen address being edited; it follows what the server says until the person edits it. */
+  const host = new Draft<string>('', {
+    equal: (a, b) => a.trim() === b.trim(),
+    save: async (draft) => {
+      const result = await setExtensionAddress(draft.trim());
+      notify(
+        'success',
+        result.restart_required
+          ? 'Saved. Restart the server for the new address to take effect.'
+          : 'No change.'
+      );
+      await list.reload();
+      return draft.trim();
+    }
+  });
+  const busy = $derived(
+    pairingAction.busy || removeAction.busy || testAction.busy || host.action.busy
+  );
+  $effect(() => {
+    if (list.data) host.load(list.data.listen.host);
+  });
   let pairing = $state<ExtensionPairingData | null>(null);
   let removeTarget = $state<ExtensionRow | null>(null);
-  let hostDraft = $state('');
   let copied = $state(false);
   let copiedTimer: number | null = null;
   /** extension_id → the last test-call result shown on its row. */
@@ -35,38 +59,18 @@ export function createExtensionsController(notify: Notify) {
     }
   }
 
-  async function load() {
-    loading = true;
-    error = null;
-    try {
-      const payload = await listExtensions();
-      rows = payload.data.extensions;
-      listen = payload.data.listen;
-      hostDraft = payload.data.listen.host;
-    } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to load extensions.';
-    } finally {
-      loading = false;
-    }
-  }
-
   async function generatePairingCode() {
-    busy = true;
-    try {
-      const result = await generateExtensionPairingCode();
-      pairing = result.data;
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Failed to make a pairing code.');
-    } finally {
-      busy = false;
-    }
+    await pairingAction.run(async () => {
+      pairing = await generateExtensionPairingCode();
+    });
+    if (pairingAction.error) notify('error', pairingAction.error);
   }
 
   function closePairing() {
     pairing = null;
     clearCopyFeedback();
     // The extension may have paired while the dialog was open.
-    void load();
+    void list.reload();
   }
 
   async function copyPairing() {
@@ -92,49 +96,30 @@ export function createExtensionsController(notify: Notify) {
 
   async function submitRemove() {
     if (!removeTarget) return;
-    busy = true;
-    try {
-      const result = await removeExtension(removeTarget.extension_id);
-      notify('success', result.data ?? 'Extension removed.');
+    const row = removeTarget;
+    await removeAction.run(async () => {
+      const result = await removeExtension(row.extension_id);
+      notify('success', result ?? 'Extension removed.');
       removeTarget = null;
-      await load();
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Remove failed.');
-    } finally {
-      busy = false;
-    }
+      await list.reload();
+    });
+    if (removeAction.error) notify('error', removeAction.error);
   }
 
   async function testCall(row: ExtensionRow) {
-    busy = true;
-    try {
-      const result = await askExtensionInfo(row.extension_id);
-      const { info, elapsed_ms } = result.data;
-      testResults = { ...testResults, [row.extension_id]: `${info.name} ${info.version} answered in ${elapsed_ms} ms` };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'No answer.';
-      testResults = { ...testResults, [row.extension_id]: `No answer: ${message}` };
-    } finally {
-      busy = false;
-    }
+    const answer = await testAction.run(async () => {
+      const { info, elapsed_ms } = await askExtensionInfo(row.extension_id);
+      return `${info.name} ${info.version} answered in ${elapsed_ms} ms`;
+    });
+    testResults = {
+      ...testResults,
+      [row.extension_id]: testAction.error ? `No answer: ${testAction.error}` : (answer ?? '')
+    };
   }
 
   async function saveAddress() {
-    busy = true;
-    try {
-      const result = await setExtensionAddress(hostDraft.trim());
-      notify(
-        'success',
-        result.data.restart_required
-          ? 'Saved. Restart the server for the new address to take effect.'
-          : 'No change.'
-      );
-      await load();
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Saving the address failed.');
-    } finally {
-      busy = false;
-    }
+    await host.save();
+    if (host.action.error) notify('error', host.action.error);
   }
 
   return {
@@ -145,13 +130,13 @@ export function createExtensionsController(notify: Notify) {
       return listen;
     },
     get loading() {
-      return loading;
+      return list.data === null && !list.error;
     },
     get busy() {
       return busy;
     },
     get error() {
-      return error;
+      return list.error || null;
     },
     get pairing() {
       return pairing;
@@ -165,16 +150,14 @@ export function createExtensionsController(notify: Notify) {
     get testResults() {
       return testResults;
     },
-    get hostDraft() {
-      return hostDraft;
-    },
-    set hostDraft(value: string) {
-      hostDraft = value;
+    /** The listen address being edited (bind to `host.value`; `host.dirty` says it differs from what is saved). */
+    get host() {
+      return host;
     },
     get connectedCount() {
       return rows.filter((row) => row.connected).length;
     },
-    load,
+    load: list.reload,
     generatePairingCode,
     closePairing,
     copyPairing,

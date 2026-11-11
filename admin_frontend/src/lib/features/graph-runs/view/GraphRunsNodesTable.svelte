@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { GraphLedgerRow } from '$lib/api/graph-runs';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { fieldLabel, formatLedgerField, isGraphNodeSubstep } from '../graph-runs-pure';
 
   let {
@@ -102,7 +102,7 @@
 </script>
 
 <div class="nodes-table-panel min-w-0">
-  <AdminTableShell density="dense" stickyHead class="nodes-scroll">
+  <TableShell density="dense" stickyHead class="nodes-scroll">
     <thead>
       <tr>
         {#each nodeFieldList as field (field)}
@@ -207,7 +207,7 @@
         </tr>
       {/each}
     </tbody>
-  </AdminTableShell>
+  </TableShell>
 </div>
 
 <style>

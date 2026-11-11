@@ -5,6 +5,7 @@
  * active track, the selected corpus/benchmark, the scan folder, and the live run arrives through
  * the injected `EvalResultsDeps` so it stays decoupled from the corpus picker beside it.
  */
+import { errorMessage } from '$kit/api/client';
 import {
   clearEvalResults,
   listEvalBenchmarkResults,
@@ -76,7 +77,7 @@ export function createEvalResults(deps: EvalResultsDeps) {
     }
     try {
       const res = await listEvalResults('memory', corpus.id, corpus.questions_path);
-      const data = res.data;
+      const data = res;
       const map: Record<string, string> = {};
       const rsMap: Record<string, boolean> = {};
       const aaMap: Record<string, string> = {};
@@ -116,9 +117,9 @@ export function createEvalResults(deps: EvalResultsDeps) {
     benchmarkResultsError = null;
     try {
       const res = await listEvalBenchmarkResults(bid, deps.getFolder().trim());
-      benchmarkResults = res.data;
+      benchmarkResults = res;
     } catch (err) {
-      benchmarkResultsError = err instanceof Error ? err.message : 'Failed to load benchmark results.';
+      benchmarkResultsError = errorMessage(err);
       benchmarkResults = null;
     } finally {
       benchmarkResultsLoading = false;
@@ -142,7 +143,7 @@ export function createEvalResults(deps: EvalResultsDeps) {
       try {
         await clearEvalResults('memory', corpus.id);
       } catch (err) {
-        deps.setError(err instanceof Error ? err.message : 'Failed to clear saved results.');
+        deps.setError(errorMessage(err));
         return false;
       }
     }

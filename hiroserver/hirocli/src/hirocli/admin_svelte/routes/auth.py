@@ -28,6 +28,8 @@ from typing import Any
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Request
+
+from hirocli.admin_svelte.result_payload import api_failure
 from fastapi.responses import JSONResponse, RedirectResponse
 from hiro_channel_sdk.constants import METHOD_SIGN_IN_FINISH, METHOD_SIGN_IN_START
 from hiro_channel_sdk.extension import ExtensionRequestError
@@ -159,21 +161,21 @@ class RequireSignIn:
             token = Request(scope).cookies.get(self.cookie)
             person = await run_in_threadpool(session_person, self.workspace_path, token) if token else None
             if person is None:
-                denied = JSONResponse({"ok": False, "error": "Sign in to the admin first.", "data": None}, status_code=401)
+                denied = api_failure("Sign in to the admin first.", 401)
                 await denied(scope, receive, send)
                 return
             # Phase 8: signed in for the apps only (Adult and Kid by default): the settings stay shut.
             if not path.startswith(LIMITED_PREFIXES):
                 opens = await run_in_threadpool(_role_opens_settings, self.workspace_path, person.role_id)
                 if not opens:
-                    refused = JSONResponse({"ok": False, "error": NOT_FOR_YOUR_ROLE, "data": None}, status_code=403)
+                    refused = api_failure(NOT_FOR_YOUR_ROLE, 403)
                     await refused(scope, receive, send)
                     return
         await self.app(scope, receive, send)
 
 
 @auth_router.get("/auth/me")
-async def who_am_i(request: Request) -> dict[str, Any]:
+async def who_am_i(request: Request) -> Any:
     person = await signed_in_person(request)
     workspace_path = _workspace_path(request)
     anyone = await run_in_threadpool(anyone_signs_in, workspace_path)
@@ -181,17 +183,13 @@ async def who_am_i(request: Request) -> dict[str, Any]:
     # Phase 8: the ways to sign in connected extensions offer (the sign-in page's buttons).
     offers = [{"id": o.id, "label": o.label, "extension": o.extension} for o in list_sign_in_offers(_manager(request))]
     return {
-        "ok": True,
-        "error": None,
-        "data": {
             "signed_in": person is not None,
             "person": _public(person) if person else None,
             "role_name": role.name if role else None,
             "can_open_settings": bool(role and role.admin),
             "anyone_signs_in": anyone,
             "sign_in_offers": offers,
-        },
-    }
+        }
 
 
 @auth_router.post("/auth/sign-in")
@@ -199,20 +197,17 @@ async def sign_in(body: SignInBody, request: Request) -> JSONResponse:
     name = body.sign_in.strip().lower()
     if _too_many_failures(name):
         log.warning("⚠️ Admin sign-in refused — too many wrong passwords", sign_in=name)
-        return JSONResponse(
-            {"ok": False, "error": "Too many wrong passwords. Wait a few minutes and try again.", "data": None},
-            status_code=429,
-        )
+        return api_failure("Too many wrong passwords. Wait a few minutes and try again.", 429)
     workspace_path = _workspace_path(request)
     person = await run_in_threadpool(check_password, workspace_path, body.sign_in, body.password)
     if person is None:
         _failures[name].append(time.monotonic())
         log.warning("⚠️ Admin sign-in failed — wrong name or password", sign_in=name)
-        return JSONResponse({"ok": False, "error": "Wrong name or password.", "data": None}, status_code=401)
+        return api_failure("Wrong name or password.", 401)
     _failures.pop(name, None)
     token, _expires = await run_in_threadpool(start_session, workspace_path, person.person_id)
     log.info(f"✅ Admin signed in — {person.name}", sign_in=person.sign_in)
-    response = JSONResponse({"ok": True, "error": None, "data": {"person": _public(person)}})
+    response = JSONResponse({"person": _public(person)})
     _set_session_cookie(request, response, token)
     return response
 
@@ -240,7 +235,7 @@ async def sign_out(request: Request) -> JSONResponse:
     await _end_this_session(request)
     # Phase 8: signing out of HiroLeague signs this browser out of the apps' sites too; the page goes there next.
     then = await _through_the_apps(request, f"{_origin(request)}/sign-in")
-    response = JSONResponse({"ok": True, "error": None, "data": {"then": then}})
+    response = JSONResponse({"then": then})
     response.delete_cookie(cookie_name(request), path="/")
     return response
 
@@ -351,12 +346,12 @@ async def sign_in_with(method: str, request: Request, next: str = "/") -> Redire
 
 
 @auth_router.get("/apps")
-async def apps(request: Request) -> dict[str, Any]:
+async def apps(request: Request) -> Any:
     """Phase 8: the extensions' sites this person's role sees (the dashboard's Apps card)."""
     person = await signed_in_person(request)
     if person is None:
-        return {"ok": False, "error": "Sign in first.", "data": None}
+        return api_failure("Sign in first.", 401)
     sites = await run_in_threadpool(list_sites, _manager(request), _workspace_path(request))
     shown = sites_for_role(sites, person.role_id)
     data = [{"extension": s.extension, "title": s.title, "icon": s.icon, "url": s.url, "online": s.online} for s in shown]
-    return {"ok": True, "error": None, "data": {"apps": data}}
+    return {"apps": data}

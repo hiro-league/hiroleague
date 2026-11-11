@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..domain.access import list_sources, roles_with_rights, set_rights
 from ..domain.admin_sign_in import give_sign_in
 from ..domain.people import (
     OWNER_ROLE,
@@ -27,6 +28,7 @@ from ..domain.people import (
     remove_role,
     rename_role,
     set_role_admin,
+    set_role_says,
     update_person,
 )
 from ..domain.workspace import resolve_workspace
@@ -79,6 +81,12 @@ class RoleResult:
 @dataclass
 class RemovedResult:
     removed: str
+
+
+@dataclass
+class AccessResult:
+    sources: list[dict[str, Any]] = field(default_factory=list)
+    roles: list[dict[str, Any]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -291,3 +299,58 @@ class RoleRemoveTool(Tool):
     def execute(self, role_id: str, workspace: str | None = None) -> RemovedResult:
         remove_role(_resolve_path(workspace), role_id)
         return RemovedResult(removed=role_id)
+
+
+# ---------------------------------------------------------------------------
+# What each role may do (Phase 9a)
+# ---------------------------------------------------------------------------
+
+
+class AccessListTool(Tool):
+    """Phase 9a: HiroLeague and each extension with the features and rights it declares, and every role's rights."""
+
+    surfaces = frozenset({"cli", "http"})
+    name = "access_list"
+    description = "List what each role may do: HiroLeague's and each extension's features and rights, per role"
+    params = {"workspace": _WORKSPACE}
+
+    def execute(self, workspace: str | None = None) -> AccessResult:
+        workspace_path = _resolve_path(workspace)
+        return AccessResult(
+            sources=[s.model_dump() for s in list_sources(workspace_path)],
+            roles=roles_with_rights(workspace_path),
+        )
+
+
+class RoleRightsTool(Tool):
+    """Phase 9a: the rights a role has in one source (HiroLeague or an extension); the extension enforces them."""
+
+    surfaces = frozenset({"cli", "http"})
+    name = "role_rights"
+    description = "Give a role exactly these rights in HiroLeague or one extension (not Owner, which has them all)"
+    params = {
+        "role_id": ToolParam(str, "The role's id"),
+        "source": ToolParam(str, "hiroleague, or the extension's name"),
+        "rights": ToolParam(list[str], 'Right keys, "<feature>.<right>" (see access_list)'),
+        "workspace": _WORKSPACE,
+    }
+
+    def execute(self, role_id: str, source: str, rights: list[str], workspace: str | None = None) -> RoleResult:
+        role = set_rights(_resolve_path(workspace), role_id, source, [str(k) for k in rights])
+        return RoleResult(role=role.model_dump())
+
+
+class RoleSaysTool(Tool):
+    """Phase 9a: the one line on what a role is for (shown when picking a role, here and in the apps)."""
+
+    surfaces = frozenset({"cli", "http"})
+    name = "role_says"
+    description = "Set the one line on what a role is for"
+    params = {
+        "role_id": ToolParam(str, "The role's id"),
+        "says": ToolParam(str, "One line, e.g. Parents: the whole home, without the settings"),
+        "workspace": _WORKSPACE,
+    }
+
+    def execute(self, role_id: str, says: str, workspace: str | None = None) -> RoleResult:
+        return RoleResult(role=set_role_says(_resolve_path(workspace), role_id, says).model_dump())

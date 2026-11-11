@@ -1,3 +1,5 @@
+import { errorMessage } from '$kit/api/client';
+import { Action } from '$kit/state/action.svelte';
 import {
   generateDevicePairingCode,
   listDevices,
@@ -5,7 +7,7 @@ import {
   type DevicePairingData,
   type DeviceRow
 } from '$lib/api/channels-devices';
-import type { Notify } from '$lib/ui/toast-types';
+import type { Notify } from '$kit/ui/toast.svelte';
 import { displayDeviceName } from '../shared/channels-devices-format';
 
 export type DevicesController = ReturnType<typeof createDevicesController>;
@@ -13,7 +15,7 @@ export type DevicesController = ReturnType<typeof createDevicesController>;
 export function createDevicesController(notify: Notify) {
   let rows = $state<DeviceRow[]>([]);
   let loading = $state(true);
-  let busy = $state(false);
+  const work = new Action();
   let error = $state<string | null>(null);
   let pairing = $state<DevicePairingData | null>(null);
   let revokeTarget = $state<DeviceRow | null>(null);
@@ -33,36 +35,31 @@ export function createDevicesController(notify: Notify) {
     error = null;
     try {
       const payload = await listDevices();
-      rows = payload.data;
+      rows = payload;
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to load devices.';
+      error = errorMessage(err);
     } finally {
       loading = false;
     }
   }
 
   function closePairing() {
-    if (busy) return;
+    if (work.busy) return;
     pairing = null;
     clearCopyFeedback();
   }
 
   function closeRevoke() {
-    if (busy) return;
+    if (work.busy) return;
     revokeTarget = null;
   }
 
   async function generatePairingCode() {
-    busy = true;
-    try {
-      const result = await generateDevicePairingCode();
-      pairing = result.data;
+    await work.run(async () => {
+      pairing = await generateDevicePairingCode();
       await load();
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Failed to generate code.');
-    } finally {
-      busy = false;
-    }
+    });
+    if (work.error) notify('error', work.error);
   }
 
   async function copyPairingPayload() {
@@ -80,17 +77,14 @@ export function createDevicesController(notify: Notify) {
 
   async function submitRevoke() {
     if (!revokeTarget) return;
-    busy = true;
-    try {
-      const result = await revokeDevice(revokeTarget.device_id);
-      notify('success', result.data ?? 'Device revoked.');
+    const target = revokeTarget;
+    await work.run(async () => {
+      const result = await revokeDevice(target.device_id);
+      notify('success', result ?? 'Device revoked.');
       revokeTarget = null;
       await load();
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Revoke failed.');
-    } finally {
-      busy = false;
-    }
+    });
+    if (work.error) notify('error', work.error);
   }
 
   function openRevoke(row: DeviceRow) {
@@ -105,7 +99,7 @@ export function createDevicesController(notify: Notify) {
       return loading;
     },
     get busy() {
-      return busy;
+      return work.busy;
     },
     get error() {
       return error;

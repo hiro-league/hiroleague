@@ -39,7 +39,7 @@ function make() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(api.listGateways).mockResolvedValue({ data: [] } as never);
+  vi.mocked(api.listGateways).mockResolvedValue([] as never);
 });
 
 describe('createGatewayStore — defaults & load', () => {
@@ -52,9 +52,7 @@ describe('createGatewayStore — defaults & load', () => {
 
   it('load populates rows and clears loading/error', async () => {
     const { store } = make();
-    vi.mocked(api.listGateways).mockResolvedValue({
-      data: [gwRow({ name: 'a', running: true }), gwRow({ name: 'b' })]
-    } as never);
+    vi.mocked(api.listGateways).mockResolvedValue([gwRow({ name: 'a', running: true }), gwRow({ name: 'b' })] as never);
     await store.load();
     expect(store.rows.map((r) => r.name)).toEqual(['a', 'b']);
     expect(store.runningCount).toBe(1);
@@ -96,7 +94,7 @@ describe('open* dialog flows', () => {
 describe('submit flows', () => {
   it('submitCreate coerces the port to a number and falls back the host', async () => {
     const { store, notify } = make();
-    vi.mocked(api.createGateway).mockResolvedValue({ data: 'created' } as never);
+    vi.mocked(api.createGateway).mockResolvedValue('created' as never);
     store.openCreate();
     store.createForm.name = 'main';
     store.createForm.desktopPublicKey = 'KEY==';
@@ -118,7 +116,7 @@ describe('submit flows', () => {
 
   it('submitStop warns when the gateway was not running', async () => {
     const { store, notify } = make();
-    vi.mocked(api.stopGateway).mockResolvedValue({ data: false } as never);
+    vi.mocked(api.stopGateway).mockResolvedValue(false as never);
     store.openStop(gwRow({ name: 'g1' }));
     await store.submitStop();
     expect(notify).toHaveBeenCalledWith('warning', expect.stringContaining('was not running'));
@@ -126,7 +124,7 @@ describe('submit flows', () => {
 
   it('submitStop confirms a successful stop', async () => {
     const { store, notify } = make();
-    vi.mocked(api.stopGateway).mockResolvedValue({ data: true } as never);
+    vi.mocked(api.stopGateway).mockResolvedValue(true as never);
     store.openStop(gwRow({ name: 'g1' }));
     await store.submitStop();
     expect(notify).toHaveBeenCalledWith('success', expect.stringContaining('stopped'));
@@ -135,7 +133,7 @@ describe('submit flows', () => {
 
   it('submitRemove forwards the purge flag', async () => {
     const { store } = make();
-    vi.mocked(api.removeGateway).mockResolvedValue({ data: 'removed' } as never);
+    vi.mocked(api.removeGateway).mockResolvedValue('removed' as never);
     store.openRemove(gwRow({ name: 'g1' }));
     store.removeForm.purge = true;
     await store.submitRemove();
@@ -146,11 +144,11 @@ describe('submit flows', () => {
 describe('start', () => {
   it('warns when already running, reports PID otherwise', async () => {
     const { store, notify } = make();
-    vi.mocked(api.startGateway).mockResolvedValue({ data: { already_running: true, pid: 7 } } as never);
+    vi.mocked(api.startGateway).mockResolvedValue({ already_running: true, pid: 7 } as never);
     await store.start(gwRow({ name: 'g1' }));
     expect(notify).toHaveBeenCalledWith('warning', expect.stringContaining('already running'));
 
-    vi.mocked(api.startGateway).mockResolvedValue({ data: { already_running: false, pid: 7 } } as never);
+    vi.mocked(api.startGateway).mockResolvedValue({ already_running: false, pid: 7 } as never);
     await store.start(gwRow({ name: 'g1' }));
     expect(notify).toHaveBeenCalledWith('success', expect.stringContaining('PID 7'));
   });

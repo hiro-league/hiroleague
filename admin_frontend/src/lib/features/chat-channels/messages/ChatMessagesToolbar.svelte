@@ -1,13 +1,13 @@
 <script lang="ts">
   import { BarChart3, FileX2, ImageIcon, RefreshCw, Wrench } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import {
     cycleChatAudioSpeed,
     formatChatAudioSpeedLabel,
     chatAudioPlaybackRate
   } from '$lib/features/chat-channels/chat-audio-coordinator';
   import type { ChatChannelsPageController } from '$lib/features/chat-channels/state/chat-channels-controller.svelte';
-  import { ADMIN_SELECT } from '$lib/styling/admin-tokens';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import { cn } from '$lib/utils';
 
   type Props = {
@@ -61,20 +61,19 @@
   {/if}
   <div class={cn('flex flex-wrap items-center gap-2', dense ? 'w-full' : 'shrink-0')}>
     {#if ctrl.channels.length > 0}
-      <select
-        class={cn(ADMIN_SELECT, dense ? 'w-full' : 'min-w-56')}
-        bind:value={ctrl.selectedChannelId}
-        onchange={() => onChannelChange()}
-        aria-label="Message channel"
-        title={ctrl.messagesHeaderChannelHint}
-      >
-        {#each ctrl.channels as channel (channel.id)}
-          <option value={String(channel.id)}>{channel.name} (id {channel.id})</option>
-        {/each}
-      </select>
+      <PickSelect
+        class={cn('h-8 text-sm', dense ? 'w-full' : 'w-auto min-w-56')}
+        label="Message channel"
+        value={ctrl.selectedChannelId ?? ''}
+        options={ctrl.channels.map((channel) => ({ value: String(channel.id), label: `${channel.name} (id ${channel.id})` }))}
+        onchange={(v) => {
+          ctrl.selectedChannelId = v;
+          onChannelChange();
+        }}
+      />
     {/if}
     <Button
-      variant="destructive-outline"
+      variant="destructive"
       size="icon"
       class="size-8"
       disabled={ctrl.busy || !ctrl.selectedChannelId || ctrl.channelsLoading}

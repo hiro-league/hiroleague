@@ -31,7 +31,7 @@
 {#if !serverReadiness.ready}
   <div
     class={cn(
-      'flex items-start gap-3 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-200',
+      'flex items-start gap-3 rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning',
       className
     )}
     role="status"

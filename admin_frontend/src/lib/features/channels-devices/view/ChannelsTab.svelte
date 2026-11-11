@@ -1,11 +1,12 @@
 <script lang="ts">
   import { Lock, Power, PowerOff, Settings2 } from '@lucide/svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import SectionCard from '$lib/components/page/SectionCard.svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import PickSelect from '$kit/ui/pick-select.svelte';
+  import Panel from '$kit/ui/panel.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
-  import type { Notify } from '$lib/ui/toast-types';
+  import type { Notify } from '$kit/ui/toast.svelte';
   import type { ChannelsController } from '../state/channels-controller.svelte';
   import RefreshableSectionCard from '../shared/RefreshableSectionCard.svelte';
   import ChannelDetail from './ChannelDetail.svelte';
@@ -48,7 +49,7 @@
 {:else}
 <div class="flex flex-col gap-4">
 {#if ctrl.available.length > 0}
-  <SectionCard class="grid gap-3">
+  <Panel class="grid gap-3">
     <div>
       <h3 class="text-lg font-semibold">Install a channel</h3>
       <span class="font-sans text-sm text-muted-foreground">
@@ -56,16 +57,14 @@
       </span>
     </div>
     <div class="flex flex-wrap items-center gap-2">
-      <select
-        class="h-9 rounded-md border border-input bg-background px-2 text-sm"
-        bind:value={chosen}
-        aria-label="Channel to install"
+      <PickSelect
+        class="h-9 w-48 text-sm"
+        value={chosen}
+        onchange={(v) => (chosen = v)}
+        options={ctrl.available.map((ch) => ({ value: ch.name, label: ch.label }))}
+        label="Channel to install"
         disabled={!!ctrl.installing}
-      >
-        {#each ctrl.available as ch (ch.name)}
-          <option value={ch.name}>{ch.label}</option>
-        {/each}
-      </select>
+      />
       <Button size="sm" onclick={() => void handleInstall()} disabled={!!ctrl.installing || !chosen}>
         {ctrl.installing ? 'Installing…' : 'Install'}
       </Button>
@@ -79,7 +78,7 @@
         run while native dependencies download.
       </p>
     {/if}
-  </SectionCard>
+  </Panel>
 {/if}
 
 <RefreshableSectionCard
@@ -93,7 +92,7 @@
   emptyMessage="No channels configured for this workspace."
   onRefresh={() => void ctrl.load()}
 >
-  <AdminTableShell layout="grid" minWidth={920} gridColumns={CHANNEL_GRID}>
+  <TableShell layout="grid" minWidth={920} gridColumns={CHANNEL_GRID}>
     {#snippet headRow()}
       <span>Name</span>
       <span>Status</span>
@@ -160,7 +159,7 @@
         </div>
       {/each}
     {/snippet}
-  </AdminTableShell>
+  </TableShell>
 </RefreshableSectionCard>
 </div>
 {/if}

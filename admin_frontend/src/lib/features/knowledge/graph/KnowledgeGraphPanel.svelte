@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { createGraphFullscreenLifecycle } from '../shared/graph-fullscreen';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
+  import StatusDot from '$kit/ui/status-dot.svelte';
   import { cn } from '$lib/utils';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import { chatOverlay } from '$lib/features/chat-channels/overlay/chat-overlay-store.svelte';
   import type { KnowledgeGraphModel } from '../state/knowledge-graph.svelte';
   import { createGraphEngineBridge } from '../state/graph/graph-engine-bridge.svelte';
@@ -235,7 +236,7 @@
   )}
   style={fullscreen
     ? undefined
-    : 'min-height: calc(100vh - 4rem - var(--admin-page-header-h, 150px) - 3rem)'}
+    : 'min-height: calc(100vh - var(--app-top, 0px) - var(--page-header, 150px) - 3rem)'}
 >
   <KnowledgeGraphToolbar
     {graph}
@@ -329,7 +330,7 @@
     {#if graph.nodes().length === 0 && !graph.loading()}
       <div class="absolute inset-0 grid place-items-center p-6">
         {#if graph.loadError()}
-          <InlineEmptyState
+          <EmptyState
             message="Couldn’t load the graph."
             hint={graph.loadError() ?? undefined}
           >
@@ -338,14 +339,14 @@
                 Retry
               </Button>
             {/snippet}
-          </InlineEmptyState>
+          </EmptyState>
         {:else if graph.progress()}
-          <InlineEmptyState
+          <EmptyState
             message="Building knowledge graph…"
             hint={`Ingesting chunk ${graph.progress()?.chunk_index}/${graph.progress()?.chunk_total} — nodes and relations will appear here as they’re extracted.`}
           />
         {:else}
-          <InlineEmptyState
+          <EmptyState
             message="No graph yet — build it from the Add tab (enable “build entity graph”)."
             hint="New nodes and relations appear here live as the graph builds."
           />
@@ -372,15 +373,15 @@
           {zoomLevel.toFixed(2)}×
         </span>
         {#if graph.live()}
-          <span class="inline-flex items-center gap-1.5 text-emerald-500">
-            <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span> live
+          <span class="inline-flex items-center gap-1.5 text-success">
+            <StatusDot tone="ok" size="xs" /> live
           </span>
         {/if}
         {#if graph.progress()}
           <span>ingesting chunk {graph.progress()?.chunk_index}/{graph.progress()?.chunk_total}…</span>
         {/if}
         {#if graph.truncated()}
-          <span class="text-amber-500">showing a capped subset</span>
+          <span class="text-warning">showing a capped subset</span>
         {/if}
       </div>
     {/if}

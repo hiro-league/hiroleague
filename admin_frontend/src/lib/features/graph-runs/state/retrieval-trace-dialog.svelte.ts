@@ -9,11 +9,12 @@
  *
  * Follows getters for `$derived`/`$state` consumers (avoid returning shorthand — stale capture).
  */
+import { errorMessage } from '$kit/api/client';
 import {
   getGraphRunRetrievalTrace,
   type RetrievalTraceRecord
 } from '$lib/api/graph-runs';
-import type { ToastKind } from '$lib/ui/toast-types';
+import type { ToastKind } from '$kit/ui/toast.svelte';
 
 export function createRetrievalTraceDialogController(
   notify: (kind: ToastKind, message: string) => void
@@ -35,7 +36,7 @@ export function createRetrievalTraceDialogController(
     traceLoadingRunId = runId;
     try {
       const res = await getGraphRunRetrievalTrace(runId);
-      const traces = res.ok && res.data ? (res.data.traces ?? []) : [];
+      const traces = res.traces ?? [];
       if (traces.length > 0) {
         const q = question.trim();
         const matched = q ? traces.find((t) => (t.query ?? '').trim() === q) : undefined;
@@ -50,7 +51,7 @@ export function createRetrievalTraceDialogController(
         );
       }
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Failed to load retrieval trace.');
+      notify('error', errorMessage(err));
     } finally {
       traceLoadingRunId = null;
     }
@@ -63,7 +64,7 @@ export function createRetrievalTraceDialogController(
     traceLoadingSid = sid;
     try {
       const res = await getGraphRunRetrievalTrace(runId);
-      const traces = res.ok && res.data ? (res.data.traces ?? []) : [];
+      const traces = res.traces ?? [];
       const matched = traces.find((t) => t.sid === sid);
       if (matched) {
         activeTrace = matched;
@@ -76,7 +77,7 @@ export function createRetrievalTraceDialogController(
         );
       }
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Failed to load retrieval trace.');
+      notify('error', errorMessage(err));
     } finally {
       traceLoadingSid = null;
     }

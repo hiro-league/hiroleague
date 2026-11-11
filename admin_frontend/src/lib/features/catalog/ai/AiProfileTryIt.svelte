@@ -5,28 +5,29 @@
    * limit is used.
    */
   import { ImagePlus, MessageSquare, X } from '@lucide/svelte';
-  import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import FormField from '$lib/components/ui/form-field.svelte';
-  import { ADMIN_TEXTAREA } from '$lib/styling/admin-tokens';
+  import Section from '$kit/ui/section.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import Field from '$kit/ui/field.svelte';
+  import { Textarea } from '$kit/components/ui/textarea/index.js';
   import type { AiController } from './ai-controller.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
   import { thinkingWords } from './ai-profile-rules';
 
   let { ai }: { ai: AiController } = $props();
+  const uid = $props.id();
 
   let fileInput = $state<HTMLInputElement | null>(null);
   const model = $derived(ai.draftModel.model);
 </script>
 
-<SectionCardMuted title="Try it" description="Asks one question with this profile as it is now, saved or not.">
+<Section title="Try it" description="Asks one question with this profile as it is now, saved or not.">
   <p class="text-xs text-muted-foreground">
     {ai.draftModel.provider?.label ?? 'No provider'} · {model?.name ?? ai.draft.model} · thinking
     {thinkingWords(ai.draft.thinking).toLowerCase()}
   </p>
-  <FormField label="Question">
-    <textarea class={ADMIN_TEXTAREA} rows="3" bind:value={ai.tryPrompt}></textarea>
-  </FormField>
+  <Field label="Question" for="{uid}-question">
+    <Textarea id="{uid}-question" rows={3} bind:value={ai.tryPrompt} />
+  </Field>
 
   <div class="grid gap-2">
     <span class="font-sans text-sm font-semibold text-muted-foreground">Picture (optional)</span>
@@ -53,7 +54,7 @@
         </Button>
       </div>
       {#if model && !model.pictures}
-        <p class="text-xs text-amber-700 dark:text-amber-300">{model.name} can't see pictures: it gets the text only.</p>
+        <p class="text-xs text-warning">{model.name} can't see pictures: it gets the text only.</p>
       {/if}
     {:else}
       <Button size="sm" variant="outline" class="w-fit" onclick={() => fileInput?.click()}>
@@ -75,10 +76,10 @@
         {r.model} · {r.seconds.toFixed(1)} s · {r.tokensIn} tokens in, {r.tokensOut} out · {r.cost}
       </p>
       {#each r.notes as note (note)}
-        <p class="text-xs text-amber-700 dark:text-amber-300">{note}</p>
+        <p class="text-xs text-warning">{note}</p>
       {/each}
     </div>
   {:else if ai.tryError}
-    <InlineDestructiveAlert message={ai.tryError} />
+    <Notice message={ai.tryError} />
   {/if}
-</SectionCardMuted>
+</Section>

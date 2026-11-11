@@ -6,6 +6,7 @@
  * The embedding/rerank picker options merge cloud catalog models with local-source models; the live
  * DOWNLOAD status is owned separately by `createLocalModelDownloads`.
  */
+import { errorMessage } from '$kit/api/client';
 import {
   listCatalogModels,
   listCatalogProviders,
@@ -18,7 +19,7 @@ import {
   catalogReloadSuccessMessage,
   reloadCatalogAndRefetch
 } from '$lib/catalog/catalog-reload';
-import type { ToastKind } from '$lib/ui/toast-types';
+import type { ToastKind } from '$kit/ui/toast.svelte';
 
 type Notify = (kind: ToastKind, message: string) => void;
 
@@ -70,14 +71,14 @@ export function createModelCatalog(notify: Notify) {
       listLocalCatalogModels('embedding'),
       listLocalCatalogModels('rerank')
     ]);
-    chatOptions = chatPayload.data.models;
-    sttOptions = sttPayload.data.models;
-    ttsOptions = ttsPayload.data.models;
-    embeddingCatalogOptions = embeddingPayload.data.models;
+    chatOptions = chatPayload.models;
+    sttOptions = sttPayload.models;
+    ttsOptions = ttsPayload.models;
+    embeddingCatalogOptions = embeddingPayload.models;
     embeddingLocalOptions = embeddingLocal;
-    rerankCatalogOptions = rerankPayload.data.models;
+    rerankCatalogOptions = rerankPayload.models;
     rerankLocalOptions = rerankLocal;
-    catalogAllProviders = providersPayload.data;
+    catalogAllProviders = providersPayload;
     loaded = true;
     await activeProvidersStore.load({ silent: true });
   }
@@ -98,7 +99,7 @@ export function createModelCatalog(notify: Notify) {
       await activeProvidersStore.load({ silent: true });
       notify('success', catalogReloadSuccessMessage(result.reload));
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Catalog reload failed.');
+      notify('error', errorMessage(err));
     } finally {
       reloadBusy = false;
     }

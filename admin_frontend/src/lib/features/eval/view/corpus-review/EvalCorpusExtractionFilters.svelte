@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { Checkbox } from '$kit/components/ui/checkbox/index.js';
+  import { CAT } from '$kit/ui/category';
   import GraphRangeSlider from '$lib/features/knowledge/graph/GraphRangeSlider.svelte';
   import type { CorpusExtractionFilters } from '$lib/features/eval/state/eval-corpus-extraction-filters.svelte';
 
@@ -9,17 +11,12 @@
 </script>
 
 <label class="flex items-center gap-1.5 font-sans text-xs select-none">
-  <input
-    type="checkbox"
-    class="size-3.5 rounded border"
-    checked={filters.noExtractionOnly}
-    onchange={(e) => (filters.noExtractionOnly = e.currentTarget.checked)}
-  />
+  <Checkbox class="size-3.5" bind:checked={filters.noExtractionOnly} />
   Only without extraction
 </label>
 {#if filters.maxEnt > 0}
   <div class="flex items-center gap-2">
-    <span class="font-sans text-xs font-medium text-emerald-600 dark:text-emerald-400">Entities</span>
+    <span class="font-sans text-xs font-medium {CAT.text[2]}">Entities</span>
     <div class="w-28">
       <GraphRangeSlider
         min={0}
@@ -34,7 +31,7 @@
 {/if}
 {#if filters.maxFact > 0}
   <div class="flex items-center gap-2">
-    <span class="font-sans text-xs font-medium text-violet-600 dark:text-violet-400">Facts</span>
+    <span class="font-sans text-xs font-medium {CAT.text[5]}">Facts</span>
     <div class="w-28">
       <GraphRangeSlider
         min={0}

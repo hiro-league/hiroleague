@@ -1,9 +1,9 @@
 <script lang="ts">
   import { FilterX } from '@lucide/svelte';
-  import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
-  import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
+  import FilterBar from '$kit/ui/filter-bar.svelte';
+  import FilterSelect from '$kit/ui/filter-select.svelte';
   import AdminIconToggleGroup from '$lib/components/page/AdminIconToggleGroup.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import type { CatalogController } from '$lib/features/catalog/state/catalog-controller.svelte';
   import {
     AVAILABILITY_FILTER_IDS,
@@ -55,13 +55,13 @@
     AVAILABILITY_FILTER_IDS.map((availability) => ({
       value: availability,
       label: AVAILABILITY_FILTER_UI[availability].title,
-      dotClass: AVAILABILITY_FILTER_UI[availability].circleClass
+      dotTone: AVAILABILITY_FILTER_UI[availability].tone
     }))
   );
 </script>
 
-<AdminFilterBar class="items-end">
-  <AdminFilterBarSelect
+<FilterBar class="items-end">
+  <FilterSelect
     label="Provider"
     value={ctrl.modelFilters.filters.provider_id}
     placeholder="All providers"
@@ -80,7 +80,7 @@
     onToggle={(kind) => void ctrl.toggleModelKindFilter(kind as (typeof MODEL_KIND_FILTER_IDS)[number])}
     groupClass="min-w-[10rem]"
   />
-  <AdminFilterBarSelect
+  <FilterSelect
     label="Class"
     value={ctrl.modelFilters.filters.model_class}
     placeholder="All classes"
@@ -120,4 +120,4 @@
       <FilterX size={15} /> Clear filters
     </Button>
   </div>
-</AdminFilterBar>
+</FilterBar>

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorMessage } from '$kit/api/client';
   import {
     chatAudioPlaybackRate,
     takeoverChatAudioPlayback,
@@ -46,7 +47,7 @@
         }
       } catch (e) {
         if (!revoked) {
-          errorText = e instanceof Error ? e.message : 'Could not load audio.';
+          errorText = errorMessage(e);
         }
       }
     })();

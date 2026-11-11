@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Check, Copy } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
 
   let {
     value,
@@ -25,7 +25,7 @@
     title="Copy to clipboard"
   >
     {#if copied}
-      <Check class="text-emerald-500" size={16} />
+      <Check class="text-success" size={16} />
     {:else}
       <Copy size={16} />
     {/if}

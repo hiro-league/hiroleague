@@ -1,17 +1,14 @@
 <script lang="ts">
-  import * as Dialog from '$lib/components/ui/dialog';
-  import Button from '$lib/components/ui/button.svelte';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
   import CharacterPhotoCropModal from '$lib/features/characters/modals/CharacterPhotoCropModal.svelte';
   import type { createCharactersPageController } from '$lib/features/characters/state/characters-controller.svelte';
-  import type { createUnsavedGuard } from '$lib/navigation/unsaved-guard.svelte';
 
   let {
     ctrl,
-    unsaved,
     characterId
   }: {
     ctrl: ReturnType<typeof createCharactersPageController>;
-    unsaved: ReturnType<typeof createUnsavedGuard>;
     characterId: string | null;
   } = $props();
 </script>
@@ -52,28 +49,3 @@
   onCropCanvasChange={ctrl.photoCrop.handleCropCanvas}
   onSubmitPhoto={() => void ctrl.photoCrop.submitPhoto()}
 />
-
-<Dialog.Root
-  open={unsaved.unsavedModalOpen}
-  onOpenChange={(next) => {
-    if (!next) unsaved.closeUnsavedModalContinueEditing();
-  }}
->
-  <Dialog.Content class="sm:max-w-md">
-    <Dialog.Header>
-      <Dialog.Title>Unsaved changes</Dialog.Title>
-      <Dialog.Description>You have edits that are not saved yet.</Dialog.Description>
-    </Dialog.Header>
-    <p class="text-sm text-muted-foreground">
-      Discard them and leave, or stay on this page to keep editing.
-    </p>
-    <Dialog.Footer>
-      <Button variant="outline" onclick={unsaved.closeUnsavedModalContinueEditing}
-        >Continue editing</Button
-      >
-      <Button variant="destructive" onclick={unsaved.confirmUnsavedModalDiscard}
-        >Discard changes</Button
-      >
-    </Dialog.Footer>
-  </Dialog.Content>
-</Dialog.Root>

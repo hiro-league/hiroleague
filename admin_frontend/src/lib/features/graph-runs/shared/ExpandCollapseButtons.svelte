@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ChevronsDownUp, ChevronsUpDown } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
 
   let {
     onExpand,

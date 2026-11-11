@@ -22,6 +22,8 @@ import socket
 from typing import Any
 
 from fastapi import APIRouter, Request
+
+from hirocli.admin_svelte.result_payload import api_failure
 from hiro_commons.log import Logger
 
 runtime_router = APIRouter()
@@ -43,7 +45,7 @@ def _main_http_listening(http_port: int, *, timeout_s: float = 0.25) -> bool:
 
 
 @runtime_router.get("/runtime/status")
-async def runtime_status(request: Request) -> dict[str, Any]:
+async def runtime_status(request: Request) -> Any:
     """Report which late-bound runtime pieces are live.
 
     Response shape (stable; frontend polls until ``ready`` is true):
@@ -61,22 +63,14 @@ async def runtime_status(request: Request) -> dict[str, Any]:
     """
     ctx = getattr(request.app.state, "ctx", None)
     if ctx is None:
-        return {
-            "ok": False,
-            "error": "Admin app has no ServerContext attached.",
-            "data": None,
-        }
+        return api_failure("Admin app has no ServerContext attached.")
 
     http_port = int(ctx.config.http_port)
     main_ready = _main_http_listening(http_port)
 
     return {
-        "ok": True,
-        "error": None,
-        "data": {
             "ready": main_ready,
             "main_http_listening": main_ready,
             "admin_port": int(ctx.config.admin_port),
             "http_port": http_port,
-        },
-    }
+        }

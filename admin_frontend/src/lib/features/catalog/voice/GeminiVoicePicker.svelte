@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorMessage } from '$kit/api/client';
   /**
    * Picks a Gemini voice for a voice profile (Phase 7b), as HomeHiro's TTS page did, from three places
    * (Gemini's own voice list, read by the core and cached a day):
@@ -13,9 +14,11 @@
    */
   import { onDestroy } from 'svelte';
   import { Check, Loader, Play, Plus, RefreshCw, Square, Trash2, Wand, X } from '@lucide/svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import Notice from '$kit/ui/notice.svelte';
+  import PickSelect from '$kit/ui/pick-select.svelte';
+  import Segmented from '$kit/ui/segmented.svelte';
   import {
     addVoice,
     deleteVoice,
@@ -26,7 +29,7 @@
     type GeminiVoice,
     type VoiceSource
   } from '$lib/api/voice';
-  import { ADMIN_INPUT, ADMIN_SELECT } from '$lib/styling/admin-tokens';
+  import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
   import { keptUntil, langName, sourceOf } from './voice-format';
 
@@ -58,22 +61,26 @@
 
   async function load(source: VoiceSource, refresh = false) {
     loading = true;
-    const res =
-      source === 'library'
-        ? await listVoices({ source, language, gender, q: query.trim(), limit: 60, refresh })
-        : await listVoices({ source, limit: 300, refresh });
-    loading = false;
-    if (!res.ok || !res.data) {
-      error = res.error ?? "Gemini's voices could not be read.";
+    // Step 1d: a failed request throws (answers are the data itself; there is no {ok, error} to test).
+    let res: Awaited<ReturnType<typeof listVoices>>;
+    try {
+      res =
+        source === 'library'
+          ? await listVoices({ source, language, gender, q: query.trim(), limit: 60, refresh })
+          : await listVoices({ source, limit: 300, refresh });
+    } catch (err) {
+      error = errorMessage(err);
       return;
+    } finally {
+      loading = false;
     }
     error = null;
-    if (source === 'studio') studio = res.data.voices;
-    else if (source === 'mine') mine = res.data.voices;
+    if (source === 'studio') studio = res.voices;
+    else if (source === 'mine') mine = res.voices;
     else {
-      library = res.data.voices;
-      libraryTotal = res.data.total;
-      languages = res.data.languages;
+      library = res.voices;
+      libraryTotal = res.total;
+      languages = res.languages;
     }
   }
 
@@ -127,42 +134,49 @@
 
   async function design() {
     designing = true;
-    const res = await designVoice({
-      name: form.name.trim(),
-      description: form.who.trim(),
-      language: form.language || undefined,
-      gender: form.gender || undefined
-    });
-    designing = false;
-    if (!res.ok || !res.data) {
-      error = res.error ?? 'The voice was not designed.';
+    let res: Awaited<ReturnType<typeof designVoice>>;
+    try {
+      res = await designVoice({
+        name: form.name.trim(),
+        description: form.who.trim(),
+        language: form.language || undefined,
+        gender: form.gender || undefined
+      });
+    } catch (err) {
+      error = errorMessage(err);
       return;
+    } finally {
+      designing = false;
     }
     error = null;
-    designed = { name: res.data.voice.name, cost: res.data.clip.cost_usd, clipId: res.data.clip.id };
-    pick(res.data.voice); // as in HomeHiro: the new voice is used by this profile at once
+    designed = { name: res.voice.name, cost: res.clip.cost_usd, clipId: res.clip.id };
+    pick(res.voice); // as in HomeHiro: the new voice is used by this profile at once
     form.who = form.name = '';
     await load('mine');
   }
   async function remove(v: GeminiVoice) {
     deleting = true;
-    const res = await deleteVoice(v.id);
-    deleting = false;
-    confirmDelete = null;
-    if (!res.ok) {
-      error = res.error ?? 'The voice was not deleted.';
+    try {
+      await deleteVoice(v.id);
+    } catch (err) {
+      error = errorMessage(err);
       return;
+    } finally {
+      deleting = false;
+      confirmDelete = null;
     }
     error = null;
     await load('mine');
   }
   async function add() {
     adding = true;
-    const res = await addVoice(pasteId.trim());
-    adding = false;
-    if (!res.ok) {
-      error = res.error ?? 'The voice was not added.';
+    try {
+      await addVoice(pasteId.trim());
+    } catch (err) {
+      error = errorMessage(err);
       return;
+    } finally {
+      adding = false;
     }
     error = null;
     pasteId = '';
@@ -179,8 +193,11 @@
     { value: 'library', label: 'Voice library' },
     { value: 'mine', label: 'My voices' }
   ];
-  const pill = (on: boolean) =>
-    cn('rounded-md px-2.5 py-1 font-sans text-xs font-medium', on ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent');
+  const GENDERS = [
+    { value: '', label: 'Any gender' },
+    { value: 'female', label: 'female' },
+    { value: 'male', label: 'male' }
+  ];
 </script>
 
 {#snippet sample(id: string)}
@@ -211,33 +228,29 @@
     <!-- Asked here, on the row: no second dialog over the editor. -->
     <div class="flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 px-2 py-1.5 text-xs">
       <span class="flex-1">Delete "{v.name}" at Google? This cannot be undone. A voice profile still using it is refused.</span>
-      <Button size="sm" variant="destructive-outline" disabled={deleting} onclick={() => remove(v)}>Delete</Button>
+      <Button size="sm" variant="destructive" disabled={deleting} onclick={() => remove(v)}>Delete</Button>
       <Button size="sm" variant="ghost" onclick={() => (confirmDelete = null)}>Cancel</Button>
     </div>
   {/if}
 {/snippet}
 
 <div class="grid gap-3 rounded-md border bg-background p-3">
-  <span class="inline-flex w-fit gap-1 rounded-lg border bg-card p-1" role="group" aria-label="Where the voice is from">
-    {#each TABS as t (t.value)}
-      <button type="button" class={pill(tab === t.value)} onclick={() => (tab = t.value)}>{t.label}</button>
-    {/each}
-  </span>
+  <Segmented options={TABS} value={tab} onchange={(v) => (tab = v)} label="Where the voice is from" />
 
-  {#if error}<InlineDestructiveAlert message={error} />{/if}
+  {#if error}<Notice message={error} />{/if}
 
   {#if tab === 'studio'}
-    <select
-      class={cn(ADMIN_SELECT, 'sm:w-2/3')}
+    <PickSelect
+      class="h-8 w-full text-sm sm:w-2/3"
+      label="Studio voice"
       value={selectedStudio?.id ?? ''}
-      onchange={(e) => {
-        const v = studio.find((x) => x.id === e.currentTarget.value);
+      placeholder={loading ? 'Reading the voices…' : `Pick one of ${studio.length} studio voices`}
+      options={studio.map((v) => ({ value: v.id, label: `${v.name} · ${hint(v)}${v.gender ? ` · ${v.gender}` : ''}` }))}
+      onchange={(id) => {
+        const v = studio.find((x) => x.id === id);
         if (v) pick(v);
       }}
-    >
-      {#if !selectedStudio}<option value="" disabled>{loading ? 'Reading the voices…' : `Pick one of ${studio.length} studio voices`}</option>{/if}
-      {#each studio as v (v.id)}<option value={v.id}>{v.name} · {hint(v)}{v.gender ? ` · ${v.gender}` : ''}</option>{/each}
-    </select>
+    />
     {#if selectedStudio}
       <div class="flex items-center gap-2">
         <p class="flex-1 text-xs text-muted-foreground">{selectedStudio.description}</p>
@@ -246,13 +259,14 @@
     {/if}
   {:else if tab === 'library'}
     <div class="grid gap-2 sm:grid-cols-[1fr_8rem_1fr]">
-      <select class={ADMIN_SELECT} bind:value={language}>
-        <option value="">Any language</option>
-        {#each languages as l (l.code)}<option value={l.code}>{langName(l.code)} ({l.count})</option>{/each}
-      </select>
-      <select class={ADMIN_SELECT} bind:value={gender}>
-        <option value="">Any gender</option><option value="female">female</option><option value="male">male</option>
-      </select>
+      <PickSelect
+        class="h-8 w-full text-sm"
+        label="Language"
+        value={language}
+        options={[{ value: '', label: 'Any language' }, ...languages.map((l) => ({ value: l.code, label: `${langName(l.code)} (${l.count})` }))]}
+        onchange={(v) => (language = v)}
+      />
+      <PickSelect class="h-8 w-full text-sm" label="Gender" value={gender} options={GENDERS} onchange={(v) => (gender = v)} />
       <input class={ADMIN_INPUT} bind:value={query} placeholder="Search: warm, narrator, Egyptian…" />
     </div>
     <div class="grid max-h-72 gap-0.5 overflow-y-auto">
@@ -288,11 +302,14 @@
         </label>
         <div class="grid gap-2 sm:grid-cols-3">
           <input class={ADMIN_INPUT} bind:value={form.name} placeholder="Name, e.g. Hiro" maxlength="80" />
-          <select class={ADMIN_SELECT} bind:value={form.language}>
-            <option value="">Any language</option>
-            {#each designLanguages as l (l)}<option value={l}>{langName(l)}</option>{/each}
-          </select>
-          <select class={ADMIN_SELECT} bind:value={form.gender}><option value="">Any gender</option><option value="female">female</option><option value="male">male</option></select>
+          <PickSelect
+            class="h-8 w-full text-sm"
+            label="Language"
+            value={form.language}
+            options={[{ value: '', label: 'Any language' }, ...designLanguages.map((l) => ({ value: l, label: langName(l) }))]}
+            onchange={(v) => (form.language = v)}
+          />
+          <PickSelect class="h-8 w-full text-sm" label="Gender" value={form.gender} options={GENDERS} onchange={(v) => (form.gender = v)} />
         </div>
         <div class="flex flex-wrap items-center gap-3">
           <Button onclick={design} disabled={!canDesign}>

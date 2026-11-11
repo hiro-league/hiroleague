@@ -97,7 +97,9 @@ _DDL = [
         name        TEXT NOT NULL,
         built_in    INTEGER NOT NULL DEFAULT 0,
         position    INTEGER NOT NULL DEFAULT 0,
-        admin       INTEGER NOT NULL DEFAULT 0
+        admin       INTEGER NOT NULL DEFAULT 0,
+        says        TEXT NOT NULL DEFAULT '',
+        rights      TEXT NOT NULL DEFAULT '{}'
     )
     """,
     """
@@ -235,6 +237,9 @@ _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
     ("roles", "position", "INTEGER NOT NULL DEFAULT 0"),
     # Phase 8: the role can open HiroLeague's settings (Owner always can; domain/people.py).
     ("roles", "admin",    "INTEGER NOT NULL DEFAULT 0"),
+    # Phase 9a: one line on what the role is for, and the rights it has in each extension (JSON {extension: [keys]}).
+    ("roles", "says",     "TEXT NOT NULL DEFAULT ''"),
+    ("roles", "rights",   "TEXT NOT NULL DEFAULT '{}'"),
     ("people", "name",          "TEXT NOT NULL DEFAULT ''"),
     ("people", "calls_them",    "TEXT NOT NULL DEFAULT ''"),
     ("people", "whatsapp",      "TEXT NOT NULL DEFAULT ''"),

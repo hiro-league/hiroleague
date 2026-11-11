@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { CAT } from '$kit/ui/category';
   import type { GraphLedgerRow } from '$lib/api/graph-runs';
   import {
     fieldLabel,
@@ -32,12 +33,11 @@
   <div class="run-elapsed-total-inner">
     <div class="run-toolbar-elapsed" aria-label="Run duration">
       <span class="run-toolbar-metric-label">Elapsed Time</span>
-      <!-- Theme colors via Tailwind `dark:` + app.css `@custom-variant dark`; avoids :global(theme) selectors. -->
-      <span class="run-toolbar-elapsed-value text-emerald-600 dark:text-emerald-400">{toolbarElapsedLabel || '—'}</span>
+      <span class={['run-toolbar-elapsed-value', CAT.text[6]]}>{toolbarElapsedLabel || '—'}</span>
     </div>
     <div class="run-toolbar-cost" aria-label="Total run cost">
       <span class="run-toolbar-metric-label">Total Cost</span>
-      <span class="run-toolbar-cost-value text-violet-600 dark:text-violet-400">{toolbarTotalCostLabel || '—'}</span>
+      <span class={['run-toolbar-cost-value', CAT.text[5]]}>{toolbarTotalCostLabel || '—'}</span>
     </div>
   </div>
 </div>

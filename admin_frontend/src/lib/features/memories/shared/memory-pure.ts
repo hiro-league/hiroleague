@@ -11,7 +11,7 @@ import type { ChatChannelRow } from '$lib/api/chat-channels';
 import type { CharacterRow } from '$lib/api/characters';
 import type { TableSortDirection } from '$lib/components/page/table/table-sort-utils';
 import { distinctOptionsWithSentinel } from '$lib/components/page/table/distinct-options';
-import { formatCompactDateTime, parseFlexibleDate } from '$lib/format/compact-datetime';
+import { formatCompactDateTime, parseFlexibleDate } from '$lib/format/timestamp-cell';
 import { shortGraphId } from '$lib/format/short-graph-id';
 import { rowMatches } from '$lib/search/match';
 
@@ -59,7 +59,7 @@ export function memoryField(row: Record<string, unknown>, ...keys: string[]): un
   return null;
 }
 
-/** Flexible epoch/ISO timestamp parsing (shared compact-datetime util). */
+/** Flexible epoch/ISO timestamp parsing (shared timestamp-cell util). */
 export const parseMemoryDate = parseFlexibleDate;
 
 export function memoryUpdatedRaw(row: Record<string, unknown>): unknown {
@@ -76,7 +76,7 @@ export function memorySortSeconds(row: Record<string, unknown>): number {
   return (updated ?? created)?.getTime() ?? 0;
 }
 
-/** Compact date/time cell formatting (shared compact-datetime util). */
+/** Compact date/time cell formatting (shared timestamp-cell util). */
 export const memoryDateDisplay = formatCompactDateTime;
 
 export function memoryChannelId(row: Record<string, unknown>): number | null {

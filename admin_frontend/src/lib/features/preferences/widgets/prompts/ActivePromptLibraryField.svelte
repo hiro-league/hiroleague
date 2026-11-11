@@ -11,13 +11,13 @@
    * PromptLibraryField "Version to edit" + "Edit versions" button).
    */
   import { Copy, Pencil, Plus } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import Field from '$kit/ui/field.svelte';
   import {
     getPreferenceByPath,
     setPreferenceByPath
   } from '$lib/features/preferences/state/preferences-edits';
-  import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import {
     preferenceFieldMeta,
     preferenceHint,
@@ -56,6 +56,8 @@
     editorLabel,
     dialogTitle
   }: Props = $props();
+
+  const uid = $props.id();
 
   let open = $state(false);
   // Which action the just-clicked icon asked the dialog to run on open (undefined = plain Edit).
@@ -111,19 +113,22 @@
 </script>
 
 <div class="flex flex-wrap items-end gap-3">
-  <FormField
+  <Field
     label={resolvedLabel}
+    for="{uid}-active"
     anchor={activeIdPath}
-    hint={resolvedHint}
-    hintTooltip
+    help={resolvedHint}
     class="min-w-[16rem] flex-1"
   >
-    <select class={ADMIN_SELECT_LG} value={activeId} onchange={(e) => setActive(e.currentTarget.value)}>
-      {#each entries as [id, p] (id)}
-        <option value={id}>{p.label}{p.locked ? ' 🔒' : ''}</option>
-      {/each}
-    </select>
-  </FormField>
+    <PickSelect
+      id="{uid}-active"
+      class="h-8 w-full text-sm"
+      label={resolvedLabel}
+      value={activeId}
+      options={entries.map(([id, p]) => ({ value: id, label: `${p.label}${p.locked ? ' 🔒' : ''}` }))}
+      onchange={setActive}
+    />
+  </Field>
   <div class="flex gap-2 pb-px">
     <Button variant="outline" size="icon" aria-label="New prompt profile" title="New profile" onclick={() => openDialog('create')}>
       <Plus class="size-4" aria-hidden="true" />

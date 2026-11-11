@@ -1,11 +1,12 @@
 <script lang="ts">
-  import Button from '$lib/components/ui/button.svelte';
-  import * as Dialog from '$lib/components/ui/dialog';
-  import FormField from '$lib/components/ui/form-field.svelte';
-  import { Input } from '$lib/components/ui/input';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
+  import Field from '$kit/ui/field.svelte';
+  import { Input } from '$kit/components/ui/input/index.js';
   import type { PeopleController } from '../state/people-controller.svelte';
 
   let { ctrl }: { ctrl: PeopleController } = $props();
+  const uid = $props.id();
 
   function submit(event: SubmitEvent) {
     event.preventDefault();
@@ -29,15 +30,15 @@
       <p class="text-sm text-muted-foreground">
         Whoever signs in to the admin can do everything there. A new password signs them out everywhere.
       </p>
-      <FormField label="Sign-in name">
-        <Input bind:value={ctrl.signInName} autocomplete="off" autocapitalize="none" spellcheck={false} required />
-      </FormField>
-      <FormField label="Password" hint="At least 8 characters.">
-        <Input bind:value={ctrl.password} type="password" autocomplete="new-password" required />
-      </FormField>
-      <FormField label="The password again">
-        <Input bind:value={ctrl.passwordAgain} type="password" autocomplete="new-password" required />
-      </FormField>
+      <Field label="Sign-in name" for="{uid}-name">
+        <Input id="{uid}-name" bind:value={ctrl.signInName} autocomplete="off" autocapitalize="none" spellcheck={false} required />
+      </Field>
+      <Field label="Password" for="{uid}-password" hint="At least 8 characters.">
+        <Input id="{uid}-password" bind:value={ctrl.password} type="password" autocomplete="new-password" required />
+      </Field>
+      <Field label="The password again" for="{uid}-again">
+        <Input id="{uid}-again" bind:value={ctrl.passwordAgain} type="password" autocomplete="new-password" required />
+      </Field>
       {#if ctrl.signInError}
         <p class="text-sm text-destructive" role="alert">{ctrl.signInError}</p>
       {/if}

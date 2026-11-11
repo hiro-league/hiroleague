@@ -4,12 +4,11 @@
    * Speak) and the voice profile each speaks with (`voice.uses`). An alert or a Speak node can still pick
    * its own profile in the extension; this is the default.
    */
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
-  import Badge from '$lib/components/ui/badge.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import { ADMIN_SELECT } from '$lib/styling/admin-tokens';
-  import { cn } from '$lib/utils';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import Notice from '$kit/ui/notice.svelte';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import type { VoiceController } from './voice-controller.svelte';
 
   let { voice, extension }: { voice: VoiceController; extension: string } = $props();
@@ -31,8 +30,8 @@
       </h4>
       <p class="text-xs text-muted-foreground">What it asks the core to say, and the voice profile it speaks with by default.</p>
     </div>
-    {#if error}<InlineDestructiveAlert message={error} />{/if}
-    <AdminTableShell layout="grid" minWidth={900} gridColumns={GRID}>
+    {#if error}<Notice message={error} />{/if}
+    <TableShell layout="grid" minWidth={900} gridColumns={GRID}>
       {#snippet headRow()}
         <span>Use</span>
         <span>Needs</span>
@@ -49,10 +48,13 @@
             </span>
             <span><Badge variant="secondary">a voice clip</Badge></span>
             <span>
-              <select class={cn(ADMIN_SELECT, 'w-full')} aria-label="Voice for {u.name}" value={u.profile_id ?? ''} onchange={(e) => pick(u.key, e.currentTarget.value)}>
-                <option value="">No voice picked</option>
-                {#each voice.profiles as vp (vp.id)}<option value={vp.id}>{vp.label}</option>{/each}
-              </select>
+              <PickSelect
+                class="h-8 w-full text-sm"
+                label="Voice for {u.name}"
+                value={u.profile_id ?? ''}
+                options={[{ value: '', label: 'No voice picked' }, ...voice.profiles.map((vp) => ({ value: vp.id, label: vp.label }))]}
+                onchange={(v) => pick(u.key, v)}
+              />
             </span>
             <span class="text-sm text-muted-foreground">
               {#if p}{p.line}{:else if u.status === 'removed'}No longer declared.{:else}Nothing is said until a voice is picked.{/if}
@@ -60,6 +62,6 @@
           </div>
         {/each}
       {/snippet}
-    </AdminTableShell>
+    </TableShell>
   </div>
 {/if}

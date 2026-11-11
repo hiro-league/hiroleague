@@ -1,5 +1,6 @@
 <script lang="ts">
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import PickSelect from '$kit/ui/pick-select.svelte';
+  import Field from '$kit/ui/field.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import {
     assertPrefSelectOptionsMatchEnum,
@@ -8,7 +9,6 @@
   } from '$lib/features/preferences/shared/preferences-field-options';
   import { usePrefField } from '$lib/features/preferences/shared/preferences-field.svelte';
   import { type PreferencePath } from '$lib/features/preferences/shared/preferences-schema';
-  import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
 
   type Props = {
     ctrl: PreferencesController;
@@ -29,6 +29,7 @@
     label: () => label,
     hint: () => hintOverride
   });
+  const uid = $props.id();
   const resolvedOptions = $derived.by(() => {
     const normalized = normalizePrefSelectOptions(options);
     assertPrefSelectOptionsMatchEnum(field.meta, normalized);
@@ -37,21 +38,21 @@
 </script>
 
 {#if field.visible}
-  <FormField
+  <Field
     label={field.label}
-    hint={field.hint}
-    hintTooltip
+    for="{uid}-input"
+    help={field.hint}
     anchor={path}
-    showReset={field.canReset}
-    onReset={field.reset}
+    onreset={field.canReset ? field.reset : undefined}
     class={className}
   >
-    <select class={ADMIN_SELECT_LG} bind:value={field.value}>
-      {#each resolvedOptions as option (option.value)}
-        <option value={option.value} disabled={option.disabled} title={option.title}>
-          {option.label}
-        </option>
-      {/each}
-    </select>
-  </FormField>
+    <PickSelect
+      id="{uid}-input"
+      class="h-10 w-full text-sm"
+      label={field.label}
+      value={field.value}
+      options={resolvedOptions}
+      onchange={(v) => (field.value = v)}
+    />
+  </Field>
 {/if}

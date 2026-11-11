@@ -1,10 +1,10 @@
 <script lang="ts">
   import { isTrafficClass, TRAFFIC_CLASSES } from '$lib/api/logs';
-  import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
+  import FilterSelect from '$kit/ui/filter-select.svelte';
   import MultiSelectFilter, {
     type MultiSelectOption
   } from '$lib/components/ui/multi-select-filter.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import { X } from '@lucide/svelte';
   import type { LogsPageController } from './state/logs-controller.svelte';
   import type { LogsPreferences } from '$lib/preferences/logs-preferences.svelte';
@@ -64,7 +64,7 @@
         />
 
         {#if ctrl.channelsVisible && ctrl.layout && ctrl.layout.available_channels.length}
-          <AdminFilterBarSelect
+          <FilterSelect
             layout="inline"
             label="Channel:"
             clearable
@@ -78,7 +78,7 @@
           />
         {/if}
 
-        <AdminFilterBarSelect
+        <FilterSelect
           layout="inline"
           clearable
           bind:value={prefs.scopeDeviceId}
@@ -90,7 +90,7 @@
           onValueChange={() => void ctrl.afterScopeChange()}
         />
 
-        <AdminFilterBarSelect
+        <FilterSelect
           layout="inline"
           clearable
           bind:value={prefs.scopeMethod}

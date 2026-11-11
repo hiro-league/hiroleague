@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ChevronLeft, ChevronRight, Settings2 } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import * as Dialog from '$lib/components/ui/dialog';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
   import type { IngestTraceRecord } from '$lib/api/graph-runs';
   import { shortGraphId } from '$lib/format/short-graph-id';
   import ExpandCollapseButtons from './shared/ExpandCollapseButtons.svelte';

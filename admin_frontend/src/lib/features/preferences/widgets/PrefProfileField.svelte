@@ -11,11 +11,11 @@
    * not the job's default profile.
    */
   import { ExternalLink } from '@lucide/svelte';
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import Field from '$kit/ui/field.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { usePrefField } from '$lib/features/preferences/shared/preferences-field.svelte';
   import type { PreferencePath } from '$lib/features/preferences/shared/preferences-schema';
-  import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import {
     aiProfileLine,
     hiroJobByPath,
@@ -35,6 +35,7 @@
 
   let { ctrl, path, kind }: Props = $props();
 
+  const uid = $props.id();
   const field = usePrefField<string | null>(() => ctrl, () => path);
   const job = $derived(kind === 'ai' ? hiroJobByPath(path) : undefined);
 
@@ -77,8 +78,9 @@
   const editHref = $derived.by(() => {
     const tab = kind === 'ai' ? 'profiles' : 'voices';
     const known = picked && !missing ? `&edit=${encodeURIComponent(picked)}` : '';
-    return `/catalog/?tab=${tab}${known}`;
+    return `/catalog?tab=${tab}${known}`;
   });
+
 
   function onPick(value: string) {
     // '' = not set (null): the job borrows its fallback's profile / Hiro doesn't speak.
@@ -88,15 +90,20 @@
 
 {#if field.visible}
   <div class="grid gap-1.5">
-    <FormField label={field.label} hint={field.hint} hintTooltip anchor={path}>
-      <select class={ADMIN_SELECT_LG} value={picked} onchange={(e) => onPick(e.currentTarget.value)}>
-        <option value="">{kind === 'ai' ? 'Not set' : 'None'}</option>
-        {#each options as option (option.id)}
-          <option value={option.id}>{option.name}</option>
-        {/each}
-        {#if missing}<option value={picked}>{picked} (missing)</option>{/if}
-      </select>
-    </FormField>
+    <Field label={field.label} for="{uid}-input" help={field.hint} anchor={path}>
+      <PickSelect
+        id="{uid}-input"
+        class="h-8 w-full text-sm"
+        label={field.label}
+        value={picked}
+        options={[
+          { value: '', label: kind === 'ai' ? 'Not set' : 'None' },
+          ...options.map((option) => ({ value: option.id, label: option.name })),
+          ...(missing ? [{ value: picked, label: `${picked} (missing)` }] : [])
+        ]}
+        onchange={onPick}
+      />
+    </Field>
     <p class="font-sans text-xs leading-snug text-muted-foreground">{line}</p>
     <a class="inline-flex w-fit items-center gap-1 font-sans text-xs text-primary hover:underline" href={editHref}>
       Edit in Catalog → Profiles <ExternalLink size={11} aria-hidden="true" />

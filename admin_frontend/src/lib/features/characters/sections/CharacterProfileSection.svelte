@@ -1,7 +1,10 @@
 <script lang="ts">
   import { ImageIcon, Upload } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import FormField from '$lib/components/ui/form-field.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import { Checkbox } from '$kit/components/ui/checkbox/index.js';
+  import Field from '$kit/ui/field.svelte';
+  import { Input } from '$kit/components/ui/input/index.js';
+  import { Textarea } from '$kit/components/ui/textarea/index.js';
   import CharacterSectionCard from '$lib/features/characters/sections/CharacterSectionCard.svelte';
   import type { CharacterDetail } from '$lib/api/characters';
   import type { CharacterForm } from '$lib/features/characters/shared/characters-pure';
@@ -10,26 +13,23 @@
     form,
     characterId,
     selected,
-    markDirty,
     onPickPhoto
   }: {
     form: CharacterForm;
     characterId: string | null | undefined;
     selected: CharacterDetail | null;
-    markDirty: () => void;
     onPickPhoto: (event: Event) => void;
   } = $props();
+  const uid = $props.id();
 
   let photoInput = $state<HTMLInputElement | null>(null);
 </script>
 
 <CharacterSectionCard title="Profile">
   {#if !characterId}
-    <FormField label="Character id" class="mb-4 max-w-md">
-      {#snippet children()}
-        <input bind:value={form.new_id} oninput={markDirty} />
-      {/snippet}
-    </FormField>
+    <Field label="Character id" for="{uid}-id" class="mb-4 max-w-md">
+      <Input id="{uid}-id" bind:value={form.new_id} />
+    </Field>
   {/if}
 
   <div class="grid gap-6 lg:grid-cols-[160px_minmax(0,1fr)] lg:items-start">
@@ -65,25 +65,16 @@
     </div>
 
     <div class="grid min-w-0 gap-4">
-      <FormField label="Display name" class="w-full md:max-w-[33%] md:min-w-[12rem]">
-        {#snippet children()}
-          <input bind:value={form.name} oninput={markDirty} />
-        {/snippet}
-      </FormField>
+      <Field label="Display name" for="{uid}-name" class="w-full md:max-w-[33%] md:min-w-[12rem]">
+        <Input id="{uid}-name" bind:value={form.name} />
+      </Field>
 
-      <FormField label="Description">
-        {#snippet children()}
-          <textarea class="min-h-24" bind:value={form.description} oninput={markDirty}></textarea>
-        {/snippet}
-      </FormField>
+      <Field label="Description" for="{uid}-description">
+        <Textarea id="{uid}-description" class="min-h-24" bind:value={form.description} />
+      </Field>
 
       <label class="flex cursor-pointer items-center gap-2 font-sans text-sm font-semibold text-foreground">
-        <input
-          class="size-4 accent-primary"
-          type="checkbox"
-          bind:checked={form.emotions_enabled}
-          onchange={markDirty}
-        />
+        <Checkbox bind:checked={form.emotions_enabled} />
         Emotions enabled (reserved)
       </label>
     </div>

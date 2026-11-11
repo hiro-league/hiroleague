@@ -1,12 +1,12 @@
 <script lang="ts">
   import { Link2, Link2Off, PlugZap } from '@lucide/svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import SectionCard from '$lib/components/page/SectionCard.svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import Panel from '$kit/ui/panel.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import RefreshableSectionCard from '$lib/features/channels-devices/shared/RefreshableSectionCard.svelte';
-  import { humanDateTime } from '$lib/format/human-datetime';
+  import { dateTime } from '$lib/format/time';
   import type { ExtensionsController } from '../state/extensions-controller.svelte';
 
   let { ctrl }: { ctrl: ExtensionsController } = $props();
@@ -14,7 +14,7 @@
   const GRID = '170px 110px 1.4fr 190px 240px';
 </script>
 
-<SectionCard class="grid gap-4">
+<Panel class="grid gap-4">
   <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
     <div>
       <h3 class="text-lg font-semibold">Add an extension</h3>
@@ -27,7 +27,7 @@
       <Link2 size={15} /> Make a pairing code
     </Button>
   </div>
-</SectionCard>
+</Panel>
 
 <RefreshableSectionCard
   title="Paired extensions"
@@ -40,7 +40,7 @@
   emptyMessage="No extensions yet. Make a pairing code above to add one."
   onRefresh={() => void ctrl.load()}
 >
-  <AdminTableShell layout="grid" minWidth={900} gridColumns={GRID} stickyHead>
+  <TableShell layout="grid" minWidth={900} gridColumns={GRID} stickyHead>
     {#snippet headRow()}
       <span>Name</span>
       <span>Version</span>
@@ -60,12 +60,12 @@
               {#if row.connected}
                 <Badge variant="success">Connected</Badge>
                 <span class="truncate text-xs text-muted-foreground" title={row.remote ?? ''}>
-                  since {humanDateTime(row.connected_at)}
+                  since {row.connected_at ? dateTime(row.connected_at) : '—'}
                 </span>
               {:else}
                 <Badge variant="secondary">Not connected</Badge>
                 <span class="truncate text-xs text-muted-foreground">
-                  last seen {humanDateTime(row.last_seen)}
+                  last seen {row.last_seen ? dateTime(row.last_seen) : '—'}
                 </span>
               {/if}
             </span>
@@ -73,7 +73,7 @@
               <span class="truncate text-xs text-muted-foreground">{ctrl.testResults[row.extension_id]}</span>
             {/if}
           </span>
-          <span class="truncate text-xs text-muted-foreground">{humanDateTime(row.paired_at)}</span>
+          <span class="truncate text-xs text-muted-foreground">{row.paired_at ? dateTime(row.paired_at) : '—'}</span>
           <span class="flex justify-end gap-2">
             <Button
               size="sm"
@@ -97,5 +97,5 @@
         </div>
       {/each}
     {/snippet}
-  </AdminTableShell>
+  </TableShell>
 </RefreshableSectionCard>

@@ -6,13 +6,13 @@
 -->
 <script lang="ts">
   import { Download, FoldVertical, ListChecks, ListX, LoaderCircle, UnfoldVertical } from '@lucide/svelte';
-  import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
+  import FilterBar from '$kit/ui/filter-bar.svelte';
   import { useTableFilters } from '$lib/components/page/table/use-table-filters.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import { setupStickyHeightVar } from '$lib/styling/sticky-height';
-  import { ADMIN_SELECT_SM } from '$lib/styling/admin-tokens';
-  import { cn } from '$lib/utils';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
+  import { Checkbox } from '$kit/components/ui/checkbox/index.js';
+  import PickSelect from '$kit/ui/pick-select.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
   import EvalResultsTable from '$lib/features/eval/answers/EvalResultsTable.svelte';
   import EvalRowDetailDialog from '$lib/features/eval/answers/EvalRowDetailDialog.svelte';
   import EvalNotRunList from '$lib/features/eval/answers/EvalNotRunList.svelte';
@@ -138,6 +138,28 @@
   function setAnsMark(value: string) {
     tableFilters.set('ans_mark', value === 'all' ? '' : value);
   }
+  const DIFFICULTY_OPTIONS = [
+    { value: 'all', label: 'All difficulties' },
+    { value: 'medium', label: 'medium' },
+    { value: 'hard', label: 'hard' },
+    { value: 'very_hard', label: 'very hard' },
+    { value: 'unspecified', label: 'unspecified' }
+  ];
+  const FLAG_OPTIONS = [
+    { value: 'all', label: 'All flags' },
+    { value: 'sufficient', label: 'Sufficient' },
+    { value: 'miss', label: 'Recall miss' },
+    { value: 'unknown', label: 'Not judged' }
+  ];
+  const MARK_OPTIONS = [
+    { value: 'all', label: 'All answer types' },
+    { value: 'pass', label: 'Pass' },
+    { value: 'incorrect', label: 'Incorrect' },
+    { value: 'partial', label: 'Partial' },
+    { value: 'fail', label: 'Fail' },
+    { value: 'abstain', label: 'Abstain' },
+    { value: 'not_judged', label: 'Not judged' }
+  ];
   // Distinct categories among the answer rows (first-seen order) for the type filter dropdown.
   const ansCategoryOptions = $derived(
     distinctOptionsWithSentinel(eval_.rows, (r) => r.category || undefined, { sort: false }).map(
@@ -242,20 +264,20 @@
 </script>
 
 {#if eval_.questions.length === 0}
-  <InlineEmptyState message="No questions loaded — pick a corpus on the Execute tab." />
+  <EmptyState message="No questions loaded — pick a corpus on the Execute tab." />
 {:else}
   <!-- Sticky controls: run-selection + search/filters + LoCoMo export. -->
   <div
     bind:this={aControlsEl}
     class="sticky z-10 flex flex-wrap items-center gap-2 bg-background py-2 pl-3"
-    style="top: calc(4rem + var(--admin-page-header-h, 0px) + var(--admin-page-sticky-toolbar-h, 0px) + var(--admin-eval-subtabs-h, 0px));"
+    style="top: calc(var(--app-top, 0px) + var(--page-header, 0px) + var(--sticky-bar, 0px) + var(--admin-eval-subtabs-h, 0px));"
   >
     <span class="mr-auto font-sans text-xs text-muted-foreground">
       <span class="font-medium text-foreground">{eval_.selectedCount}</span>/{eval_.questions
         .length} selected{#if resultsSummary} · {resultsSummary}{/if}{#if ansFiltered}
         · {filteredAnswerRows.length}/{eval_.rows.length} shown{/if}
     </span>
-    <AdminFilterBar class="ml-auto items-center gap-2">
+    <FilterBar class="ml-auto items-center gap-2">
       <SearchInput
         variant="inline"
         class="h-8 w-48 min-w-0 shadow-xs"
@@ -269,64 +291,43 @@
         class="flex cursor-pointer select-none items-center gap-1.5 font-sans text-xs text-muted-foreground"
         title="Also search inside every folded table: the recalled facts/entities/episodes and the evidence-recall episodes"
       >
-        <input
-          type="checkbox"
+        <Checkbox
           class="size-3.5"
           checked={ansSearchRecalled}
-          onchange={(e) => setAnsSearchRecalled(e.currentTarget.checked)}
+          onCheckedChange={setAnsSearchRecalled}
         />
         Recalled
       </label>
-      <select
-        class={cn(ADMIN_SELECT_SM, 'min-w-28')}
+      <PickSelect
+        class="h-8 min-w-28 w-auto text-sm"
+        label="Filter by question type"
         value={ansCategory}
-        onchange={(e) => setAnsCategory(e.currentTarget.value)}
-        title="Filter by question type"
-      >
-        <option value="all">All types</option>
-        {#each ansCategoryOptions as c (c)}
-          <option value={c}>{c}</option>
-        {/each}
-      </select>
-      <select
-        class={cn(ADMIN_SELECT_SM, 'min-w-32')}
+        options={[{ value: 'all', label: 'All types' }, ...ansCategoryOptions.map((c) => ({ value: c, label: c }))]}
+        onchange={setAnsCategory}
+      />
+      <PickSelect
+        class="h-8 min-w-32 w-auto text-sm"
+        label="Filter by difficulty"
         value={ansDifficulty}
-        onchange={(e) => setAnsDifficulty(e.currentTarget.value)}
-        title="Filter by difficulty"
-      >
-        <option value="all">All difficulties</option>
-        <option value="medium">medium</option>
-        <option value="hard">hard</option>
-        <option value="very_hard">very hard</option>
-        <option value="unspecified">unspecified</option>
-      </select>
+        options={DIFFICULTY_OPTIONS}
+        onchange={setAnsDifficulty}
+      />
       {#if cfg.showRecallColumn}
-        <select
-          class={cn(ADMIN_SELECT_SM, 'min-w-28')}
+        <PickSelect
+          class="h-8 min-w-28 w-auto text-sm"
+          label="Filter by judge recall-sufficiency flag"
           value={ansFlag}
-          onchange={(e) => setAnsFlag(e.currentTarget.value)}
-          title="Filter by judge recall-sufficiency flag"
-        >
-          <option value="all">All flags</option>
-          <option value="sufficient">Sufficient</option>
-          <option value="miss">Recall miss</option>
-          <option value="unknown">Not judged</option>
-        </select>
+          options={FLAG_OPTIONS}
+          onchange={setAnsFlag}
+        />
       {/if}
-      <select
-        class={cn(ADMIN_SELECT_SM, 'min-w-32')}
+      <PickSelect
+        class="h-8 min-w-32 w-auto text-sm"
+        label="Filter by answer type (judge verdict)"
         value={ansMark}
-        onchange={(e) => setAnsMark(e.currentTarget.value)}
-        title="Filter by answer type (judge verdict)"
-      >
-        <option value="all">All answer types</option>
-        <option value="pass">Pass</option>
-        <option value="incorrect">Incorrect</option>
-        <option value="partial">Partial</option>
-        <option value="fail">Fail</option>
-        <option value="abstain">Abstain</option>
-        <option value="not_judged">Not judged</option>
-      </select>
+        options={MARK_OPTIONS}
+        onchange={setAnsMark}
+      />
       {#if ansFiltered}
         <button
           type="button"
@@ -394,7 +395,7 @@
           LoCoMo
         </Button>
       {/if}
-    </AdminFilterBar>
+    </FilterBar>
   </div>
   {#if showMemorySummaryBar}
     <div

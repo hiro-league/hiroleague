@@ -2,43 +2,36 @@
   import { afterNavigate } from '$app/navigation';
   import { onMount } from 'svelte';
   import { Plus, UserRound } from '@lucide/svelte';
-  import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
+  import PageHeader from '$kit/ui/page-header.svelte';
   import AdminRecordTabChip from '$lib/components/page/AdminRecordTabChip.svelte';
-  import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
-  import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
-  import Button from '$lib/components/ui/button.svelte';
+  import PageTabs from '$kit/ui/page-tabs.svelte';
+  import type { PageTab } from '$kit/ui/page-tabs.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import CharactersBrowseSection from '$lib/features/characters/browse/CharactersBrowseSection.svelte';
   import CharacterViewPanel from '$lib/features/characters/view/CharacterViewPanel.svelte';
   import CharacterEditPanel from '$lib/features/characters/view/CharacterEditPanel.svelte';
   import CharacterDialogs from '$lib/features/characters/modals/CharacterDialogs.svelte';
-  import { createCharactersFormModel } from '$lib/features/characters/state/characters-form.svelte';
   import { createCharactersPageController } from '$lib/features/characters/state/characters-controller.svelte';
-  import { createUnsavedGuard } from '$lib/navigation/unsaved-guard.svelte';
-  import ToastHost from '$lib/ui/ToastHost.svelte';
-  import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
+  import { ask } from '$kit/ui/confirm.svelte';
+  import { toast } from '$kit/ui/toast.svelte';
   import { createCharactersPreferences } from '$lib/preferences/characters-preferences.svelte';
   import type { CharactersTabPreference } from '$lib/preferences/keys';
 
   const prefs = createCharactersPreferences();
-  const toasts = createToastNotifier();
-  const notify = toasts.notify;
+  const notify = toast.show;
 
-  const formApi = createCharactersFormModel();
-
-  const unsaved = createUnsavedGuard(
-    () => formApi.dirty,
-    () => prefs.detailMode === 'edit',
-    (next) => {
-      formApi.dirty = next;
-    }
-  );
-
-  /** Remote list/detail/catalog + destructive actions wired to prefs + draft formModel. */
+  /** Remote list/detail/catalog + destructive actions wired to prefs; it holds the character being edited (`ctrl.draft`). */
   const ctrl = createCharactersPageController({
     prefs,
-    formApi,
     notify,
-    confirmDiscard: unsaved.confirmDiscard
+    confirmDiscard: async () =>
+      !ctrl.draft.dirty ||
+      ask({
+        title: 'Unsaved changes',
+        description: 'You have edits that are not saved yet. Discard them and leave, or stay to keep editing.',
+        action: 'Discard changes',
+        danger: true
+      })
   });
 
   const detailVisible = $derived(prefs.activeTab === 'detail');
@@ -48,7 +41,7 @@
     isNew ? 'New character' : ctrl.selected?.name?.trim() || prefs.characterId || 'Detail'
   );
 
-  const fixedTabs: readonly AdminTabDescriptor<CharactersTabPreference>[] = [
+  const fixedTabs: readonly PageTab<CharactersTabPreference>[] = [
     { id: 'browse', label: 'Browse', kind: 'pane' }
   ];
 
@@ -63,22 +56,18 @@
   });
 </script>
 
-<AdminPageHeader
-  kicker="Configuration"
-  title="Characters"
-  sticky
-  wrapperClass={detailVisible && prefs.detailMode === 'edit'
+<section class={detailVisible && prefs.detailMode === 'edit'
     ? 'grid max-w-[1420px] gap-3'
-    : 'grid max-w-[1420px] gap-5'}
->
-  {#snippet tabs()}
-    <AdminTabStrip
-      ariaLabel="Characters sections"
+    : 'grid max-w-[1420px] gap-5'}>
+  <PageHeader title="Characters">
+    {#snippet tabs()}
+    <PageTabs
+      label="Characters sections"
       tabs={fixedTabs}
-      active={prefs.activeTab}
-      onSelect={() => void ctrl.openBrowse()}
+      value={prefs.activeTab}
+      onchange={() => void ctrl.openBrowse()}
     >
-      {#snippet recordTab()}
+      {#snippet extra()}
         {#if detailVisible}
           <AdminRecordTabChip
             label={detailTabLabel}
@@ -89,14 +78,17 @@
           />
         {/if}
       {/snippet}
-    </AdminTabStrip>
-  {/snippet}
-
-  {#snippet actions()}
+    </PageTabs>
+    {/snippet}
+    {#snippet actions()}
     <Button onclick={() => void ctrl.openNewCharacter()}>
       <Plus size={16} /> New character
     </Button>
-  {/snippet}
+    {/snippet}
+  </PageHeader>
+  
+
+  
 
   {#if prefs.activeTab === 'browse'}
     <CharactersBrowseSection
@@ -117,10 +109,9 @@
       onEnterEdit={() => void ctrl.enterEditMode()}
     />
   {:else}
-    <CharacterEditPanel {ctrl} {formApi} characterId={prefs.characterId} {notify} />
+    <CharacterEditPanel {ctrl} characterId={prefs.characterId} {notify} />
   {/if}
-</AdminPageHeader>
+</section>
 
-<ToastHost toast={toasts.toast} />
 
-<CharacterDialogs {ctrl} {unsaved} characterId={prefs.characterId} />
+<CharacterDialogs {ctrl} characterId={prefs.characterId} />

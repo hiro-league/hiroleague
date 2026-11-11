@@ -2,8 +2,8 @@
   import { base } from '$app/paths';
   import { goto, invalidateAll } from '$app/navigation';
   import { page } from '$app/state';
-  import Button from '$lib/components/ui/button.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import Notice from '$kit/ui/notice.svelte';
   import { RefreshCw } from '@lucide/svelte';
 
   const message = $derived(page.error?.message ?? 'Something went wrong. Please try again.');
@@ -25,7 +25,7 @@
     {/if}
   </div>
 
-  <InlineDestructiveAlert title="Error" {message} />
+  <Notice title="Error" {message} />
 
   <div class="flex flex-wrap gap-2">
     <Button onclick={() => void retry()}>

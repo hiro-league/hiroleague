@@ -1,8 +1,10 @@
 <script lang="ts">
-  import Button from '$lib/components/ui/button.svelte';
-  import FormField from '$lib/components/ui/form-field.svelte';
-  import * as Dialog from '$lib/components/ui/dialog';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
+  import { Input } from '$kit/components/ui/input/index.js';
+  import Field from '$kit/ui/field.svelte';
+  import Loading from '$kit/ui/loading.svelte';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import type { AddableProviderRow } from '$lib/api/catalog';
 
   import type { ProviderCheckResult } from '$lib/api/catalog';
@@ -46,6 +48,7 @@
     onAccountIdChange,
     onBaseUrlChange
   }: Props = $props();
+  const uid = $props.id();
 
   // Cataloged models not yet pulled on the probed server — surfaced with their `ollama pull` hint.
   const missingModels = $derived(
@@ -72,35 +75,33 @@
       <Dialog.Title>Add provider</Dialog.Title>
     </Dialog.Header>
     {#if loading}
-      <InlineLoading label="Loading providers…" />
+      <Loading label="Loading providers…" />
     {:else}
       <div class="grid gap-4">
-        <FormField label="Provider">
-          {#snippet children()}
-            <select
-              value={providerId}
-              onchange={(event) => onProviderIdChange((event.currentTarget as HTMLSelectElement).value)}
-            >
-              {#each addableProviders as provider}
-                <option value={provider.id}>{provider.display_name} ({provider.id})</option>
-              {/each}
-            </select>
-          {/snippet}
-        </FormField>
+        <Field label="Provider" for="{uid}-provider">
+          <PickSelect
+            id="{uid}-provider"
+            value={providerId}
+            options={addableProviders.map((provider) => ({ value: provider.id, label: `${provider.display_name} (${provider.id})` }))}
+            onchange={onProviderIdChange}
+            label="Provider"
+            class="h-8 w-full text-sm"
+          />
+        </Field>
         {#if isLocal}
-          <FormField
+          <Field
             label="Endpoint URL"
+            for="{uid}-url"
             hint="HTTP base URL of the local server — no API key. Ollama defaults to http://localhost:11434."
           >
-            {#snippet children()}
-              <input
-                type="text"
-                value={baseUrl}
-                oninput={(event) => onBaseUrlChange((event.currentTarget as HTMLInputElement).value)}
-                placeholder="http://localhost:11434"
-              />
-            {/snippet}
-          </FormField>
+            <Input
+              id="{uid}-url"
+              type="text"
+              value={baseUrl}
+              oninput={(event) => onBaseUrlChange((event.currentTarget as HTMLInputElement).value)}
+              placeholder="http://localhost:11434"
+            />
+          </Field>
           <div class="grid gap-2">
             <Button
               variant="outline"
@@ -112,7 +113,7 @@
             </Button>
             {#if checkResult}
               {#if checkResult.online}
-                <p class="text-sm text-green-700 dark:text-green-500">
+                <p class="text-sm text-success">
                   ✅ Online — {checkResult.installed.length} model{checkResult.installed.length === 1
                     ? ''
                     : 's'} installed{checkResult.latency_ms != null
@@ -120,8 +121,8 @@
                     : ''}
                 </p>
                 {#if missingModels.length > 0}
-                  <div class="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs dark:border-amber-800 dark:bg-amber-950/40">
-                    <p class="mb-1 font-medium text-amber-800 dark:text-amber-300">
+                  <div class="rounded-md border border-warning/30 bg-warning/10 p-2 text-xs">
+                    <p class="mb-1 font-medium text-warning">
                       Cataloged models not pulled yet:
                     </p>
                     <ul class="grid gap-1">
@@ -144,30 +145,29 @@
             {/if}
           </div>
         {:else}
-          <FormField label="API key">
-            {#snippet children()}
-              <input
-                type="password"
-                value={apiKey}
-                oninput={(event) => onApiKeyChange((event.currentTarget as HTMLInputElement).value)}
-                placeholder="Paste the provider API key"
-              />
-            {/snippet}
-          </FormField>
+          <Field label="API key" for="{uid}-key">
+            <Input
+              id="{uid}-key"
+              type="password"
+              value={apiKey}
+              oninput={(event) => onApiKeyChange((event.currentTarget as HTMLInputElement).value)}
+              placeholder="Paste the provider API key"
+            />
+          </Field>
           {#if requiresAccountId}
-            <FormField
+            <Field
               label="Account ID"
+              for="{uid}-account"
               hint="Non-secret vendor account identifier (part of the API URL) — e.g. the Cloudflare account id from the dashboard."
             >
-              {#snippet children()}
-                <input
-                  type="text"
-                  value={accountId}
-                  oninput={(event) => onAccountIdChange((event.currentTarget as HTMLInputElement).value)}
-                  placeholder="Paste the provider account id"
-                />
-              {/snippet}
-            </FormField>
+              <Input
+                id="{uid}-account"
+                type="text"
+                value={accountId}
+                oninput={(event) => onAccountIdChange((event.currentTarget as HTMLInputElement).value)}
+                placeholder="Paste the provider account id"
+              />
+            </Field>
           {/if}
         {/if}
       </div>

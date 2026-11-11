@@ -1,15 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { afterNavigate } from '$app/navigation';
-  import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
-  import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
-  import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
+  import PageHeader from '$kit/ui/page-header.svelte';
+  import PageTabs from '$kit/ui/page-tabs.svelte';
+  import type { PageTab } from '$kit/ui/page-tabs.svelte';
   import ChatChannelsBrowse from '$lib/features/chat-channels/browse/ChatChannelsBrowse.svelte';
   import ChatChannelEditorModal from '$lib/features/chat-channels/edit/ChatChannelEditorModal.svelte';
   import ChatChannelsMessagesPanel from '$lib/features/chat-channels/messages/ChatChannelsMessagesPanel.svelte';
   import ChatChannelDeleteModal from '$lib/features/chat-channels/modals/ChatChannelDeleteModal.svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import * as Dialog from '$lib/components/ui/dialog';
   import { getChatEngine } from '$lib/features/chat-channels/state/chat-engine-singleton.svelte';
   import {
     CHAT_CHANNELS_PANEL_IDS,
@@ -43,7 +41,7 @@
     ctrl.setPageMessagesActive(ctrl.activeTab === 'messages');
   });
 
-  const tabDescriptors: readonly AdminTabDescriptor<ChatChannelsTabPreference>[] = [
+  const tabDescriptors: readonly PageTab<ChatChannelsTabPreference>[] = [
     {
       id: 'channels',
       label: 'Channels',
@@ -61,19 +59,18 @@
   ];
 </script>
 
-<AdminPageHeader
-  kicker="Communication"
-  title="Chat channels"
-  wrapperClass="flex h-full min-h-0 max-w-[1420px] flex-col gap-5"
->
-  {#snippet tabs()}
-    <AdminTabStrip
-      ariaLabel={CHAT_CHANNELS_TABLIST_LABEL}
+<section class="flex h-full min-h-0 max-w-[1420px] flex-col gap-5">
+  <PageHeader sticky={false} title="Chat channels">
+    {#snippet tabs()}
+    <PageTabs
+      label={CHAT_CHANNELS_TABLIST_LABEL}
       tabs={tabDescriptors}
-      active={ctrl.activeTab}
-      onSelect={(id) => void ctrl.setActiveTab(id)}
+      value={ctrl.activeTab}
+      onchange={(id) => void ctrl.setActiveTab(id)}
     />
-  {/snippet}
+    {/snippet}
+  </PageHeader>
+  
 
   <div
     id={CHAT_CHANNELS_PANEL_IDS.channels}
@@ -106,7 +103,7 @@
       onRefresh={ctrl.refreshCurrent}
     />
   </div>
-</AdminPageHeader>
+</section>
 
 <!-- Toast host + clear-messages modal moved to AdminShell so they serve the global
      overlay too (single shared engine). Channel CRUD modals stay here (page-only). -->
@@ -127,33 +124,6 @@
   onCancelExplicit={() => void ctrl.cancelChannelFormExplicit()}
   onSubmit={() => void ctrl.submitForm()}
 />
-
-<Dialog.Root
-  open={ctrl.unsaved.unsavedModalOpen}
-  onOpenChange={(next) => {
-    if (!next) ctrl.unsaved.closeUnsavedModalContinueEditing();
-  }}
->
-  <Dialog.Content overlayClass="z-[60]" class="z-[60] sm:max-w-md">
-    <Dialog.Header>
-      <Dialog.Title>Discard changes?</Dialog.Title>
-      <Dialog.Description>
-        You have unsaved edits for this conversation channel.
-      </Dialog.Description>
-    </Dialog.Header>
-    <p class="font-sans text-sm text-muted-foreground">
-      Discard them and close the editor, or keep editing.
-    </p>
-    <Dialog.Footer>
-      <Button variant="outline" onclick={ctrl.unsaved.closeUnsavedModalContinueEditing}>
-        Keep editing
-      </Button>
-      <Button variant="destructive" onclick={ctrl.unsaved.confirmUnsavedModalDiscard}>
-        Discard
-      </Button>
-    </Dialog.Footer>
-  </Dialog.Content>
-</Dialog.Root>
 
 <ChatChannelDeleteModal
   target={ctrl.deleteTarget}

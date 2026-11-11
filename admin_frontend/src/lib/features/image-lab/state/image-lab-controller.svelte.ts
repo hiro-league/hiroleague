@@ -6,7 +6,9 @@ import {
   type ImageProfile
 } from '$lib/api/image-lab';
 import { patchPreferences } from '$lib/api/preferences';
-import type { ToastKind } from '$lib/ui/toast-types';
+import { errorMessage } from '$kit/api/client';
+import { Action } from '$kit/state/action.svelte';
+import type { ToastKind } from '$kit/ui/toast.svelte';
 import {
   composeImagePrompt,
   estimateImageCostUsd,
@@ -40,15 +42,14 @@ export function createImageLabController() {
   let stylePrefix = $state('');
   let styleSuffix = $state('');
 
-  let generating = $state(false);
-  let generateError = $state<string | null>(null);
+  const generation = new Action();
   let result = $state<ImageLabGenerateResult | null>(null);
 
   // Save-as-recipe dialog.
   let saveDialogOpen = $state(false);
   let saveProfileId = $state('');
   let saveProfileLabel = $state('');
-  let saving = $state(false);
+  const saveRecipe = new Action();
 
   const models = $derived(options?.models ?? []);
   const profiles = $derived(options?.profiles ?? ({} as Record<string, ImageProfile>));
@@ -63,12 +64,12 @@ export function createImageLabController() {
     error = null;
     try {
       const payload = await getImageLabOptions();
-      options = payload.data;
-      const firstAvailable = payload.data.models.find((m) => m.available);
-      model = payload.data.default_model ?? firstAvailable?.id ?? payload.data.models[0]?.id ?? '';
-      applyProfile(payload.data.default_profile);
+      options = payload;
+      const firstAvailable = payload.models.find((m) => m.available);
+      model = payload.default_model ?? firstAvailable?.id ?? payload.models[0]?.id ?? '';
+      applyProfile(payload.default_profile);
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to load Image Lab options.';
+      error = errorMessage(err);
       options = null;
     } finally {
       loading = false;
@@ -92,22 +93,16 @@ export function createImageLabController() {
       notify('warning', 'Write a prompt first.');
       return;
     }
-    generating = true;
-    generateError = null;
-    try {
-      const payload = await generateImage({
+    const payload = await generation.run(() =>
+      generateImage({
         prompt: composedPrompt,
         profile_id: PLAYGROUND_PROFILE_ID,
         model,
         steps,
         seed
-      });
-      result = payload.data;
-    } catch (err) {
-      generateError = err instanceof Error ? err.message : 'Image generation failed.';
-    } finally {
-      generating = false;
-    }
+      })
+    );
+    if (payload) result = payload;
   }
 
   function openSaveDialog() {
@@ -117,7 +112,7 @@ export function createImageLabController() {
   }
 
   function closeSaveDialog() {
-    if (saving) return;
+    if (saveRecipe.busy) return;
     saveDialogOpen = false;
   }
 
@@ -132,8 +127,7 @@ export function createImageLabController() {
       notify('error', `Recipe "${id}" is locked and cannot be overwritten.`);
       return;
     }
-    saving = true;
-    try {
+    await saveRecipe.run(async () => {
       await patchPreferences({
         [`image_profiles.${id}`]: {
           label: label || id,
@@ -150,11 +144,8 @@ export function createImageLabController() {
       saveDialogOpen = false;
       await load();
       applyProfile(id);
-    } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Failed to save recipe.');
-    } finally {
-      saving = false;
-    }
+    });
+    if (saveRecipe.error) notify('error', saveRecipe.error);
   }
 
   async function setDefaultModel(notify: Notify) {
@@ -164,7 +155,7 @@ export function createImageLabController() {
       notify('success', `Workspace default image model set to ${model}.`);
       if (options) options = { ...options, default_model: model };
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Failed to set default model.');
+      notify('error', errorMessage(err));
     }
   }
 
@@ -236,10 +227,10 @@ export function createImageLabController() {
       styleSuffix = value;
     },
     get generating() {
-      return generating;
+      return generation.busy;
     },
     get generateError() {
-      return generateError;
+      return generation.error || null;
     },
     get result() {
       return result;
@@ -260,7 +251,7 @@ export function createImageLabController() {
       saveProfileLabel = value;
     },
     get saving() {
-      return saving;
+      return saveRecipe.busy;
     },
     load,
     applyProfile,

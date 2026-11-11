@@ -7,7 +7,7 @@ vi.mock('$lib/runtime/feature-errors', () => ({
   }
 }));
 
-import { createListResource, createListSelection, createMutation, createResource } from './create-resource.svelte';
+import { createListResource, createListSelection, createResource } from './create-resource.svelte';
 
 describe('createResource', () => {
   it('loads data on success', async () => {
@@ -120,37 +120,5 @@ describe('createListResource', () => {
     await list.load({ silent: true });
     expect(list.selectedId).toBe('2');
     expect(list.selected).toEqual({ id: '2', label: 'two' });
-  });
-});
-
-describe('createMutation', () => {
-  it('notifies success, runs onDone, and toggles busy', async () => {
-    const notify = vi.fn();
-    const fn = vi.fn().mockResolvedValue({ id: 7 });
-    const onDone = vi.fn();
-    const mutation = createMutation(fn, {
-      notify,
-      successMsg: (result) => `done ${result.id}`,
-      onDone
-    });
-
-    expect(mutation.busy).toBe(false);
-    const pending = mutation.run('arg' as never);
-    expect(mutation.busy).toBe(true);
-    await pending;
-    expect(mutation.busy).toBe(false);
-    expect(notify).toHaveBeenCalledWith('success', 'done 7');
-    expect(onDone).toHaveBeenCalledWith({ id: 7 });
-  });
-
-  it('notifies error with prefix fallback', async () => {
-    const notify = vi.fn();
-    const mutation = createMutation(vi.fn().mockRejectedValue('nope'), {
-      notify,
-      errorPrefix: 'Save failed.'
-    });
-
-    await mutation.run();
-    expect(notify).toHaveBeenCalledWith('error', 'Save failed.');
   });
 });

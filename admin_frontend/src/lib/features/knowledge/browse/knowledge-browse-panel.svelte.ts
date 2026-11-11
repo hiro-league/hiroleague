@@ -2,7 +2,7 @@ import type { KnowledgeDocument, KnowledgeScannedFile } from '$lib/api/knowledge
 import { removeDocumentFromKnowledgeGraph } from '$lib/api/knowledge';
 import type { KnowledgePageController } from '$lib/features/knowledge/state/knowledge-controller.svelte';
 import { documentToPreviewFile } from '$lib/features/knowledge/shared/knowledge-pure';
-import type { ToastKind } from '$lib/ui/toast-types';
+import type { ToastKind } from '$kit/ui/toast.svelte';
 import {
   knowledgeDeleteSuccessMessage,
   knowledgeMetadataSavedMessage
@@ -88,9 +88,13 @@ export function createKnowledgeBrowsePanelUi(deps: { ctl: KnowledgePageControlle
     let removedEpisodes = 0;
     let failed = 0;
     for (const document of removeGraphTargets) {
-      const res = await removeDocumentFromKnowledgeGraph(document.id);
-      if (res.ok && res.data) removedEpisodes += res.data.removed_episodes;
-      else failed += 1;
+      // Step 1d: a failed request throws (answers are the data itself; there is no {ok, error} to test).
+      try {
+        const res = await removeDocumentFromKnowledgeGraph(document.id);
+        removedEpisodes += res.removed_episodes;
+      } catch {
+        failed += 1;
+      }
     }
     removingGraph = false;
     const docCount = removeGraphTargets.length;

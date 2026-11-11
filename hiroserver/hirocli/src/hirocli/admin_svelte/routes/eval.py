@@ -22,7 +22,7 @@ from starlette.concurrency import run_in_threadpool
 from hiro_commons.log import Logger
 
 from hirocli.admin_svelte.deps import SelectedWorkspaceIdDep
-from hirocli.admin_svelte.result_payload import envelope_failure
+from hirocli.admin_svelte.result_payload import api_failure
 from hirocli.admin_svelte.routes.knowledge import (
     _close_if_owned,
     _publish_graph_event,
@@ -95,7 +95,7 @@ async def eval_run(
     body: EvalRunBody,
     workspace_id: SelectedWorkspaceIdDep,
     request: Request,
-) -> dict[str, Any]:
+) -> Any:
     """L3 (Phase 5e) — kick the synthetic eval batch in the background.
 
     Returns ``{run_id}`` immediately. The eval emits ``eval.*`` Domain
@@ -135,13 +135,13 @@ async def eval_run(
         questions_path = (body.questions_path or "").strip()
         selected_ids = [q for q in (body.question_ids or []) if q]
         if not corpus_id or not corpus_path:
-            return envelope_failure("Pick a corpus before running the eval.")
+            return api_failure("Pick a corpus before running the eval.")
         # Setup-only runs (remember/ingest/build/clear a batch with NO questions) are allowed —
         # that's how a large corpus gets built in monitored chunks before any recall. A run with
         # neither questions nor a setup action would do nothing, so reject only that case.
         setup_only = body.ingest_synthetic or body.build_graph or body.clear_before
         if not selected_ids and not setup_only:
-            return envelope_failure(
+            return api_failure(
                 "Select at least one question, or enable Remember / Clear for a setup-only batch."
             )
         # Questions need their bank; a setup-only batch doesn't. Load + filter to the explicit
@@ -149,14 +149,14 @@ async def eval_run(
         questions: list[dict[str, Any]] = []
         if selected_ids:
             if not questions_path or not Path(questions_path).exists():
-                return envelope_failure(
+                return api_failure(
                     f"No question bank found for corpus '{corpus_id}' "
                     f"(expected {corpus_id}.questions.yaml beside the corpus)."
                 )
             wanted = set(selected_ids)
             questions = [q for q in load_questions(Path(questions_path)) if q["id"] in wanted]
             if not questions:
-                return envelope_failure("None of the selected question ids exist in the bank.")
+                return api_failure("None of the selected question ids exist in the bank.")
         # Subscribe the per-workspace run registry BEFORE the task starts so it
         # captures the full event trail for mid-run replay / cross-origin reads.
         registry = get_eval_registry()
@@ -382,13 +382,13 @@ async def eval_run(
             str(exc),
             exc_info=True,
         )
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @eval_router.get("/eval/state")
 async def eval_state(
     workspace_id: SelectedWorkspaceIdDep,
-) -> dict[str, Any]:
+) -> Any:
     """L3 — replay the latest eval run's live state for this workspace.
 
     The admin panel calls this on mount so leaving + returning (or opening the
@@ -405,7 +405,7 @@ async def eval_state(
         return _success(state.to_payload() if state is not None else None)
     except Exception as exc:
         log.error("knowledge eval state failed · %s", str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 class EvalCancelBody(BaseModel):
@@ -420,7 +420,7 @@ class EvalCancelBody(BaseModel):
 async def eval_cancel(
     body: EvalCancelBody,
     workspace_id: SelectedWorkspaceIdDep,
-) -> dict[str, Any]:
+) -> Any:
     """L3 — request cancellation of the in-flight eval run for this workspace.
 
     Cancels the background task; the runner catches ``CancelledError`` and emits
@@ -435,7 +435,7 @@ async def eval_cancel(
         return _success({"cancelled": cancelled, "run_id": body.run_id})
     except Exception as exc:
         log.error("knowledge eval cancel failed · %s", str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @eval_router.post("/eval/clear")
@@ -444,7 +444,7 @@ async def eval_clear(
     request: Request,
     track: str = "knowledge",
     corpus_id: str = "",
-) -> dict[str, Any]:
+) -> Any:
     """Delete a track's eval data from the workspace. Backs the Eval panel's "Clear eval data".
 
     - **knowledge** (default): document-scoped wipe of the chosen corpus's eval-tagged docs
@@ -459,7 +459,7 @@ async def eval_clear(
 
         set_id = (corpus_id or "").strip()
         if not set_id:
-            return envelope_failure("corpus_id is required to clear a memory eval drawer.")
+            return api_failure("corpus_id is required to clear a memory eval drawer.")
         entry, _ = resolve_workspace(workspace_id)
         workspace_path = Path(entry.path)
         try:
@@ -479,20 +479,20 @@ async def eval_clear(
             return _success({"removed_facts": removed})
         except Exception as exc:
             log.error("knowledge eval clear (memory) failed · %s", str(exc), exc_info=True)
-            return envelope_failure(str(exc))
+            return api_failure(str(exc))
 
     from hirocli.services.eval.runner import clear_eval_data
 
     kb_corpus = (corpus_id or "").strip()
     if not kb_corpus:
-        return envelope_failure("corpus_id is required to clear a knowledge eval corpus.")
+        return api_failure("corpus_id is required to clear a knowledge eval corpus.")
     service, owned = await _resolve_service(request, workspace_id)
     try:
         removed = await clear_eval_data(service, kb_corpus)
         return _success({"removed_documents": removed})
     except Exception as exc:
         log.error("knowledge eval clear failed · %s", str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
     finally:
         await _close_if_owned(service, owned)
 
@@ -503,7 +503,7 @@ async def eval_results(
     track: str = "memory",
     corpus_id: str = "",
     questions_path: str = "",
-) -> dict[str, Any]:
+) -> Any:
     """Persisted per-corpus eval results (the merged snapshot) — backs "show latest".
 
     Memory track only. Joins the CURRENT question bank (the spine — so edited
@@ -517,7 +517,7 @@ async def eval_results(
         return _success({"rows": [], "summary": None})
     cid = (corpus_id or "").strip()
     if not cid:
-        return envelope_failure("corpus_id is required to read eval results.")
+        return api_failure("corpus_id is required to read eval results.")
     from hirocli.services.eval.runner import load_questions, summarize_memory_rows
     from hirocli.services.eval.store import (
         coalesce_ingested_ranges,
@@ -621,7 +621,7 @@ async def eval_results(
         return _success({"rows": merged, "summary": summary, "ingested": ingested})
     except Exception as exc:
         log.error("knowledge eval results read failed · %s", str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 def _enrich_rows_with_evidence(corpus_id: str, questions_path: str, rows: list[dict[str, Any]]) -> None:
@@ -654,7 +654,7 @@ async def eval_results_by_benchmark(
     workspace_id: SelectedWorkspaceIdDep,
     benchmark: str = "",
     folder: str = "",
-) -> dict[str, Any]:
+) -> Any:
     """Per-corpus + TOTAL memory-eval summaries for every corpus in a benchmark.
 
     Powers the benchmark results overview (one summary row per corpus + a TOTAL row over
@@ -670,7 +670,7 @@ async def eval_results_by_benchmark(
 
     bid = benchmark.strip()
     if not bid:
-        return envelope_failure("benchmark is required to read benchmark results.")
+        return api_failure("benchmark is required to read benchmark results.")
     try:
         base = Path(folder.strip()) if folder.strip() else DEFAULT_EVAL_FOLDER
         corpuses = [c for c in discover_corpuses(base, "memory") if c.get("benchmark") == bid]
@@ -706,7 +706,7 @@ async def eval_results_by_benchmark(
         )
     except Exception as exc:
         log.error("knowledge eval by-benchmark read failed · %s", str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 class EvalResultsClearBody(BaseModel):
@@ -720,17 +720,17 @@ class EvalResultsClearBody(BaseModel):
 async def eval_results_clear(
     body: EvalResultsClearBody,
     workspace_id: SelectedWorkspaceIdDep,
-) -> dict[str, Any]:
+) -> Any:
     """Delete a corpus's persisted eval RESULTS from disk (results-only).
 
     Distinct from ``/eval/clear`` (which wipes the ingested memory
     drawer): this removes only the saved result snapshot, leaving ingested memory
     intact so a re-run reuses it. Memory track only."""
     if body.track != "memory":
-        return envelope_failure("Only the memory track persists eval results.")
+        return api_failure("Only the memory track persists eval results.")
     cid = (body.corpus_id or "").strip()
     if not cid:
-        return envelope_failure("corpus_id is required to clear eval results.")
+        return api_failure("corpus_id is required to clear eval results.")
     from hirocli.services.eval.store import get_eval_result_store
 
     try:
@@ -741,14 +741,14 @@ async def eval_results_clear(
         return _success({"removed": removed})
     except Exception as exc:
         log.error("knowledge eval results clear failed · %s", str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @eval_shared_router.get("/eval/row")
 async def eval_row_by_run(
     workspace_id: SelectedWorkspaceIdDep,
     run_id: str = "",
-) -> dict[str, Any]:
+) -> Any:
     """Resolve ONE saved memory-eval question row by its per-question graph ``run_id``.
 
     Backs the Graph-Runs → eval-detail bridge: a ``memory_recall`` node in a graph run carries the
@@ -758,7 +758,7 @@ async def eval_row_by_run(
     (``row`` is ``null`` when no saved row ran under that id, e.g. results were cleared)."""
     rid = (run_id or "").strip()
     if not rid:
-        return envelope_failure("run_id is required to look up an eval row.")
+        return api_failure("run_id is required to look up an eval row.")
     from hirocli.services.eval.store import get_eval_result_store
 
     try:
@@ -774,7 +774,7 @@ async def eval_row_by_run(
         return _success({"row": row})
     except Exception as exc:
         log.error("knowledge eval row-by-run read failed · %s", str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @eval_router.get("/eval/results/locomo")
@@ -783,7 +783,7 @@ async def eval_results_locomo(
     corpus_id: str = "",
     questions_path: str = "",
     prediction_key: str = "hiro_memory_prediction",
-) -> dict[str, Any]:
+) -> Any:
     """Export saved memory-eval results in LoCoMo's QA-result JSON shape.
 
     The API envelope carries filename/counts for the admin UI, but ``data.content`` is the
@@ -794,9 +794,9 @@ async def eval_results_locomo(
     cid = (corpus_id or "").strip()
     qpath = Path(questions_path.strip()) if questions_path.strip() else None
     if not cid:
-        return envelope_failure("corpus_id is required to export LoCoMo results.")
+        return api_failure("corpus_id is required to export LoCoMo results.")
     if qpath is None:
-        return envelope_failure("questions_path is required to export LoCoMo results.")
+        return api_failure("questions_path is required to export LoCoMo results.")
 
     from hirocli.services.eval.locomo import (
         LocomoExportError,
@@ -816,10 +816,10 @@ async def eval_results_locomo(
         )
         return _success(export)
     except LocomoExportError as exc:
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
     except Exception as exc:
         log.error("knowledge eval LoCoMo export failed · %s", str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @eval_router.get("/eval/corpuses")
@@ -827,7 +827,7 @@ async def eval_corpuses(
     workspace_id: SelectedWorkspaceIdDep,
     track: str = "memory",
     folder: str = "",
-) -> dict[str, Any]:
+) -> Any:
     """List the corpuses in ``folder`` for ``track`` (the corpus-picker source).
 
     ``folder`` defaults to the sibling ``eval-corpus`` repo (``DEFAULT_EVAL_FOLDER``;
@@ -895,11 +895,11 @@ async def eval_corpuses(
         )
     except Exception as exc:
         log.error("knowledge eval corpuses list failed · %s", str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @eval_router.get("/eval/corpus")
-async def eval_corpus(path: str = "") -> dict[str, Any]:
+async def eval_corpus(path: str = "") -> Any:
     """Load a memory-track corpus's episodes for the human-readable Corpus review panel.
 
     ``path`` is the ``<id>.episodes.jsonl`` for the chosen corpus (from the corpuses list).
@@ -912,7 +912,7 @@ async def eval_corpus(path: str = "") -> dict[str, Any]:
     try:
         cpath = Path(path.strip())
         if not path.strip() or not cpath.exists():
-            return envelope_failure(f"Corpus not found: {path or '(none given)'}")
+            return api_failure(f"Corpus not found: {path or '(none given)'}")
         # Parsing reads + validates the whole file; keep it off the event loop.
         episodes = await run_in_threadpool(load_episodes_file, cpath)
         rows = [
@@ -937,14 +937,14 @@ async def eval_corpus(path: str = "") -> dict[str, Any]:
         )
     except Exception as exc:
         log.error("knowledge eval corpus load failed · %s", str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @eval_router.get("/eval/corpus-extraction")
 async def eval_corpus_extraction(
     workspace_id: SelectedWorkspaceIdDep,
     corpus_id: str = "",
-) -> dict[str, Any]:
+) -> Any:
     """Per-episode at-ingest extraction summary for a memory corpus, for the Corpus-review tab.
 
     Returns ``{episodes: {<episode_id>: {entity_count, fact_count, run_id, step_index}}}`` built
@@ -958,7 +958,7 @@ async def eval_corpus_extraction(
     try:
         cid = corpus_id.strip()
         if not cid:
-            return envelope_failure("corpus_id is required")
+            return api_failure("corpus_id is required")
         entry, _ = resolve_workspace(workspace_id)
         workspace_path = Path(entry.path).resolve()
         group_id = eval_memory_group_id(cid)
@@ -971,11 +971,11 @@ async def eval_corpus_extraction(
         return _success({"episodes": episodes, "group_id": group_id})
     except Exception as exc:
         log.error("knowledge eval corpus extraction failed · %s", str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))
 
 
 @eval_router.get("/eval/questions")
-async def eval_questions(path: str = "") -> dict[str, Any]:
+async def eval_questions(path: str = "") -> Any:
     """List a corpus's question bank for the checklist (id/category/subcategory/text/gold).
 
     ``path`` is the ``<id>.questions.yaml`` for the chosen corpus (from the corpuses list).
@@ -985,7 +985,7 @@ async def eval_questions(path: str = "") -> dict[str, Any]:
     try:
         qpath = Path(path.strip())
         if not path.strip() or not qpath.exists():
-            return envelope_failure(f"Question bank not found: {path or '(none given)'}")
+            return api_failure(f"Question bank not found: {path or '(none given)'}")
         rows = load_questions(qpath)
         questions = [
             {
@@ -1003,4 +1003,4 @@ async def eval_questions(path: str = "") -> dict[str, Any]:
         return _success({"path": str(qpath), "questions": questions})
     except Exception as exc:
         log.error("knowledge eval questions list failed · %s", str(exc), exc_info=True)
-        return envelope_failure(str(exc))
+        return api_failure(str(exc))

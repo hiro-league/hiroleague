@@ -65,6 +65,10 @@ say "deploying ${COMMIT} as release ${RELEASE_ID}"
 # `npm ci` installs exactly package-lock.json (as the PyPI release build does).
 say "installing the admin UI's packages (npm ci)"
 (cd admin_frontend && npm ci --no-audit --no-fund) || die "npm ci failed: nothing was changed."
+# The shared UI kit (ui-kit/) has packages of its own: check.sh's "ui-kit: check" part needs them (the admin UI's
+# build only copies the kit's source, scripts/kit-sync.mjs). Without this the first deploy with the kit fails its check.
+say "installing the UI kit's packages (npm ci)"
+(cd ui-kit && npm ci --no-audit --no-fund) || die "npm ci (ui-kit) failed: nothing was changed."
 say "running the checks (scripts/check.sh)"
 ./scripts/check.sh || die "checks failed: nothing was changed."
 

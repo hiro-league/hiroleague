@@ -6,16 +6,18 @@
    * Studio the context and batch Hiro loads models with. Save (`PUT`) then checks; Check checks now.
    */
   import { RefreshCw } from '@lucide/svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import * as Dialog from '$lib/components/ui/dialog';
-  import FormField from '$lib/components/ui/form-field.svelte';
-  import { humanDateTime } from '$lib/format/human-datetime';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import * as Dialog from '$kit/components/ui/dialog/index.js';
+  import { Input } from '$kit/components/ui/input/index.js';
+  import Field from '$kit/ui/field.svelte';
+  import { dateTime } from '$lib/format/time';
   import { cn } from '$lib/utils';
   import type { AiController } from './ai-controller.svelte';
   import { LOCAL_SERVER_IDS, LOCAL_SERVER_KIND_LABELS, serverStatus } from './ai-profile-rules';
 
   let { ai }: { ai: AiController } = $props();
+  const uid = $props.id();
 
   const id = $derived(
     LOCAL_SERVER_IDS.find((k) => k === ai.dialogProviderId) ?? null
@@ -23,7 +25,7 @@
   const server = $derived(id ? ai.serverFor(id) : undefined);
   const status = $derived(server ? serverStatus(server) : null);
   const usedBy = $derived(id ? ai.profilesOnProvider(id) : []);
-  const checking = $derived(id ? !!ai.checkingServerIds[id] : false);
+  const checking = $derived(id ? ai.serverChecking(id) : false);
   const BADGE = { ok: 'success', warn: 'warning', off: 'secondary' } as const;
 </script>
 
@@ -48,11 +50,11 @@
       {#if server}
         <dl class="grid grid-cols-[8rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
           <dt class="text-muted-foreground">Status</dt>
-          <dd class={cn(status?.tone === 'warn' && 'text-amber-700 dark:text-amber-300')}>
+          <dd class={cn(status?.tone === 'warn' && 'text-warning')}>
             {server.state === 'up' ? 'Up' : (server.error ?? status?.word)}
           </dd>
           <dt class="text-muted-foreground">Checked</dt>
-          <dd>{humanDateTime(server.checked_at)}</dd>
+          <dd>{server.checked_at ? dateTime(server.checked_at) : '—'}</dd>
           <dt class="text-muted-foreground">Used by</dt>
           <dd class="text-muted-foreground">{usedBy.length ? usedBy.join(', ') : 'No profile'}</dd>
           <dt class="text-muted-foreground">Models</dt>
@@ -83,20 +85,20 @@
       {/if}
 
       <div class="grid gap-3">
-        <FormField label="Address" hint={id === 'lm_studio' ? 'e.g. http://192.168.1.90:1234' : 'e.g. http://127.0.0.1:11434'}>
-          <input bind:value={ai.serverDraft.baseUrl} placeholder="http://" />
-        </FormField>
+        <Field label="Address" for="{uid}-address" hint={id === 'lm_studio' ? 'e.g. http://192.168.1.90:1234' : 'e.g. http://127.0.0.1:11434'}>
+          <Input id="{uid}-address" bind:value={ai.serverDraft.baseUrl} placeholder="http://" />
+        </Field>
         <div class="grid items-start gap-3 sm:grid-cols-3">
-          <FormField label="Unload idle after (min)" hint="Models Hiro loaded.">
-            <input type="number" min="1" max="1440" step="5" bind:value={ai.serverDraft.unloadIdleMin} />
-          </FormField>
+          <Field label="Unload idle after (min)" for="{uid}-unload" hint="Models Hiro loaded.">
+            <Input id="{uid}-unload" type="number" min="1" max="1440" step="5" bind:value={ai.serverDraft.unloadIdleMin} />
+          </Field>
           {#if id === 'lm_studio'}
-            <FormField label="Context" hint="A profile's own context wins.">
-              <input type="number" min="2048" max="262144" step="1024" bind:value={ai.serverDraft.context} />
-            </FormField>
-            <FormField label="Batch" hint="Pictures need 2048 or more.">
-              <input type="number" min="64" max="16384" step="256" bind:value={ai.serverDraft.batch} />
-            </FormField>
+            <Field label="Context" for="{uid}-context" hint="A profile's own context wins.">
+              <Input id="{uid}-context" type="number" min="2048" max="262144" step="1024" bind:value={ai.serverDraft.context} />
+            </Field>
+            <Field label="Batch" for="{uid}-batch" hint="Pictures need 2048 or more.">
+              <Input id="{uid}-batch" type="number" min="64" max="16384" step="256" bind:value={ai.serverDraft.batch} />
+            </Field>
           {/if}
         </div>
       </div>

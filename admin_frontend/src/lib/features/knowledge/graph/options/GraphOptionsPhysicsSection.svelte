@@ -1,5 +1,6 @@
 <script lang="ts">
   import { ChevronDown } from '@lucide/svelte';
+  import { Slider } from '$kit/components/ui/slider/index.js';
   import { cn } from '$lib/utils';
   import { GRAPH_OPTION_DEFAULTS as D } from '../knowledge-graph-prefs';
   import GraphOptionsResetDot from './GraphOptionsResetDot.svelte';
@@ -64,7 +65,7 @@
   </button>
   {#if open}
     <div class="space-y-3 p-2.5">
-      <label class="block">
+      <div class="block">
         <div class="mb-1 flex items-center justify-between text-xs">
           <span class="flex items-center font-medium">
             Link strength
@@ -72,10 +73,10 @@
           </span>
           <span class="tabular-nums text-muted-foreground">{linkStrength.toFixed(2)}</span>
         </div>
-        <input type="range" min="0" max="1" step="0.05" bind:value={linkStrength} class="h-1.5 w-full cursor-pointer accent-primary" aria-label="Link strength between nodes" />
+        <Slider type="single" min={0} max={1} step={0.05} bind:value={linkStrength} class="py-1" aria-label="Link strength between nodes" />
         <div class="mt-0.5 flex justify-between text-[10px] text-muted-foreground"><span>loose</span><span>tight</span></div>
-      </label>
-      <label class="block">
+      </div>
+      <div class="block">
         <div class="mb-1 flex items-center justify-between text-xs">
           <span class="flex items-center font-medium">
             Link distance
@@ -83,10 +84,10 @@
           </span>
           <span class="tabular-nums text-muted-foreground">{linkDistance}</span>
         </div>
-        <input type="range" min="20" max="300" step="5" bind:value={linkDistance} class="h-1.5 w-full cursor-pointer accent-primary" aria-label="Resting distance of edges between nodes" />
+        <Slider type="single" min={20} max={300} step={5} bind:value={linkDistance} class="py-1" aria-label="Resting distance of edges between nodes" />
         <div class="mt-0.5 flex justify-between text-[10px] text-muted-foreground"><span>near</span><span>far</span></div>
-      </label>
-      <label class="block">
+      </div>
+      <div class="block">
         <div class="mb-1 flex items-center justify-between text-xs">
           <span class="flex items-center font-medium">
             Node repulsion
@@ -94,10 +95,10 @@
           </span>
           <span class="tabular-nums text-muted-foreground">{Math.abs(chargeStrength)}</span>
         </div>
-        <input type="range" min={chargeMin} max={chargeMax} step="20" bind:value={chargeStrength} class="h-1.5 w-full cursor-pointer accent-primary" aria-label="How strongly nodes push each other apart" />
+        <Slider type="single" min={chargeMin} max={chargeMax} step={20} bind:value={chargeStrength} class="py-1" aria-label="How strongly nodes push each other apart" />
         <div class="mt-0.5 flex justify-between text-[10px] text-muted-foreground"><span>spread</span><span>clump</span></div>
-      </label>
-      <label class="block">
+      </div>
+      <div class="block">
         <div class="mb-1 flex items-center justify-between text-xs">
           <span class="flex items-center font-medium">
             Center pull
@@ -105,10 +106,10 @@
           </span>
           <span class="tabular-nums text-muted-foreground">{centerStrength.toFixed(2)}</span>
         </div>
-        <input type="range" min="0" max={centerStrengthMax} step="0.01" bind:value={centerStrength} class="h-1.5 w-full cursor-pointer accent-primary" aria-label="How strongly all nodes are pulled toward the center" />
+        <Slider type="single" min={0} max={centerStrengthMax} step={0.01} bind:value={centerStrength} class="py-1" aria-label="How strongly all nodes are pulled toward the center" />
         <div class="mt-0.5 flex justify-between text-[10px] text-muted-foreground"><span>loose</span><span>tight</span></div>
-      </label>
-      <label class="block">
+      </div>
+      <div class="block">
         <div class="mb-1 flex items-center justify-between text-xs">
           <span class="flex items-center font-medium">
             Spread radius
@@ -116,10 +117,10 @@
           </span>
           <span class="tabular-nums text-muted-foreground">{radialRing}</span>
         </div>
-        <input type="range" min={radialRingMin} max={radialRingMax} step="5" bind:value={radialRing} class="h-1.5 w-full cursor-pointer accent-primary" aria-label="How far the least-connected and disconnected nodes sit from the center" />
+        <Slider type="single" min={radialRingMin} max={radialRingMax} step={5} bind:value={radialRing} class="py-1" aria-label="How far the least-connected and disconnected nodes sit from the center" />
         <div class="mt-0.5 flex justify-between text-[10px] text-muted-foreground"><span>tight</span><span>wide</span></div>
-      </label>
-      <label class="block">
+      </div>
+      <div class="block">
         <div class="mb-1 flex items-center justify-between text-xs">
           <span class="flex items-center font-medium">
             Hub separation
@@ -127,10 +128,10 @@
           </span>
           <span class="tabular-nums text-muted-foreground">{hubSeparation.toFixed(2)}</span>
         </div>
-        <input type="range" min={hubSeparationMin} max={hubSeparationMax} step="0.05" bind:value={hubSeparation} class="h-1.5 w-full cursor-pointer accent-primary" aria-label="How strongly high-connection hubs are pushed apart from each other" />
+        <Slider type="single" min={hubSeparationMin} max={hubSeparationMax} step={0.05} bind:value={hubSeparation} class="py-1" aria-label="How strongly high-connection hubs are pushed apart from each other" />
         <div class="mt-0.5 flex justify-between text-[10px] text-muted-foreground"><span>off</span><span>spread hubs</span></div>
-      </label>
-      <label class={cn('block', hubSeparation === 0 && 'pointer-events-none opacity-40')}>
+      </div>
+      <div class={cn('block', hubSeparation === 0 && 'pointer-events-none opacity-40')}>
         <div class="mb-1 flex items-center justify-between text-xs">
           <span class="flex items-center font-medium">
             Hub spacing
@@ -138,10 +139,10 @@
           </span>
           <span class="tabular-nums text-muted-foreground">{hubSpacing.toFixed(2)}×</span>
         </div>
-        <input type="range" min={hubSpacingMin} max={hubSpacingMax} step="0.25" bind:value={hubSpacing} disabled={hubSeparation === 0} class="h-1.5 w-full cursor-pointer accent-primary" aria-label="How far apart the separated hubs settle" />
+        <Slider type="single" min={hubSpacingMin} max={hubSpacingMax} step={0.25} bind:value={hubSpacing} disabled={hubSeparation === 0} class="py-1" aria-label="How far apart the separated hubs settle" />
         <div class="mt-0.5 flex justify-between text-[10px] text-muted-foreground"><span>near</span><span>far</span></div>
-      </label>
-      <label class="block">
+      </div>
+      <div class="block">
         <div class="mb-1 flex items-center justify-between text-xs">
           <span class="flex items-center font-medium">
             Collision spacing
@@ -149,9 +150,9 @@
           </span>
           <span class="tabular-nums text-muted-foreground">{collideScale.toFixed(2)}×</span>
         </div>
-        <input type="range" min={collideScaleMin} max={collideScaleMax} step="0.05" bind:value={collideScale} class="h-1.5 w-full cursor-pointer accent-primary" aria-label="Collision radius multiplier — extra spacing so labels don't cover other nodes" />
+        <Slider type="single" min={collideScaleMin} max={collideScaleMax} step={0.05} bind:value={collideScale} class="py-1" aria-label="Collision radius multiplier — extra spacing so labels don't cover other nodes" />
         <div class="mt-0.5 flex justify-between text-[10px] text-muted-foreground"><span>normal</span><span>roomy</span></div>
-      </label>
+      </div>
     </div>
   {/if}
 </section>

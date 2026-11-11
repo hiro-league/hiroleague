@@ -2,15 +2,15 @@
   import type { ChatChannelRow } from '$lib/api/chat-channels';
   import type { CharacterRow } from '$lib/api/characters';
   import type { GraphLedgerRow } from '$lib/api/graph-runs';
-  import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
+  import FilterBar from '$kit/ui/filter-bar.svelte';
   import SearchInput from '$lib/search/SearchInput.svelte';
-  import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
-  import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import FilterSelect from '$kit/ui/filter-select.svelte';
+  import StickyBar from '$kit/ui/sticky-bar.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import AdminAvatarNameCell from '$lib/components/page/table/AdminAvatarNameCell.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import { FileText } from '@lucide/svelte';
-  import { formatCompactDateTime } from '$lib/format/compact-datetime';
+  import { formatCompactDateTime } from '$lib/format/timestamp-cell';
   import Highlight from '$lib/search/Highlight.svelte';
   import { matchesQuery } from '$lib/search/match';
   import {
@@ -99,30 +99,30 @@
   {hidden}
 >
   {#if !hidden}
-    <AdminPageStickyToolbar>
-      <AdminFilterBar class="items-end">
-      <AdminFilterBarSelect
+    <StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
+      <FilterBar class="items-end">
+      <FilterSelect
         label="Run kind"
         bind:value={filterRunKind}
         placeholder="All run kinds"
         class="min-w-[10rem]"
         options={runKindOptions}
       />
-      <AdminFilterBarSelect
+      <FilterSelect
         label="Character"
         bind:value={filterCharacterId}
         placeholder="All characters"
         class="min-w-[10rem]"
         options={characterOptions}
       />
-      <AdminFilterBarSelect
+      <FilterSelect
         label="Channel"
         bind:value={filterChannelId}
         placeholder="All channels"
         class="min-w-[10rem]"
         options={channelOptions}
       />
-      <AdminFilterBarSelect
+      <FilterSelect
         label="Status"
         bind:value={filterStatus}
         placeholder="All statuses"
@@ -135,15 +135,15 @@
         placeholder="Search input / output previews…"
         class="min-w-[12rem] flex-1"
       />
-      </AdminFilterBar>
-    </AdminPageStickyToolbar>
+      </FilterBar>
+    </StickyBar>
   {/if}
 
   {#if error}
     <p class="error m-0 font-sans text-sm text-muted-foreground" role="alert">{error}</p>
   {/if}
 
-  <AdminTableShell density="dense" stickyHead>
+  <TableShell density="dense" stickyHead>
     <thead>
       <tr>
         <th>Time</th>
@@ -218,7 +218,7 @@
         </tr>
       {/each}
     </tbody>
-  </AdminTableShell>
+  </TableShell>
 
   {#if hasMoreRuns && onLoadMore}
     <div class="border-t py-3 text-center">

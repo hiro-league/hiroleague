@@ -8,21 +8,22 @@
    * (greyed out, choice read-only, Forget).
    */
   import { RefreshCw, X } from '@lucide/svelte';
-  import SectionCard from '$lib/components/page/SectionCard.svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import Panel from '$kit/ui/panel.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
-  import Badge from '$lib/components/ui/badge.svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import { humanDateTime } from '$lib/format/human-datetime';
-  import { ADMIN_SECTION_HEADING_LG, ADMIN_SELECT } from '$lib/styling/admin-tokens';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import { dateTime } from '$lib/format/time';
+  import { ADMIN_SECTION_HEADING_LG } from '$lib/styling/admin-tokens';
+  import Notice from '$kit/ui/notice.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
+  import Loading from '$kit/ui/loading.svelte';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import { cn } from '$lib/utils';
   import type { AiController } from './ai-controller.svelte';
   import { chainLabel, fallbackChain, needsMismatch } from './ai-profile-rules';
   import type { AiUse } from './ai-types';
-  import SourceFilter from '$lib/components/page/SourceFilter.svelte';
+  import Segmented from '$kit/ui/segmented.svelte';
   import VoiceUsesTable from '$lib/features/catalog/voice/VoiceUsesTable.svelte';
   import type { VoiceController } from '$lib/features/catalog/voice/voice-controller.svelte';
   import HiroUsesTable from './HiroUsesTable.svelte';
@@ -34,10 +35,10 @@
   let source = $state(HIRO);
   const sourceTabs = $derived([
     // Hiro's jobs plus its one speaking use (Hiro's voice).
-    { id: HIRO, label: 'Hiro', count: ai.jobs.length + 1 },
-    ...ai.useGroups.map((g) => ({ id: g.extension, label: g.extension, count: ai.uses.filter((u) => u.extension === g.extension && u.status !== 'removed').length }))
+    { value: HIRO, label: 'Hiro', count: ai.jobs.length + 1 },
+    ...ai.useGroups.map((g) => ({ value: g.extension, label: g.extension, count: ai.uses.filter((u) => u.extension === g.extension && u.status !== 'removed').length }))
   ]);
-  const activeSource = $derived(sourceTabs.some((t) => t.id === source) ? source : (sourceTabs[0]?.id ?? ''));
+  const activeSource = $derived(sourceTabs.some((t) => t.value === source) ? source : (sourceTabs[0]?.value ?? ''));
 
   const GRID = 'minmax(200px,1.1fr) minmax(170px,0.9fr) minmax(200px,1fr) minmax(240px,1.4fr)';
 
@@ -55,7 +56,7 @@
   }
 </script>
 
-<SectionCard class="grid gap-4">
+<Panel class="grid gap-4">
   <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
     <div>
       <h3 class={ADMIN_SECTION_HEADING_LG}>Uses</h3>
@@ -65,31 +66,31 @@
     </div>
     <!-- One source at a time — Hiro's own jobs, then each extension. The same pills as the profile lists
          (Uses is itself a sub-tab of Profiles, so no second tab strip). -->
-    <SourceFilter options={sourceTabs} value={activeSource} onchange={(id) => (source = id)} />
+    <Segmented class="flex-wrap" label="Show uses for" options={sourceTabs} value={activeSource} onchange={(id) => (source = id)} />
   </div>
 
   {#if activeSource === HIRO}
     {#if ai.profilesLoading && ai.jobs.length === 0}
-      <InlineLoading label="Loading Hiro's jobs…" />
+      <Loading label="Loading Hiro's jobs…" />
     {:else if ai.profilesError}
-      <InlineDestructiveAlert title="Could not load Hiro's jobs" message={ai.profilesError} />
+      <Notice title="Could not load Hiro's jobs" message={ai.profilesError} />
     {:else}
       <HiroUsesTable {ai} {voice} />
     {/if}
   {:else}
 
   {#if ai.usesLoading && ai.useGroups.length === 0}
-    <InlineLoading label="Loading uses…" />
+    <Loading label="Loading uses…" />
   {:else if ai.usesError}
-    <InlineDestructiveAlert title="Could not load uses" message={ai.usesError} />
+    <Notice title="Could not load uses" message={ai.usesError} />
   {:else if ai.useGroups.length === 0}
-    <InlineEmptyState message="No extension has declared uses yet." hint="Pair an extension on the Extensions page." />
+    <EmptyState message="No extension has declared uses yet." hint="Pair an extension on the Extensions page." />
   {/if}
 
   {#each ai.useGroups.filter((g) => g.extension === activeSource) as group (group.extension)}
     {@const rows = ai.uses.filter((u) => u.extension === group.extension)}
     {@const offered = rows.filter((u) => u.status !== 'removed').length}
-    {@const refreshing = ai.refreshingExtensions[group.extension]}
+    {@const refreshing = ai.refreshingExtension(group.extension)}
     <div class="grid gap-2">
       <div class="flex flex-wrap items-end justify-between gap-2">
         <div>
@@ -102,7 +103,7 @@
             {/if}
           </h4>
           <p class="text-xs text-muted-foreground">
-            Uses as of {group.asOf ? humanDateTime(group.asOf) : 'never'}
+            Uses as of {group.asOf ? dateTime(group.asOf) : 'never'}
           </p>
         </div>
         <Button
@@ -116,7 +117,7 @@
           {refreshing ? 'Asking…' : 'Refresh'}
         </Button>
       </div>
-      <AdminTableShell layout="grid" minWidth={900} gridColumns={GRID}>
+      <TableShell layout="grid" minWidth={900} gridColumns={GRID}>
         {#snippet headRow()}
           <span>Use</span>
           <span>Needs</span>
@@ -127,7 +128,7 @@
           {#each rows as use (use.id)}
             {@const n = note(use)}
             {@const removed = use.status === 'removed'}
-            {@const busy = ai.useBusy[use.id]}
+            {@const busy = ai.useBusy(use.id)}
             <div class={cn(ADMIN_TABLE_GRID_ROW, removed && 'opacity-60')} style:grid-template-columns={GRID}>
               <span class="flex items-start gap-2">
                 <span class="font-sans text-sm font-semibold">{use.label}</span>
@@ -149,21 +150,17 @@
                 {/if}
               </span>
               <span>
-                <select
-                  class={cn(ADMIN_SELECT, 'w-full')}
-                  aria-label={`Profile for ${use.label}`}
+                <PickSelect
+                  class="h-9 w-full text-sm"
+                  label={`Profile for ${use.label}`}
                   value={use.profileId ?? ''}
                   disabled={removed || busy}
-                  onchange={(event) => void ai.setUseProfile(use.id, event.currentTarget.value)}
-                >
-                  <option value="">No profile</option>
-                  {#each ai.profiles as p (p.id)}
-                    <option value={p.id}>{p.name}</option>
-                  {/each}
-                </select>
+                  options={[{ value: '', label: 'No profile' }, ...ai.profiles.map((p) => ({ value: p.id, label: p.name }))]}
+                  onchange={(v) => void ai.setUseProfile(use.id, v)}
+                />
               </span>
               <span class="flex flex-wrap items-start justify-between gap-2">
-                <span class={cn('text-sm', n.warn ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground')}>
+                <span class={cn('text-sm', n.warn ? 'text-warning' : 'text-muted-foreground')}>
                   {n.text}
                 </span>
                 {#if removed}
@@ -175,10 +172,10 @@
             </div>
           {/each}
         {/snippet}
-      </AdminTableShell>
+      </TableShell>
     </div>
       <!-- Phase 7b: the extension's speaking (voice uses), real. -->
       <VoiceUsesTable {voice} extension={group.extension} />
   {/each}
   {/if}
-</SectionCard>
+</Panel>

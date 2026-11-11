@@ -1,3 +1,4 @@
+import { errorMessage } from '$kit/api/client';
 import {
   configureMetrics,
   getMetricsTick,
@@ -5,7 +6,7 @@ import {
   type MetricsTickResponse,
   type MetricsUiFrame
 } from '$lib/api/metrics';
-import type { Notify } from '$lib/ui/toast-types';
+import type { Notify } from '$kit/ui/toast.svelte';
 import { createPoller } from '$lib/state/create-poller.svelte';
 import { appendMetricsChartPoint, type MetricsChartPoint } from '../shared/metrics-chart';
 import {
@@ -69,7 +70,7 @@ export function createMetricsController(opts: { notify: Notify }) {
     polling = true;
     try {
       const payload = await getMetricsTick();
-      const data = payload.data;
+      const data = payload;
       tickData = data;
       pollError = null;
       if (syncControls || !initialized) {
@@ -83,7 +84,7 @@ export function createMetricsController(opts: { notify: Notify }) {
         clearChartSeries();
       }
     } catch (err) {
-      pollError = err instanceof Error ? err.message : 'Metrics polling failed.';
+      pollError = errorMessage(err);
     } finally {
       polling = false;
       loading = false;
@@ -99,12 +100,12 @@ export function createMetricsController(opts: { notify: Notify }) {
         enabled: nextEnabled,
         interval: nextInterval
       });
-      enabled = payload.data.enabled;
-      intervalValue = payload.data.interval;
+      enabled = payload.enabled;
+      intervalValue = payload.interval;
       await loadTick(true);
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : 'Failed to update metrics configuration.';
+        errorMessage(err);
       error = message;
       notify('error', message);
       // Resync toolbar controls from the server after optimistic checkbox/slider edits.
@@ -114,13 +115,13 @@ export function createMetricsController(opts: { notify: Notify }) {
     }
   }
 
-  function onEnabledChange(event: Event) {
-    enabled = (event.currentTarget as HTMLInputElement).checked;
+  function onEnabledChange(next: boolean) {
+    enabled = next;
     void applyConfig(enabled, intervalValue);
   }
 
-  function onIntervalInput(event: Event) {
-    intervalValue = Number((event.currentTarget as HTMLInputElement).value);
+  function onIntervalInput(next: number) {
+    intervalValue = next;
   }
 
   function onIntervalChange() {

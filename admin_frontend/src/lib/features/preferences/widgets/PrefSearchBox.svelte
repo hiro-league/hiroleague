@@ -8,7 +8,7 @@
    * control can be picked directly; the n/N indicator + prev/next arrows step through the same list.
    */
   import { ChevronLeft, ChevronRight, Search, X } from '@lucide/svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import { cn } from '$lib/utils';
   import type { PrefSearchEntry } from '$lib/features/preferences/shared/preferences-search-index';
 

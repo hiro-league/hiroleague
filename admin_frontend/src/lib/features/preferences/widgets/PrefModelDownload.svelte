@@ -5,7 +5,7 @@
    * which controller state to read — one widget for both, shared by the model-picker download slot and
    * the embedder field.
    */
-  import Button from '$lib/components/ui/button.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import type { LocalEmbedderRow, LocalRerankerRow } from '$lib/api/knowledge';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
 
@@ -42,7 +42,7 @@
 </script>
 
 {#if sel && needsDownload}
-  <div class="grid gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+  <div class="grid gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2">
     <div class="flex items-center justify-between gap-3">
       <div class="min-w-0 font-sans text-xs">
         <span class="font-medium">
@@ -73,7 +73,7 @@
     {#if downloading}
       <div class="h-1.5 w-full overflow-hidden rounded-full bg-muted">
         <div
-          class="h-full rounded-full bg-amber-500 transition-[width] duration-500"
+          class="h-full rounded-full bg-warning transition-[width] duration-500"
           style="width: {sel.percent ?? 3}%"
         ></div>
       </div>

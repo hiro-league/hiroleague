@@ -9,7 +9,7 @@
    * reporting — only the card's visual chrome collapses.
    */
   import type { Snippet } from 'svelte';
-  import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
+  import Section from '$kit/ui/section.svelte';
   import { cn } from '$lib/utils';
   import {
     createPrefFieldRegistry,
@@ -49,7 +49,7 @@
   const hidden = $derived(registry.hasFields && !registry.anyVisible);
 </script>
 
-<SectionCardMuted
+<Section
   {...rest}
   {descriptionTooltip}
   {indentBody}
@@ -57,4 +57,4 @@
   class={cn(className, hidden && 'hidden')}
 >
   {@render children?.()}
-</SectionCardMuted>
+</Section>

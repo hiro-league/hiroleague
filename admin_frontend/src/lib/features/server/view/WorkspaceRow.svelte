@@ -11,8 +11,8 @@
     Star,
     Trash2
   } from '@lucide/svelte';
-  import Badge from '$lib/components/ui/badge.svelte';
-  import Button from '$lib/components/ui/button.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import type { WorkspaceRow } from '$lib/api/server';
   import AutostartBadge from '../shared/AutostartBadge.svelte';
@@ -36,7 +36,7 @@
     <span class="flex min-w-0 items-center gap-1.5">
       {#if row.is_default}
         <Star
-          class="shrink-0 text-amber-500"
+          class="shrink-0 text-brand"
           fill="currentColor"
           size={15}
           title={`Default workspace: ${row.name}`}

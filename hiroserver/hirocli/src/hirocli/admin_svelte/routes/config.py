@@ -16,7 +16,7 @@ config_router = APIRouter()
 
 
 @config_router.get("/config")
-async def get_admin_config(workspace_id: SelectedWorkspaceIdDep) -> dict[str, Any]:
+async def get_admin_config(workspace_id: SelectedWorkspaceIdDep) -> Any:
     config = get_environment_config()
     data = dataclasses.asdict(config)
     data.update(
@@ -27,8 +27,4 @@ async def get_admin_config(workspace_id: SelectedWorkspaceIdDep) -> dict[str, An
             "hiro_package_version": _hiro_package_version(),
         }
     )
-    return {
-        "ok": True,
-        "error": None,
-        "data": data,
-    }
+    return data

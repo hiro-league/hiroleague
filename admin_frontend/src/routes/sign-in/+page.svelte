@@ -9,7 +9,7 @@
   import { base } from '$app/paths';
   import { page } from '$app/state';
   import { backToAppUrl } from '$lib/api/auth';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import Loading from '$kit/ui/loading.svelte';
 
   const forApp = page.url.searchParams.get('for');
 
@@ -23,5 +23,5 @@
 </script>
 
 <div class="grid min-h-[50vh] place-items-center">
-  <InlineLoading label={forApp ? 'Taking you back…' : 'Signed in'} />
+  <Loading label={forApp ? 'Taking you back…' : 'Signed in'} />
 </div>

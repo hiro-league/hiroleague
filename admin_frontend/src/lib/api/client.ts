@@ -3,13 +3,6 @@ import { PREF_KEYS } from '$lib/preferences/keys';
 import { signalServerMaybeUnavailable } from '$lib/runtime/server-stale-signal';
 import { signalSignedOut } from '$lib/runtime/sign-in-signal';
 
-export type ApiResponse<T> = {
-  ok: boolean;
-  error: string | null;
-  data: T;
-  hosting_workspace_id?: string | null;
-};
-
 const apiBase = `${base}/api`;
 
 type RequestOptions = {
@@ -28,10 +21,35 @@ function maybeMarkServerStale(path: string): void {
   signalServerMaybeUnavailable();
 }
 
+/**
+ * The words of a failure body: FastAPI's `{"detail": "<words>"}`, or its list of validation errors
+ * (`[{loc, msg}, ...]`) joined as "where: what". Null when the body carries neither.
+ */
+function failureWords(payload: unknown): string | null {
+  if (typeof payload !== 'object' || payload === null) return null;
+  const detail = (payload as { detail?: unknown }).detail;
+  if (typeof detail === 'string') return detail || null;
+  if (Array.isArray(detail)) {
+    const lines = detail.map((item) => {
+      if (typeof item === 'string') return item;
+      if (typeof item !== 'object' || item === null) return String(item);
+      const { loc, msg } = item as { loc?: unknown; msg?: unknown };
+      // "body" / "query" only say where in the request; the field name after it is what a person needs.
+      const where = Array.isArray(loc)
+        ? loc.filter((part) => part !== 'body' && part !== 'query' && part !== 'path').join('.')
+        : '';
+      const what = typeof msg === 'string' ? msg : JSON.stringify(item);
+      return where ? `${where}: ${what}` : what;
+    });
+    return lines.join('; ') || null;
+  }
+  return null;
+}
+
 export async function apiRequest<T>(
   path: string,
   options: RequestOptions = {}
-): Promise<ApiResponse<T>> {
+): Promise<T> {
   const selectedWorkspace =
     typeof localStorage === 'undefined' ? null : localStorage.getItem(PREF_KEYS.selectedWorkspace);
   const headers = new Headers();
@@ -89,17 +107,21 @@ export async function apiRequest<T>(
     throw err;
   }
 
-  let payload: ApiResponse<T>;
+  // UI kit step 1d (completes backend commit fd0c06b0): an answer is the data itself; a failure is an
+  // HTTP status with FastAPI's body {"detail": ...}. The old {ok, error, data} wrapper is gone, so this
+  // returns the parsed body and throws the failure's words.
+  let payload: unknown;
   try {
-    payload = (await response.json()) as ApiResponse<T>;
+    payload = await response.json();
   } catch {
     if (response.status >= 500) {
       maybeMarkServerStale(path);
     }
+    // A 2xx with no JSON body is not something any route sends; say so like any other failure.
     throw new Error(`HTTP ${response.status}`);
   }
 
-  if (!response.ok || !payload.ok) {
+  if (!response.ok) {
     // Phase 6: the admin has its own sign-in; a 401 outside /auth/ means the session is gone.
     if (response.status === 401 && !path.startsWith('/auth/')) {
       signalSignedOut();
@@ -107,8 +129,8 @@ export async function apiRequest<T>(
     if (response.status >= 500) {
       maybeMarkServerStale(path);
     }
-    throw new Error(payload.error ?? `HTTP ${response.status}`);
+    throw new Error(failureWords(payload) ?? `HTTP ${response.status}`);
   }
 
-  return payload;
+  return payload as T;
 }

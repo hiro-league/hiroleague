@@ -1,22 +1,20 @@
 <script lang="ts">
+  import { errorMessage } from '$kit/api/client';
   import CharacterEditToolbar from '$lib/features/characters/view/CharacterEditToolbar.svelte';
   import CharacterProfileSection from '$lib/features/characters/sections/CharacterProfileSection.svelte';
   import CharacterProfilesSection from '$lib/features/characters/sections/CharacterProfilesSection.svelte';
   import CharacterPromptsSection from '$lib/features/characters/sections/CharacterPromptsSection.svelte';
   import CharacterExtrasSection from '$lib/features/characters/sections/CharacterExtrasSection.svelte';
   import type { createCharactersPageController } from '$lib/features/characters/state/characters-controller.svelte';
-  import type { createCharactersFormModel } from '$lib/features/characters/state/characters-form.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import Loading from '$kit/ui/loading.svelte';
 
   let {
     ctrl,
-    formApi,
     characterId,
     notify
   }: {
     ctrl: ReturnType<typeof createCharactersPageController>;
-    formApi: ReturnType<typeof createCharactersFormModel>;
     characterId: string | null;
     notify: (kind: 'success' | 'error' | 'info' | 'warning', message: string) => void;
   } = $props();
@@ -26,7 +24,7 @@
       await ctrl.reloadProfileOptions();
       notify('success', 'Profiles reloaded.');
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Could not read the profiles.');
+      notify('error', errorMessage(err));
     }
   }
 
@@ -34,7 +32,7 @@
 
   const editCharacterDisplayLine = $derived.by(() => {
     if (!characterId) return '';
-    const n = formApi.form.name.trim() || ctrl.selected?.name?.trim() || '';
+    const n = ctrl.draft.value.name.trim() || ctrl.selected?.name?.trim() || '';
     return n || characterId;
   });
 </script>
@@ -45,7 +43,7 @@
     {characterId}
     {editCharacterDisplayLine}
     selected={ctrl.selected}
-    dirty={formApi.dirty}
+    dirty={ctrl.draft.dirty}
     busy={ctrl.busy}
     onDeleteClick={() => (ctrl.deleteOpen = true)}
     onCancel={() => void ctrl.cancelEdit()}
@@ -54,49 +52,46 @@
 
   <div class="grid gap-5 px-4 pb-5 pt-3 md:px-5">
     {#if ctrl.loadingDetail}
-      <InlineLoading label="Loading character…" />
+      <Loading label="Loading character…" />
     {:else if ctrl.detailError}
-      <InlineDestructiveAlert title="Could not load character" message={ctrl.detailError} />
+      <Notice title="Could not load character" message={ctrl.detailError} />
     {:else}
       <div class="grid gap-8">
         <CharacterProfileSection
-          form={formApi.form}
+          form={ctrl.draft.value}
           {characterId}
           selected={ctrl.selected}
-          markDirty={formApi.markDirty}
           onPickPhoto={(e) => void ctrl.photoCrop.pickPhoto(e)}
         />
 
         <!-- Phase 7b step 5: ordered AI / voice profiles (were model pickers, a tuning profile and TTS settings). -->
         <CharacterProfilesSection
           variant="ai"
-          form={formApi.form}
+          form={ctrl.draft.value}
           {characterId}
           options={ctrl.aiProfileOptions}
           busy={ctrl.busy}
           resolved={ctrl.resolved}
           resolvedError={ctrl.resolvedError}
-          dirty={formApi.dirty}
+          dirty={ctrl.draft.dirty}
           onReloadProfiles={() => void reloadProfiles()}
-          markDirty={formApi.markDirty}
         />
 
         <CharacterProfilesSection
           variant="voice"
-          form={formApi.form}
+          form={ctrl.draft.value}
           {characterId}
           options={ctrl.voiceProfileOptions}
           busy={ctrl.busy}
           resolved={ctrl.resolved}
           resolvedError={ctrl.resolvedError}
-          dirty={formApi.dirty}
+          dirty={ctrl.draft.dirty}
           onReloadProfiles={() => void reloadProfiles()}
-          markDirty={formApi.markDirty}
         />
 
-        <CharacterPromptsSection form={formApi.form} markDirty={formApi.markDirty} />
+        <CharacterPromptsSection form={ctrl.draft.value} />
 
-        <CharacterExtrasSection form={formApi.form} markDirty={formApi.markDirty} />
+        <CharacterExtrasSection form={ctrl.draft.value} />
       </div>
     {/if}
   </div>

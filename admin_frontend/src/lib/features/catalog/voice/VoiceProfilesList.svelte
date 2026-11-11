@@ -5,17 +5,18 @@
    * extension's or the unused ones, so the sources don't mix. A designed voice Google dropped is flagged.
    */
   import { Copy, Pencil, Plus, Trash2, TriangleAlert } from '@lucide/svelte';
-  import SectionCard from '$lib/components/page/SectionCard.svelte';
-  import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
+  import Panel from '$kit/ui/panel.svelte';
+  import TableShell from '$kit/ui/table-shell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
-  import Badge from '$lib/components/ui/badge.svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import { Badge } from '$kit/components/ui/badge/index.js';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import { Action } from '$kit/state/action.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
+  import Loading from '$kit/ui/loading.svelte';
   import type { VoiceProfileRow } from '$lib/api/voice';
   import { ADMIN_SECTION_HEADING_LG } from '$lib/styling/admin-tokens';
-  import SourceFilter, { type SourceOption } from '$lib/components/page/SourceFilter.svelte';
+  import Segmented from '$kit/ui/segmented.svelte';
   import { sourceOf } from './voice-format';
   import type { VoiceController } from './voice-controller.svelte';
 
@@ -44,10 +45,10 @@
       a === HIRO ? -1 : b === HIRO ? 1 : a.localeCompare(b)
     )
   );
-  const options: SourceOption[] = $derived([
-    { id: 'all', label: 'All', count: ctrl.profiles.length },
-    ...sources.map((s) => ({ id: s, label: s, count: ctrl.profiles.filter((r) => sourcesOf(r).has(s)).length })),
-    { id: 'unused', label: 'Unused', count: ctrl.profiles.filter(isUnused).length }
+  const options = $derived([
+    { value: 'all', label: 'All', count: ctrl.profiles.length },
+    ...sources.map((s) => ({ value: s, label: s, count: ctrl.profiles.filter((r) => sourcesOf(r).has(s)).length })),
+    { value: 'unused', label: 'Unused', count: ctrl.profiles.filter(isUnused).length }
   ]);
   let source = $state('all');
   const rows = $derived(
@@ -60,16 +61,16 @@
   const usedByLine = (r: VoiceProfileRow) =>
     [...(isHiroVoice(r) ? ["Hiro's voice"] : []), ...r.used_by.map(ctrl.useLabel)].join(', ');
   let confirmDelete = $state<string | null>(null);
-  let deleteError = $state<string | null>(null);
+  const deleting = new Action();
 
   async function remove(r: VoiceProfileRow) {
-    deleteError = await ctrl.remove(r.id);
+    await deleting.run(() => ctrl.remove(r.id));
     confirmDelete = null;
   }
   const voiceKind = (r: VoiceProfileRow) => (r.provider === 'openai' ? 'OpenAI voice' : VOICE_SOURCE[sourceOf(r.voice)]);
 </script>
 
-<SectionCard class="grid gap-4">
+<Panel class="grid gap-4">
   <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
     <div>
       <h3 class={ADMIN_SECTION_HEADING_LG}>Voice profiles</h3>
@@ -78,20 +79,20 @@
       </p>
     </div>
     <div class="flex flex-wrap items-center gap-2">
-      <SourceFilter {options} value={source} onchange={(id) => (source = id)} />
+      <Segmented class="flex-wrap" label="Show profiles for" {options} value={source} onchange={(id) => (source = id)} />
       <Button onclick={() => onedit(null)}><Plus size={15} /> New voice profile</Button>
     </div>
   </div>
 
-  {#if ctrl.error}<InlineDestructiveAlert message={ctrl.error} />{/if}
-  {#if deleteError}<InlineDestructiveAlert message={deleteError} />{/if}
+  {#if ctrl.error}<Notice message={ctrl.error} />{/if}
+  {#if deleting.error}<Notice message={deleting.error} />{/if}
 
   {#if ctrl.loading && !ctrl.profiles.length}
-    <InlineLoading label="Reading voice profiles…" />
+    <Loading label="Reading voice profiles…" />
   {:else if !ctrl.profiles.length}
-    <InlineEmptyState message="No voice profiles yet. Make one for each way something should speak (an alert, a story, Hiro)." />
+    <EmptyState message="No voice profiles yet. Make one for each way something should speak (an alert, a story, Hiro)." />
   {:else}
-    <AdminTableShell layout="grid" minWidth={980} gridColumns={GRID}>
+    <TableShell layout="grid" minWidth={980} gridColumns={GRID}>
       {#snippet headRow()}
         <span>Name</span>
         <span>Model</span>
@@ -126,14 +127,14 @@
               <span class="flex flex-wrap justify-end gap-2">
                 <Button size="sm" variant="outline" onclick={() => onedit(r)}><Pencil size={13} /> Edit</Button>
                 <Button size="sm" variant="outline" onclick={() => onduplicate(r)}><Copy size={13} /> Duplicate</Button>
-                <Button size="sm" variant="destructive-outline" onclick={() => (confirmDelete = r.id)}><Trash2 size={13} /> Delete</Button>
+                <Button size="sm" variant="destructive" onclick={() => (confirmDelete = r.id)}><Trash2 size={13} /> Delete</Button>
               </span>
               {#if confirmDelete === r.id}
                 <span class="flex flex-wrap items-center justify-end gap-2 text-xs">
                   Delete "{r.label}"?{r.used_by.length ? ' Its uses will have no voice.' : ''}{isHiroVoice(r)
                     ? " Hiro won't speak its replies until another voice is picked."
                     : ''}
-                  <Button size="sm" variant="destructive-outline" onclick={() => remove(r)}>Delete</Button>
+                  <Button size="sm" variant="destructive" onclick={() => remove(r)}>Delete</Button>
                   <Button size="sm" variant="ghost" onclick={() => (confirmDelete = null)}>Cancel</Button>
                 </span>
               {/if}
@@ -141,6 +142,6 @@
           </div>
         {/each}
       {/snippet}
-    </AdminTableShell>
+    </TableShell>
   {/if}
-</SectionCard>
+</Panel>

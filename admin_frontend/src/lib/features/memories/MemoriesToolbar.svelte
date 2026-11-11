@@ -1,13 +1,12 @@
 <script lang="ts">
   import { RefreshCw, Trash2 } from '@lucide/svelte';
-  import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
+  import FilterBar from '$kit/ui/filter-bar.svelte';
   import SearchInput from '$lib/search/SearchInput.svelte';
-  import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
-  import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
-  import Button from '$lib/components/ui/button.svelte';
-  import FormField from '$lib/components/ui/form-field.svelte';
-  import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
-  import { cn } from '$lib/utils';
+  import FilterSelect from '$kit/ui/filter-select.svelte';
+  import StickyBar from '$kit/ui/sticky-bar.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import Field from '$kit/ui/field.svelte';
+  import DateField from '$kit/ui/date-field.svelte';
   import type { MemoryFilterKey } from './shared/memory-pure';
 
   let {
@@ -41,13 +40,13 @@
   } = $props();
 </script>
 
-<AdminPageStickyToolbar>
+<StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
   <div class="memories-controls">
-    <AdminFilterBar class="min-w-0 flex-1 items-end">
+    <FilterBar class="min-w-0 flex-1 items-end">
       {#if groupsForMemoryFilterDropdown.length > 0}
         <!-- A single group is always selected — no "All" scope (it only ever meant conversation
              memory, never knowledge/eval, which was confusing). No placeholder option. -->
-        <AdminFilterBarSelect
+        <FilterSelect
           label="Group"
           value={filters.mem_group}
           onValueChange={(v) => setFilter('mem_group', v)}
@@ -55,7 +54,7 @@
           options={groupsForMemoryFilterDropdown}
         />
       {/if}
-      <AdminFilterBarSelect
+      <FilterSelect
         label="Character"
         value={filters.mem_char}
         onValueChange={(v) => setFilter('mem_char', v)}
@@ -63,7 +62,7 @@
         class="min-w-[10rem]"
         options={characterOptions}
       />
-      <AdminFilterBarSelect
+      <FilterSelect
         label="Source"
         value={filters.mem_source}
         onValueChange={(v) => setFilter('mem_source', v)}
@@ -71,22 +70,12 @@
         class="min-w-[10rem]"
         options={sourcesForMemoryFilterDropdown}
       />
-      <FormField label="From" class="min-w-[9rem]">
-        <input
-          type="date"
-          class={cn(ADMIN_INPUT, 'w-full')}
-          value={filters.mem_from}
-          oninput={(e) => setFilter('mem_from', e.currentTarget.value)}
-        />
-      </FormField>
-      <FormField label="To" class="min-w-[9rem]">
-        <input
-          type="date"
-          class={cn(ADMIN_INPUT, 'w-full')}
-          value={filters.mem_to}
-          oninput={(e) => setFilter('mem_to', e.currentTarget.value)}
-        />
-      </FormField>
+      <Field label="From" class="min-w-[9rem]">
+        <DateField clearable value={filters.mem_from} onchange={(v) => setFilter('mem_from', v)} />
+      </Field>
+      <Field label="To" class="min-w-[9rem]">
+        <DateField clearable value={filters.mem_to} onchange={(v) => setFilter('mem_to', v)} />
+      </Field>
       <SearchInput
         label="Search"
         value={filters.mem_q}
@@ -94,7 +83,7 @@
         placeholder="Search memory text, id, source…"
         class="min-w-[12rem] flex-1"
       />
-    </AdminFilterBar>
+    </FilterBar>
     <div class="memories-actions">
       {#if canClearMemories}
         <!-- Deletes only the filtered relation facts in view (entities are excluded — use
@@ -145,7 +134,7 @@
       </Button>
     </div>
   </div>
-</AdminPageStickyToolbar>
+</StickyBar>
 
 <style>
   .memories-controls {
