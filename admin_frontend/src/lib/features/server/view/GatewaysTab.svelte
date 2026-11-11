@@ -1,11 +1,10 @@
 <script lang="ts">
+  import ResourceView from '$kit/ui/resource-view.svelte';
+  import Panel from '$kit/ui/panel.svelte';
   import { onMount } from 'svelte';
   import { RefreshCw } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import { liveStatus } from '$lib/live/status.svelte';
-  import Notice from '$kit/ui/notice.svelte';
-  import EmptyState from '$kit/ui/empty-state.svelte';
-  import Loading from '$kit/ui/loading.svelte';
   import TableShell from '$kit/ui/table-shell.svelte';
   import type { Notify } from '$kit/ui/toast.svelte';
   import { createGatewayStore } from '../state/gateway-store.svelte';
@@ -26,53 +25,54 @@
       gateway.applyLiveRows(status.gateways, status.gateways_error);
     });
   });
+
+  const view = $derived({
+    data: gateway.rows.length || !(gateway.loading || gateway.error) ? gateway.rows : null,
+    error: gateway.error ?? '',
+    loading: gateway.loading,
+    reload: () => gateway.load()
+  });
 </script>
 
-<section class="grid gap-4 rounded-lg border bg-card p-5 shadow-sm">
-  <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-    <div>
-      <h3 class="text-lg font-semibold">Gateways</h3>
-      <span class="font-sans text-sm text-muted-foreground">
-        {gateway.rows.length} configured / {gateway.runningCount} running
-      </span>
-    </div>
-    <div class="flex flex-wrap gap-2">
-      <Button
-        class="size-9 px-0"
-        variant="outline"
-        onclick={() => gateway.load()}
-        aria-label="Refresh gateways"
-        title="Refresh gateways"
-      >
-        <RefreshCw size={15} />
-      </Button>
-      <Button onclick={gateway.openCreate}>Create gateway</Button>
-    </div>
-  </div>
-
-  {#if gateway.loading}
-    <Loading label="Loading gateways…" />
-  {:else if gateway.error}
-    <Notice title="Could not load gateways" message={gateway.error} />
-  {:else if gateway.rows.length === 0}
-    <EmptyState message="No gateway instances configured yet." />
-  {:else}
-    <TableShell layout="grid" minWidth={880} gridColumns={GATEWAY_GRID}>
-      {#snippet headRow()}
-        <span>Name</span>
-        <span>Status</span>
-        <span>Host : Port</span>
-        <span>Autostart</span>
-        <span>Actions</span>
-      {/snippet}
-      {#snippet body()}
-        {#each gateway.rows as row (row.name)}
-          <GatewayRow {row} {gateway} grid={GATEWAY_GRID} />
-        {/each}
-      {/snippet}
-    </TableShell>
-  {/if}
-</section>
+<Panel title="Gateways" description={`${gateway.rows.length} configured / ${gateway.runningCount} running`}>
+  {#snippet actions()}
+    <Button
+      class="size-9 px-0"
+      variant="outline"
+      onclick={() => gateway.load()}
+      aria-label="Refresh gateways"
+      title="Refresh gateways"
+    >
+      <RefreshCw size={15} />
+    </Button>
+    <Button onclick={gateway.openCreate}>Create gateway</Button>
+  {/snippet}
+  <ResourceView
+    resource={view}
+    loadingLabel="Loading gateways…"
+    errorTitle="Could not load gateways"
+    empty={(d) => d.length === 0}
+    emptyMessage="No gateway instances configured yet."
+    quiet
+  >
+    {#snippet children()}
+      <TableShell layout="grid" minWidth={880} gridColumns={GATEWAY_GRID}>
+        {#snippet headRow()}
+          <span>Name</span>
+          <span>Status</span>
+          <span>Host : Port</span>
+          <span>Autostart</span>
+          <span>Actions</span>
+        {/snippet}
+        {#snippet body()}
+          {#each gateway.rows as row (row.name)}
+            <GatewayRow {row} {gateway} grid={GATEWAY_GRID} />
+          {/each}
+        {/snippet}
+      </TableShell>
+    {/snippet}
+  </ResourceView>
+</Panel>
 
 <GatewayCreateDialog {gateway} />
 <GatewayStopDialog {gateway} />

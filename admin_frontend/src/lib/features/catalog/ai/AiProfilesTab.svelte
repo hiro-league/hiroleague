@@ -11,6 +11,7 @@
   import { Copy, Pencil, Plus, RotateCcw, Trash2 } from '@lucide/svelte';
   import FieldHelp from '$lib/components/ui/field-help.svelte';
   import Segmented from '$kit/ui/segmented.svelte';
+  import ResourceView from '$kit/ui/resource-view.svelte';
   import Panel from '$kit/ui/panel.svelte';
   import TableShell from '$kit/ui/table-shell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
@@ -18,9 +19,6 @@
   import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
   import ConfirmDialog from '$kit/ui/confirm-dialog.svelte';
-  import Notice from '$kit/ui/notice.svelte';
-  import EmptyState from '$kit/ui/empty-state.svelte';
-  import Loading from '$kit/ui/loading.svelte';
   import AiProfileEditorDialog from './AiProfileEditorDialog.svelte';
   import type { AiController } from './ai-controller.svelte';
   import {
@@ -73,6 +71,12 @@
     if (jobs.length) parts.push(`Hiro's ${jobs.join(', ')} will borrow the profile of the job they fall back to.`);
     return parts.join(' ') || 'Nothing uses it.';
   });
+  const view = $derived({
+    data: ai.profiles.length === 0 && (ai.profilesLoading || ai.profilesError) ? null : ai.profiles,
+    error: ai.profilesError ?? '',
+    loading: ai.profilesLoading,
+    reload: () => ai.reload()
+  });
 </script>
 
 <Panel title="AI profiles" description="A profile is one recipe for asking: the model, how hard it thinks, what it may spend, and who asks instead when it can't answer. Uses point at a profile." class="grid gap-4">
@@ -82,13 +86,16 @@
     <Button onclick={() => ai.newProfile()}><Plus size={15} /> New profile</Button>
   {/snippet}
 
-  {#if ai.profilesLoading && ai.profiles.length === 0}
-    <Loading label="Loading AI profiles…" />
-  {:else if ai.profilesError}
-    <Notice title="Could not load AI profiles" message={ai.profilesError} />
-  {:else if ai.profiles.length === 0}
-    <EmptyState message="No AI profiles yet." hint="Make one with New profile." />
-  {:else}
+  <ResourceView
+    resource={view}
+    loadingLabel="Loading AI profiles…"
+    errorTitle="Could not load AI profiles"
+    empty={(d) => d.length === 0}
+    emptyMessage="No AI profiles yet."
+    emptyHint="Make one with New profile."
+    quiet
+  >
+    {#snippet children()}
     <TableShell layout="grid" minWidth={1260} gridColumns={GRID}>
       {#snippet headRow()}
         <span>Name</span>
@@ -178,7 +185,8 @@
         {/each}
       {/snippet}
     </TableShell>
-  {/if}
+    {/snippet}
+  </ResourceView>
 </Panel>
 
 <AiProfileEditorDialog {ai} />

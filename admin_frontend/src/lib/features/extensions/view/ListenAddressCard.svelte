@@ -16,15 +16,12 @@
   );
 </script>
 
-<Panel class="grid gap-4">
-  <div>
-    <h3 class="text-lg font-semibold">Where extensions connect</h3>
-    <p class="font-sans text-sm text-muted-foreground">
-      <span class="font-mono">127.0.0.1</span> reaches extensions on this machine only. Use the Docker
-      bridge address for an extension in a normal Docker network, or the LAN address for one on another
-      machine.
-    </p>
-  </div>
+<Panel title="Where extensions connect" contentClass="grid gap-4">
+  {#snippet details()}
+    <span class="font-mono">127.0.0.1</span> reaches extensions on this machine only. Use the Docker
+    bridge address for an extension in a normal Docker network, or the LAN address for one on another
+    machine.
+  {/snippet}
 
   {#if listen}
     <div class="grid gap-1 font-sans text-sm">

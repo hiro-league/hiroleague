@@ -61,12 +61,9 @@ export function cnAdminTab(active: boolean) {
 
 // ── section cards (two deliberate variants — §2.4.4) ───────────────────────
 
-/** Solid card for top-level page sections. */
-export const ADMIN_SECTION_CARD = 'rounded-md border bg-card p-4 shadow-sm';
 
 export const ADMIN_SECTION_TITLE = 'font-sans text-base font-semibold text-primary';
 
-export const ADMIN_SECTION_HEADING_LG = 'font-sans text-lg font-semibold text-foreground';
 
 // ── form controls ──────────────────────────────────────────────────────────
 

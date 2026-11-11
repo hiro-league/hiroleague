@@ -1,12 +1,11 @@
 <script lang="ts">
+  import ResourceView from '$kit/ui/resource-view.svelte';
+  import Panel from '$kit/ui/panel.svelte';
   import { onMount } from 'svelte';
   import { BookOpen, RefreshCw } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import { DEFAULT_ADMIN_CONFIG, docsUrl, getAdminConfig, type AdminConfig } from '$lib/api/config';
   import { liveStatus } from '$lib/live/status.svelte';
-  import Notice from '$kit/ui/notice.svelte';
-  import EmptyState from '$kit/ui/empty-state.svelte';
-  import Loading from '$kit/ui/loading.svelte';
   import TableShell from '$kit/ui/table-shell.svelte';
   import type { Notify } from '$kit/ui/toast.svelte';
   import { createWorkspaceStore } from '../state/workspace-store.svelte';
@@ -42,66 +41,65 @@
     .catch(() => {
       adminConfig = DEFAULT_ADMIN_CONFIG;
     });
+
+  const view = $derived({
+    data: workspace.rows.length || !(workspace.loading || workspace.error) ? workspace.rows : null,
+    error: workspace.error ?? '',
+    loading: workspace.loading,
+    reload: () => workspace.load()
+  });
 </script>
 
-<section class="grid gap-4 rounded-lg border bg-card p-5 shadow-sm">
-  <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-    <div>
-      <div class="flex items-center gap-2">
-        <h3 class="text-lg font-semibold">Workspaces</h3>
-        <a
-          class="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-          href={workspaceGatewayDocsUrl}
-          target="_blank"
-          rel="noreferrer"
-          title={`Workspace and gateway CLI docs: ${workspaceGatewayDocsUrl}`}
-          aria-label="Workspace and gateway CLI docs"
-        >
-          <BookOpen size={15} />
-        </a>
-      </div>
-      <span class="font-sans text-sm text-muted-foreground">
-        {workspace.rows.length} registered / {workspace.configuredCount} configured / {workspace.runningCount} running
-      </span>
-    </div>
-    <div class="flex flex-wrap gap-2">
-      <Button
-        class="size-9 px-0"
-        variant="outline"
-        onclick={() => workspace.load()}
-        aria-label="Refresh workspaces"
-        title="Refresh workspaces"
-      >
-        <RefreshCw size={15} />
-      </Button>
-      <Button onclick={workspace.openCreate}>Create workspace</Button>
-    </div>
-  </div>
-
-  {#if workspace.loading}
-    <Loading label="Loading workspaces…" />
-  {:else if workspace.error}
-    <Notice title="Could not load workspaces" message={workspace.error} />
-  {:else if workspace.rows.length === 0}
-    <EmptyState message="No workspaces configured yet." />
-  {:else}
-    <TableShell layout="grid" minWidth={1180} gridColumns={WORKSPACE_GRID}>
-      {#snippet headRow()}
-        <span>Name</span>
-        <span>Setup</span>
-        <span>Status</span>
-        <span>Gateway</span>
-        <span>Autostart</span>
-        <span>Actions</span>
-      {/snippet}
-      {#snippet body()}
-        {#each workspace.rows as row (row.id)}
-          <WorkspaceRow {row} {workspace} grid={WORKSPACE_GRID} />
-        {/each}
-      {/snippet}
-    </TableShell>
-  {/if}
-</section>
+<Panel title="Workspaces" description={`${workspace.rows.length} registered / ${workspace.configuredCount} configured / ${workspace.runningCount} running`}>
+  {#snippet actions()}
+    <a
+      class="inline-flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+      href={workspaceGatewayDocsUrl}
+      target="_blank"
+      rel="noreferrer"
+      title={`Workspace and gateway CLI docs: ${workspaceGatewayDocsUrl}`}
+      aria-label="Workspace and gateway CLI docs"
+    >
+      <BookOpen size={15} />
+    </a>
+    <Button
+      class="size-9 px-0"
+      variant="outline"
+      onclick={() => workspace.load()}
+      aria-label="Refresh workspaces"
+      title="Refresh workspaces"
+    >
+      <RefreshCw size={15} />
+    </Button>
+    <Button onclick={workspace.openCreate}>Create workspace</Button>
+  {/snippet}
+  <ResourceView
+    resource={view}
+    loadingLabel="Loading workspaces…"
+    errorTitle="Could not load workspaces"
+    empty={(d) => d.length === 0}
+    emptyMessage="No workspaces configured yet."
+    quiet
+  >
+    {#snippet children()}
+      <TableShell layout="grid" minWidth={1180} gridColumns={WORKSPACE_GRID}>
+        {#snippet headRow()}
+          <span>Name</span>
+          <span>Setup</span>
+          <span>Status</span>
+          <span>Gateway</span>
+          <span>Autostart</span>
+          <span>Actions</span>
+        {/snippet}
+        {#snippet body()}
+          {#each workspace.rows as row (row.id)}
+            <WorkspaceRow {row} {workspace} grid={WORKSPACE_GRID} />
+          {/each}
+        {/snippet}
+      </TableShell>
+    {/snippet}
+  </ResourceView>
+</Panel>
 
 <WorkspaceCreateDialog {workspace} />
 <WorkspaceEditDialog {workspace} />
