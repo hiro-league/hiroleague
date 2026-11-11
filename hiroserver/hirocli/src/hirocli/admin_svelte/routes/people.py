@@ -10,7 +10,7 @@ from collections.abc import Callable
 from dataclasses import asdict
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 from hiro_commons.log import Logger
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
@@ -173,12 +173,14 @@ async def remove_role(role_id: str, workspace_id: SelectedWorkspaceIdDep) -> Any
 async def list_access(request: Request, workspace_id: SelectedWorkspaceIdDep) -> Any:
     """Every source with its features and rights (each extension marked connected or not), and every role's rights."""
     result = await _call("read what each role may do", lambda: AccessListTool().execute(workspace=workspace_id))
-    if not result["ok"]:
+    # Step 1d fix: _call answers the data itself or the failure response; there is no {"ok", "data"}
+    # envelope to read (this route raised KeyError 'ok', an HTTP 500 on People -> Roles).
+    if isinstance(result, Response):
         return result
     workspace_path = await run_in_threadpool(ExtensionService().workspace_path, workspace_id)
     manager = _live_manager(request, workspace_path)
     live = manager.snapshot() if manager is not None else {}
-    for source in result["data"]["sources"]:
+    for source in result["sources"]:
         source["connected"] = source["kind"] == "core" or source["extension_id"] in live
     return result
 

@@ -15,7 +15,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 
@@ -295,10 +295,12 @@ async def ai_local_servers(workspace_id: SelectedWorkspaceIdDep) -> Any:
             for pid in DISCOVERABLE_LOCAL_PROVIDERS
         )
     )
+    # Step 1d fix: _run_tool answers the data itself or the failure response; there is no
+    # {"ok", "data"} envelope to read (this route raised KeyError 'ok', an HTTP 500).
     for one in results:
-        if not one["ok"]:
+        if isinstance(one, Response):
             return one
-    return _ok({"servers": [one["data"] for one in results]})
+    return _ok({"servers": list(results)})
 
 
 @ai_router.put("/ai/local-servers/{provider_id}")
