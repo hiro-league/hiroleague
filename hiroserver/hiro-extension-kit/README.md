@@ -59,6 +59,8 @@ disk and nothing in its API.
 | `settings` | `get()` and `put()` for key/value settings; each app names its own keys |
 | `timeline` | `slots()`: counting times into slots |
 | `ui` | `router`: the app's built UI, for every path that isn't the API |
+| `notices` | `Browsers(notices, hello=...)` and `events_router(browsers)`: `GET /api/events`, the notices open pages reload on |
+| `testing` | for an app's tests only: `guard_network()`, `RunLog`, `CleanDatabases`, `wait_until()`, `FakeCore` and `FakeLink` |
 
 ## Rules
 
@@ -70,6 +72,11 @@ disk and nothing in its API.
 - **No copies left behind.** An app imports the kit's module directly; its own copy is deleted, not kept as a wrapper.
 
 ## Tests
+
+An app's `tests/conftest.py` builds on `testing`: it sets its environment, imports its package (which calls
+`setup()`), then calls `testing.guard_network()`, registers `testing.RunLog`, and copies its databases back for every
+test with `testing.CleanDatabases`. Its `tests/fakes.py` gives `testing.FakeCore` its own defaults (NetHiro: the AI's
+answers and HomeHiro's) and keeps the fakes of its own outside systems (HA, Frigate).
 
 `./scripts/check.sh` in the HiroLeague repo runs them with the rest of the workspace (`hiroserver: pytest`). Only
 this package: from `hiroserver/`, `uv run pytest hiro-extension-kit`. The tests run as an app called `testapp` with

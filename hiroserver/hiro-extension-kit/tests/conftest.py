@@ -17,6 +17,8 @@ from hiro_extension_kit import identity
 DATA_DIR = Path(tempfile.mkdtemp(prefix="hiro-kit-tests-")).resolve()
 identity.setup(name="testapp", title="TestApp", package=Path(__file__).parent, data_dir=DATA_DIR,
                static_dir=DATA_DIR / "static")
+# (No testing.guard_network() here: these tests run in one process with the rest of the HiroLeague workspace, whose
+# own tests don't expect it. test_testing.py checks the guard in a process of its own.)
 
 
 @pytest.fixture(autouse=True, scope="session")
