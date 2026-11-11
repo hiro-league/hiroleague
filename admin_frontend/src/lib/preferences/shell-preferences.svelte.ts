@@ -1,5 +1,4 @@
-import { browser } from '$app/environment';
-import { PREF_KEYS, type ThemePreference } from './keys';
+import { PREF_KEYS } from './keys';
 import {
   readLocalBoolean,
   readLocalString,
@@ -7,33 +6,15 @@ import {
   writeLocalString
 } from './storage';
 
-function detectDefaultTheme(): ThemePreference {
-  if (!browser) return 'dark';
-  return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-}
-
+// UI kit step 1d: light/dark is no longer kept here; mode-watcher owns it (see routes/+layout.svelte
+// and app.html).
 export function createShellPreferences() {
-  let theme = $state<ThemePreference>('dark');
   let sidebarCollapsed = $state(false);
   let selectedWorkspace = $state<string | null>(null);
 
   function initialize() {
-    const savedTheme = readLocalString(PREF_KEYS.theme);
-    theme = savedTheme === 'light' || savedTheme === 'dark' ? savedTheme : detectDefaultTheme();
-    document.documentElement.dataset.theme = theme;
-
     sidebarCollapsed = readLocalBoolean(PREF_KEYS.sidebarCollapsed, false);
     selectedWorkspace = readLocalString(PREF_KEYS.selectedWorkspace);
-  }
-
-  function setTheme(nextTheme: ThemePreference) {
-    theme = nextTheme;
-    document.documentElement.dataset.theme = nextTheme;
-    writeLocalString(PREF_KEYS.theme, nextTheme);
-  }
-
-  function toggleTheme() {
-    setTheme(theme === 'dark' ? 'light' : 'dark');
   }
 
   function setSidebarCollapsed(nextCollapsed: boolean) {
@@ -53,9 +34,6 @@ export function createShellPreferences() {
   }
 
   return {
-    get theme() {
-      return theme;
-    },
     get sidebarCollapsed() {
       return sidebarCollapsed;
     },
@@ -63,8 +41,6 @@ export function createShellPreferences() {
       return selectedWorkspace;
     },
     initialize,
-    setTheme,
-    toggleTheme,
     setSidebarCollapsed,
     toggleSidebar,
     setSelectedWorkspace

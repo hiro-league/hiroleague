@@ -1,5 +1,6 @@
 <script lang="ts">
   import { base } from '$app/paths';
+  import { mode, toggleMode } from 'mode-watcher';
   import {
     Activity,
     BookOpen,
@@ -325,13 +326,13 @@
           <ExternalLink size={14} />
         </a>
         <Button
-          aria-label={prefs.theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-          title={prefs.theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          aria-label={mode.current === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          title={mode.current === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
           variant="outline"
           size="icon"
-          onclick={prefs.toggleTheme}
+          onclick={toggleMode}
         >
-          {#if prefs.theme === 'dark'}
+          {#if mode.current === 'dark'}
             <Sun size={17} />
           {:else}
             <Moon size={17} />

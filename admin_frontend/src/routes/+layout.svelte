@@ -2,6 +2,7 @@
   import { page } from '$app/state';
   import { onMount } from 'svelte';
   import type { Snippet } from 'svelte';
+  import { ModeWatcher } from 'mode-watcher';
   import AdminShell from '$lib/shell/AdminShell.svelte';
   import { navItems } from '$lib/shell/nav';
   import { isFeatureActive } from '$lib/shell/features';
@@ -35,6 +36,10 @@
     void adminSession.check();
   });
 </script>
+
+<!-- UI kit step 1d: dark by default, light on the shell's toggle. app.html applies the saved mode
+     before first paint; mode-watcher keeps the `dark` class on <html> from here on. -->
+<ModeWatcher defaultMode="dark" />
 
 {#if adminSession.state === 'checking'}
   <div class="grid min-h-screen place-items-center">

@@ -1,8 +1,8 @@
 /**
  * Dark/light-mode-aware colour scheme for the knowledge graph canvas.
  *
- * The app sets `data-theme="dark"` / `"light"` on <html> (shell-preferences →
- * document.documentElement.dataset.theme). The engine caches one Scheme and refreshes it
+ * The app puts the `dark` class on <html> in dark mode (mode-watcher; UI kit step 1d). The
+ * engine caches one Scheme and refreshes it
  * only on a theme toggle (MutationObserver), instead of reading the DOM + allocating a
  * fresh object inside every node/edge draw callback (thousands of times/sec at 60fps).
  */
@@ -36,7 +36,7 @@ export type Scheme = {
 
 export function computeScheme(): Scheme {
   const dark =
-    typeof document !== 'undefined' && document.documentElement.dataset.theme === 'dark';
+    typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
   return dark
     ? {
         pillBg: 'rgba(2,6,23,0.72)',
