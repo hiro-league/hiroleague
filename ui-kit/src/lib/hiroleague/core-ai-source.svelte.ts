@@ -1,7 +1,7 @@
 // What the app knows of the HiroLeague core's AI: its AI profiles, the app's uses and the profile each asks with, and
 // whether the core answers (backend llm/core_ai.py keeps the last list it got, with when, while the core is down).
 // Settings → AI from HiroLeague and every per-copy picker read one of these; make it while a component starts.
-import { getCoreAi, type CoreAi as CoreAiData, type CoreProfile, type CoreUse } from '$hiro-app/api';
+import { getCoreAi, type CoreAi as CoreAiData, type CoreProfile, type CoreUse } from '$kit/pages/ai/api';
 import { Resource } from '$kit/state/resource.svelte';
 
 const EVERY = 60_000; // ms: the backend reads the core again when its list is older than 30 s

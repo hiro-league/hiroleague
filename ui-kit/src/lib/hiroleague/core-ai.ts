@@ -1,6 +1,6 @@
 // How the app reads the core's AI profiles and uses (Settings → AI from HiroLeague, and the per-copy picker). Pure,
 // tested next to it (core-ai.test.ts). The core decides; these only say it in words.
-import type { CoreProfile, CoreUse, Need } from '$hiro-app/api';
+import type { CoreProfile, CoreUse, Need } from '$kit/pages/ai/api';
 
 const money = (v: number) => `$${v.toFixed(2)}`; // budgets and a day's spending, to the cent
 

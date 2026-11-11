@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CoreProfile, CoreUse } from '$hiro-app/api';
+import type { CoreProfile, CoreUse } from '$kit/pages/ai/api';
 import { budgetHint, chainLine, fallbacksOf, needLabels, usageText } from '$kit/hiroleague/core-ai';
 
 const P = (p: Partial<CoreProfile> & { id: string }): CoreProfile => ({
