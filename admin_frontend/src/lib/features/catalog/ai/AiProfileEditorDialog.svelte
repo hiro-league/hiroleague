@@ -7,7 +7,7 @@
   import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
   import SingleModelPicker from '$lib/features/preferences/SingleModelPicker.svelte';
   import AiProfileTryIt from './AiProfileTryIt.svelte';
   import type { AiController } from './ai-controller.svelte';
@@ -180,7 +180,7 @@
             </p>
           {/if}
           {#if ai.draftCheck.message}
-            <InlineDestructiveAlert message={ai.draftCheck.message} />
+            <Notice message={ai.draftCheck.message} />
           {:else}
             <p class="text-xs text-muted-foreground">At most {MAX_FALLBACKS} fallbacks in a row, and no loops.</p>
           {/if}

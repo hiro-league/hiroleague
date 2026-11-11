@@ -13,7 +13,7 @@
     KNOWLEDGE_BROWSE_BULK_DIALOG_BODY
   } from '$lib/features/knowledge/shared/knowledge-ui';
   import { createPoller } from '$lib/state/create-poller.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
 
   type Props = {
     open: boolean;
@@ -158,7 +158,7 @@
         Existing indexed content {documentCount === 1 ? 'for this document' : 'for each selected document'} will be replaced.
       </p>
       {#if startError}
-        <InlineDestructiveAlert class="mt-3" message={startError} />
+        <Notice class="mt-3" message={startError} />
       {/if}
     {:else if phase === 'running'}
       <div class="grid gap-3 font-sans text-sm">
@@ -223,7 +223,7 @@
             </span>
           </div>
           {#if Object.keys(trackedJob.errors).length > 0}
-            <InlineDestructiveAlert
+            <Notice
               title="Re-ingest errors"
               class="whitespace-pre-wrap font-mono text-xs"
               message={JSON.stringify(trackedJob.errors, null, 2)}
@@ -256,7 +256,7 @@
           </ul>
         </div>
       {:else if startError}
-        <InlineDestructiveAlert message={startError} />
+        <Notice message={startError} />
       {/if}
     {/if}
     </div>

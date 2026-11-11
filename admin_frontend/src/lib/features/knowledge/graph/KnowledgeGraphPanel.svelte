@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { createGraphFullscreenLifecycle } from '../shared/graph-fullscreen';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
   import { cn } from '$lib/utils';
   import { Button } from '$kit/components/ui/button/index.js';
   import { chatOverlay } from '$lib/features/chat-channels/overlay/chat-overlay-store.svelte';
@@ -329,7 +329,7 @@
     {#if graph.nodes().length === 0 && !graph.loading()}
       <div class="absolute inset-0 grid place-items-center p-6">
         {#if graph.loadError()}
-          <InlineEmptyState
+          <EmptyState
             message="Couldn’t load the graph."
             hint={graph.loadError() ?? undefined}
           >
@@ -338,14 +338,14 @@
                 Retry
               </Button>
             {/snippet}
-          </InlineEmptyState>
+          </EmptyState>
         {:else if graph.progress()}
-          <InlineEmptyState
+          <EmptyState
             message="Building knowledge graph…"
             hint={`Ingesting chunk ${graph.progress()?.chunk_index}/${graph.progress()?.chunk_total} — nodes and relations will appear here as they’re extracted.`}
           />
         {:else}
-          <InlineEmptyState
+          <EmptyState
             message="No graph yet — build it from the Add tab (enable “build entity graph”)."
             hint="New nodes and relations appear here live as the graph builds."
           />

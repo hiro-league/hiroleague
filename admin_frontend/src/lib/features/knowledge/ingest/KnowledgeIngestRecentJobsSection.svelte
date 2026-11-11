@@ -6,7 +6,7 @@
   import type { KnowledgeIngestModel } from '$lib/features/knowledge/state/knowledge-ingest.svelte';
   import { formatJobTotalsSummary } from '$lib/features/knowledge/shared/knowledge-pure';
   import { KNOWLEDGE_SECTION_CARD, KNOWLEDGE_SECTION_TITLE } from '$lib/features/knowledge/shared/knowledge-ui';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
   import { cn } from '$lib/utils';
 
   type Props = {
@@ -70,7 +70,7 @@
           {#if ingest.activeErrorsJobId === item.id}
             <details class="basis-full text-xs" open>
               <summary class="text-destructive">Errors</summary>
-              <InlineDestructiveAlert
+              <Notice
                 class="mt-2 whitespace-pre-wrap font-mono text-xs"
                 message={JSON.stringify(item.errors, null, 2)}
               />

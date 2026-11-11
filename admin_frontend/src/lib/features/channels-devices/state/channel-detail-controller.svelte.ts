@@ -11,7 +11,7 @@ import {
   type ChannelStatus
 } from '$lib/api/channels-devices';
 import { createPoller } from '$lib/state/create-poller.svelte';
-import type { Notify } from '$lib/ui/toast-types';
+import type { Notify } from '$kit/ui/toast.svelte';
 import { channelNeedsRepair, channelStatusMessage } from '../shared/channel-status-message';
 import { sanitizePairingQrSvg } from '../shared/sanitize-pairing-qr-svg';
 import { draftValue, fieldsFromSchema, parseDraftValue, secretIsSet, type FieldSpec } from '../shared/schema-form';

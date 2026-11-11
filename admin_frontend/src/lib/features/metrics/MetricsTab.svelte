@@ -8,7 +8,7 @@
   import { setupMetricsTabRuntime } from '$lib/features/metrics/shared/metrics-page-lifecycle';
   import { createMetricsController } from '$lib/features/metrics/state/metrics-controller.svelte';
   import MetricsPanel from '$lib/features/metrics/view/MetricsPanel.svelte';
-  import type { Notify } from '$lib/ui/toast-types';
+  import type { Notify } from '$kit/ui/toast.svelte';
   import { cn } from '$lib/utils';
 
   let { notify }: { notify: Notify } = $props();

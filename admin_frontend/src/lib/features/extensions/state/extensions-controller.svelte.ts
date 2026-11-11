@@ -8,7 +8,7 @@ import {
   type ExtensionPairingData,
   type ExtensionRow
 } from '$lib/api/extensions';
-import type { Notify } from '$lib/ui/toast-types';
+import type { Notify } from '$kit/ui/toast.svelte';
 
 export type ExtensionsController = ReturnType<typeof createExtensionsController>;
 

@@ -6,7 +6,7 @@
   import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
   import PageTabs from '$kit/ui/page-tabs.svelte';
   import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
   import { createKnowledgePreferences } from '$lib/preferences/knowledge-preferences.svelte';
   import KnowledgeAskPanel from './ask/KnowledgeAskPanel.svelte';
   import KnowledgeBrowsePanel from './browse/KnowledgeBrowsePanel.svelte';
@@ -64,7 +64,7 @@
   
 
   {#if ctl.error}
-    <InlineDestructiveAlert message={ctl.error} />
+    <Notice message={ctl.error} />
   {/if}
 
   <LiveDegradedBanner />

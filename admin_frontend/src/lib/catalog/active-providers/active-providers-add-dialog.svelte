@@ -2,7 +2,7 @@
   import { Button } from '$kit/components/ui/button/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import Loading from '$kit/ui/loading.svelte';
   import type { AddableProviderRow } from '$lib/api/catalog';
 
   import type { ProviderCheckResult } from '$lib/api/catalog';
@@ -72,7 +72,7 @@
       <Dialog.Title>Add provider</Dialog.Title>
     </Dialog.Header>
     {#if loading}
-      <InlineLoading label="Loading providers…" />
+      <Loading label="Loading providers…" />
     {:else}
       <div class="grid gap-4">
         <FormField label="Provider">

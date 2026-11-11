@@ -5,7 +5,7 @@ import {
   type DevicePairingData,
   type DeviceRow
 } from '$lib/api/channels-devices';
-import type { Notify } from '$lib/ui/toast-types';
+import type { Notify } from '$kit/ui/toast.svelte';
 import { displayDeviceName } from '../shared/channels-devices-format';
 
 export type DevicesController = ReturnType<typeof createDevicesController>;

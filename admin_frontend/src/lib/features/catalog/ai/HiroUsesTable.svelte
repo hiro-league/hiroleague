@@ -12,7 +12,7 @@
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { isPlanModel } from '$lib/catalog/hiro-jobs';
   import { ADMIN_SELECT } from '$lib/styling/admin-tokens';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
   import { cn } from '$lib/utils';
   import type { VoiceController } from '$lib/features/catalog/voice/voice-controller.svelte';
   import type { AiController } from './ai-controller.svelte';
@@ -125,7 +125,7 @@
       The voice profile Hiro speaks its voice replies with. A character with voice profiles of its own speaks with those first.
     </p>
   </div>
-  {#if voiceError}<InlineDestructiveAlert message={voiceError} />{/if}
+  {#if voiceError}<Notice message={voiceError} />{/if}
   <AdminTableShell layout="grid" minWidth={900} gridColumns={GRID}>
     {#snippet headRow()}
       <span>Use</span>

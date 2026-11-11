@@ -5,10 +5,10 @@
   import SectionCard from '$lib/components/page/SectionCard.svelte';
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
   import { ADMIN_SECTION_TITLE } from '$lib/styling/admin-tokens';
-  import type { ToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
+  import { toast } from '$kit/ui/toast.svelte';
   import type { ImageLabController } from './state/image-lab-controller.svelte';
 
-  let { ctl, toasts }: { ctl: ImageLabController; toasts: ToastNotifier } = $props();
+  let { ctl }: { ctl: ImageLabController } = $props();
 
   const isDefaultModel = $derived(ctl.options?.default_model === ctl.model);
 </script>
@@ -36,7 +36,7 @@
       on the <a class="underline" href="/catalog">Providers/Models</a> page.
     </p>
   {:else if ctl.model && !isDefaultModel}
-    <Button size="sm" variant="outline" class="justify-self-start" onclick={() => void ctl.setDefaultModel(toasts.notify)}>
+    <Button size="sm" variant="outline" class="justify-self-start" onclick={() => void ctl.setDefaultModel(toast.show)}>
       <Star size={13} /> Set as workspace default
     </Button>
   {/if}
@@ -98,7 +98,7 @@
   <div class="flex flex-wrap items-center gap-3">
     <Button
       disabled={ctl.generating || !ctl.composedPrompt || !ctl.modelReady}
-      onclick={() => void ctl.generate(toasts.notify)}
+      onclick={() => void ctl.generate(toast.show)}
     >
       <Sparkles size={15} />
       {ctl.generating ? 'Generating…' : 'Generate'}

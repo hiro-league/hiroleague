@@ -13,7 +13,7 @@ import {
   getGraphRunRetrievalTrace,
   type RetrievalTraceRecord
 } from '$lib/api/graph-runs';
-import type { ToastKind } from '$lib/ui/toast-types';
+import type { ToastKind } from '$kit/ui/toast.svelte';
 
 export function createRetrievalTraceDialogController(
   notify: (kind: ToastKind, message: string) => void

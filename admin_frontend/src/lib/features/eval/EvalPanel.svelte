@@ -16,7 +16,7 @@
   import type { AdminSubtabDescriptor } from '$lib/components/page/tab-types';
   import { ADMIN_SHELL_STICKY_BLEED } from '$lib/styling/admin-tokens';
   import { setupStickyHeightVar } from '$lib/styling/sticky-height';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
   import { createEvalSubtabPreferences } from '$lib/preferences/eval-preferences.svelte';
   import type { EvalSubtabPreference } from '$lib/preferences/keys';
   import { Button } from '$kit/components/ui/button/index.js';
@@ -35,7 +35,7 @@
   import { createEvalTraces } from '$lib/features/eval/state/eval-traces.svelte';
   import { getPreferences, type WorkspacePreferences } from '$lib/api/preferences';
   import type { EvalModel } from '$lib/features/eval/state/eval-model.svelte';
-  import type { ToastKind } from '$lib/ui/toast-types';
+  import type { ToastKind } from '$kit/ui/toast.svelte';
   import { ADMIN_INPUT, ADMIN_SELECT } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
 
@@ -189,10 +189,10 @@
 <section class="grid gap-4">
   <!-- Error banners — above the sub-tabs so transport/scan failures stay visible. -->
   {#if eval_.status === 'failed' && eval_.failureMessage}
-    <InlineDestructiveAlert title="Eval run failed" message={eval_.failureMessage} />
+    <Notice title="Eval run failed" message={eval_.failureMessage} />
   {/if}
   {#if eval_.corpusesError}
-    <InlineDestructiveAlert message={eval_.corpusesError} />
+    <Notice message={eval_.corpusesError} />
   {/if}
 
   <!-- Corpus selector — shared context for every sub-tab. Scrolls away normally; only the sub-tab

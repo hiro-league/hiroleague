@@ -15,7 +15,7 @@
   import { Check, Loader, Play, Plus, RefreshCw, Square, Trash2, Wand, X } from '@lucide/svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
   import {
     addVoice,
     deleteVoice,
@@ -235,7 +235,7 @@
     {/each}
   </span>
 
-  {#if error}<InlineDestructiveAlert message={error} />{/if}
+  {#if error}<Notice message={error} />{/if}
 
   {#if tab === 'studio'}
     <select

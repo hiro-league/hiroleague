@@ -2,9 +2,9 @@
   import { Image as ImageIcon, Save } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import SectionCard from '$lib/components/page/SectionCard.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
+  import Loading from '$kit/ui/loading.svelte';
   import { ADMIN_SECTION_TITLE } from '$lib/styling/admin-tokens';
   import type { ImageLabController } from './state/image-lab-controller.svelte';
 
@@ -40,9 +40,9 @@
   </div>
 
   {#if ctl.generating}
-    <InlineLoading label="Generating image…" />
+    <Loading label="Generating image…" />
   {:else if ctl.generateError}
-    <InlineDestructiveAlert message={ctl.generateError} />
+    <Notice message={ctl.generateError} />
   {:else if ctl.result && dataUri}
     <img
       class="w-full rounded-md border"
@@ -70,10 +70,10 @@
       {ctl.result.prompt_used}
     </p>
   {:else}
-    <InlineEmptyState message="No image yet — write a prompt and hit Generate.">
+    <EmptyState message="No image yet — write a prompt and hit Generate.">
       {#snippet icon()}
         <ImageIcon size={28} />
       {/snippet}
-    </InlineEmptyState>
+    </EmptyState>
   {/if}
 </SectionCard>

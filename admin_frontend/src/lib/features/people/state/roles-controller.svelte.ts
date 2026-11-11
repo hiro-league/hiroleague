@@ -9,7 +9,7 @@ import {
   type AccessSource,
   type RoleAccess
 } from '$lib/api/people';
-import type { Notify } from '$lib/ui/toast-types';
+import type { Notify } from '$kit/ui/toast.svelte';
 
 export type RolesController = ReturnType<typeof createRolesController>;
 

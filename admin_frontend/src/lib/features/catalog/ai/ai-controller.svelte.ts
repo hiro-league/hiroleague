@@ -44,7 +44,7 @@ import {
 import { listCatalogModels, type CatalogModelRow, type CatalogProviderRow } from '$lib/api/catalog';
 import type { AiProfile as AiProfilePrefs } from '$lib/api/generated/preferences.generated';
 import { patchPreferences } from '$lib/api/preferences';
-import type { Notify } from '$lib/ui/toast-types';
+import type { Notify } from '$kit/ui/toast.svelte';
 import {
   jobFromRow,
   localModelCatalogRows,

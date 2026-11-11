@@ -7,14 +7,12 @@
   import { createServerPreferences } from '$lib/preferences/server-preferences.svelte';
   import type { ServerTabPreference } from '$lib/preferences/keys';
   import { isFeatureActive } from '$lib/shell/features';
-  import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
-  import ToastHost from '$lib/ui/ToastHost.svelte';
+  import { toast } from '$kit/ui/toast.svelte';
   import MetricsTab from '$lib/features/metrics/MetricsTab.svelte';
   import GatewaysTab from './view/GatewaysTab.svelte';
   import WorkspacesTab from './view/WorkspacesTab.svelte';
 
   const prefs = createServerPreferences();
-  const toasts = createToastNotifier();
 
   // The Gateways and Metrics subtabs are each gated by their feature (features.ts). When hidden a
   // tab is dropped here and from the allowed-tab whitelist (server-preferences), so a hidden
@@ -48,12 +46,11 @@
   
 
   {#if prefs.activeTab === 'gateways' && isFeatureActive('gateway')}
-    <GatewaysTab notify={toasts.notify} />
+    <GatewaysTab notify={toast.show} />
   {:else if prefs.activeTab === 'metrics' && isFeatureActive('metrics')}
-    <MetricsTab notify={toasts.notify} />
+    <MetricsTab notify={toast.show} />
   {:else}
-    <WorkspacesTab notify={toasts.notify} />
+    <WorkspacesTab notify={toast.show} />
   {/if}
 </section>
 
-<ToastHost toast={toasts.toast} />

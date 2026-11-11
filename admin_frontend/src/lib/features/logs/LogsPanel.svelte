@@ -5,9 +5,8 @@
   import AdminMasterDetail from '$lib/components/page/table/AdminMasterDetail.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineWarningAlert from '$lib/ui/InlineWarningAlert.svelte';
-  import type { ToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import type { Notify } from '$kit/ui/toast.svelte';
   import type { LogsPageController } from './state/logs-controller.svelte';
   import type { LogsPreferences } from '$lib/preferences/logs-preferences.svelte';
   import LogsDetailPanel from './LogsDetailPanel.svelte';
@@ -25,7 +24,7 @@
     ctrl,
     prefs,
     notify
-  }: { ctrl: LogsPageController; prefs: LogsPreferences; notify: ToastNotifier['notify'] } = $props();
+  }: { ctrl: LogsPageController; prefs: LogsPreferences; notify: Notify } = $props();
 
   // Auto-follow new logs only while pinned to the very top (newest-first feed); once
   // the user scrolls down to read, stop yanking them back to the top.
@@ -107,9 +106,9 @@
 </StickyBar>
 
 {#if ctrl.error}
-  <InlineDestructiveAlert message={ctrl.error} class="px-3 py-2 text-sm" />
+  <Notice message={ctrl.error} class="px-3 py-2 text-sm" />
 {:else if ctrl.pollError}
-  <InlineWarningAlert message={ctrl.pollError} class="px-3 py-2 text-sm" />
+  <Notice tone="warning" message={ctrl.pollError} class="px-3 py-2 text-sm" />
 {/if}
 
 <AdminMasterDetail bind:detailOpen={prefs.detailPanelOpen} scroll="page">

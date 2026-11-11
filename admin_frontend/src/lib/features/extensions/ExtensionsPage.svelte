@@ -2,16 +2,14 @@
   import { onMount } from 'svelte';
   import PageHeader from '$kit/ui/page-header.svelte';
   import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
-  import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
-  import ToastHost from '$lib/ui/ToastHost.svelte';
+  import { toast } from '$kit/ui/toast.svelte';
   import ExtensionPairingDialog from './dialogs/ExtensionPairingDialog.svelte';
   import ExtensionRemoveDialog from './dialogs/ExtensionRemoveDialog.svelte';
   import { createExtensionsController } from './state/extensions-controller.svelte';
   import ExtensionsListCard from './view/ExtensionsListCard.svelte';
   import ListenAddressCard from './view/ListenAddressCard.svelte';
 
-  const toasts = createToastNotifier();
-  const ctrl = createExtensionsController(toasts.notify);
+  const ctrl = createExtensionsController(toast.show);
 
   onMount(() => {
     void ctrl.load();
@@ -28,4 +26,3 @@
 
 <ExtensionPairingDialog {ctrl} />
 <ExtensionRemoveDialog {ctrl} />
-<ToastHost toast={toasts.toast} />

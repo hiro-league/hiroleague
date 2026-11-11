@@ -10,8 +10,7 @@
   import { liveStatus } from '$lib/live/status.svelte';
   import { createShellPreferences } from '$lib/preferences/shell-preferences.svelte';
   import { serverReadiness } from '$lib/runtime/server-readiness.svelte';
-  import { globalToast } from '$lib/ui/global-toast.svelte';
-  import ToastHost from '$lib/ui/ToastHost.svelte';
+  import { toast } from '$kit/ui/toast.svelte';
 
   const prefs = createShellPreferences();
   // Create the shared chat engine here, in the always-mounted part of the shell, so it owns the controller's
@@ -20,6 +19,10 @@
   const chatEngine = getChatEngine();
   /** Tracks SSE connect/disconnect so we can nudge the readiness poller on drop. */
   let liveWasConnected = false;
+
+  // UI kit, step 3: the admin's toasts are the kit's one toast now (pages had one each). The banner owns the
+  // "server is starting" message, so error toasts wait until the server is up.
+  toast.quiet = (kind) => kind === 'error' && !serverReadiness.ready;
 
   onMount(() => {
     prefs.initialize();
@@ -41,12 +44,9 @@
   });
 </script>
 
-<!-- Global chat: floating overlay + the shared engine's toast/clear-messages modal.
+<!-- Global chat: floating overlay + the shared engine's clear-messages modal.
      These live in the shell (not the /chats page) so they work over any page. -->
 <GlobalChatOverlay />
-
-<ToastHost toast={chatEngine.toast} />
-<ToastHost toast={globalToast.toast} />
 
 <ChatChannelClearMessagesModal
   open={chatEngine.clearMessagesConfirmOpen}

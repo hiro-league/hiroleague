@@ -19,7 +19,7 @@ import { seedGraphEpisodeFocus } from '$lib/features/knowledge/graph/knowledge-g
 import { formatEvalRowForAI } from '$lib/features/eval/shared/eval-clipboard';
 import type { EvalRow } from '$lib/features/eval/shared/eval-row';
 import type { EvalModel } from '$lib/features/eval/state/eval-model.svelte';
-import type { ToastKind } from '$lib/ui/toast-types';
+import type { ToastKind } from '$kit/ui/toast.svelte';
 
 /** Narrow read-seam back to the panel: the model + the (prefs-derived) compact engine line that
  *  the per-row "Copy for AI" brief embeds. Kept as accessors so they stay reactive. */

@@ -10,9 +10,9 @@
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
+  import Loading from '$kit/ui/loading.svelte';
   import type { VoiceProfileRow } from '$lib/api/voice';
   import { ADMIN_SECTION_HEADING_LG } from '$lib/styling/admin-tokens';
   import SourceFilter, { type SourceOption } from '$lib/components/page/SourceFilter.svelte';
@@ -83,13 +83,13 @@
     </div>
   </div>
 
-  {#if ctrl.error}<InlineDestructiveAlert message={ctrl.error} />{/if}
-  {#if deleteError}<InlineDestructiveAlert message={deleteError} />{/if}
+  {#if ctrl.error}<Notice message={ctrl.error} />{/if}
+  {#if deleteError}<Notice message={deleteError} />{/if}
 
   {#if ctrl.loading && !ctrl.profiles.length}
-    <InlineLoading label="Reading voice profiles…" />
+    <Loading label="Reading voice profiles…" />
   {:else if !ctrl.profiles.length}
-    <InlineEmptyState message="No voice profiles yet. Make one for each way something should speak (an alert, a story, Hiro)." />
+    <EmptyState message="No voice profiles yet. Make one for each way something should speak (an alert, a story, Hiro)." />
   {:else}
     <AdminTableShell layout="grid" minWidth={980} gridColumns={GRID}>
       {#snippet headRow()}

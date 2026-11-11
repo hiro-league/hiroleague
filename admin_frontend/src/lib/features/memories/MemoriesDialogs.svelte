@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import Loading from '$kit/ui/loading.svelte';
   import type { GraphChunkDetail } from '$lib/api/knowledge';
   import { memoryDateDisplay, memoryPrimaryText } from './shared/memory-pure';
 
@@ -66,7 +66,7 @@
       <p class="memories-provenance-fact">{memoryPrimaryText(memoryProvenanceRow)}</p>
     {/if}
     {#if memoryProvenanceLoading}
-      <InlineLoading label="Loading source turns…" class="m-0" />
+      <Loading label="Loading source turns…" class="m-0" />
     {:else if memoryProvenanceError}
       <p class="font-sans text-sm text-destructive" role="alert">{memoryProvenanceError}</p>
     {:else if memoryProvenanceChunks.length === 0}

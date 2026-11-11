@@ -10,7 +10,7 @@
   import FormField from '$lib/components/ui/form-field.svelte';
   import { ADMIN_TEXTAREA } from '$lib/styling/admin-tokens';
   import type { AiController } from './ai-controller.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
   import { thinkingWords } from './ai-profile-rules';
 
   let { ai }: { ai: AiController } = $props();
@@ -79,6 +79,6 @@
       {/each}
     </div>
   {:else if ai.tryError}
-    <InlineDestructiveAlert message={ai.tryError} />
+    <Notice message={ai.tryError} />
   {/if}
 </SectionCardMuted>

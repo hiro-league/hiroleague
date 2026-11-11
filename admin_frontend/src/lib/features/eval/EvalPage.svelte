@@ -6,12 +6,11 @@
   import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
   import PageTabs from '$kit/ui/page-tabs.svelte';
   import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
   import EvalPanel from '$lib/features/eval/EvalPanel.svelte';
   import LiveDegradedBanner from '$lib/live/LiveDegradedBanner.svelte';
   import { createEvalPreferences } from '$lib/preferences/eval-preferences.svelte';
-  import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
-  import ToastHost from '$lib/ui/ToastHost.svelte';
+  import { toast } from '$kit/ui/toast.svelte';
   import {
     createEvalModel,
     type EvalTrack
@@ -26,7 +25,6 @@
    */
   let error = $state<string | null>(null);
   const tabPrefs = createEvalPreferences();
-  const toasts = createToastNotifier();
   const eval_ = createEvalModel({ setError: (msg) => (error = msg) });
 
   onMount(() => {
@@ -84,12 +82,11 @@
   
 
   {#if error}
-    <InlineDestructiveAlert message={error} />
+    <Notice message={error} />
   {/if}
 
   <LiveDegradedBanner />
 
-  <EvalPanel {eval_} notify={toasts.notify} />
+  <EvalPanel {eval_} notify={toast.show} />
 </section>
 
-<ToastHost toast={toasts.toast} />

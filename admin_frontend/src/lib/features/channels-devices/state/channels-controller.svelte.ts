@@ -8,7 +8,7 @@ import {
   type ChannelRow
 } from '$lib/api/channels-devices';
 import { isFeatureActive } from '$lib/shell/features';
-import type { Notify } from '$lib/ui/toast-types';
+import type { Notify } from '$kit/ui/toast.svelte';
 
 export type ChannelsController = ReturnType<typeof createChannelsController>;
 

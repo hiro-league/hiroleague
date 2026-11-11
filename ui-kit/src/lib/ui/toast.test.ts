@@ -38,4 +38,12 @@ describe('toast', () => {
 		toast.dismiss(id);
 		expect(toast.list).toEqual([]);
 	});
+
+	it("shows nothing the app's quiet rule holds back", () => {
+		toast.quiet = (kind) => kind === 'error';
+		toast.error('Server is away');
+		toast.success('Saved');
+		toast.quiet = null;
+		expect(toast.list.map((t) => t.message)).toEqual(['Saved']);
+	});
 });

@@ -22,7 +22,7 @@ import {
 import { PREFERENCES_FIELD_SCHEMA } from '$lib/api/preferences-field-schema';
 import type { PreferencesSchemaMap } from '$lib/features/preferences/shared/preferences-schema';
 import { createUnsavedGuard } from '$lib/navigation/unsaved-guard.svelte';
-import type { ToastKind } from '$lib/ui/toast-types';
+import type { ToastKind } from '$kit/ui/toast.svelte';
 
 type Notify = (kind: ToastKind, message: string) => void;
 

@@ -17,7 +17,7 @@
     KNOWLEDGE_SECTION_TITLE,
     KNOWLEDGE_SELECT
   } from '$lib/features/knowledge/shared/knowledge-ui';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
   import { cn } from '$lib/utils';
 
   type Props = {
@@ -229,7 +229,7 @@
           {#if Object.keys(ingest.job.errors).length > 0}
             <details class="text-xs">
               <summary class="text-destructive">View errors</summary>
-              <InlineDestructiveAlert
+              <Notice
                 class="mt-2 whitespace-pre-wrap font-mono text-xs"
                 message={JSON.stringify(ingest.job.errors, null, 2)}
               />

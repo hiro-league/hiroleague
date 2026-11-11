@@ -8,7 +8,7 @@ import {
   type GatewayRow
 } from '$lib/api/server';
 import { createMutation, createResource } from '$lib/state/create-resource.svelte';
-import type { Notify } from '$lib/ui/toast-types';
+import type { Notify } from '$kit/ui/toast.svelte';
 
 export type GatewayDialog = 'create' | 'stop' | 'remove' | null;
 

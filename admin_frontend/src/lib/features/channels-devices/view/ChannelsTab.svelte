@@ -5,7 +5,7 @@
   import SectionCard from '$lib/components/page/SectionCard.svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
-  import type { Notify } from '$lib/ui/toast-types';
+  import type { Notify } from '$kit/ui/toast.svelte';
   import type { ChannelsController } from '../state/channels-controller.svelte';
   import RefreshableSectionCard from '../shared/RefreshableSectionCard.svelte';
   import ChannelDetail from './ChannelDetail.svelte';

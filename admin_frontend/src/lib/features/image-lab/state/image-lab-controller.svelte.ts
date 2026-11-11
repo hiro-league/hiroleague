@@ -6,7 +6,7 @@ import {
   type ImageProfile
 } from '$lib/api/image-lab';
 import { patchPreferences } from '$lib/api/preferences';
-import type { ToastKind } from '$lib/ui/toast-types';
+import type { ToastKind } from '$kit/ui/toast.svelte';
 import {
   composeImagePrompt,
   estimateImageCostUsd,

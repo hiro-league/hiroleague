@@ -3,8 +3,7 @@
   import FormField from '$lib/components/ui/form-field.svelte';
   import SectionCard from '$lib/components/page/SectionCard.svelte';
   import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineWarningAlert from '$lib/ui/InlineWarningAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
   import type { ExtensionsController } from '../state/extensions-controller.svelte';
 
   let { ctrl }: { ctrl: ExtensionsController } = $props();
@@ -34,16 +33,16 @@
       {/if}
     </div>
     {#if listen.error}
-      <InlineDestructiveAlert
+      <Notice
         title="Extensions can't connect"
         message="The server couldn't listen on {listen.live_host}:{listen.port}: {listen.error}"
       />
     {/if}
     {#if restartPending}
-      <InlineWarningAlert message="Restart the server for the new address to take effect." />
+      <Notice tone="warning" message="Restart the server for the new address to take effect." />
     {/if}
     {#if listen.note}
-      <InlineWarningAlert title="Not encrypted" message={listen.note} />
+      <Notice tone="warning" title="Not encrypted" message={listen.note} />
     {/if}
   {/if}
 

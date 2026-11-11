@@ -18,7 +18,7 @@ import {
   catalogReloadSuccessMessage,
   reloadCatalogAndRefetch
 } from '$lib/catalog/catalog-reload';
-import type { ToastKind } from '$lib/ui/toast-types';
+import type { ToastKind } from '$kit/ui/toast.svelte';
 
 type Notify = (kind: ToastKind, message: string) => void;
 

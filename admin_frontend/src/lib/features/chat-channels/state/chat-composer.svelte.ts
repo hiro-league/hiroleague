@@ -1,5 +1,5 @@
 import { sendChatMessage } from '$lib/api/chat-channels';
-import type { ToastKind } from '$lib/ui/toast-types';
+import type { ToastKind } from '$kit/ui/toast.svelte';
 import { pickRecordingMimeType } from '$lib/features/chat-channels/shared/chat-channel-media';
 import {
   buildRecordingBlobFromChunks,

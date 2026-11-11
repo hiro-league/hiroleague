@@ -7,8 +7,8 @@
 <script lang="ts">
   import { LoaderCircle } from '@lucide/svelte';
   import EvalCorpusReview from '$lib/features/eval/view/EvalCorpusReview.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
   import { fmtCompact, fmtCount, fmtEpisodeDate } from '$lib/features/eval/shared/eval-format';
   import {
     readCorpusMarkdownPref,
@@ -64,9 +64,9 @@
 
 {#if cfg.hasCorpusReview && eval_.selectedCorpus}
   {#if eval_.corpusError}
-    <InlineDestructiveAlert message={eval_.corpusError} />
+    <Notice message={eval_.corpusError} />
   {:else if eval_.corpusEpisodes.length === 0 && !eval_.corpusLoading}
-    <InlineEmptyState message="No episodes loaded." />
+    <EmptyState message="No episodes loaded." />
   {:else}
     <!-- Corpus stats line — scrolls away normally (the search + filters live on the sticky
          toolbar rendered by EvalCorpusReview below). -->

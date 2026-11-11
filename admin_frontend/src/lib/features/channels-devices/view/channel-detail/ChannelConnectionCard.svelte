@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Button } from '$kit/components/ui/button/index.js';
   import SectionCard from '$lib/components/page/SectionCard.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
   import { ADMIN_SECTION_TITLE } from '$lib/styling/admin-tokens';
   import type { ChannelDetailController } from '../../state/channel-detail-controller.svelte';
   import ChannelPairingPane from './ChannelPairingPane.svelte';
@@ -34,7 +34,7 @@
   </div>
 
   {#if ctrl.needsRepair && ctrl.statusMessage}
-    <InlineDestructiveAlert message={ctrl.statusMessage} />
+    <Notice message={ctrl.statusMessage} />
   {/if}
 
   <ChannelPairingPane kind={ctrl.pairingKind} connected={ctrl.connected} qrSvg={ctrl.qrSvg} />

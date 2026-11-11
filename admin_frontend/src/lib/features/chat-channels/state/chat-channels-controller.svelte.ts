@@ -8,7 +8,7 @@ import {
 import { listCharacters, type CharacterRow } from '$lib/api/characters';
 import type { ChatChannelFormFields } from '$lib/features/chat-channels/shared/chat-channel-form';
 import { createChatChannelsPreferences } from '$lib/preferences/chat-channels-preferences.svelte';
-import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
+import { toast } from '$kit/ui/toast.svelte';
 import { createChatChannelsDialogs } from '$lib/features/chat-channels/state/chat-channels-dialogs.svelte';
 import { createChatChannelsUiPrefs } from '$lib/features/chat-channels/state/chat-channels-ui-prefs.svelte';
 import { createChatMessagesEngine } from '$lib/features/chat-channels/state/chat-messages-engine.svelte';
@@ -22,7 +22,6 @@ export type ChatChannelsPageController = ReturnType<typeof createChatChannelsPag
 
 /** Chat channels Messages tab orchestration — URL prefs, REST, mic capture, modal wiring. Derived fields use getters per Svelte POJO-controller pattern. */
 export function createChatChannelsPageController() {
-  const toasts = createToastNotifier();
   const nav = createChatChannelsPreferences();
   let selectedChannelId = $state<string | null>(null);
   let channels = $state<ChatChannelRow[]>([]);
@@ -47,7 +46,7 @@ export function createChatChannelsPageController() {
     getChannels: () => channels,
     isBusy: () => busy,
     setBusy: (b) => (busy = b),
-    notify: toasts.notify,
+    notify: toast.show,
     onSaved: () => refreshCurrent()
   });
   /** Idempotent boot guard so the shared engine starts (load channels/chars) exactly once. */
@@ -71,7 +70,7 @@ export function createChatChannelsPageController() {
     engine,
     uiPrefs,
     effectiveRequestVoiceReply: () => charResolved.effectiveRequestVoiceReply(),
-    notify: toasts.notify
+    notify: toast.show
   });
 
   /** Character browse photo only (no channel thumbnail fallback). */
@@ -110,7 +109,7 @@ export function createChatChannelsPageController() {
     return `${charPart}${ch.name} · id ${ch.id}`;
   });
 
-  const notify = toasts.notify;
+  const notify = toast.show;
 
   /** Restore tab/channel from `createChatChannelsPreferences().initialize()`. */
   function initializeNavigation() {
@@ -372,9 +371,6 @@ export function createChatChannelsPageController() {
     discardRecording: composer.discardRecording,
     disposeActiveRecording: composer.disposeActiveRecording,
 
-    get toast() {
-      return toasts.toast;
-    },
     get unsaved() {
       return form.unsaved;
     },

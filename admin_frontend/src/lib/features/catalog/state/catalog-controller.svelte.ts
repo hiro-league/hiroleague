@@ -18,7 +18,7 @@ import { asTableSortDirection } from '$lib/components/page/table/table-sort-util
 import { createCatalogPreferences } from '$lib/preferences/catalog-preferences.svelte';
 import type { CatalogTabPreference } from '$lib/preferences/keys';
 import { createMutation, createResource } from '$lib/state/create-resource.svelte';
-import type { Notify } from '$lib/ui/toast-types';
+import type { Notify } from '$kit/ui/toast.svelte';
 import {
   AVAILABILITY_FILTER_IDS,
   filterModelsByAvailability,

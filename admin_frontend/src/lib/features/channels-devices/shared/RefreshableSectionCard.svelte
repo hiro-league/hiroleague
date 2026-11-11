@@ -3,9 +3,9 @@
   import { RefreshCw } from '@lucide/svelte';
   import SectionCard from '$lib/components/page/SectionCard.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
+  import Loading from '$kit/ui/loading.svelte';
 
   type Props = {
     title: string;
@@ -46,11 +46,11 @@
   </div>
 
   {#if loading}
-    <InlineLoading label={loadingLabel} />
+    <Loading label={loadingLabel} />
   {:else if error}
-    <InlineDestructiveAlert title={errorTitle} message={error} />
+    <Notice title={errorTitle} message={error} />
   {:else if empty}
-    <InlineEmptyState message={emptyMessage} />
+    <EmptyState message={emptyMessage} />
   {:else}
     {@render children?.()}
   {/if}

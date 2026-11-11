@@ -12,7 +12,7 @@
   import SectionCardMuted from '$lib/components/page/SectionCardMuted.svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
   import type { Person } from '$lib/api/people';
   import {
     sendVoiceClip,
@@ -173,7 +173,7 @@
       {/if}
     </div>
 
-    {#if error}<InlineDestructiveAlert message={error} />{/if}
+    {#if error}<Notice message={error} />{/if}
 
     {#each takes as t (t.clip.id)}
       <div class="grid gap-2 rounded-md border bg-background p-3">

@@ -7,7 +7,7 @@
   import LogsTableMessageScopeCell from './LogsTableMessageScopeCell.svelte';
   import LogLevelIcon from './shared/LogLevelIcon.svelte';
   import LogRowSourceIcon from './shared/LogRowSourceIcon.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import Loading from '$kit/ui/loading.svelte';
   import type { LogsPageController } from './state/logs-controller.svelte';
   import { logLevelAccentClass, logModuleTextClass } from './shared/logs-classes';
   import {
@@ -90,7 +90,7 @@
 <div class="min-w-0 rounded-md border bg-card/70">
   {#if ctrl.loading}
     <div class="grid min-h-80 place-items-center">
-      <InlineLoading label="Loading logs…" />
+      <Loading label="Loading logs…" />
     </div>
   {:else}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->

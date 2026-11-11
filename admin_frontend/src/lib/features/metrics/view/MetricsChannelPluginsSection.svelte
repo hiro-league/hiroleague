@@ -2,7 +2,7 @@
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import { Badge } from '$kit/components/ui/badge/index.js';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
   import { ADMIN_SECTION_HEADING_LG } from '$lib/styling/admin-tokens';
   import type { MetricsController } from '../state/metrics-controller.svelte';
 
@@ -18,7 +18,7 @@
 <section class="grid gap-3">
   <h3 class={ADMIN_SECTION_HEADING_LG}>Channel Plugins</h3>
   {#if ctrl.children.length === 0}
-    <InlineEmptyState message="No channel plugin processes reported." />
+    <EmptyState message="No channel plugin processes reported." />
   {:else}
     <AdminTableShell layout="grid" minWidth={760} gridColumns={CHANNEL_GRID}>
       {#snippet headRow()}

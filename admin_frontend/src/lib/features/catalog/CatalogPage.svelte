@@ -17,13 +17,11 @@
   import { LOCAL_SERVER_IDS } from '$lib/features/catalog/ai/ai-profile-rules';
   import { createCatalogController } from '$lib/features/catalog/state/catalog-controller.svelte';
   import type { CatalogTabPreference } from '$lib/preferences/keys';
-  import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
-  import ToastHost from '$lib/ui/ToastHost.svelte';
+  import { toast } from '$kit/ui/toast.svelte';
 
-  const toasts = createToastNotifier();
-  const ctrl = createCatalogController(toasts.notify);
+  const ctrl = createCatalogController(toast.show);
   // Phase 7a: AI profiles, uses, local servers and plan tools (`/api/ai`).
-  const ai = createAiController(toasts.notify, ctrl);
+  const ai = createAiController(toast.show, ctrl);
 
   const tabDescriptors: readonly AdminTabDescriptor<CatalogTabPreference>[] = [
     // Providers tab merges the former Active + Catalog provider tabs into one list.
@@ -86,4 +84,3 @@
   {/if}
 </section>
 
-<ToastHost toast={toasts.toast} />

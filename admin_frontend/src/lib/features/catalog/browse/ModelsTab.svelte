@@ -14,9 +14,9 @@
     modelKindUiForRow
   } from '$lib/features/catalog/shared/catalog-filter-ui';
   import { modelPricing, pricingSourceHref } from '$lib/features/catalog/shared/catalog-pricing';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
+  import Loading from '$kit/ui/loading.svelte';
   import { ADMIN_SECTION_CARD, ADMIN_SECTION_HEADING_LG, ADMIN_TABLE_HEAD } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
 
@@ -47,11 +47,11 @@
          Filter-driven reloads keep the existing table mounted so the document
          height stays stable, which prevents the sticky page header from
          flickering back to expanded mode while fetching. -->
-    <InlineLoading label="Loading models…" />
+    <Loading label="Loading models…" />
   {:else if ctrl.modelsError}
-    <InlineDestructiveAlert title="Could not load models" message={ctrl.modelsError} />
+    <Notice title="Could not load models" message={ctrl.modelsError} />
   {:else if ctrl.filteredModels.length === 0}
-    <InlineEmptyState message="No models match the current filters." />
+    <EmptyState message="No models match the current filters." />
   {:else}
     <!-- min-w is shared with ProvidersTab (keep in sync) so both tabs render at the same content
          width and switching Models↔Providers doesn't jump. -->

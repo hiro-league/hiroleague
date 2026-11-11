@@ -6,7 +6,7 @@
   import KnowledgeAskFilterBar from '$lib/features/knowledge/ask/KnowledgeAskFilterBar.svelte';
   import KnowledgeAskCompareView from '$lib/features/knowledge/ask/KnowledgeAskCompareView.svelte';
   import KnowledgeCollapsibleSectionCard from '$lib/features/knowledge/shared/KnowledgeCollapsibleSectionCard.svelte';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
   import KnowledgeChunkMarkdownPreview from '$lib/features/knowledge/shared/KnowledgeChunkMarkdownPreview.svelte';
   import { graphRunPageUrl } from '$lib/features/graph-runs/graph-runs-pure';
   import type { KnowledgePageController } from '$lib/features/knowledge/state/knowledge-controller.svelte';
@@ -170,7 +170,7 @@
       <!-- L3 compare-mode: render the two-leg side-by-side view. -->
       <KnowledgeAskCompareView compareResult={ask.compareResult} />
     {:else if inCompareMode}
-      <InlineEmptyState
+      <EmptyState
         message="Ask a question to compare flat vs graph-augmented retrieval side-by-side."
         hint={!ask.askRewrite
           ? 'Tip: enable Rewrite — graph mode needs entities from the rewrite step.'
@@ -178,7 +178,7 @@
         class="border-solid bg-background px-3 py-8"
       />
     {:else if ask.answerResult?.no_results}
-      <InlineEmptyState
+      <EmptyState
         message="No sources matched. Relax filters or lower the minimum score."
         class="border-solid bg-background px-3 py-8"
       />
@@ -231,7 +231,7 @@
         <p class="whitespace-pre-wrap font-sans text-sm leading-6">{ask.answerResult.answer}</p>
       </article>
     {:else}
-      <InlineEmptyState
+      <EmptyState
         message="Ask a question to retrieve cited sources."
         class="border-solid bg-background px-3 py-8"
       />

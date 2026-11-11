@@ -18,9 +18,9 @@
   import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
   import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
+  import Loading from '$kit/ui/loading.svelte';
   import { ADMIN_SECTION_HEADING_LG } from '$lib/styling/admin-tokens';
   import AiProfileEditorDialog from './AiProfileEditorDialog.svelte';
   import type { AiController } from './ai-controller.svelte';
@@ -93,11 +93,11 @@
   </div>
 
   {#if ai.profilesLoading && ai.profiles.length === 0}
-    <InlineLoading label="Loading AI profiles…" />
+    <Loading label="Loading AI profiles…" />
   {:else if ai.profilesError}
-    <InlineDestructiveAlert title="Could not load AI profiles" message={ai.profilesError} />
+    <Notice title="Could not load AI profiles" message={ai.profilesError} />
   {:else if ai.profiles.length === 0}
-    <InlineEmptyState message="No AI profiles yet." hint="Make one with New profile." />
+    <EmptyState message="No AI profiles yet." hint="Make one with New profile." />
   {:else}
     <AdminTableShell layout="grid" minWidth={1260} gridColumns={GRID}>
       {#snippet headRow()}

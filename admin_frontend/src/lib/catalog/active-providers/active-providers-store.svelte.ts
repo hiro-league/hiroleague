@@ -11,7 +11,7 @@ import {
   type ProviderCheckResult
 } from '$lib/api/catalog';
 import { createMutation, createResource } from '$lib/state/create-resource.svelte';
-import type { ToastKind } from '$lib/ui/toast-types';
+import type { ToastKind } from '$kit/ui/toast.svelte';
 
 type Notify = (kind: ToastKind, message: string) => void;
 

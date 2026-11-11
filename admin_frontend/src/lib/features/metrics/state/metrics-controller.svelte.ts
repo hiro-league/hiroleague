@@ -5,7 +5,7 @@ import {
   type MetricsTickResponse,
   type MetricsUiFrame
 } from '$lib/api/metrics';
-import type { Notify } from '$lib/ui/toast-types';
+import type { Notify } from '$kit/ui/toast.svelte';
 import { createPoller } from '$lib/state/create-poller.svelte';
 import { appendMetricsChartPoint, type MetricsChartPoint } from '../shared/metrics-chart';
 import {

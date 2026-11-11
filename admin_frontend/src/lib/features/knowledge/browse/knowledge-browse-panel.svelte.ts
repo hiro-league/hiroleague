@@ -2,7 +2,7 @@ import type { KnowledgeDocument, KnowledgeScannedFile } from '$lib/api/knowledge
 import { removeDocumentFromKnowledgeGraph } from '$lib/api/knowledge';
 import type { KnowledgePageController } from '$lib/features/knowledge/state/knowledge-controller.svelte';
 import { documentToPreviewFile } from '$lib/features/knowledge/shared/knowledge-pure';
-import type { ToastKind } from '$lib/ui/toast-types';
+import type { ToastKind } from '$kit/ui/toast.svelte';
 import {
   knowledgeDeleteSuccessMessage,
   knowledgeMetadataSavedMessage

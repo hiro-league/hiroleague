@@ -7,7 +7,7 @@
   import { onMount } from 'svelte';
   import { AppWindow, ChartColumn, ExternalLink, House } from '@lucide/svelte';
   import SectionCard from '$lib/components/page/SectionCard.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
   import { listApps, type AppSite } from '$lib/api/auth';
 
   // The icons extensions may name (offers.shows "icon"); anything else gets a plain app icon.
@@ -31,7 +31,7 @@
 </script>
 
 {#if error}
-  <InlineDestructiveAlert message={error} class="text-xs" />
+  <Notice message={error} class="text-xs" />
 {:else if loaded && apps.length}
   <SectionCard class="grid gap-4">
     <div class="flex items-baseline justify-between gap-3">

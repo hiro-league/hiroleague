@@ -5,8 +5,7 @@
   import PageHeader from '$kit/ui/page-header.svelte';
   import PageTabs from '$kit/ui/page-tabs.svelte';
   import { ADMIN_HEADER_INTRO, ADMIN_PAGE_MAX_W_WIDE } from '$lib/styling/admin-tokens';
-  import ToastHost from '$lib/ui/ToastHost.svelte';
-  import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
+  import { toast } from '$kit/ui/toast.svelte';
   import { cn } from '$lib/utils';
   import { createLogsPreferences } from '$lib/preferences/logs-preferences.svelte';
   import { createLogsTabPreferences } from '$lib/preferences/logs-tab-preferences.svelte';
@@ -28,8 +27,7 @@
   // Primary `?tab=logs|runs` pill.
   const tabPrefs = createLogsTabPreferences();
 
-  const toasts = createToastNotifier();
-  const notify = toasts.notify;
+  const notify = toast.show;
   // Graph runs (second tab) — runs-only controller. `notify` drives the eval-detail bridge's
   // load/trace toasts.
   const runsCtrl = createGraphRunsPageController(notify);
@@ -199,4 +197,3 @@
   {/if}
 </section>
 
-<ToastHost toast={toasts.toast} />

@@ -5,7 +5,7 @@
   import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
   import { dialogCloseAllowed } from '$lib/ui/dialog-close-guard';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
   import type { ChatChannelFormFields } from '$lib/features/chat-channels/shared/chat-channel-form';
 
   type Props = {
@@ -142,7 +142,7 @@
     </div>
 
     {#if formError}
-      <InlineDestructiveAlert message={formError} />
+      <Notice message={formError} />
     {/if}
 
     <Dialog.Footer>

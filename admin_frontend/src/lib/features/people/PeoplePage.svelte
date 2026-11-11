@@ -11,8 +11,7 @@
   import SectionCard from '$lib/components/page/SectionCard.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
-  import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
-  import ToastHost from '$lib/ui/ToastHost.svelte';
+  import { toast } from '$kit/ui/toast.svelte';
   import PersonDialog from './dialogs/PersonDialog.svelte';
   import SignInDialog from './dialogs/SignInDialog.svelte';
   import { createPeopleController } from './state/people-controller.svelte';
@@ -22,10 +21,9 @@
   import { createRolesController } from './state/roles-controller.svelte';
   import RolesTab from './view/RolesTab.svelte';
 
-  const toasts = createToastNotifier();
-  const ctrl = createPeopleController(toasts.notify);
+  const ctrl = createPeopleController(toast.show);
   // A role added, renamed or removed changes the People tab's role names too.
-  const roles = createRolesController(toasts.notify, () => ctrl.load());
+  const roles = createRolesController(toast.show, () => ctrl.load());
 
   // Phase 9a: an app's Edit link opens People → Roles at one role (?tab=roles&role=kid).
   const asked = page.url.searchParams;
@@ -105,4 +103,3 @@
   pending={ctrl.busy}
   onConfirm={() => void ctrl.submitRemoveSignIn()}
 />
-<ToastHost toast={toasts.toast} />

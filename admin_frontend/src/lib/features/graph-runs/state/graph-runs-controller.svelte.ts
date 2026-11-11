@@ -51,7 +51,7 @@ import { createRetrievalTraceDialogController } from './retrieval-trace-dialog.s
 import { getEvalRowByRunId } from '$lib/api/eval';
 import { rowFromPayload, type EvalRow } from '$lib/features/eval/shared/eval-row';
 import type { EvalQuestionLeg } from '$lib/features/eval/shared/eval-events';
-import type { ToastKind } from '$lib/ui/toast-types';
+import type { ToastKind } from '$kit/ui/toast.svelte';
 
 const NOOP_NOTIFY = (_kind: ToastKind, _message: string): void => {};
 

@@ -6,9 +6,9 @@
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import { formatChatTimestamp } from '$lib/features/chat-channels/chat-datetime';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
+  import Loading from '$kit/ui/loading.svelte';
 
   type Props = {
     channels: ChatChannelRow[];
@@ -51,11 +51,11 @@
   </div>
 
   {#if channelsLoading}
-    <InlineLoading label="Loading chat channels…" />
+    <Loading label="Loading chat channels…" />
   {:else if channelsError}
-    <InlineDestructiveAlert title="Could not load chat channels" message={channelsError} />
+    <Notice title="Could not load chat channels" message={channelsError} />
   {:else if channels.length === 0}
-    <InlineEmptyState message="No conversation channels yet." />
+    <EmptyState message="No conversation channels yet." />
   {:else}
     <AdminTableShell layout="grid" minWidth={1120} gridColumns={CHAT_CHANNELS_GRID}>
       {#snippet headRow()}

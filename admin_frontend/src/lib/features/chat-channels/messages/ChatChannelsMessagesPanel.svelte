@@ -8,10 +8,9 @@
   import ChatMessagesToolbar from '$lib/features/chat-channels/messages/ChatMessagesToolbar.svelte';
   import { agentMetadataByReplyId } from '$lib/features/chat-channels/messages/agent-message-meta';
   import type { ChatChannelsPageController } from '$lib/features/chat-channels/state/chat-channels-controller.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
-  import InlineWarningAlert from '$lib/ui/InlineWarningAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
+  import Loading from '$kit/ui/loading.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import { cn } from '$lib/utils';
 
@@ -139,35 +138,35 @@
 
   <div class={cn('flex min-h-0 flex-1 flex-col overflow-hidden', dense ? 'gap-2' : 'gap-4')}>
     {#if channelsLoading}
-      <InlineLoading label="Loading chat channels…" class="shrink-0" />
+      <Loading label="Loading chat channels…" class="shrink-0" />
     {:else if channelsError}
-      <InlineDestructiveAlert class="shrink-0" title="Could not load chat channels" message={channelsError} />
+      <Notice class="shrink-0" title="Could not load chat channels" message={channelsError} />
     {:else if channels.length === 0}
-      <InlineEmptyState
+      <EmptyState
         message="No conversation channels yet."
         hint="Create one on the Channels tab to start chatting."
         class="shrink-0"
       >
         {#snippet icon()}<MessagesSquare size={22} />{/snippet}
-      </InlineEmptyState>
+      </EmptyState>
     {:else if messagesLoading}
-      <InlineLoading label="Loading messages…" class="shrink-0" />
+      <Loading label="Loading messages…" class="shrink-0" />
     {:else if messagesError}
-      <InlineDestructiveAlert class="shrink-0" title="Could not load messages" message={messagesError} />
+      <Notice class="shrink-0" title="Could not load messages" message={messagesError} />
     {:else}
       <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden">
         {#if liveUpdatesPaused}
-          <InlineWarningAlert message="Live updates paused - retrying" class="shrink-0" />
+          <Notice tone="warning" message="Live updates paused - retrying" class="shrink-0" />
         {/if}
         {#if messages.length === 0}
           <div class="flex min-h-0 min-w-0 flex-1 items-center justify-center">
-            <InlineEmptyState
+            <EmptyState
               message="No messages in this channel yet."
               hint="Send a message below to get started."
               class="w-full max-w-sm"
             >
               {#snippet icon()}<MessageCircle size={22} />{/snippet}
-            </InlineEmptyState>
+            </EmptyState>
           </div>
         {:else}
           <div class="relative min-h-0 min-w-0 flex-1">

@@ -8,9 +8,9 @@
   import { Button } from '$kit/components/ui/button/index.js';
   import type { ChatChannelRow } from '$lib/api/chat-channels';
   import type { CharacterRow } from '$lib/api/characters';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
+  import Loading from '$kit/ui/loading.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
   import MemoriesEntitiesCell from './MemoriesEntitiesCell.svelte';
   import MemoriesToolbar from './MemoriesToolbar.svelte';
   import {
@@ -99,14 +99,14 @@
   {hidden}
 >
   {#if memoriesError}
-    <InlineDestructiveAlert message={memoriesError} />
+    <Notice message={memoriesError} />
   {/if}
 
   <div class="memories-panel">
     {#if memoriesLoading}
-      <InlineLoading label="Loading memories…" class="m-0" />
+      <Loading label="Loading memories…" class="m-0" />
     {:else if memoryEnabled === false}
-      <InlineEmptyState
+      <EmptyState
         message="Long-term memory is disabled or not configured for this workspace (settings or missing models)."
       />
     {:else if memoriesError}
@@ -130,9 +130,9 @@
       {/if}
 
       {#if memoriesTotalCount === 0}
-        <InlineEmptyState message="No memories in the store for the default user yet." />
+        <EmptyState message="No memories in the store for the default user yet." />
       {:else if visibleMemoriesRows.length === 0}
-        <InlineEmptyState message="No memories match the current filters." />
+        <EmptyState message="No memories match the current filters." />
       {:else}
         <div class="memories-table-container">
           <AdminTableShell density="dense" stickyHead class="memories-table-wrap">

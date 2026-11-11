@@ -6,8 +6,8 @@
   import CharacterExtrasSection from '$lib/features/characters/sections/CharacterExtrasSection.svelte';
   import type { createCharactersPageController } from '$lib/features/characters/state/characters-controller.svelte';
   import type { createCharactersFormModel } from '$lib/features/characters/state/characters-form.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import Loading from '$kit/ui/loading.svelte';
 
   let {
     ctrl,
@@ -54,9 +54,9 @@
 
   <div class="grid gap-5 px-4 pb-5 pt-3 md:px-5">
     {#if ctrl.loadingDetail}
-      <InlineLoading label="Loading character…" />
+      <Loading label="Loading character…" />
     {:else if ctrl.detailError}
-      <InlineDestructiveAlert title="Could not load character" message={ctrl.detailError} />
+      <Notice title="Could not load character" message={ctrl.detailError} />
     {:else}
       <div class="grid gap-8">
         <CharacterProfileSection

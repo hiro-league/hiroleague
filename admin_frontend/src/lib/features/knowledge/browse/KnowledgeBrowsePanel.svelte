@@ -11,8 +11,7 @@
   import KnowledgeDocumentReingestDialog from '$lib/features/knowledge/browse/KnowledgeDocumentReingestDialog.svelte';
   import KnowledgeFilePreviewDialog from '$lib/features/knowledge/shared/file-preview/KnowledgeFilePreviewDialog.svelte';
   import type { KnowledgePageController } from '$lib/features/knowledge/state/knowledge-controller.svelte';
-  import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
-  import ToastHost from '$lib/ui/ToastHost.svelte';
+  import { toast } from '$kit/ui/toast.svelte';
 
   interface Props {
     ctl: KnowledgePageController;
@@ -20,8 +19,7 @@
 
   let { ctl }: Props = $props();
 
-  const toasts = createToastNotifier();
-  const ui = untrack(() => createKnowledgeBrowsePanelUi({ ctl, notify: toasts.notify }));
+  const ui = untrack(() => createKnowledgeBrowsePanelUi({ ctl, notify: toast.show }));
 </script>
 
 <section class="grid gap-4">
@@ -78,4 +76,3 @@
   onConfirm={ui.confirmRemoveFromGraph}
 />
 
-<ToastHost toast={toasts.toast} />

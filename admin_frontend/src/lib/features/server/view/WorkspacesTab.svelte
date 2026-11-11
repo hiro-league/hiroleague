@@ -4,11 +4,11 @@
   import { Button } from '$kit/components/ui/button/index.js';
   import { DEFAULT_ADMIN_CONFIG, docsUrl, getAdminConfig, type AdminConfig } from '$lib/api/config';
   import { liveStatus } from '$lib/live/status.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
+  import Loading from '$kit/ui/loading.svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
-  import type { Notify } from '$lib/ui/toast-types';
+  import type { Notify } from '$kit/ui/toast.svelte';
   import { createWorkspaceStore } from '../state/workspace-store.svelte';
   import WorkspaceRow from './WorkspaceRow.svelte';
   import WorkspaceCreateDialog from '../dialogs/WorkspaceCreateDialog.svelte';
@@ -79,11 +79,11 @@
   </div>
 
   {#if workspace.loading}
-    <InlineLoading label="Loading workspaces…" />
+    <Loading label="Loading workspaces…" />
   {:else if workspace.error}
-    <InlineDestructiveAlert title="Could not load workspaces" message={workspace.error} />
+    <Notice title="Could not load workspaces" message={workspace.error} />
   {:else if workspace.rows.length === 0}
-    <InlineEmptyState message="No workspaces configured yet." />
+    <EmptyState message="No workspaces configured yet." />
   {:else}
     <AdminTableShell layout="grid" minWidth={1180} gridColumns={WORKSPACE_GRID}>
       {#snippet headRow()}

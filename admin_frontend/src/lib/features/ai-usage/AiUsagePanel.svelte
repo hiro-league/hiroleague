@@ -4,8 +4,8 @@
   // dimension, filter on any of the others; a table row picked keeps only it. Each call's own
   // details stay with whoever asked (Home's AI requests log; Graph runs for Hiro).
   import { X } from '@lucide/svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import Loading from '$kit/ui/loading.svelte';
   import StickyBar from '$kit/ui/sticky-bar.svelte';
   import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
   import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
@@ -100,9 +100,9 @@
   </StickyBar>
 
   {#if pg.error}
-    <InlineDestructiveAlert message={pg.error} />
+    <Notice message={pg.error} />
   {:else if pg.loading && !pg.all.length}
-    <InlineLoading label="Reading AI usage…" />
+    <Loading label="Reading AI usage…" />
   {/if}
 
   <AiUsageTiles now={pg.totals} before={pg.before} compared={previousLabel(pg.span, pg.now)} />

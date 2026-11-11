@@ -9,10 +9,10 @@
   import type { CatalogController } from '$lib/features/catalog/state/catalog-controller.svelte';
   import ActiveProvidersAddDialog from '$lib/catalog/active-providers/active-providers-add-dialog.svelte';
   import ActiveProvidersRemoveDialog from '$lib/catalog/active-providers/active-providers-remove-dialog.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
   import ProviderFreeOffersBadge from '$lib/features/catalog/shared/ProviderFreeOffersBadge.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import Loading from '$kit/ui/loading.svelte';
   import { AVAILABILITY_FILTER_UI, formatProviderKindsLabel } from '$lib/features/catalog/shared/catalog-filter-ui';
   import { ADMIN_SECTION_CARD, ADMIN_SECTION_HEADING_LG, ADMIN_TABLE_HEAD } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
@@ -103,11 +103,11 @@
 
   {#if ctrl.providersLoading && ctrl.providers.length === 0}
     <!-- See ModelsTab — keep existing rows mounted on refresh to avoid header flicker. -->
-    <InlineLoading label="Loading providers…" />
+    <Loading label="Loading providers…" />
   {:else if ctrl.providersError}
-    <InlineDestructiveAlert title="Could not load providers" message={ctrl.providersError} />
+    <Notice title="Could not load providers" message={ctrl.providersError} />
   {:else if visibleProviders.length === 0}
-    <InlineEmptyState
+    <EmptyState
       message={activeOnly ? 'No active (online) providers.' : 'No providers in the bundled catalog.'}
       hint={activeOnly ? 'Add a provider or turn off the active-only filter.' : undefined}
     />

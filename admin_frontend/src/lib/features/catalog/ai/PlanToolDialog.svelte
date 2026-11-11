@@ -11,8 +11,7 @@
   import * as Dialog from '$kit/components/ui/dialog/index.js';
   import { dateTime } from '$lib/format/time';
   import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineWarningAlert from '$lib/ui/InlineWarningAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
   import { cn } from '$lib/utils';
   import type { AiController } from './ai-controller.svelte';
   import { planAccountWords, planToolStatus, signInExpiryWords } from './ai-profile-rules';
@@ -48,7 +47,7 @@
       </Dialog.Header>
 
       {#if tool.problem}
-        <InlineWarningAlert message={tool.problem} />
+        <Notice tone="warning" message={tool.problem} />
       {/if}
 
       <dl class="grid grid-cols-[8rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
@@ -116,7 +115,7 @@
               {/if}
             {/if}
           {:else if signIn.state === 'blocked' || signIn.state === 'failed' || signIn.state === 'expired'}
-            <InlineDestructiveAlert message={signIn.message ?? `The sign-in ${signIn.state === 'expired' ? 'expired' : 'stopped'}.`} />
+            <Notice message={signIn.message ?? `The sign-in ${signIn.state === 'expired' ? 'expired' : 'stopped'}.`} />
           {/if}
           <Button size="sm" variant="ghost" class="w-fit" onclick={() => void ai.cancelSignIn(tool.id)}>
             <X size={13} />
@@ -132,7 +131,7 @@
             <span class="text-xs text-muted-foreground">· {test.model ?? 'model not said'} · {(test.ms / 1000).toFixed(1)} s</span>
           </p>
         {:else}
-          <InlineDestructiveAlert message={test.error ?? 'The test question failed.'} />
+          <Notice message={test.error ?? 'The test question failed.'} />
         {/if}
       {/if}
       {#if busy}

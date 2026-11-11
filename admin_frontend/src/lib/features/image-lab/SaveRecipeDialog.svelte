@@ -2,10 +2,10 @@
   import { Button } from '$kit/components/ui/button/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
-  import type { ToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
+  import { toast } from '$kit/ui/toast.svelte';
   import type { ImageLabController } from './state/image-lab-controller.svelte';
 
-  let { ctl, toasts }: { ctl: ImageLabController; toasts: ToastNotifier } = $props();
+  let { ctl }: { ctl: ImageLabController } = $props();
 </script>
 
 <Dialog.Root open={ctl.saveDialogOpen} onOpenChange={(next) => { if (!next) ctl.closeSaveDialog(); }}>
@@ -39,7 +39,7 @@
       <Button variant="outline" disabled={ctl.saving} onclick={() => ctl.closeSaveDialog()}>Cancel</Button>
       <Button
         disabled={ctl.saving || !ctl.saveProfileId.trim()}
-        onclick={() => void ctl.saveProfile(toasts.notify)}
+        onclick={() => void ctl.saveProfile(toast.show)}
       >
         {ctl.saving ? 'Saving…' : 'Save recipe'}
       </Button>

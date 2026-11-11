@@ -2,7 +2,7 @@
   import { Copy } from '@lucide/svelte';
   import DetailPanelShell from '$lib/components/page/DetailPanelShell.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
-  import type { Notify } from '$lib/ui/toast-types';
+  import type { Notify } from '$kit/ui/toast.svelte';
   import LogExtraSegments from './LogExtraSegments.svelte';
   import { LOGS_DETAIL_PANEL_ID } from './shared/logs-a11y';
   import { logLevelTextClass, logModuleTextClass } from './shared/logs-classes';

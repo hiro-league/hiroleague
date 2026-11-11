@@ -5,7 +5,7 @@
   import PageHeader from '$kit/ui/page-header.svelte';
   import PageTabs from '$kit/ui/page-tabs.svelte';
   import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
   import { ADMIN_PAGE_MAX_W_WIDE } from '$lib/styling/admin-tokens';
   import { createMemoriesPreferences } from '$lib/preferences/memories-preferences.svelte';
   import type { MemoriesTabPreference } from '$lib/preferences/keys';
@@ -71,7 +71,7 @@
   
 
   {#if tabPrefs.activeTab === 'graph' && graphError}
-    <InlineDestructiveAlert message={graphError} />
+    <Notice message={graphError} />
   {/if}
 
   {#if tabPrefs.activeTab === 'graph'}

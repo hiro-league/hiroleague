@@ -12,7 +12,7 @@
   import { setupStickyHeightVar } from '$lib/styling/sticky-height';
   import { ADMIN_SELECT_SM } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
   import EvalResultsTable from '$lib/features/eval/answers/EvalResultsTable.svelte';
   import EvalRowDetailDialog from '$lib/features/eval/answers/EvalRowDetailDialog.svelte';
   import EvalNotRunList from '$lib/features/eval/answers/EvalNotRunList.svelte';
@@ -242,7 +242,7 @@
 </script>
 
 {#if eval_.questions.length === 0}
-  <InlineEmptyState message="No questions loaded — pick a corpus on the Execute tab." />
+  <EmptyState message="No questions loaded — pick a corpus on the Execute tab." />
 {:else}
   <!-- Sticky controls: run-selection + search/filters + LoCoMo export. -->
   <div

@@ -15,7 +15,7 @@
   import * as Dialog from '$kit/components/ui/dialog/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
   import SingleModelPicker from '$lib/features/preferences/SingleModelPicker.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
   import type { VoiceProfileFields, VoiceProfileRow } from '$lib/api/voice';
   import { ADMIN_SELECT } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
@@ -215,7 +215,7 @@
       </div>
     </div>
 
-    {#if error}<InlineDestructiveAlert message={error} />{/if}
+    {#if error}<Notice message={error} />{/if}
     {#if confirmDelete && current}
       <div class="flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 px-3 py-2 text-sm">
         <span class="flex-1">

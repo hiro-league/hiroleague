@@ -13,7 +13,7 @@ import {
   type ChatChannelFormFields
 } from '$lib/features/chat-channels/shared/chat-channel-form';
 import { createUnsavedGuard } from '$lib/navigation/unsaved-guard.svelte';
-import type { ToastKind } from '$lib/ui/toast-types';
+import type { ToastKind } from '$kit/ui/toast.svelte';
 
 type ChatChannelFormOptions = {
   getCharacters: () => CharacterRow[];

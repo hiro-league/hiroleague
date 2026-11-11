@@ -6,8 +6,7 @@
   import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
   import type { ChannelsDevicesTabPreference } from '$lib/preferences/keys';
   import { createChannelsDevicesPreferences } from '$lib/preferences/channels-devices-preferences.svelte';
-  import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
-  import ToastHost from '$lib/ui/ToastHost.svelte';
+  import { toast } from '$kit/ui/toast.svelte';
   import { isFeatureActive } from '$lib/shell/features';
   import { createChannelsController } from './state/channels-controller.svelte';
   import { createDevicesController } from './state/devices-controller.svelte';
@@ -16,9 +15,8 @@
 
   const prefs = createChannelsDevicesPreferences();
 
-  const toasts = createToastNotifier();
-  const channelsCtrl = createChannelsController(toasts.notify);
-  const devicesCtrl = createDevicesController(toasts.notify);
+  const channelsCtrl = createChannelsController(toast.show);
+  const devicesCtrl = createDevicesController(toast.show);
 
   // The Devices tab is gated by the `devices` feature (features.ts). When hidden the tab is dropped
   // here and from the allowed-tab whitelist (channels-devices-preferences), so a hidden
@@ -60,10 +58,9 @@
   
 
   {#if prefs.activeTab === 'channels'}
-    <ChannelsTab ctrl={channelsCtrl} notify={toasts.notify} />
+    <ChannelsTab ctrl={channelsCtrl} notify={toast.show} />
   {:else if devicesActive}
     <DevicesTab ctrl={devicesCtrl} />
   {/if}
 </section>
 
-<ToastHost toast={toasts.toast} />

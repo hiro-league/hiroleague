@@ -10,7 +10,7 @@
     CharacterResolvedPayload,
     CharacterResolvedVoiceRow
   } from '$lib/api/characters';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import Loading from '$kit/ui/loading.svelte';
   import {
     appliedTuningLine,
     llmCollapsedSummary,
@@ -322,7 +322,7 @@
     {#if error}
       <p class="text-sm text-destructive">{error}</p>
     {:else if !resolved}
-      <InlineLoading label="Loading resolved configuration…" />
+      <Loading label="Loading resolved configuration…" />
     {:else}
       <div class="grid gap-5 md:grid-cols-2 md:items-start">
         {@render llmColumn(resolved, 'Chat (AI profile)')}
@@ -346,7 +346,7 @@
       {#if error}
         <p class="text-sm text-destructive">{error}</p>
       {:else if !resolved}
-        <InlineLoading label="Loading resolved configuration…" />
+        <Loading label="Loading resolved configuration…" />
       {:else if segment === 'llm'}
         {@render llmColumn(resolved, '')}
       {:else}

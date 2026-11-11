@@ -7,7 +7,7 @@
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import { Badge } from '$kit/components/ui/badge/index.js';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
   import { ADMIN_SELECT } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
   import type { VoiceController } from './voice-controller.svelte';
@@ -31,7 +31,7 @@
       </h4>
       <p class="text-xs text-muted-foreground">What it asks the core to say, and the voice profile it speaks with by default.</p>
     </div>
-    {#if error}<InlineDestructiveAlert message={error} />{/if}
+    {#if error}<Notice message={error} />{/if}
     <AdminTableShell layout="grid" minWidth={900} gridColumns={GRID}>
       {#snippet headRow()}
         <span>Use</span>

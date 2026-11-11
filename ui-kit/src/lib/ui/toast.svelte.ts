@@ -7,6 +7,8 @@
 
 export type ToastKind = 'success' | 'error' | 'warning' | 'info';
 export type Toast = { id: number; kind: ToastKind; message: string };
+/** What a controller is handed to say something: `toast.show`, or a test's own. */
+export type Notify = (kind: ToastKind, message: string) => void;
 
 const STAYS: Record<ToastKind, number> = { success: 4500, info: 4500, warning: 7000, error: 9000 }; // ms
 const MOST = 3; // shown at once; an older one makes way
@@ -14,9 +16,13 @@ const MOST = 3; // shown at once; an older one makes way
 class Toasts {
 	list = $state<Toast[]>([]);
 	#next = 1;
+	/** An app's rule for toasts not worth showing right now (the admin: no error toasts while its banner already
+	 *  says the server is starting). UI kit, step 3: from the admin's createToastNotifier. */
+	quiet: ((kind: ToastKind) => boolean) | null = null;
 	#timers = new Map<number, ReturnType<typeof setTimeout>>();
 
 	show = (kind: ToastKind, message: string) => {
+		if (this.quiet?.(kind)) return 0;
 		// the same words again (a button pressed twice) replace the first, not stack under it
 		for (const t of this.list.filter((t) => t.kind === kind && t.message === message)) this.dismiss(t.id);
 		const id = this.#next++;

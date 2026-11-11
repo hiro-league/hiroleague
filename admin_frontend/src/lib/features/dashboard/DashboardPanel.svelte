@@ -4,7 +4,7 @@
   import StatTile from '$lib/components/page/StatTile.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import type { DashboardController } from '$lib/features/dashboard/state/dashboard-controller.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
 
   type Props = {
     ctrl: DashboardController;
@@ -18,7 +18,7 @@
 <div class="grid gap-5">
   <div class="flex items-center justify-between gap-3">
     {#if ctrl.error}
-      <InlineDestructiveAlert message={ctrl.error} class="flex-1 text-xs" />
+      <Notice message={ctrl.error} class="flex-1 text-xs" />
     {:else}
       <span class="rounded-full border bg-muted px-3 py-1 font-sans text-xs font-semibold text-muted-foreground">
         {ctrl.loading ? 'Loading dashboard status' : 'Live dashboard status'}

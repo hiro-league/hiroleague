@@ -1,8 +1,8 @@
 <script lang="ts">
   import * as Dialog from '$kit/components/ui/dialog/index.js';
   import { previewKnowledgeFile, type KnowledgeScannedFile } from '$lib/api/knowledge';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import Loading from '$kit/ui/loading.svelte';
   import { fileName } from '$lib/features/knowledge/shared/knowledge-pure';
   import KnowledgeFilePreviewMetrics from './KnowledgeFilePreviewMetrics.svelte';
   import type { KnowledgeFilePreviewData } from './file-preview-types';
@@ -82,10 +82,10 @@
     <div class="min-h-0 flex-1 overflow-auto bg-card px-4 py-3">
       {#if loading}
         <div class="grid h-full min-h-[240px] place-items-center">
-          <InlineLoading label="Loading preview…" />
+          <Loading label="Loading preview…" />
         </div>
       {:else if error}
-        <InlineDestructiveAlert message={error} />
+        <Notice message={error} />
       {:else if preview}
         {#if preview.truncated}
           <p class="mb-3 font-sans text-xs text-amber-700 dark:text-amber-300">

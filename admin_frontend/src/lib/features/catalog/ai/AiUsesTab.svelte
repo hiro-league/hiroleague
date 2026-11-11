@@ -15,9 +15,9 @@
   import { Button } from '$kit/components/ui/button/index.js';
   import { dateTime } from '$lib/format/time';
   import { ADMIN_SECTION_HEADING_LG, ADMIN_SELECT } from '$lib/styling/admin-tokens';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
+  import Loading from '$kit/ui/loading.svelte';
   import { cn } from '$lib/utils';
   import type { AiController } from './ai-controller.svelte';
   import { chainLabel, fallbackChain, needsMismatch } from './ai-profile-rules';
@@ -70,20 +70,20 @@
 
   {#if activeSource === HIRO}
     {#if ai.profilesLoading && ai.jobs.length === 0}
-      <InlineLoading label="Loading Hiro's jobs…" />
+      <Loading label="Loading Hiro's jobs…" />
     {:else if ai.profilesError}
-      <InlineDestructiveAlert title="Could not load Hiro's jobs" message={ai.profilesError} />
+      <Notice title="Could not load Hiro's jobs" message={ai.profilesError} />
     {:else}
       <HiroUsesTable {ai} {voice} />
     {/if}
   {:else}
 
   {#if ai.usesLoading && ai.useGroups.length === 0}
-    <InlineLoading label="Loading uses…" />
+    <Loading label="Loading uses…" />
   {:else if ai.usesError}
-    <InlineDestructiveAlert title="Could not load uses" message={ai.usesError} />
+    <Notice title="Could not load uses" message={ai.usesError} />
   {:else if ai.useGroups.length === 0}
-    <InlineEmptyState message="No extension has declared uses yet." hint="Pair an extension on the Extensions page." />
+    <EmptyState message="No extension has declared uses yet." hint="Pair an extension on the Extensions page." />
   {/if}
 
   {#each ai.useGroups.filter((g) => g.extension === activeSource) as group (group.extension)}

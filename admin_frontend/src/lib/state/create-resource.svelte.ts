@@ -1,4 +1,4 @@
-import type { Notify } from '$lib/ui/toast-types';
+import type { Notify } from '$kit/ui/toast.svelte';
 import { featureErrorFrom } from '$lib/runtime/feature-errors';
 import type { Resource } from './types';
 

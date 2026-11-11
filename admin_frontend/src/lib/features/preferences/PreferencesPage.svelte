@@ -33,14 +33,12 @@
   import type { PrefSearchEntry } from '$lib/features/preferences/shared/preferences-search-index';
   import { getPreferenceByPath } from '$lib/features/preferences/state/preferences-edits';
   import { createPreferencesTabPreferences } from '$lib/preferences/preferences-tab-preferences.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
-  import ToastHost from '$lib/ui/ToastHost.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import Loading from '$kit/ui/loading.svelte';
   import UnsavedPreferencesDialog from '$lib/features/preferences/widgets/UnsavedPreferencesDialog.svelte';
-  import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
+  import { toast } from '$kit/ui/toast.svelte';
 
-  const toasts = createToastNotifier();
-  const ctrl = createPreferencesController(toasts.notify);
+  const ctrl = createPreferencesController(toast.show);
   // Global "show advanced" toggle, shared with every field gate via context (session-persisted).
   const advancedVis = createAdvancedVisibility();
   provideAdvancedVisibility(advancedVis);
@@ -191,7 +189,6 @@
   <title>Settings - Hiro Admin</title>
 </svelte:head>
 
-<ToastHost toast={toasts.toast} />
 
 <section class={ADMIN_PAGE_MAX_W}>
   <PageHeader title="Settings" description="Runtime settings are held in memory and persisted to preferences.json when saved." />
@@ -275,9 +272,9 @@
   {/if}
 
   {#if ctrl.loading}
-    <InlineLoading label="Loading preferences…" />
+    <Loading label="Loading preferences…" />
   {:else if ctrl.error}
-    <InlineDestructiveAlert message={ctrl.error} class="p-4 text-sm" />
+    <Notice message={ctrl.error} class="p-4 text-sm" />
   {:else if ctrl.draft}
     {#if activeManifestTab}
       <PrefManifestTab {ctrl} tab={activeManifestTab} />

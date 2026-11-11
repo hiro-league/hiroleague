@@ -9,7 +9,7 @@ import {
   type PersonFields,
   type Role
 } from '$lib/api/people';
-import type { Notify } from '$lib/ui/toast-types';
+import type { Notify } from '$kit/ui/toast.svelte';
 
 export type PeopleController = ReturnType<typeof createPeopleController>;
 

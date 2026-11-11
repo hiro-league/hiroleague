@@ -4,7 +4,7 @@
   import { Button } from '$kit/components/ui/button/index.js';
   import FieldHelp from '$lib/components/ui/field-help.svelte';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
-  import InlineWarningAlert from '$lib/ui/InlineWarningAlert.svelte';
+  import Notice from '$kit/ui/notice.svelte';
   import { selectedModelIssue } from '$lib/catalog/selected-model-issue';
   import type { CatalogModelRow, CatalogProviderRow } from '$lib/api/catalog';
   import {
@@ -218,7 +218,7 @@
       </Button>
     </div>
     {#if issue}
-      <InlineWarningAlert message={issue.message} />
+      <Notice tone="warning" message={issue.message} />
     {/if}
   {:else}
     <div

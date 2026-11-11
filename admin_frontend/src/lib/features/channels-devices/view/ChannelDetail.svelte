@@ -4,11 +4,11 @@
   import { Button } from '$kit/components/ui/button/index.js';
   import SectionCard from '$lib/components/page/SectionCard.svelte';
   import { ADMIN_SECTION_TITLE } from '$lib/styling/admin-tokens';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
+  import Loading from '$kit/ui/loading.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
   import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
-  import type { Notify } from '$lib/ui/toast-types';
+  import type { Notify } from '$kit/ui/toast.svelte';
   import { createChannelDetailController } from '../state/channel-detail-controller.svelte';
   import ChannelConnectionCard from './channel-detail/ChannelConnectionCard.svelte';
   import SchemaConfigForm from './channel-detail/SchemaConfigForm.svelte';
@@ -52,16 +52,16 @@
   </div>
 
   {#if ctrl.loading}
-    <InlineLoading label="Loading {name}…" />
+    <Loading label="Loading {name}…" />
   {:else if ctrl.error}
-    <InlineDestructiveAlert message={ctrl.error} />
+    <Notice message={ctrl.error} />
   {:else}
     <ChannelConnectionCard {ctrl} onRequestUninstall={() => (confirmingUninstall = true)} />
 
     <SectionCard class="grid gap-3">
       <h2 class={ADMIN_SECTION_TITLE}>Settings</h2>
       {#if ctrl.fields.length === 0}
-        <InlineEmptyState message="This channel has no configurable settings." />
+        <EmptyState message="This channel has no configurable settings." />
       {:else}
         <SchemaConfigForm
           fields={ctrl.fields}

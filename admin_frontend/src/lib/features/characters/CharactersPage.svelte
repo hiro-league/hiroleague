@@ -14,14 +14,12 @@
   import { createCharactersFormModel } from '$lib/features/characters/state/characters-form.svelte';
   import { createCharactersPageController } from '$lib/features/characters/state/characters-controller.svelte';
   import { createUnsavedGuard } from '$lib/navigation/unsaved-guard.svelte';
-  import ToastHost from '$lib/ui/ToastHost.svelte';
-  import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
+  import { toast } from '$kit/ui/toast.svelte';
   import { createCharactersPreferences } from '$lib/preferences/characters-preferences.svelte';
   import type { CharactersTabPreference } from '$lib/preferences/keys';
 
   const prefs = createCharactersPreferences();
-  const toasts = createToastNotifier();
-  const notify = toasts.notify;
+  const notify = toast.show;
 
   const formApi = createCharactersFormModel();
 
@@ -120,6 +118,5 @@
   {/if}
 </section>
 
-<ToastHost toast={toasts.toast} />
 
 <CharacterDialogs {ctrl} {unsaved} characterId={prefs.characterId} />

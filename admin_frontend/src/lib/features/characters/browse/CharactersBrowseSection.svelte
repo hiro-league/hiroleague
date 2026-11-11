@@ -1,9 +1,9 @@
 <script lang="ts">
   import { RefreshCw } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
-  import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
-  import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import Notice from '$kit/ui/notice.svelte';
+  import EmptyState from '$kit/ui/empty-state.svelte';
+  import Loading from '$kit/ui/loading.svelte';
   import type { CharacterRow } from '$lib/api/characters';
   import CharacterBrowseCard from '$lib/features/characters/browse/CharacterBrowseCard.svelte';
 
@@ -32,11 +32,11 @@
   </div>
 
   {#if loadingList}
-    <InlineLoading label="Loading characters…" />
+    <Loading label="Loading characters…" />
   {:else if listError}
-    <InlineDestructiveAlert title="Could not load characters" message={listError} />
+    <Notice title="Could not load characters" message={listError} />
   {:else if rows.length === 0}
-    <InlineEmptyState message="No characters yet. Create one with the button above." />
+    <EmptyState message="No characters yet. Create one with the button above." />
   {:else}
     <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
       {#each rows as row (row.id)}
