@@ -105,9 +105,9 @@ describe('graphRunTabId', () => {
 
 describe('graphRunPageUrl', () => {
   it('builds a deep link, encoding the run id', () => {
-    expect(graphRunPageUrl('')).toBe('/logs/?tab=runs');
-    expect(graphRunPageUrl('  ')).toBe('/logs/?tab=runs');
-    expect(graphRunPageUrl('chat-1 2')).toBe('/logs/?tab=runs&run=chat-1%202');
+    expect(graphRunPageUrl('')).toBe('/logs?tab=runs');
+    expect(graphRunPageUrl('  ')).toBe('/logs?tab=runs');
+    expect(graphRunPageUrl('chat-1 2')).toBe('/logs?tab=runs&run=chat-1%202');
   });
 });
 

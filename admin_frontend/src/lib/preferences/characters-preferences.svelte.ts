@@ -4,7 +4,7 @@
  * Characters-specific extra state kept alongside.
  *
  * The page also has the "land on Browse when the route arrives with no query
- * params" rule (`/characters/` from the sidebar should not restore Detail
+ * params" rule (`/characters` from the sidebar should not restore Detail
  * from session alone). That rule is preserved in `initialize()` below.
  */
 import { page } from '$app/state';

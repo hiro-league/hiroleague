@@ -308,7 +308,7 @@
         <!-- Quick access to workspace Settings, mirroring the sidebar entry. Icon-only. -->
         <a
           class="inline-flex size-9 shrink-0 items-center justify-center rounded-md border border-input bg-background text-muted-foreground shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground"
-          href={navHref('/preferences/')}
+          href={navHref('/preferences')}
           aria-label="Settings"
           title="Settings"
         >

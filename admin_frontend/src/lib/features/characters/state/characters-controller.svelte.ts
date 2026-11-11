@@ -219,7 +219,8 @@ export function createCharactersPageController(opts: {
   }
 
   function isCharactersPath(pathname: string): boolean {
-    return pathname.endsWith('/characters') || pathname.endsWith('/characters/');
+    // Step 1d: pages have no trailing slash.
+    return pathname.endsWith('/characters');
   }
 
   /** Apply URL + prefs to remote state + optional edit form. */
