@@ -3,7 +3,7 @@
   import { afterNavigate } from '$app/navigation';
   import { page } from '$app/state';
   import { onMount, setContext, tick } from 'svelte';
-  import { ChevronsDownUp, ChevronsUpDown, Eye, EyeOff, RotateCcw, Save } from '@lucide/svelte';
+  import { ChevronsDownUp, ChevronsUpDown, Eye, EyeOff, Palette, RotateCcw, Save } from '@lucide/svelte';
   import PageHeader from '$kit/ui/page-header.svelte';
   import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
   import StickyBar from '$kit/ui/sticky-bar.svelte';
@@ -191,7 +191,12 @@
 
 
 <section class={ADMIN_PAGE_MAX_W}>
-  <PageHeader title="Settings" description="Runtime settings are held in memory and persisted to preferences.json when saved." />
+  <!-- UI kit: the look of HiroLeague and its apps is designed on the UI kit page; linked from Settings, where people look for it. -->
+  <PageHeader title="Settings" description="Runtime settings are held in memory and persisted to preferences.json when saved.">
+    {#snippet actions()}
+      <Button variant="outline" size="sm" href="/ui-kit?tab=theme"><Palette />Look and theme</Button>
+    {/snippet}
+  </PageHeader>
   {#if !ctrl.error}
     <StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
       <Subtabs

@@ -5,6 +5,7 @@
 	import type { Snippet } from 'svelte';
 	import { APP } from '$hiro-app/app';
 	import { HIROLEAGUE } from '$hiro-app/hiroleague';
+	import { ExternalLink } from '@lucide/svelte';
 	import { Button } from '$kit/components/ui/button/index.js';
 	import * as Card from '$kit/components/ui/card/index.js';
 	import { Input } from '$kit/components/ui/input/index.js';
@@ -136,6 +137,16 @@
 					? `${current.admin_url}, from the core's address and admin port`
 					: "the core's address and admin port, once connected"}. Behind a proxy, type the address people open, e.g. http://hiro.local.
 			</p>
+			<!-- UI kit: the app's colours are designed in the admin's UI kit page (its Theme designer) and pasted into
+			     the app's src/lib/app/theme.css; linked here, where the admin's address is known. -->
+			{#if current?.admin_url}
+				<p class="text-xs text-muted-foreground">
+					{APP.name}'s colours: the
+					<a class="inline-flex items-center gap-0.5 text-primary hover:underline" href="{current.admin_url.replace(/\/+$/, '')}/ui-kit?tab=theme" target="_blank" rel="noreferrer"
+						>Theme designer in HiroLeague's admin<ExternalLink class="size-3" /></a
+					>. It makes the app's own <code>theme.css</code>.
+				</p>
+			{/if}
 			<Feedback action={savingAdmin} />
 		</div>
 

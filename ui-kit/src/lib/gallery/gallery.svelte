@@ -9,12 +9,15 @@
 	import Pieces from './pieces.svelte';
 	import StandardPages from './standard-pages.svelte';
 	import ThemeDesigner from './theme-designer.svelte';
+	import { UrlTab } from '$kit/state/url-tab.svelte';
 
-	let tab = $state('pieces');
+	// The open tab is in the address (?tab=theme), so Settings pages can link straight to the Theme designer.
+	const tabs = new UrlTab('gallery.tab', ['pieces', 'theme', 'pages'] as const, 'pieces');
+	const tab = $derived(tabs.current);
 </script>
 
 <div class="max-w-5xl">
-	<Tabs.Root bind:value={tab}>
+	<Tabs.Root bind:value={tabs.current}>
 		<div class="mb-4 flex flex-wrap items-center justify-between gap-2">
 			<Tabs.List>
 				<Tabs.Trigger value="pieces">Pieces</Tabs.Trigger>
