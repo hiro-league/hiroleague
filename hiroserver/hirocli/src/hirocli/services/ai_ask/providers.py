@@ -61,6 +61,7 @@ class ProviderCall:
     sound_mime: str = "audio/wav"
     schema: dict[str, Any] | None = None  # None = a plain text answer
     detail: str = "medium"
+    folder: Path | None = None  # a checked folder for a plan tool to read; no other provider can
     timeout: float = 60.0
     wait: bool = True
     workspace_path: Path = Path(".")  # Part B: plan tools keep their login under the workspace
@@ -100,6 +101,7 @@ class PlanCall:
     workspace_path: Path = Path(".")
     line: str = ""
     at_once: int = 1
+    folder: Path | None = None  # the tool starts here and may read it (never write): a checked, existing folder
 
 
 class PlanTool(Protocol):
@@ -149,6 +151,7 @@ async def answer_on_plan(call: ProviderCall) -> ProviderResult:
             workspace_path=call.workspace_path,
             line=call.line,
             at_once=call.profile.at_once,
+            folder=call.folder,
         )
     )
 
@@ -167,6 +170,8 @@ class ChatModelProvider:
 
     async def answer(self, call: ProviderCall) -> ProviderResult:
         target = call.target
+        if call.folder is not None:
+            raise ProviderFailed(f"{target.model_id} can't read a folder: pick a Claude Code or Codex profile")
         if call.pictures and not target.pictures:
             raise ProviderFailed(f"{target.model_id} can't read pictures")
         if call.sound is not None and not target.sound:

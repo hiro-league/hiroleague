@@ -52,6 +52,7 @@ log = Logger.get("AI.ASK")
 
 # Seconds one model may take when the ask doesn't say (HomeHiro's limits).
 DEFAULT_TIMEOUT_S = {"api": 60.0, "local": 180.0, "plan": 120.0}
+FOLDER_TIMEOUT_S = 900.0  # a tool reading a folder (a code review) takes minutes, not seconds
 MAX_TIMEOUT_S = 1800.0
 DETAILS = ("low", "medium", "high")
 # Profile id used by Try it for a profile that isn't saved yet (never counted).
@@ -76,6 +77,9 @@ class AskRequest:
     # Phase 7b: what AI usage files the ask under — the person it is for (a person id) and a free label.
     person_id: str = ""
     label: str = ""
+    # A folder for a plan tool to read (Claude Code: Read, Glob, Grep; Codex: read-only), already checked against
+    # what the extension may name (ai_ask/folders.py). "" = none: the tool gets its own empty folder.
+    folder: str = ""
 
     @property
     def source(self) -> str:
@@ -237,7 +241,8 @@ class AskRunner:
                 return None
 
         question = f"{request.prompt}\n\n{profile.instructions.strip()}" if profile.instructions.strip() else request.prompt
-        timeout = min(request.timeout or DEFAULT_TIMEOUT_S[target.kind], MAX_TIMEOUT_S)
+        default = FOLDER_TIMEOUT_S if request.folder and target.kind == "plan" else DEFAULT_TIMEOUT_S[target.kind]
+        timeout = min(request.timeout or default, MAX_TIMEOUT_S)
         call = ProviderCall(
             profile=profile,
             target=target,
@@ -248,6 +253,7 @@ class AskRunner:
             sound_mime=request.sound_mime,
             schema=request.schema,
             detail=request.detail,
+            folder=Path(request.folder) if request.folder else None,
             timeout=timeout,
             wait=request.wait,
             workspace_path=self._workspace_path,

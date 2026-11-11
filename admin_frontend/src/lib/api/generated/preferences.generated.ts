@@ -662,6 +662,7 @@ export interface AiPreferences {
   profiles: Profiles;
   uses: Uses;
   local_servers: LocalServers;
+  folders: Folders;
 }
 export interface Profiles {
   [k: string]: AiProfile;
@@ -696,6 +697,9 @@ export interface LocalServerSettings {
   unload_idle_min: UnloadIdleMin;
   context: Context;
   batch: Batch;
+}
+export interface Folders {
+  [k: string]: string[];
 }
 /**
  * ``prefs.voice``: the voice profiles, which profile each speech use speaks with, and the clip cache.

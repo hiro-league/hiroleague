@@ -14,6 +14,8 @@ as the response's error code, through ``RequestRefused``.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 from hiro_channel_sdk.constants import AI_ERROR_INVALID, METHOD_AI_ASK, METHOD_AI_PROFILES
@@ -24,6 +26,7 @@ from ..domain.extensions import get_paired_extension
 from ..domain.people import get_person
 from ..domain.workspace import workspace_id_for_path
 from ..services.ai_ask import AskError, extension_use_map, get_ask_runner, profile_rows
+from ..services.ai_ask.folders import check_folder
 from ..services.ai_ask.params import ask_request_from_params
 from .request_handler import EXTENSIONS_ONLY, RequestContext, RequestRefused
 
@@ -44,6 +47,16 @@ async def _caller_name(ctx: RequestContext) -> str:
     return paired.name
 
 
+async def _checked_folder(folder: str, name: str, use: str, ctx: RequestContext) -> Path:
+    """The folder an ask names, if this extension's use declares it and the admin allowed it (ai_ask/folders.py)."""
+    paired = await asyncio.to_thread(get_paired_extension, ctx.workspace_path, ctx.msg.routing.sender_id)
+    declared = {u["id"]: u for u in (paired.declared_uses() if paired else [])}
+    allowed = ctx.server_ctx.preferences.current.ai.folders.get(name, [])
+    return await asyncio.to_thread(
+        check_folder, folder, allowed, extension=name, use=use, use_reads_folders=bool(declared.get(use, {}).get("folder"))
+    )
+
+
 async def handle_ai_ask(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
     name = await _caller_name(ctx)
     use = params.get("use")
@@ -52,6 +65,8 @@ async def handle_ai_ask(params: dict[str, Any], ctx: RequestContext) -> dict[str
     use_key = f"{name}:{use.strip()}"
     try:
         request = ask_request_from_params(params, use_key=use_key, who=name)
+        if request.folder:
+            request = replace(request, folder=str(await _checked_folder(request.folder, name, use.strip(), ctx)))
         # Phase 7b: a person the core doesn't know would file the ask's usage under nobody.
         if request.person_id and await asyncio.to_thread(get_person, ctx.workspace_path, request.person_id) is None:
             raise AskError(AI_ERROR_INVALID, f"There's no person {request.person_id!r} in the family list.")

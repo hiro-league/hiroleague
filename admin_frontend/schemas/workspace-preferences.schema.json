@@ -33,6 +33,17 @@
           "preferencesSaveSkip": true,
           "title": "Local Servers",
           "type": "object"
+        },
+        "folders": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "preferencesSaveSkip": true,
+          "title": "Folders",
+          "type": "object"
         }
       },
       "title": "AiPreferences",
@@ -40,7 +51,8 @@
       "required": [
         "profiles",
         "uses",
-        "local_servers"
+        "local_servers",
+        "folders"
       ]
     },
     "AiProfile": {

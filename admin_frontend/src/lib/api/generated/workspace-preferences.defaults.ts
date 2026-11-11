@@ -188,7 +188,8 @@ export const DEFAULT_WORKSPACE_PREFERENCES = {
   "ai": {
     "profiles": {},
     "uses": {},
-    "local_servers": {}
+    "local_servers": {},
+    "folders": {}
   },
   "voice": {
     "profiles": {},
