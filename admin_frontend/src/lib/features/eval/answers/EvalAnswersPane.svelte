@@ -248,7 +248,7 @@
   <div
     bind:this={aControlsEl}
     class="sticky z-10 flex flex-wrap items-center gap-2 bg-background py-2 pl-3"
-    style="top: calc(4rem + var(--admin-page-header-h, 0px) + var(--admin-page-sticky-toolbar-h, 0px) + var(--admin-eval-subtabs-h, 0px));"
+    style="top: calc(var(--app-top, 0px) + var(--page-header, 0px) + var(--sticky-bar, 0px) + var(--admin-eval-subtabs-h, 0px));"
   >
     <span class="mr-auto font-sans text-xs text-muted-foreground">
       <span class="font-medium text-foreground">{eval_.selectedCount}</span>/{eval_.questions

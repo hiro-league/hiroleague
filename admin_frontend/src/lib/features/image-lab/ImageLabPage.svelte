@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
+  import PageHeader from '$kit/ui/page-header.svelte';
+  import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
   import ToastHost from '$lib/ui/ToastHost.svelte';
@@ -22,11 +23,8 @@
   <title>Image Lab - Hiro Admin</title>
 </svelte:head>
 
-<AdminPageHeader
-  kicker="Operations"
-  title="Image Lab"
-  subtitle="Test text-to-image generation, tune parameters, and promote good setups into reusable recipes."
->
+<section class={ADMIN_PAGE_MAX_W}>
+  <PageHeader title="Image Lab" description="Test text-to-image generation, tune parameters, and promote good setups into reusable recipes." />
   {#if ctl.loading}
     <InlineLoading label="Loading Image Lab…" />
   {:else if ctl.error}
@@ -37,7 +35,7 @@
       <ImageLabResult {ctl} />
     </div>
   {/if}
-</AdminPageHeader>
+</section>
 
 <SaveRecipeDialog {ctl} {toasts} />
 <ToastHost toast={toasts.toast} />

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { RefreshCw } from '@lucide/svelte';
-  import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
+  import StickyBar from '$kit/ui/sticky-bar.svelte';
   import FormField from '$lib/components/ui/form-field.svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
@@ -20,7 +20,7 @@
   onMount(() => setupMetricsTabRuntime(ctrl));
 </script>
 
-<AdminPageStickyToolbar>
+<StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
   <div class="flex flex-wrap items-end gap-4">
     <FormField label="Enable metrics">
       <input
@@ -55,6 +55,6 @@
     </Button>
     <Badge variant={ctrl.statusVariant}>{ctrl.statusText}</Badge>
   </div>
-</AdminPageStickyToolbar>
+</StickyBar>
 
 <MetricsPanel {ctrl} />

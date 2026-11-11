@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
-  import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
+  import PageHeader from '$kit/ui/page-header.svelte';
+  import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
+  import PageTabs from '$kit/ui/page-tabs.svelte';
   import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
   import type { ChannelsDevicesTabPreference } from '$lib/preferences/keys';
   import { createChannelsDevicesPreferences } from '$lib/preferences/channels-devices-preferences.svelte';
@@ -45,21 +46,24 @@
   });
 </script>
 
-<AdminPageHeader kicker="Operations" title="Channels & Devices" sticky>
-  {#snippet tabs()}
-    <AdminTabStrip
-      ariaLabel="Channels and devices sections"
+<section class={ADMIN_PAGE_MAX_W}>
+  <PageHeader title="Channels & Devices">
+    {#snippet tabs()}
+    <PageTabs
+      label="Channels and devices sections"
       tabs={tabDescriptors}
-      active={prefs.activeTab}
-      onSelect={(id) => prefs.setActiveTab(id)}
+      value={prefs.activeTab}
+      onchange={(id) => prefs.setActiveTab(id)}
     />
-  {/snippet}
+    {/snippet}
+  </PageHeader>
+  
 
   {#if prefs.activeTab === 'channels'}
     <ChannelsTab ctrl={channelsCtrl} notify={toasts.notify} />
   {:else if devicesActive}
     <DevicesTab ctrl={devicesCtrl} />
   {/if}
-</AdminPageHeader>
+</section>
 
 <ToastHost toast={toasts.toast} />

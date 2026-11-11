@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { afterNavigate } from '$app/navigation';
-  import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
-  import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
+  import PageHeader from '$kit/ui/page-header.svelte';
+  import PageTabs from '$kit/ui/page-tabs.svelte';
   import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
   import ChatChannelsBrowse from '$lib/features/chat-channels/browse/ChatChannelsBrowse.svelte';
   import ChatChannelEditorModal from '$lib/features/chat-channels/edit/ChatChannelEditorModal.svelte';
@@ -61,19 +61,18 @@
   ];
 </script>
 
-<AdminPageHeader
-  kicker="Communication"
-  title="Chat channels"
-  wrapperClass="flex h-full min-h-0 max-w-[1420px] flex-col gap-5"
->
-  {#snippet tabs()}
-    <AdminTabStrip
-      ariaLabel={CHAT_CHANNELS_TABLIST_LABEL}
+<section class="flex h-full min-h-0 max-w-[1420px] flex-col gap-5">
+  <PageHeader sticky={false} title="Chat channels">
+    {#snippet tabs()}
+    <PageTabs
+      label={CHAT_CHANNELS_TABLIST_LABEL}
       tabs={tabDescriptors}
-      active={ctrl.activeTab}
-      onSelect={(id) => void ctrl.setActiveTab(id)}
+      value={ctrl.activeTab}
+      onchange={(id) => void ctrl.setActiveTab(id)}
     />
-  {/snippet}
+    {/snippet}
+  </PageHeader>
+  
 
   <div
     id={CHAT_CHANNELS_PANEL_IDS.channels}
@@ -106,7 +105,7 @@
       onRefresh={ctrl.refreshCurrent}
     />
   </div>
-</AdminPageHeader>
+</section>
 
 <!-- Toast host + clear-messages modal moved to AdminShell so they serve the global
      overlay too (single shared engine). Channel CRUD modals stay here (page-only). -->

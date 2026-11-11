@@ -2,8 +2,9 @@
   import { afterNavigate } from '$app/navigation';
   import { onMount } from 'svelte';
   import { FolderPlus, Library, MessageCircleQuestion } from '@lucide/svelte';
-  import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
-  import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
+  import PageHeader from '$kit/ui/page-header.svelte';
+  import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
+  import PageTabs from '$kit/ui/page-tabs.svelte';
   import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import { createKnowledgePreferences } from '$lib/preferences/knowledge-preferences.svelte';
@@ -47,22 +48,20 @@
   <title>Knowledge - Hiro Admin</title>
 </svelte:head>
 
-<AdminPageHeader
-  kicker="Knowledge base"
-  title="Knowledge"
-  subtitle="Markdown ingest and vector search"
-  sticky
->
-  {#snippet tabs()}
-    <AdminTabStrip
-      ariaLabel="Knowledge sections"
+<section class={ADMIN_PAGE_MAX_W}>
+  <PageHeader title="Knowledge" description="Markdown ingest and vector search">
+    {#snippet tabs()}
+    <PageTabs
+      label="Knowledge sections"
       tabs={tabDescriptors}
-      active={tabPrefs.activeTab}
-      onSelect={(id) => {
+      value={tabPrefs.activeTab}
+      onchange={(id) => {
         void tabPrefs.setActiveTab(id);
       }}
     />
-  {/snippet}
+    {/snippet}
+  </PageHeader>
+  
 
   {#if ctl.error}
     <InlineDestructiveAlert message={ctl.error} />
@@ -77,4 +76,4 @@
   {:else}
     <KnowledgeAskPanel {ctl} />
   {/if}
-</AdminPageHeader>
+</section>

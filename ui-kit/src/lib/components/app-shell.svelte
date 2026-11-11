@@ -50,6 +50,13 @@
 	// Its width, dragged by its edge.
 	const sidebarWidth = persisted('sidebar.width', SIDEBAR_DEFAULT, isWidth);
 
+	// The top bar's height, for what sticks under it (a page's header, its filter bar): --app-top, 0 with no bar.
+	let barHeight = $state(0);
+	$effect(() => {
+		document.documentElement.style.setProperty('--app-top', topBar ? `${barHeight}px` : '0px');
+		return () => document.documentElement.style.removeProperty('--app-top');
+	});
+
 	const here = $derived(page.route.id);
 	// A page that shows alone, with no sign-in and no menu (the app's `openRoutes`, e.g. HomeHiro's TV screen).
 	const alone = (id: string | null) => !!id && APP.openRoutes.includes(id);
@@ -92,7 +99,7 @@
 	<Sidebar.Inset class="min-w-0">
 		<!-- The collapse button is in the sidebar; on phones the sidebar is hidden, so it opens from here.
 		     With a top bar, the bar shows on every screen and holds that button on phones. -->
-		<header class={['flex min-h-12 items-center gap-2 border-b px-3', topBar ? 'sticky top-0 z-20 bg-background/85 backdrop-blur' : 'md:hidden']}>
+		<header class={['flex min-h-12 items-center gap-2 border-b px-3', topBar ? 'sticky top-0 z-30 bg-background/85 backdrop-blur' : 'md:hidden']} bind:offsetHeight={barHeight}>
 			<Sidebar.Trigger class="md:hidden" />
 			{@render topBar?.()}
 		</header>

@@ -27,7 +27,7 @@
    *  (z-50) so a confirm triggered from here still stacks on top. */
   const shellClass = $derived(
     chatOverlay.mode === 'full'
-      ? 'right-0 top-16 bottom-0 w-full sm:w-[420px] rounded-none border-y-0 border-r-0'
+      ? 'right-0 top-[var(--app-top,4rem)] bottom-0 w-full sm:w-[420px] rounded-none border-y-0 border-r-0'
       : 'right-4 bottom-0 h-[min(60vh,560px)] w-[min(380px,calc(100vw-2rem))] rounded-t-xl'
   );
 

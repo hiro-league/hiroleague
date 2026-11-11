@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
+  import StickyBar from '$kit/ui/sticky-bar.svelte';
   import KnowledgeBrowseDeleteDialog from '$lib/features/knowledge/browse/KnowledgeBrowseDeleteDialog.svelte';
   import KnowledgeBrowseRemoveGraphDialog from '$lib/features/knowledge/browse/KnowledgeBrowseRemoveGraphDialog.svelte';
   import KnowledgeBrowseDocumentListSection from '$lib/features/knowledge/browse/KnowledgeBrowseDocumentListSection.svelte';
@@ -25,9 +25,9 @@
 </script>
 
 <section class="grid gap-4">
-  <AdminPageStickyToolbar>
+  <StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
     <KnowledgeBrowseFilterBar browse={ctl.browse} options={ctl.options} />
-  </AdminPageStickyToolbar>
+  </StickyBar>
 
   <KnowledgeBrowseDocumentListSection
     browse={ctl.browse}

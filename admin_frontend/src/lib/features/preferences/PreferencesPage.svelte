@@ -4,8 +4,9 @@
   import { page } from '$app/state';
   import { onMount, setContext, tick } from 'svelte';
   import { ChevronsDownUp, ChevronsUpDown, Eye, EyeOff, RotateCcw, Save } from '@lucide/svelte';
-  import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
-  import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
+  import PageHeader from '$kit/ui/page-header.svelte';
+  import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
+  import StickyBar from '$kit/ui/sticky-bar.svelte';
   import AdminSubtabStrip from '$lib/components/page/AdminSubtabStrip.svelte';
   import {
     COLLAPSIBLE_SECTION_REGISTRY,
@@ -192,16 +193,10 @@
 
 <ToastHost toast={toasts.toast} />
 
-<AdminPageHeader
-  sticky
-  forceCompact={search.active}
-  kicker="Workspace"
-  title="Settings"
-  subtitle="Runtime settings are held in memory and persisted to preferences.json when saved."
-  class="w-full"
->
+<section class={ADMIN_PAGE_MAX_W}>
+  <PageHeader title="Settings" description="Runtime settings are held in memory and persisted to preferences.json when saved." />
   {#if !ctrl.error}
-    <AdminPageStickyToolbar>
+    <StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
       <AdminSubtabStrip
         ariaLabel={PREFERENCE_TABLIST_LABEL}
         tabs={subtabDescriptors}
@@ -276,7 +271,7 @@
           </div>
         {/snippet}
       </AdminSubtabStrip>
-    </AdminPageStickyToolbar>
+    </StickyBar>
   {/if}
 
   {#if ctrl.loading}
@@ -288,7 +283,7 @@
       <PrefManifestTab {ctrl} tab={activeManifestTab} />
     {/if}
   {/if}
-</AdminPageHeader>
+</section>
 
 <UnsavedPreferencesDialog unsaved={ctrl.unsaved} onDiscard={discardUnsavedChanges} />
 

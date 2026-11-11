@@ -18,7 +18,8 @@ export const ADMIN_SHELL_CONTENT_PY = 'py-4 md:py-6';
 export const ADMIN_SHELL_CONTENT_PR = 'pr-4 md:pr-6';
 
 /** Left inset — 2× the original `pl-4` / `md:pl-6` gap from the side nav. */
-export const ADMIN_SHELL_CONTENT_PL = 'pl-8 md:pl-12';
+// UI kit step 3: the page area's padding is the shared shell's (p-4, md:p-6); the left side was twice that.
+export const ADMIN_SHELL_CONTENT_PL = 'pl-4 md:pl-6';
 
 export const ADMIN_SHELL_CONTENT_PADDING = cn(
   ADMIN_SHELL_CONTENT_PY,
@@ -30,7 +31,7 @@ export const ADMIN_SHELL_HEADER_PADDING = cn(ADMIN_SHELL_CONTENT_PR, ADMIN_SHELL
 
 /** Cancels shell content padding so sticky page chrome can bleed edge-to-edge in `<main>`. */
 export const ADMIN_SHELL_STICKY_BLEED = cn(
-  '-ml-8 -mr-4 pl-8 pr-4 md:-ml-12 md:-mr-6 md:pl-12 md:pr-6'
+  '-mx-4 px-4 md:-mx-6 md:px-6'
 );
 
 // ── page wrapper ───────────────────────────────────────────────────────────
@@ -191,7 +192,7 @@ export const ADMIN_TABLE_ROW = 'border-t transition-[background-color,box-shadow
 
 /** Sticky `<thead>` offset beneath shell header + optional sticky toolbar. */
 export const ADMIN_TABLE_STICKY_TOP =
-  'calc(4rem + var(--admin-page-header-h, 0px) + var(--admin-page-sticky-toolbar-h, 0px))';
+  'calc(var(--app-top, 0px) + var(--page-header, 0px) + var(--sticky-bar, 0px))';
 
 export const ADMIN_TABLE_GRID_HEAD =
   'grid gap-3 bg-muted px-3 py-2 font-sans text-xs font-bold uppercase text-muted-foreground';

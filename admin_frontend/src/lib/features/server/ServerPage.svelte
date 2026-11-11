@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
-  import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
+  import PageHeader from '$kit/ui/page-header.svelte';
+  import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
+  import PageTabs from '$kit/ui/page-tabs.svelte';
   import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
   import { createServerPreferences } from '$lib/preferences/server-preferences.svelte';
   import type { ServerTabPreference } from '$lib/preferences/keys';
@@ -33,15 +34,18 @@
   });
 </script>
 
-<AdminPageHeader kicker="Server operations" title="Server" sticky>
-  {#snippet tabs()}
-    <AdminTabStrip
-      ariaLabel="Server sections"
+<section class={ADMIN_PAGE_MAX_W}>
+  <PageHeader title="Server">
+    {#snippet tabs()}
+    <PageTabs
+      label="Server sections"
       tabs={tabDescriptors}
-      active={prefs.activeTab}
-      onSelect={(id) => prefs.setActiveTab(id)}
+      value={prefs.activeTab}
+      onchange={(id) => prefs.setActiveTab(id)}
     />
-  {/snippet}
+    {/snippet}
+  </PageHeader>
+  
 
   {#if prefs.activeTab === 'gateways' && isFeatureActive('gateway')}
     <GatewaysTab notify={toasts.notify} />
@@ -50,6 +54,6 @@
   {:else}
     <WorkspacesTab notify={toasts.notify} />
   {/if}
-</AdminPageHeader>
+</section>
 
 <ToastHost toast={toasts.toast} />

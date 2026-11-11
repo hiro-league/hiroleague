@@ -6,7 +6,8 @@
   import { onMount } from 'svelte';
   import { UserPlus } from '@lucide/svelte';
   import { page } from '$app/state';
-  import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
+  import PageHeader from '$kit/ui/page-header.svelte';
+  import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
   import SectionCard from '$lib/components/page/SectionCard.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
@@ -16,7 +17,7 @@
   import SignInDialog from './dialogs/SignInDialog.svelte';
   import { createPeopleController } from './state/people-controller.svelte';
   import PeopleListCard from './view/PeopleListCard.svelte';
-  import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
+  import PageTabs from '$kit/ui/page-tabs.svelte';
   import NewRoleDialog from './dialogs/NewRoleDialog.svelte';
   import { createRolesController } from './state/roles-controller.svelte';
   import RolesTab from './view/RolesTab.svelte';
@@ -43,14 +44,13 @@
   });
 </script>
 
-<AdminPageHeader
-  kicker="Core"
-  title="People"
-  subtitle="The family: who they are, what Hiro calls them, how to reach them, their role. HomeHiro reads this list."
->
-  {#snippet tabs()}
-    <AdminTabStrip ariaLabel="People sections" tabs={tabDescriptors} active={tab} onSelect={(id) => (tab = id)} />
-  {/snippet}
+<section class={ADMIN_PAGE_MAX_W}>
+  <PageHeader title="People" description="The family: who they are, what Hiro calls them, how to reach them, their role. HomeHiro reads this list.">
+    {#snippet tabs()}
+    <PageTabs label="People sections" tabs={tabDescriptors} value={tab} onchange={(id) => (tab = id)} />
+    {/snippet}
+  </PageHeader>
+  
   {#if tab === 'roles'}
     <RolesTab ctrl={roles} people={ctrl.people} />
   {:else}
@@ -67,7 +67,7 @@
     <PeopleListCard {ctrl} />
   </section>
   {/if}
-</AdminPageHeader>
+</section>
 
 <PersonDialog {ctrl} />
 <NewRoleDialog ctrl={roles} />

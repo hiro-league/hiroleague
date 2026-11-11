@@ -3,7 +3,7 @@
   import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
   import SearchInput from '$lib/search/SearchInput.svelte';
   import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
-  import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
+  import StickyBar from '$kit/ui/sticky-bar.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import FormField from '$lib/components/ui/form-field.svelte';
   import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
@@ -41,7 +41,7 @@
   } = $props();
 </script>
 
-<AdminPageStickyToolbar>
+<StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
   <div class="memories-controls">
     <AdminFilterBar class="min-w-0 flex-1 items-end">
       {#if groupsForMemoryFilterDropdown.length > 0}
@@ -145,7 +145,7 @@
       </Button>
     </div>
   </div>
-</AdminPageStickyToolbar>
+</StickyBar>
 
 <style>
   .memories-controls {

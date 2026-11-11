@@ -2,8 +2,8 @@
   import { onMount } from 'svelte';
   import { afterNavigate } from '$app/navigation';
   import { FolderOpen } from '@lucide/svelte';
-  import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
-  import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
+  import PageHeader from '$kit/ui/page-header.svelte';
+  import PageTabs from '$kit/ui/page-tabs.svelte';
   import { ADMIN_HEADER_INTRO, ADMIN_PAGE_MAX_W_WIDE } from '$lib/styling/admin-tokens';
   import ToastHost from '$lib/ui/ToastHost.svelte';
   import { createToastNotifier } from '$lib/ui/create-toast-notifier.svelte';
@@ -54,13 +54,9 @@
   <title>{pageTitle} - Hiro Admin</title>
 </svelte:head>
 
-<AdminPageHeader
-  sticky
-  kicker="Operations"
-  title={pageTitle}
-  wrapperClass={ADMIN_PAGE_MAX_W_WIDE}
->
-  {#snippet titleAdornment()}
+<section class={ADMIN_PAGE_MAX_W_WIDE}>
+  <PageHeader title={pageTitle}>
+    {#snippet adornment()}
     {#if !isRunsTab && !isUsageTab}
       <button
         class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-40"
@@ -77,9 +73,8 @@
         <FolderOpen size={13} />
       </button>
     {/if}
-  {/snippet}
-
-  {#snippet subtitleSlot()}
+    {/snippet}
+    {#snippet details()}
     {#if isRunsTab}
       <p class={cn(ADMIN_HEADER_INTRO, 'mt-1 font-sans text-xs')}>
         Recent agent turns with aggregate cost, latency, and drill-down timelines.
@@ -98,21 +93,18 @@
         {/if}
       </p>
     {/if}
-  {/snippet}
-
-  {#snippet tabs()}
-    <AdminTabStrip
-      ariaLabel="Logs sections"
+    {/snippet}
+    {#snippet tabs()}
+    <PageTabs
+      label="Logs sections"
       class="max-w-full flex-wrap"
       tabs={LOGS_TAB_DESCRIPTORS}
-      active={tabPrefs.activeTab}
-      onSelect={(id) => {
+      value={tabPrefs.activeTab}
+      onchange={(id) => {
         void tabPrefs.setActiveTab(id);
       }}
     />
-  {/snippet}
-
-  {#snippet subnav()}
+    {/snippet}
     {#if isRunsTab}
       <GraphRunsSubtabNav
         activePane={runsCtrl.activePane}
@@ -127,7 +119,14 @@
         onRefresh={runsCtrl.refreshMain}
       />
     {/if}
-  {/snippet}
+  </PageHeader>
+  
+
+  
+
+  
+
+  
 
   {#if isRunsTab}
     <GraphRunsRunsPanel
@@ -198,6 +197,6 @@
   {:else}
     <LogsPanel ctrl={logsCtrl} {prefs} {notify} />
   {/if}
-</AdminPageHeader>
+</section>
 
 <ToastHost toast={toasts.toast} />

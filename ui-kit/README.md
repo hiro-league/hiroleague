@@ -7,19 +7,20 @@ stream (`live.ts`). It started as HomeHiro's frontend; the palette and colour st
 
 ## How an app uses it
 
-- **Install:** `"@hiroleague/ui": "file:../../hiroleague/ui-kit"` with `install-links=true` in the app's `.npmrc`,
-  so npm copies it into `node_modules` and it uses the app's own svelte and bits-ui (one copy of each).
-- **Read as source:** the app's SvelteKit `alias` maps `$kit` to `node_modules/@hiroleague/ui/src/lib`
+- **A copy, kept current:** each app has `scripts/kit-sync.mjs` (`npm run kit`, run by its dev, build, check and
+  test). It copies this folder's `src/lib` to the app's `.kit/lib` (not committed). A copy, not a link, so the kit's
+  files use the app's own svelte and bits-ui (one of each); a folder of the app's own, not `node_modules`, so the dev
+  server watches it and reloads on a change.
+- **Read as source:** the app's SvelteKit `alias` maps `$kit` to `.kit/lib`
   (`import Segmented from '$kit/ui/segmented.svelte'`). Inside the kit, files import each other as `$kit/...` too.
 - **The app's own facts:** the kit reads them at `$hiro-app`, which the app maps to its `src/lib/app/`:
   `app.ts` (name, icon, words), `prefs.ts`, `pages.ts`, `menu.ts`, `notices.ts`, and `api.ts` (what the kit needs
-  of the app's API: `getMe`, `Me`, `Access`, and the core's AI for apps that use it).
+  of the app's API: who is asking, starting a sign-in, signing out, and the core's AI for apps that use it).
 - **Styles:** the app's stylesheet imports Tailwind, `tw-animate-css`, `shadcn-svelte/tailwind.css`, then the kit's
-  `theme.css`, and adds `@source` for the kit's folder (Tailwind skips `node_modules` unless told).
-- **Staying current:** npm does not copy a same-version local package again, so each app has
-  `scripts/kit-sync.mjs` (`npm run kit`), run by its dev, build, check and test.
+  `theme.css` from `.kit/lib`, and adds `@source` for that folder (Tailwind skips what git ignores unless told).
+- **Packages:** the app lists the libraries the kit uses (this folder's `peerDependencies`) in its own `package.json`.
 
-Change shared code here, never in an app's `node_modules`. No published release yet: apps take it from the
+Change shared code here, never in an app's `.kit`. No published release yet: apps take it from the
 HiroLeague checkout beside them.
 
 ## The kit's own project

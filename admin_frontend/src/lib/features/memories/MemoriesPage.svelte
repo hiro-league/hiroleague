@@ -2,8 +2,8 @@
   import { afterNavigate } from '$app/navigation';
   import { onMount } from 'svelte';
   import { Brain, Share2 } from '@lucide/svelte';
-  import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
-  import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
+  import PageHeader from '$kit/ui/page-header.svelte';
+  import PageTabs from '$kit/ui/page-tabs.svelte';
   import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import { ADMIN_PAGE_MAX_W_WIDE } from '$lib/styling/admin-tokens';
@@ -55,24 +55,20 @@
   <title>Memories - Hiro Admin</title>
 </svelte:head>
 
-<AdminPageHeader
-  sticky
-  wrapperClass={ADMIN_PAGE_MAX_W_WIDE}
-  kicker="Operations"
-  title="Memories"
-  subtitle="Long-term agent memory (Graphiti facts) for the selected workspace."
-  forceCompact={tabPrefs.activeTab === 'graph'}
->
-  {#snippet tabs()}
-    <AdminTabStrip
-      ariaLabel="Memories sections"
+<section class={ADMIN_PAGE_MAX_W_WIDE}>
+  <PageHeader title="Memories" description="Long-term agent memory (Graphiti facts) for the selected workspace.">
+    {#snippet tabs()}
+    <PageTabs
+      label="Memories sections"
       tabs={tabDescriptors}
-      active={tabPrefs.activeTab}
-      onSelect={(id) => {
+      value={tabPrefs.activeTab}
+      onchange={(id) => {
         void tabPrefs.setActiveTab(id);
       }}
     />
-  {/snippet}
+    {/snippet}
+  </PageHeader>
+  
 
   {#if tabPrefs.activeTab === 'graph' && graphError}
     <InlineDestructiveAlert message={graphError} />
@@ -107,7 +103,7 @@
       onViewProvenance={ctl.showMemoryProvenance}
     />
   {/if}
-</AdminPageHeader>
+</section>
 
 <MemoriesDialogs
   memoryJsonRow={ctl.memoryJsonRow}

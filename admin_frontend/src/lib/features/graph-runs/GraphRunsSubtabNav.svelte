@@ -1,7 +1,7 @@
 <script lang="ts">
   /**
    * Graph Runs second-level strip: ledger list + dynamic run inspectors + toolbar.
-   * Primary pill tabs live in `<AdminPageHeader tabs>`.
+   * Primary pill tabs live in the page header's `tabs`.
    */
   import { ChevronDown, ChevronUp, RefreshCw, X } from '@lucide/svelte';
   import AdminSubtabStrip from '$lib/components/page/AdminSubtabStrip.svelte';

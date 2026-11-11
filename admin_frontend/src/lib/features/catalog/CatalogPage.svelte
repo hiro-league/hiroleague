@@ -1,8 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
-  import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
-  import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
+  import PageHeader from '$kit/ui/page-header.svelte';
+  import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
+  import StickyBar from '$kit/ui/sticky-bar.svelte';
+  import PageTabs from '$kit/ui/page-tabs.svelte';
   import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
   import ModelsFilterBar from '$lib/features/catalog/browse/ModelsFilterBar.svelte';
   import ModelsTab from '$lib/features/catalog/browse/ModelsTab.svelte';
@@ -46,20 +47,23 @@
   });
 </script>
 
-<AdminPageHeader sticky kicker="Configuration" title="Providers/Models">
-  {#snippet tabs()}
-    <AdminTabStrip
-      ariaLabel="Providers and models sections"
+<section class={ADMIN_PAGE_MAX_W}>
+  <PageHeader title="Providers/Models">
+    {#snippet tabs()}
+    <PageTabs
+      label="Providers and models sections"
       tabs={tabDescriptors}
-      active={inProfiles ? 'profiles' : ctrl.activeTab}
-      onSelect={(id) => void ctrl.switchTab(id)}
+      value={inProfiles ? 'profiles' : ctrl.activeTab}
+      onchange={(id) => void ctrl.switchTab(id)}
     />
-  {/snippet}
+    {/snippet}
+  </PageHeader>
+  
 
   {#if ctrl.activeTab === 'models'}
-    <AdminPageStickyToolbar>
+    <StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
       <ModelsFilterBar {ctrl} />
-    </AdminPageStickyToolbar>
+    </StickyBar>
     <ModelsTab {ctrl} />
   {:else if inProfiles}
     <ProfilesTab
@@ -80,6 +84,6 @@
     <LocalServerDialog {ai} />
     <PlanToolDialog {ai} />
   {/if}
-</AdminPageHeader>
+</section>
 
 <ToastHost toast={toasts.toast} />

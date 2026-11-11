@@ -2,9 +2,9 @@
   import { afterNavigate } from '$app/navigation';
   import { onMount } from 'svelte';
   import { Plus, UserRound } from '@lucide/svelte';
-  import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
+  import PageHeader from '$kit/ui/page-header.svelte';
   import AdminRecordTabChip from '$lib/components/page/AdminRecordTabChip.svelte';
-  import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
+  import PageTabs from '$kit/ui/page-tabs.svelte';
   import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
   import { Button } from '$kit/components/ui/button/index.js';
   import CharactersBrowseSection from '$lib/features/characters/browse/CharactersBrowseSection.svelte';
@@ -63,22 +63,18 @@
   });
 </script>
 
-<AdminPageHeader
-  kicker="Configuration"
-  title="Characters"
-  sticky
-  wrapperClass={detailVisible && prefs.detailMode === 'edit'
+<section class={detailVisible && prefs.detailMode === 'edit'
     ? 'grid max-w-[1420px] gap-3'
-    : 'grid max-w-[1420px] gap-5'}
->
-  {#snippet tabs()}
-    <AdminTabStrip
-      ariaLabel="Characters sections"
+    : 'grid max-w-[1420px] gap-5'}>
+  <PageHeader title="Characters">
+    {#snippet tabs()}
+    <PageTabs
+      label="Characters sections"
       tabs={fixedTabs}
-      active={prefs.activeTab}
-      onSelect={() => void ctrl.openBrowse()}
+      value={prefs.activeTab}
+      onchange={() => void ctrl.openBrowse()}
     >
-      {#snippet recordTab()}
+      {#snippet extra()}
         {#if detailVisible}
           <AdminRecordTabChip
             label={detailTabLabel}
@@ -89,14 +85,17 @@
           />
         {/if}
       {/snippet}
-    </AdminTabStrip>
-  {/snippet}
-
-  {#snippet actions()}
+    </PageTabs>
+    {/snippet}
+    {#snippet actions()}
     <Button onclick={() => void ctrl.openNewCharacter()}>
       <Plus size={16} /> New character
     </Button>
-  {/snippet}
+    {/snippet}
+  </PageHeader>
+  
+
+  
 
   {#if prefs.activeTab === 'browse'}
     <CharactersBrowseSection
@@ -119,7 +118,7 @@
   {:else}
     <CharacterEditPanel {ctrl} {formApi} characterId={prefs.characterId} {notify} />
   {/if}
-</AdminPageHeader>
+</section>
 
 <ToastHost toast={toasts.toast} />
 

@@ -105,7 +105,7 @@
       extraction={eval_.corpusExtraction}
       onOpenPipeline={traces.openIngestTraceForEpisode}
       onOpenGraph={traces.openGraphForEpisode}
-      stickyTop="calc(4rem + var(--admin-page-header-h, 0px) + var(--admin-page-sticky-toolbar-h, 0px) + var(--admin-eval-subtabs-h, 0px))"
+      stickyTop="calc(var(--app-top, 0px) + var(--page-header, 0px) + var(--sticky-bar, 0px) + var(--admin-eval-subtabs-h, 0px))"
     />
   {/if}
 {/if}

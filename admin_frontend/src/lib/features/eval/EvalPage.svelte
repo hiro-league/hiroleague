@@ -2,8 +2,9 @@
   import { afterNavigate } from '$app/navigation';
   import { onMount } from 'svelte';
   import { Brain, Database } from '@lucide/svelte';
-  import AdminPageHeader from '$lib/components/page/AdminPageHeader.svelte';
-  import AdminTabStrip from '$lib/components/page/AdminTabStrip.svelte';
+  import PageHeader from '$kit/ui/page-header.svelte';
+  import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
+  import PageTabs from '$kit/ui/page-tabs.svelte';
   import type { AdminTabDescriptor } from '$lib/components/page/tab-types';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import EvalPanel from '$lib/features/eval/EvalPanel.svelte';
@@ -69,20 +70,18 @@
   <title>Eval - Hiro Admin</title>
 </svelte:head>
 
-<AdminPageHeader
-  kicker="Evaluation"
-  title="Eval"
-  subtitle="Memory & knowledge retrieval evals"
-  sticky
->
-  {#snippet tabs()}
-    <AdminTabStrip
-      ariaLabel="Eval track"
+<section class={ADMIN_PAGE_MAX_W}>
+  <PageHeader title="Eval" description="Memory & knowledge retrieval evals">
+    {#snippet tabs()}
+    <PageTabs
+      label="Eval track"
       tabs={tabDescriptors}
-      active={eval_.track}
-      onSelect={selectTrack}
+      value={eval_.track}
+      onchange={selectTrack}
     />
-  {/snippet}
+    {/snippet}
+  </PageHeader>
+  
 
   {#if error}
     <InlineDestructiveAlert message={error} />
@@ -91,6 +90,6 @@
   <LiveDegradedBanner />
 
   <EvalPanel {eval_} notify={toasts.notify} />
-</AdminPageHeader>
+</section>
 
 <ToastHost toast={toasts.toast} />

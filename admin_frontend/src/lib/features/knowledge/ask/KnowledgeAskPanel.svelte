@@ -1,6 +1,6 @@
 <script lang="ts">
   import { BookText, Code, ExternalLink, LoaderCircle, Search } from '@lucide/svelte';
-  import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
+  import StickyBar from '$kit/ui/sticky-bar.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import KnowledgeAskFilterBar from '$lib/features/knowledge/ask/KnowledgeAskFilterBar.svelte';
@@ -120,9 +120,9 @@
 </script>
 
 <section class="grid gap-4">
-  <AdminPageStickyToolbar>
+  <StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
     <KnowledgeAskFilterBar {ask} {options} />
-  </AdminPageStickyToolbar>
+  </StickyBar>
 
   <KnowledgeCollapsibleSectionCard
     title="Question"

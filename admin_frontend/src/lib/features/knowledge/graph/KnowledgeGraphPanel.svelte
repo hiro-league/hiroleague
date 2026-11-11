@@ -235,7 +235,7 @@
   )}
   style={fullscreen
     ? undefined
-    : 'min-height: calc(100vh - 4rem - var(--admin-page-header-h, 150px) - 3rem)'}
+    : 'min-height: calc(100vh - var(--app-top, 0px) - var(--page-header, 150px) - 3rem)'}
 >
   <KnowledgeGraphToolbar
     {graph}

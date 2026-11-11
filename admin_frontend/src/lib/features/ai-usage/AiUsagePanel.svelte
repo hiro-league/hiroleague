@@ -6,7 +6,7 @@
   import { X } from '@lucide/svelte';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import InlineLoading from '$lib/ui/InlineLoading.svelte';
-  import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
+  import StickyBar from '$kit/ui/sticky-bar.svelte';
   import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
   import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
   import MultiSelectFilter from '$lib/components/ui/multi-select-filter.svelte';
@@ -53,7 +53,7 @@
 </script>
 
 <div class="flex min-w-0 flex-col gap-4">
-  <AdminPageStickyToolbar>
+  <StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
     <div class="grid gap-3">
       <AdminFilterBar class="items-center">
         <!-- The days shown: ‹ › step the picked range itself; the period buttons are shortcuts. -->
@@ -97,7 +97,7 @@
         {/if}
       </div>
     </div>
-  </AdminPageStickyToolbar>
+  </StickyBar>
 
   {#if pg.error}
     <InlineDestructiveAlert message={pg.error} />

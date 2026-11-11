@@ -27,7 +27,7 @@
 </script>
 
 <div
-  class="character-edit-toolbar sticky top-16 z-10 flex flex-col gap-2 border-b border-border bg-card px-4 py-3 shadow-sm backdrop-blur-md supports-[backdrop-filter]:bg-card/95 md:flex-row md:items-start md:justify-between md:gap-3 md:px-5"
+  class="character-edit-toolbar sticky top-[calc(var(--app-top,0px)+var(--page-header,0px))] z-10 flex flex-col gap-2 border-b border-border bg-card px-4 py-3 shadow-sm backdrop-blur-md supports-[backdrop-filter]:bg-card/95 md:flex-row md:items-start md:justify-between md:gap-3 md:px-5"
 >
   <div class="min-w-0 flex-1">
     <h3 class="text-2xl font-semibold">

@@ -113,7 +113,7 @@
   .admin-table-shell-sticky-page :global(thead th),
   .admin-table-grid-head-sticky-page {
     position: sticky;
-    top: var(--admin-table-sticky-top, 4rem);
+    top: var(--admin-table-sticky-top, var(--app-top, 0px));
     z-index: 5;
   }
 
@@ -177,7 +177,7 @@
 
   /* Dense tables pinned beneath page chrome on document scroll. */
   .admin-table-shell-dense-sticky-page :global(thead th) {
-    top: var(--admin-table-sticky-top, 4rem);
+    top: var(--admin-table-sticky-top, var(--app-top, 0px));
     z-index: 5;
     box-shadow: 0 1px 0 var(--border);
   }

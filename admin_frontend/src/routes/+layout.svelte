@@ -26,7 +26,7 @@
   const activePath = $derived(page.url.pathname.split('/').filter(Boolean)[0] ?? 'dashboard');
   // The pages keep the padding their sticky headers were written for; only chats keeps the fixed-height,
   // internally-scrolling page.
-  const mainClass = $derived(cn(ADMIN_SHELL_CONTENT_PADDING, activePath === 'chats' ? 'h-[calc(100vh-4rem)] overflow-hidden' : ''));
+  const mainClass = $derived(cn(ADMIN_SHELL_CONTENT_PADDING, activePath === 'chats' ? 'h-[calc(100vh-var(--app-top,4rem))] overflow-hidden' : ''));
 
   // The admin's session (its sign-in form, a 401 from any call, Sign out in the apps-only view) and the
   // shell's "who is asking" are kept in step: when one learns someone signed in or out, the shell asks again.

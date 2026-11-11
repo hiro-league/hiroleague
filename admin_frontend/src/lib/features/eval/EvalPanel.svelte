@@ -277,7 +277,7 @@
   <div
     bind:this={subtabsEl}
     class="sticky z-10 bg-background/95 py-1 backdrop-blur supports-[backdrop-filter]:bg-background/85 {ADMIN_SHELL_STICKY_BLEED}"
-    style="top: calc(4rem + var(--admin-page-header-h, 0px) + var(--admin-page-sticky-toolbar-h, 0px));"
+    style="top: calc(var(--app-top, 0px) + var(--page-header, 0px) + var(--sticky-bar, 0px));"
   >
     <AdminSubtabStrip
       ariaLabel="Eval section"

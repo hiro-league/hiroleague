@@ -5,7 +5,7 @@
   import AdminFilterBar from '$lib/components/page/table/AdminFilterBar.svelte';
   import SearchInput from '$lib/search/SearchInput.svelte';
   import AdminFilterBarSelect from '$lib/components/page/table/AdminFilterBarSelect.svelte';
-  import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
+  import StickyBar from '$kit/ui/sticky-bar.svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import AdminAvatarNameCell from '$lib/components/page/table/AdminAvatarNameCell.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
@@ -99,7 +99,7 @@
   {hidden}
 >
   {#if !hidden}
-    <AdminPageStickyToolbar>
+    <StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
       <AdminFilterBar class="items-end">
       <AdminFilterBarSelect
         label="Run kind"
@@ -136,7 +136,7 @@
         class="min-w-[12rem] flex-1"
       />
       </AdminFilterBar>
-    </AdminPageStickyToolbar>
+    </StickyBar>
   {/if}
 
   {#if error}

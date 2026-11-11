@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { page } from '$app/state';
-  import AdminPageStickyToolbar from '$lib/components/page/AdminPageStickyToolbar.svelte';
+  import StickyBar from '$kit/ui/sticky-bar.svelte';
   import AdminMasterDetail from '$lib/components/page/table/AdminMasterDetail.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
@@ -39,7 +39,7 @@
   // toolbar always keeps a real, nonzero height — removing one row reliably re-fires
   // ResizeObserver, so we can read the published var directly without gating on the flag.
   const tableStickyTop = $derived(
-    `calc(4rem + var(--admin-page-header-h, 0px) + var(--admin-page-sticky-toolbar-h, 0px))`
+    `calc(var(--app-top, 0px) + var(--page-header, 0px) + var(--sticky-bar, 0px))`
   );
   const detailStickyTop = $derived(`calc(${tableStickyTop} + 0.75rem)`);
   // Fixed height (not just max-height) so the panel always fills the visible page
@@ -98,13 +98,13 @@
      remains visible and sticky even when filters are collapsed; only the second line
      (secondary filters) collapses. The collapse chevron sits at the far right of the
      first line and targets the second line's region via aria-controls. -->
-<AdminPageStickyToolbar>
+<StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
   <LogsToolbar {prefs} {ctrl} onRequestClearLogs={requestClearLogs}>
     {#snippet filters()}
       <LogsFiltersPanel {prefs} {ctrl} />
     {/snippet}
   </LogsToolbar>
-</AdminPageStickyToolbar>
+</StickyBar>
 
 {#if ctrl.error}
   <InlineDestructiveAlert message={ctrl.error} class="px-3 py-2 text-sm" />
