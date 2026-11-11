@@ -4,6 +4,7 @@
  * `approxTokens` is a cheap heuristic (≈ chars / 4) used only for the "text size"
  * readouts in the corpus picker/header — it is NOT an exact tokenizer count.
  */
+import { clock, fullDateTime } from '$lib/format/time';
 
 const INT = new Intl.NumberFormat('en-US');
 
@@ -53,12 +54,13 @@ export function pct(n: number, total: number): string {
 export function fmtTime(iso: string | undefined): string {
   if (!iso) return '—';
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  // Step 1d: the one formatter, not the browser's locale (which can be 24-hour).
+  return Number.isNaN(d.getTime()) ? '—' : clock(d);
 }
 export function fmtDateTime(iso: string | undefined): string {
   if (!iso) return 'Not run yet';
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+  return Number.isNaN(d.getTime()) ? iso : fullDateTime(d);
 }
 export function timeMs(iso: string | undefined): number {
   const t = iso ? Date.parse(iso) : NaN;

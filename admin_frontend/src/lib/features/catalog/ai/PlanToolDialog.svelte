@@ -9,7 +9,7 @@
   import Badge from '$lib/components/ui/badge.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import * as Dialog from '$lib/components/ui/dialog';
-  import { humanDateTime } from '$lib/format/human-datetime';
+  import { dateTime } from '$lib/format/time';
   import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import InlineWarningAlert from '$lib/ui/InlineWarningAlert.svelte';
@@ -60,7 +60,7 @@
         <dd class="font-mono text-xs leading-5">{tool.version ?? '—'}</dd>
         <dt class="text-muted-foreground">Last update</dt>
         <dd>
-          {ai.planUpdates?.last_run ? humanDateTime(ai.planUpdates.last_run) : 'Never'}
+          {ai.planUpdates?.last_run ? dateTime(ai.planUpdates.last_run) : 'Never'}
           {#if updating}<span class="text-muted-foreground">· updating now…</span>{/if}
         </dd>
         {#if ai.planUpdates?.message && !updating}

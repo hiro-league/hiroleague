@@ -13,7 +13,7 @@
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import Badge from '$lib/components/ui/badge.svelte';
   import Button from '$lib/components/ui/button.svelte';
-  import { humanDateTime } from '$lib/format/human-datetime';
+  import { dateTime } from '$lib/format/time';
   import { ADMIN_SECTION_HEADING_LG, ADMIN_SELECT } from '$lib/styling/admin-tokens';
   import InlineDestructiveAlert from '$lib/ui/InlineDestructiveAlert.svelte';
   import InlineEmptyState from '$lib/ui/InlineEmptyState.svelte';
@@ -102,7 +102,7 @@
             {/if}
           </h4>
           <p class="text-xs text-muted-foreground">
-            Uses as of {group.asOf ? humanDateTime(group.asOf) : 'never'}
+            Uses as of {group.asOf ? dateTime(group.asOf) : 'never'}
           </p>
         </div>
         <Button

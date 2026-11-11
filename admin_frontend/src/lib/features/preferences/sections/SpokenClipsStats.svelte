@@ -7,7 +7,7 @@
   import { onMount } from 'svelte';
   import { getClipCache, type ClipCacheStats } from '$lib/api/voice';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
-  import { humanDateTime } from '$lib/format/human-datetime';
+  import { dateTime } from '$lib/format/time';
 
   let { ctrl }: { ctrl: PreferencesController } = $props();
 
@@ -37,7 +37,7 @@
     >
     <span class="text-xs text-muted-foreground">
       {usedMb.toFixed(1)} MB, {stats.clips} clips · said again {stats.hits} times, saved ${stats.saved_usd.toFixed(2)}{stats.since
-        ? ` since ${humanDateTime(stats.since)}`
+        ? ` since ${dateTime(stats.since)}`
         : ''}
     </span>
   {:else}

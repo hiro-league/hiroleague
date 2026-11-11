@@ -4,7 +4,7 @@
  */
 import type { LocalServerStatus, PlanToolStatus, PlanUpdates } from '$lib/api/ai';
 import type { CatalogProviderRow } from '$lib/api/catalog';
-import { humanDateTime } from '$lib/format/human-datetime';
+import { dateTime } from '$lib/format/time';
 import type {
   AiCatalogModelRow,
   AiModelOption,
@@ -314,7 +314,7 @@ export function serverInfo(server: LocalServerStatus, usedBy: readonly string[],
     server.state === 'down' ? (server.error ?? "Can't connect") : loadedWords(server),
     `unloads a model idle ${server.unload_idle_min} min`,
     server.provider_id === 'lm_studio' ? `loads with context ${server.context}, batch ${server.batch}` : null,
-    `checked ${humanDateTime(server.checked_at, now)}`,
+    `checked ${server.checked_at ? dateTime(server.checked_at, { now }) : '—'}`,
     usedBy.length ? `used by ${usedBy.join(', ')}` : 'no profile uses it'
   ]
     .filter(Boolean)
@@ -333,7 +333,7 @@ export function signInExpiryWords(tool: PlanToolStatus, now: Date = new Date()):
   if (!tool.installed) return 'Not installed';
   if (!tool.signed_in) return 'Not signed in';
   if (!tool.sign_in_ends_at) return 'OK';
-  return `${tool.attention ? 'Ends soon: ' : 'Ends '}${humanDateTime(tool.sign_in_ends_at, now)}`;
+  return `${tool.attention ? 'Ends soon: ' : 'Ends '}${dateTime(tool.sign_in_ends_at, { now })}`;
 }
 
 /** "Max plan · you@example.com", or null when signed out. */
@@ -353,7 +353,7 @@ export function planToolInfo(
     planAccountWords(tool) ?? 'Not signed in',
     `sign-in: ${signInExpiryWords(tool, now)}`,
     tool.version ? `version ${tool.version}` : null,
-    updates?.last_run ? `updated ${humanDateTime(updates.last_run, now)}` : null,
+    updates?.last_run ? `updated ${dateTime(updates.last_run, { now })}` : null,
     tool.queue_note,
     usedBy.length ? `used by ${usedBy.join(', ')}` : 'no profile uses it'
   ]

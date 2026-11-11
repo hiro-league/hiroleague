@@ -2,7 +2,7 @@
   import { Check, Copy } from '@lucide/svelte';
   import Button from '$lib/components/ui/button.svelte';
   import * as Dialog from '$lib/components/ui/dialog';
-  import { humanDateTime } from '$lib/format/human-datetime';
+  import { dateTime } from '$lib/format/time';
   import type { ExtensionsController } from '../state/extensions-controller.svelte';
 
   let { ctrl }: { ctrl: ExtensionsController } = $props();
@@ -30,7 +30,7 @@
           <span class="font-mono text-5xl font-bold tracking-widest text-primary">{ctrl.pairing.code}</span>
         </div>
         <p class="font-sans text-sm text-muted-foreground">
-          Works once, until {humanDateTime(ctrl.pairing.expires_at)}.
+          Works once, until {dateTime(ctrl.pairing.expires_at)}.
         </p>
       </div>
     {/if}

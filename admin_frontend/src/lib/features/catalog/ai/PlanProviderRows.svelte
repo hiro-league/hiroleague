@@ -5,7 +5,7 @@
    * for them and draws these with the live status (`GET /api/ai/plans`). The action opens the plan
    * dialog (sign in / out, update, test question).
    */
-  import { humanDateTime } from '$lib/format/human-datetime';
+  import { dateTime } from '$lib/format/time';
   import AiProviderRow from './AiProviderRow.svelte';
   import type { AiController } from './ai-controller.svelte';
   import { planToolInfo, planToolStatus } from './ai-profile-rules';
@@ -25,7 +25,7 @@
     models={tool.models.length}
     kinds="chat"
     recommended={tool.models[0] ? { kind: 'chat', name: tool.models[0].name, id: `${tool.id}:${tool.models[0].id}` } : null}
-    updated={ai.planUpdates?.last_run ? humanDateTime(ai.planUpdates.last_run) : '-'}
+    updated={ai.planUpdates?.last_run ? dateTime(ai.planUpdates.last_run) : '-'}
     info={planToolInfo(tool, ai.planUpdates, ai.profilesOnProvider(tool.id))}
     actionLabel="Manage"
     onAction={() => ai.openProviderDialog(tool.id)}

@@ -10,7 +10,7 @@
   import AdminAvatarNameCell from '$lib/components/page/table/AdminAvatarNameCell.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import { FileText } from '@lucide/svelte';
-  import { formatCompactDateTime } from '$lib/format/compact-datetime';
+  import { formatCompactDateTime } from '$lib/format/timestamp-cell';
   import Highlight from '$lib/search/Highlight.svelte';
   import { matchesQuery } from '$lib/search/match';
   import {
