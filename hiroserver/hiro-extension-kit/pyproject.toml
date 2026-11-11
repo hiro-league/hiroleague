@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hiro-extension-kit"
+version = "0.2.0"
+description = "The backend every HiroLeague extension app is built on (errors, logs, events, database, settings)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [
+    { name = "Michel Habib", email = "michelhabib@gmail.com" },
+]
+
+keywords = ["hiroleague", "extension", "fastapi", "sqlite"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "alembic>=1.13",
+    "fastapi>=0.115",
+    "sqlmodel>=0.0.21",
+    "hiro-channel-sdk~=0.2.0",
+]
+
+[project.urls]
+Homepage = "https://www.hiroleague.com"
+Documentation = "https://docs.hiroleague.com"
+Repository = "https://github.com/hiro-league/hiroleague"
+Issues = "https://github.com/hiro-league/hiroleague/issues"
+
+[tool.uv.sources]
+hiro-channel-sdk = { workspace = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hiro_extension_kit"]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.27",
+    "pytest>=8",
+]

@@ -1,5 +1,5 @@
 [tool.uv.workspace]
-members = ["hiroleague", "hirocli", "gateway", "hiro-channel-sdk", "hiro-commons", "channels/*"]
+members = ["hiroleague", "hirocli", "gateway", "hiro-channel-sdk", "hiro-commons", "hiro-extension-kit", "channels/*"]
 
 [dependency-groups]
 dev = ["debugpy>=1.8,<2"]
