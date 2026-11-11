@@ -1,0 +1,6 @@
+/* The kit's own project (its gallery): the libraries' styles, then the Hiro theme. An app's stylesheet does the
+   same, with the kit's path inside its node_modules (README.md). */
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn-svelte/tailwind.css";
+@import "../lib/theme.css";

@@ -22,5 +22,13 @@ stream (`live.ts`). It started as HomeHiro's frontend; the palette and colour st
 Change shared code here, never in an app's `node_modules`. No published release yet: apps take it from the
 HiroLeague checkout beside them.
 
-Not here yet (the plan's step 2, second half): the kit's own project (its checks and its tests, which moved here
-from the apps and do not run anywhere until then) and its gallery page.
+## The kit's own project
+
+This folder is also a small SvelteKit app: the **gallery** (`src/routes`), every shared piece on one page inside the
+shared shell, running against a **sample app** (`src/sample`: what a real app keeps in its `src/lib/app`). A new
+app starts by copying `src/sample` and changing its words.
+
+- `npm install` once, then `npm run dev` for the gallery and `npm run check` for svelte-check, ESLint and the tests.
+- The repo's `./scripts/check.sh` runs `npm run check` here as its "ui-kit: check" part.
+- shadcn's components are added here with its CLI (`npx shadcn-svelte@1.7.0 add <name> --yes`; `components.json`
+  points it at `$kit`), one at a time; check the diff, since `--overwrite` also overwrites shared components.
