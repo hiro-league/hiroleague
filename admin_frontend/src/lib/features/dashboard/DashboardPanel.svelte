@@ -1,7 +1,7 @@
 <script lang="ts">
   import { base } from '$app/paths';
   import { Cable, KeyRound, RefreshCw, Router, Server } from '@lucide/svelte';
-  import StatTile from '$lib/components/page/StatTile.svelte';
+  import StatTile from '$kit/ui/stat-tile.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import type { DashboardController } from '$lib/features/dashboard/state/dashboard-controller.svelte';
   import Notice from '$kit/ui/notice.svelte';

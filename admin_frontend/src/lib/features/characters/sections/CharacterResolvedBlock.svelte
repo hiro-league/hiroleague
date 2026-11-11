@@ -1,4 +1,5 @@
 <script lang="ts">
+  import SectionLabel from '$kit/ui/section-label.svelte';
   /**
    * How the runtime would pick this character's chat model and voice (Phase 7b step 5: from its AI /
    * voice profiles in order, then Hiro's chat profile / Hiro's voice). `full` in the view panel; one
@@ -150,14 +151,12 @@
   {#snippet llmColumn(payload: CharacterResolvedPayload, label: string)}
     <div class="grid max-w-lg gap-2">
       {#if label}
-        <span class="font-sans text-xs font-semibold uppercase text-muted-foreground">{label}</span>
+        <SectionLabel>{label}</SectionLabel>
       {/if}
       {#if payload.ai_rows.length === 0}
         <p class="text-sm text-muted-foreground">No AI profiles — Hiro's chat profile applies.</p>
       {:else}
-        <span class="font-sans text-[10px] font-bold uppercase tracking-wide text-muted-foreground"
-          >Character list</span
-        >
+        <SectionLabel>Character list</SectionLabel>
         <ul class="space-y-2">
           {#each payload.ai_rows as row (row.profile_id)}
             {@render resolvedCandidateRow(
@@ -169,9 +168,7 @@
         </ul>
       {/if}
       {#if payload.ai_workspace_row}
-        <span class="mt-1 font-sans text-[10px] font-bold uppercase tracking-wide text-muted-foreground"
-          >Hiro's chat profile</span
-        >
+        <SectionLabel class="mt-1">Hiro's chat profile</SectionLabel>
         <ul class="space-y-2">
           {@render resolvedCandidateRow(
             payload.ai_workspace_row,
@@ -202,7 +199,7 @@
   {#snippet voiceColumn(payload: CharacterResolvedPayload, label: string)}
     <div class="grid max-w-lg gap-2">
       {#if label}
-        <span class="font-sans text-xs font-semibold uppercase text-muted-foreground">{label}</span>
+        <SectionLabel>{label}</SectionLabel>
       {/if}
       {#if payload.voice_disabled}
         <p class="text-sm text-muted-foreground">
@@ -211,9 +208,7 @@
       {:else if payload.voice_rows.length === 0}
         <p class="text-sm text-muted-foreground">No voice profiles — Hiro's voice applies.</p>
       {:else}
-        <span class="font-sans text-[10px] font-bold uppercase tracking-wide text-muted-foreground"
-          >Character list</span
-        >
+        <SectionLabel>Character list</SectionLabel>
         <ul class="space-y-2">
           {#each payload.voice_rows as row (row.profile_id)}
             {@render resolvedCandidateRow(
@@ -225,9 +220,7 @@
         </ul>
       {/if}
       {#if payload.voice_workspace_row}
-        <span class="mt-1 font-sans text-[10px] font-bold uppercase tracking-wide text-muted-foreground"
-          >Hiro's voice</span
-        >
+        <SectionLabel class="mt-1">Hiro's voice</SectionLabel>
         <ul class="space-y-2">
           {@render resolvedCandidateRow(
             payload.voice_workspace_row,
@@ -282,13 +275,11 @@
         )}
         aria-hidden="true"
       />
-      <span class="shrink-0 font-sans text-xs font-semibold uppercase text-muted-foreground">
-        {#if segment === 'llm'}
+      <SectionLabel class="shrink-0">{#if segment === 'llm'}
           Chat resolution (saved)
         {:else}
           Voice resolution (saved)
-        {/if}
-      </span>
+        {/if}</SectionLabel>
       <span
         class={cn(
           'min-w-0 flex-1 truncate font-sans text-sm',

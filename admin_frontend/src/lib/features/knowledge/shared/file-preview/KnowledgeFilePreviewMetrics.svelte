@@ -1,5 +1,6 @@
 <script lang="ts">
   import { cn } from '$lib/utils';
+  import { count } from '$kit/format/number';
   import type { FilePreviewMetrics } from './file-preview-types';
 
   let { metrics, class: className = '' }: { metrics: FilePreviewMetrics; class?: string } = $props();
@@ -11,7 +12,7 @@
     className
   )}
 >
-  <span>{metrics.line_count.toLocaleString()} lines</span>
-  <span>{metrics.character_count.toLocaleString()} chars</span>
-  <span>~{metrics.estimated_tokens.toLocaleString()} tokens</span>
+  <span>{count(metrics.line_count)} lines</span>
+  <span>{count(metrics.character_count)} chars</span>
+  <span>~{count(metrics.estimated_tokens)} tokens</span>
 </div>

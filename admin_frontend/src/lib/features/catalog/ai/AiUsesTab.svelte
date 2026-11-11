@@ -14,7 +14,6 @@
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import { dateTime } from '$lib/format/time';
-  import { ADMIN_SECTION_HEADING_LG } from '$lib/styling/admin-tokens';
   import Notice from '$kit/ui/notice.svelte';
   import EmptyState from '$kit/ui/empty-state.svelte';
   import Loading from '$kit/ui/loading.svelte';
@@ -56,18 +55,16 @@
   }
 </script>
 
-<Panel class="grid gap-4">
-  <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-    <div>
-      <h3 class={ADMIN_SECTION_HEADING_LG}>Uses</h3>
-      <p class="font-sans text-sm text-muted-foreground">
-        What Hiro and each extension ask an AI for, and what speaks. Pick the profile each one uses.
-      </p>
-    </div>
+<Panel
+  title="Uses"
+  description="What Hiro and each extension ask an AI for, and what speaks. Pick the profile each one uses."
+  class="grid gap-4"
+>
+  {#snippet actions()}
     <!-- One source at a time — Hiro's own jobs, then each extension. The same pills as the profile lists
          (Uses is itself a sub-tab of Profiles, so no second tab strip). -->
     <Segmented class="flex-wrap" label="Show uses for" options={sourceTabs} value={activeSource} onchange={(id) => (source = id)} />
-  </div>
+  {/snippet}
 
   {#if activeSource === HIRO}
     {#if ai.profilesLoading && ai.jobs.length === 0}

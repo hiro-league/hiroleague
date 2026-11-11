@@ -1,4 +1,5 @@
 <script lang="ts">
+  import SectionLabel from '$kit/ui/section-label.svelte';
   import { Check, Copy } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
@@ -22,11 +23,11 @@
       <div class="grid justify-items-center gap-3 text-center">
         <p class="font-sans text-sm text-muted-foreground">Type both into the extension's settings.</p>
         <div class="grid gap-1">
-          <span class="font-sans text-xs uppercase tracking-wide text-muted-foreground">Address</span>
+          <SectionLabel>Address</SectionLabel>
           <span class="font-mono text-base font-semibold break-all">{ctrl.pairing.address}</span>
         </div>
         <div class="grid gap-1">
-          <span class="font-sans text-xs uppercase tracking-wide text-muted-foreground">Code</span>
+          <SectionLabel>Code</SectionLabel>
           <span class="font-mono text-5xl font-bold tracking-widest text-primary">{ctrl.pairing.code}</span>
         </div>
         <p class="font-sans text-sm text-muted-foreground">

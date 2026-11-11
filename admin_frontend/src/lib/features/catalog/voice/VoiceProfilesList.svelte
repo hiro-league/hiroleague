@@ -15,7 +15,6 @@
   import EmptyState from '$kit/ui/empty-state.svelte';
   import Loading from '$kit/ui/loading.svelte';
   import type { VoiceProfileRow } from '$lib/api/voice';
-  import { ADMIN_SECTION_HEADING_LG } from '$lib/styling/admin-tokens';
   import Segmented from '$kit/ui/segmented.svelte';
   import { sourceOf } from './voice-format';
   import type { VoiceController } from './voice-controller.svelte';
@@ -70,19 +69,11 @@
   const voiceKind = (r: VoiceProfileRow) => (r.provider === 'openai' ? 'OpenAI voice' : VOICE_SOURCE[sourceOf(r.voice)]);
 </script>
 
-<Panel class="grid gap-4">
-  <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-    <div>
-      <h3 class={ADMIN_SECTION_HEADING_LG}>Voice profiles</h3>
-      <p class="font-sans text-sm text-muted-foreground">
-        How something speaks: the speech model, the voice, the speaking style and speed. Uses point at a profile.
-      </p>
-    </div>
-    <div class="flex flex-wrap items-center gap-2">
-      <Segmented class="flex-wrap" label="Show profiles for" {options} value={source} onchange={(id) => (source = id)} />
-      <Button onclick={() => onedit(null)}><Plus size={15} /> New voice profile</Button>
-    </div>
-  </div>
+<Panel title="Voice profiles" description="How something speaks: the speech model, the voice, the speaking style and speed. Uses point at a profile." class="grid gap-4">
+  {#snippet actions()}
+    <Segmented class="flex-wrap" label="Show profiles for" {options} value={source} onchange={(id) => (source = id)} />
+    <Button onclick={() => onedit(null)}><Plus size={15} /> New voice profile</Button>
+  {/snippet}
 
   {#if ctrl.error}<Notice message={ctrl.error} />{/if}
   {#if deleting.error}<Notice message={deleting.error} />{/if}

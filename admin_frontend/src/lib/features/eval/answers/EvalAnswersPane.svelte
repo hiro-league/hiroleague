@@ -5,6 +5,7 @@
   controls-bar height var the table's sticky thead pins beneath.
 -->
 <script lang="ts">
+  import SectionLabel from '$kit/ui/section-label.svelte';
   import { Download, FoldVertical, ListChecks, ListX, LoaderCircle, UnfoldVertical } from '@lucide/svelte';
   import FilterBar from '$kit/ui/filter-bar.svelte';
   import { useTableFilters } from '$lib/components/page/table/use-table-filters.svelte';
@@ -403,7 +404,7 @@
       title="Run-level memory eval summary"
     >
       {#if showRetrievalLoopSummary}
-        <span class="font-semibold uppercase tracking-wide text-muted-foreground">Retrieval loop</span>
+        <SectionLabel>Retrieval loop</SectionLabel>
         <span class="text-muted-foreground">
           turns/Q:
           {#each [1, 2, 3, 4] as bucket (bucket)}

@@ -21,7 +21,6 @@
   import Notice from '$kit/ui/notice.svelte';
   import EmptyState from '$kit/ui/empty-state.svelte';
   import Loading from '$kit/ui/loading.svelte';
-  import { ADMIN_SECTION_HEADING_LG } from '$lib/styling/admin-tokens';
   import AiProfileEditorDialog from './AiProfileEditorDialog.svelte';
   import type { AiController } from './ai-controller.svelte';
   import {
@@ -76,21 +75,12 @@
   });
 </script>
 
-<Panel class="grid gap-4">
-  <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-    <div>
-      <h3 class={ADMIN_SECTION_HEADING_LG}>AI profiles</h3>
-      <p class="font-sans text-sm text-muted-foreground">
-        A profile is one recipe for asking: the model, how hard it thinks, what it may spend, and who
-        asks instead when it can't answer. Uses point at a profile.
-      </p>
-    </div>
-    <div class="flex flex-wrap items-center gap-2">
-      <!-- Hiro's profiles, each extension's, or the unused ones — never all mixed unless asked. -->
-      <Segmented class="flex-wrap" label="Show profiles for" options={sourceOptions} value={source} onchange={(id) => (source = id)} />
-      <Button onclick={() => ai.newProfile()}><Plus size={15} /> New profile</Button>
-    </div>
-  </div>
+<Panel title="AI profiles" description="A profile is one recipe for asking: the model, how hard it thinks, what it may spend, and who asks instead when it can't answer. Uses point at a profile." class="grid gap-4">
+  {#snippet actions()}
+    <!-- Hiro's profiles, each extension's, or the unused ones — never all mixed unless asked. -->
+    <Segmented class="flex-wrap" label="Show profiles for" options={sourceOptions} value={source} onchange={(id) => (source = id)} />
+    <Button onclick={() => ai.newProfile()}><Plus size={15} /> New profile</Button>
+  {/snippet}
 
   {#if ai.profilesLoading && ai.profiles.length === 0}
     <Loading label="Loading AI profiles…" />

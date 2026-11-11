@@ -6,6 +6,7 @@
   router (shared by all panes); settings are editable via the Graph engine link.
 -->
 <script lang="ts">
+  import SectionLabel from '$kit/ui/section-label.svelte';
   import { base } from '$app/paths';
   import { Download, LoaderCircle, Play, Settings2, Square } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
@@ -105,7 +106,7 @@
 <div class="grid gap-4 rounded-md border bg-muted/10 px-3 py-3">
   <!-- Ingestion: build options + the Ingest button (left); read-only ingestion settings (right). -->
   <div class="grid gap-2">
-    <p class="font-sans text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Ingestion</p>
+    <SectionLabel>Ingestion</SectionLabel>
     <div class="grid gap-4 md:grid-cols-2">
       <div class="flex flex-col gap-3">
         <div class="flex flex-wrap items-center gap-3">
@@ -129,7 +130,7 @@
 
   <!-- Question answering: answer/recall options + selected count + Eval button (left); settings (right). -->
   <div class="grid gap-2 border-t pt-3">
-    <p class="font-sans text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Question answering</p>
+    <SectionLabel>Question answering</SectionLabel>
     <div class="grid gap-4 md:grid-cols-2">
       <div class="flex flex-col gap-3">
         <div class="flex flex-wrap items-center gap-3">
@@ -206,7 +207,7 @@
 {#snippet settingsColumn(models: ModelLine[], knobs: Param[])}
   <div class="min-w-0">
     <div class="mb-1 flex items-center justify-between gap-2">
-      <span class="font-sans text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">Settings</span>
+      <SectionLabel>Settings</SectionLabel>
       <a
         href={preferenceTabHref('graph-engine', base)}
         title="Edit these settings in Graph engine"

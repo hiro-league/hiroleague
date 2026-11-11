@@ -5,6 +5,7 @@
   (LLM + reranker; embeddings unpriced). Knowledge ingest cost is deferred (multi-run), shown "—".
 -->
 <script lang="ts">
+  import SectionLabel from '$kit/ui/section-label.svelte';
   import { LoaderCircle, Microscope } from '@lucide/svelte';
   import { fmtCost } from '$lib/features/eval/shared/eval-format';
   import type { EvalTrackConfig } from '$lib/features/eval/shared/eval-tracks';
@@ -55,7 +56,7 @@
 
 {#if totalCost > 0 || isBusy}
   <div class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border bg-muted/20 px-3 py-2 font-sans text-xs">
-    <span class="font-semibold uppercase tracking-wide text-muted-foreground">Cost</span>
+    <SectionLabel>Cost</SectionLabel>
     <span class="font-mono text-foreground">≈ {fmtCost(totalCost)}</span>
     <span class="text-muted-foreground" title="Ingest = cumulative graph-build spend for this corpus (sum of every ingest batch; survives reload). Q = this view's question cost.">
       (ingest{cfg.tracksIngestion && ingestCostCumulative > 0 ? ' cumulative' : ''} {cfg.tracksIngestion

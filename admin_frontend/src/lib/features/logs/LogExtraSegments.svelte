@@ -1,4 +1,5 @@
 <script lang="ts">
+  import SectionLabel from '$kit/ui/section-label.svelte';
   import type { LogExtraSegment } from '$lib/api/logs';
 
   type Props = {
@@ -36,9 +37,7 @@
 {:else if segments.length > 0}
   {#each segments as segment (segment)}
     <div class="mt-2">
-      <span class="block text-[0.68rem] font-bold uppercase text-muted-foreground">
-        {segment.key ?? 'value'}
-      </span>
+      <SectionLabel>{segment.key ?? 'value'}</SectionLabel>
       {#if segment.pretty}
         <pre
           class="mt-1 whitespace-pre-wrap break-words rounded-md bg-muted/70 px-[0.65rem] py-2 font-mono text-[0.82rem] leading-snug"

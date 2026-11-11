@@ -1,5 +1,6 @@
 <script lang="ts">
   import { ArrowUpRight } from '@lucide/svelte';
+  import { count } from '$kit/format/number';
   import AdminTableHeaderCell from '$lib/components/page/table/AdminTableHeaderCell.svelte';
   import TableShell from '$kit/ui/table-shell.svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
@@ -152,7 +153,7 @@
               </span>
             </td>
             <td class="px-3 py-3 text-center font-sans text-xs text-muted-foreground">
-              {typeof model.context_window === 'number' ? model.context_window.toLocaleString() : '-'}
+              {typeof model.context_window === 'number' ? count(model.context_window) : '-'}
             </td>
             <td class="px-3 py-3">
               <span class="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">

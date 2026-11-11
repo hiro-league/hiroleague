@@ -1,4 +1,5 @@
 <script lang="ts">
+  import SectionLabel from '$kit/ui/section-label.svelte';
   import { CalendarDays, FileText } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import type { GraphChunkDetail, GraphEdgeDTO } from '$lib/api/knowledge';
@@ -45,9 +46,9 @@
   {@const validUntil = formatChunkDate(edge.invalid_at)}
   {@const retired = formatChunkDate(edge.expired_at)}
   <div class="flex flex-col gap-1 rounded-md border bg-muted/30 p-2">
-    <span class="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+    <SectionLabel class="flex items-center gap-1.5">
       <CalendarDays size={11} aria-hidden="true" /> Validity
-    </span>
+    </SectionLabel>
     <div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-foreground/80">
       <span title={validFrom?.title}>From: {validFrom ? validFrom.label : '—'}</span>
       {#if validUntil}<span title={validUntil.title}>Until: {validUntil.label}</span>{/if}
@@ -59,7 +60,7 @@
 {/if}
 
 <div class="mt-1 flex items-center justify-between">
-  <span class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Sources</span>
+  <SectionLabel>Sources</SectionLabel>
   <span class="text-[11px] text-muted-foreground">
     {search.trim() ? `${matchedChunkCount}/${selectedChunkIds.length}` : selectedChunkIds.length}
     episode{selectedChunkIds.length === 1 ? '' : 's'}{selectedDocCount

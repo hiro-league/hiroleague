@@ -1,4 +1,5 @@
 <script lang="ts">
+  import SectionLabel from '$kit/ui/section-label.svelte';
   import { ArrowLeft, Edit3, UserRound } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import Notice from '$kit/ui/notice.svelte';
@@ -64,21 +65,21 @@
       </div>
       <div class="grid min-w-0 gap-4">
         <div>
-          <span class="font-sans text-xs font-semibold uppercase text-muted-foreground">Id</span>
+          <SectionLabel>Id</SectionLabel>
           <p class="font-sans text-sm">{selected.id}</p>
         </div>
         <div>
-          <span class="font-sans text-xs font-semibold uppercase text-muted-foreground">Description</span>
+          <SectionLabel>Description</SectionLabel>
           <p class="text-sm">{selected.description || '-'}</p>
         </div>
         <div>
-          <span class="font-sans text-xs font-semibold uppercase text-muted-foreground">Prompt</span>
+          <SectionLabel>Prompt</SectionLabel>
           <div class="mt-1 rounded-md border bg-background/45 p-3 text-sm">
             <MarkdownPreview markdown={selected.prompt} compact />
           </div>
         </div>
         <div>
-          <span class="font-sans text-xs font-semibold uppercase text-muted-foreground">Backstory</span>
+          <SectionLabel>Backstory</SectionLabel>
           <div class="mt-1 rounded-md border bg-background/45 p-3 text-sm">
             <MarkdownPreview markdown={selected.backstory} compact />
           </div>
@@ -86,13 +87,13 @@
         <div class="grid gap-3 md:grid-cols-2">
           <!-- Phase 7b step 5: the character's AI / voice profiles, in order (were its model lists). -->
           <div>
-            <span class="font-sans text-xs font-semibold uppercase text-muted-foreground">AI profiles</span>
+            <SectionLabel>AI profiles</SectionLabel>
             <pre class="mt-1 overflow-auto rounded-md border bg-background/45 p-3 text-xs">{selected.ai_profiles?.length
                 ? prettyJson(selected.ai_profiles)
                 : "- (Hiro's chat profile)"}</pre>
           </div>
           <div>
-            <span class="font-sans text-xs font-semibold uppercase text-muted-foreground">Voice profiles</span>
+            <SectionLabel>Voice profiles</SectionLabel>
             <pre class="mt-1 overflow-auto rounded-md border bg-background/45 p-3 text-xs">{selected.voice_profiles?.length
                 ? prettyJson(selected.voice_profiles)
                 : "- (Hiro's voice)"}</pre>

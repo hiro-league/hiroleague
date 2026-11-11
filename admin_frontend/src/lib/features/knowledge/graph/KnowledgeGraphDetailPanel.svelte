@@ -1,4 +1,5 @@
 <script lang="ts">
+  import SectionLabel from '$kit/ui/section-label.svelte';
   /**
    * Selection / provenance detail panel for the knowledge graph view (the right-hand aside
    * shown when an entity, relation, or "N other relations" aggregate edge is selected).
@@ -239,9 +240,7 @@
       <HeaderIcon size={16} aria-hidden="true" />
     </span>
     <div class="min-w-0 flex-1">
-      <div class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-        {typeLabel}
-      </div>
+      <SectionLabel>{typeLabel}</SectionLabel>
       <div class="truncate font-semibold" title={name}>{name}</div>
     </div>
     <button

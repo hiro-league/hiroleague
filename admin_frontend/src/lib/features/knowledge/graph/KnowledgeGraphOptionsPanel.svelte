@@ -1,4 +1,5 @@
 <script lang="ts">
+  import SectionLabel from '$kit/ui/section-label.svelte';
   /**
    * Left-side "Graph options" panel. Three collapsible sections (Filters → View → Physics):
    *  • Filters — edge/node visibility (validity / dates / orphans / connection caps), model-backed.
@@ -138,7 +139,7 @@
 
 <div class="flex max-h-full w-72 flex-col rounded-lg border bg-background/95 shadow-md backdrop-blur">
   <div class="flex items-center justify-between gap-2 border-b px-3 py-2">
-    <h3 class="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Graph options</h3>
+    <SectionLabel level={3}>Graph options</SectionLabel>
     <div class="flex items-center gap-1">
       <button type="button" onclick={onReset} class="rounded px-1.5 py-0.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground">Reset</button>
       <button type="button" onclick={onClose} class="rounded p-0.5 text-muted-foreground hover:bg-accent" aria-label="Hide graph options">
