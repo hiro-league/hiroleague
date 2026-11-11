@@ -7,6 +7,9 @@
 	//   topBar    - a bar across the top of the page, beside the menu (left out: none; the menu holds everything)
 	//   banners   - lines above every page (the server is starting, the connection dropped)
 	//   overlays  - what floats over every page (a chat window, toasts)
+	//   noPages   - what someone signed in sees when their role has no page here (the HiroLeague core shows its
+	//               apps to a role that doesn't open its settings). Left out: the first page says it isn't theirs.
+	// `mainClass` adds to the page area's classes (its padding, a fixed height for a page that scrolls inside).
 	import type { Snippet } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
@@ -18,6 +21,7 @@
 	import * as Card from '$kit/components/ui/card/index.js';
 	import * as Sidebar from '$kit/components/ui/sidebar/index.js';
 	import { firstPage, pageAllowed } from '$kit/state/pages';
+	import { cn } from '$kit/utils';
 	import { isBool, persisted } from '$kit/state/persisted.svelte';
 	import { who } from '$kit/state/who.svelte';
 	import ConfirmHost from '$kit/ui/confirm-host.svelte';
@@ -35,8 +39,10 @@
 		topBar?: Snippet;
 		banners?: Snippet;
 		overlays?: Snippet;
+		noPages?: Snippet;
+		mainClass?: string;
 	}
-	let { children, signedOut, topBar, banners, overlays }: Props = $props();
+	let { children, signedOut, topBar, banners, overlays, noPages, mainClass }: Props = $props();
 
 	// Sidebar open or collapsed, remembered in this browser (the component's own cookie is never read
 	// back, since the app has no server rendering).
@@ -78,19 +84,21 @@
 	{#if signedOut}{@render signedOut()}{:else}<ToHiroLeague />{/if}
 {:else if who.state === 'blocked'}
 	<NoAccess />
+{:else if noPages && who.state === 'ok' && firstPage(who.me) === null}
+	{@render noPages()}
 {:else}
 <Sidebar.Provider bind:open={sidebarOpen.current} style="--sidebar-width: {sidebarWidth.current}px">
 	<AppSidebar width={sidebarWidth.current} onwidth={(px) => (sidebarWidth.current = px)} />
 	<Sidebar.Inset class="min-w-0">
 		<!-- The collapse button is in the sidebar; on phones the sidebar is hidden, so it opens from here.
 		     With a top bar, the bar shows on every screen and holds that button on phones. -->
-		<header class={['flex h-12 items-center gap-2 border-b px-3', topBar ? 'sticky top-0 z-20 bg-background/85 backdrop-blur' : 'md:hidden']}>
+		<header class={['flex min-h-12 items-center gap-2 border-b px-3', topBar ? 'sticky top-0 z-20 bg-background/85 backdrop-blur' : 'md:hidden']}>
 			<Sidebar.Trigger class="md:hidden" />
 			{@render topBar?.()}
 		</header>
 		{@render banners?.()}
 		<!-- min-w-0: let wide tables scroll inside their box instead of widening the page -->
-		<main class="min-w-0 flex-1 p-4 md:p-6">
+		<main class={cn('min-w-0 flex-1 p-4 md:p-6', mainClass)}>
 			<!-- A page that throws while it draws or updates shows why, instead of going blank. -->
 			<svelte:boundary onerror={(e) => console.error(e)}>
 				{#if pageAllowed(who.me, here) || who.state === 'error'}

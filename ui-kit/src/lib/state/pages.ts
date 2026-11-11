@@ -46,6 +46,12 @@ export function pageAllowed(me: Me | null, routeId: string | null): boolean {
 	return !p.ownerOnly && p.any.some((f) => can(me, f, p.need));
 }
 
+/** Whether this build has the page with this route id (a route not listed is in). */
+export const inBuild = (routeId: string | null): boolean => {
+	const p = pageOf(routeId);
+	return !p?.inBuild || p.inBuild();
+};
+
 /** Whether a page is in this user's menu: the pages they may open; a page with `menu` only with that feature. */
 export function inMenu(me: Me | null, routeId: string): boolean {
 	const only = PAGES.find((p) => trimSlash(p.route) === trimSlash(routeId))?.menu;

@@ -1,77 +1,59 @@
 <script lang="ts">
+  // The admin's own layout: its colours, and the shared shell (@hiroleague/ui's app-shell: who is asking, the
+  // menu, the page) with what is the admin's own passed in. UI kit step 2b: the shell was AdminShell, a sidebar
+  // and frame of the admin's own; it is the same shell HomeHiro, NetHiro and TrainHiro use now, with
+  //   - the admin's sign-in form where an app would send the browser to HiroLeague (signedOut),
+  //   - its top bar (workspace state, chat, Settings, docs),
+  //   - its "server is starting" banner,
+  //   - the chat overlay and what else runs on every page (overlays),
+  //   - the apps-only view for a role that doesn't open HiroLeague's settings (noPages).
   import { page } from '$app/state';
-  import { onMount } from 'svelte';
   import type { Snippet } from 'svelte';
-  import { ModeWatcher } from 'mode-watcher';
-  import AdminShell from '$lib/shell/AdminShell.svelte';
-  import { navItems } from '$lib/shell/nav';
-  import { isFeatureActive } from '$lib/shell/features';
-  import SignInPage from '$lib/features/sign-in/SignInPage.svelte';
+  import AppShell from '$kit/components/app-shell.svelte';
+  import { who } from '$kit/state/who.svelte';
   import AppsOnlyView from '$lib/features/apps/AppsOnlyView.svelte';
-  import InlineLoading from '$lib/ui/InlineLoading.svelte';
+  import SignInPage from '$lib/features/sign-in/SignInPage.svelte';
   import { adminSession } from '$lib/runtime/admin-session.svelte';
+  import ServerStartingBanner from '$lib/runtime/ServerStartingBanner.svelte';
+  import { serverReadiness } from '$lib/runtime/server-readiness.svelte';
+  import AdminRuntime from '$lib/shell/AdminRuntime.svelte';
+  import AdminTopBar from '$lib/shell/AdminTopBar.svelte';
+  import { ADMIN_SHELL_CONTENT_PADDING, ADMIN_SHELL_HEADER_PADDING } from '$lib/styling/admin-tokens';
+  import { cn } from '$kit/utils';
   import '../styles/app.css';
 
   let { children }: { children?: Snippet } = $props();
-  const pathname = $derived(page.url.pathname);
-  const activePath = $derived(pathname === '/' ? 'dashboard' : pathname.split('/').filter(Boolean)[0]);
-  // Guard direct navigation (typed URL / bookmark) to a hidden feature's route: the
-  // nav link is gone, but the route still prerenders, so block it client-side. The
-  // API is also unmounted server-side, so a rendered page would only make dead calls.
-  const routeSegment = (path: string) => path.split('/').filter(Boolean)[0] ?? '';
-  const blockedFeature = $derived(
-    navItems.some(
-      (item) => item.feature && !isFeatureActive(item.feature) && routeSegment(item.path) === activePath
-    )
-  );
-  // Logs now scrolls with the document (sticky header + sticky filter toolbar like
-  // other pages); only chats keeps the fixed-height, internally-scrolling shell.
-  const mainClass = $derived(
-    activePath === 'chats' ? 'h-[calc(100vh-4rem)] overflow-hidden' : ''
-  );
+  const activePath = $derived(page.url.pathname.split('/').filter(Boolean)[0] ?? 'dashboard');
+  // The pages keep the padding their sticky headers were written for; only chats keeps the fixed-height,
+  // internally-scrolling page.
+  const mainClass = $derived(cn(ADMIN_SHELL_CONTENT_PADDING, activePath === 'chats' ? 'h-[calc(100vh-4rem)] overflow-hidden' : ''));
 
-  // Phase 6: the admin has its own sign-in. Nothing of the admin (and none of its live
-  // streams) starts until someone is signed in.
-  onMount(() => {
-    void adminSession.check();
+  // The admin's session (its sign-in form, a 401 from any call, Sign out in the apps-only view) and the
+  // shell's "who is asking" are kept in step: when one learns someone signed in or out, the shell asks again.
+  $effect(() => {
+    const session = adminSession.state;
+    if ((session === 'signed-in' && who.state === 'signin') || (session === 'signed-out' && who.state === 'ok')) void who.load();
   });
 </script>
 
-<!-- UI kit step 1d: dark by default, light on the shell's toggle. app.html applies the saved mode
-     before first paint; mode-watcher keeps the `dark` class on <html> from here on. -->
-<ModeWatcher defaultMode="dark" />
+<svelte:head>
+  <title>Hiro Admin</title>
+</svelte:head>
 
-{#if adminSession.state === 'checking'}
-  <div class="grid min-h-screen place-items-center">
-    <InlineLoading label="Loading…" />
-  </div>
-{:else if adminSession.state === 'unreachable'}
-  <div class="grid min-h-screen place-items-center px-4 text-center">
-    <div class="grid gap-2">
-      <h2 class="text-lg font-semibold">The server didn't answer</h2>
-      <p class="text-sm text-muted-foreground">{adminSession.error}</p>
-      <button class="text-sm text-primary underline" onclick={() => void adminSession.check()}>Try again</button>
-    </div>
-  </div>
-{:else if adminSession.state === 'signed-out'}
-  <SignInPage />
-{:else if activePath === 'sign-in'}
+{#if activePath === 'sign-in' && who.state === 'ok'}
   <!-- Phase 8: signed in already; /sign-in sends the browser back to the app that asked. -->
   {@render children?.()}
-{:else if !adminSession.canOpenSettings}
-  <!-- Phase 8: a role that doesn't open HiroLeague's settings sees only its apps. -->
-  <AppsOnlyView />
-{:else}
-  <AdminShell {activePath} {mainClass}>
-    {#if blockedFeature}
-      <div class="mx-auto max-w-md py-16 text-center">
-        <h2 class="text-lg font-semibold">Not available</h2>
-        <p class="mt-2 text-sm text-muted-foreground">
-          This feature isn't enabled in this build.
-        </p>
-      </div>
-    {:else}
-      {@render children?.()}
-    {/if}
-  </AdminShell>
 {/if}
+
+<AppShell {mainClass}>
+  {#snippet signedOut()}<SignInPage />{/snippet}
+  {#snippet noPages()}<AppsOnlyView />{/snippet}
+  {#snippet topBar()}<AdminTopBar />{/snippet}
+  {#snippet banners()}
+    {#if !serverReadiness.ready}
+      <div class={cn('border-b border-warning/20 bg-warning/5', ADMIN_SHELL_HEADER_PADDING)}><ServerStartingBanner /></div>
+    {/if}
+  {/snippet}
+  {#snippet overlays()}<AdminRuntime />{/snippet}
+  {#if activePath !== 'sign-in'}{@render children?.()}{/if}
+</AppShell>
