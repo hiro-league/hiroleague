@@ -80,7 +80,6 @@
     return `/catalog?tab=${tab}${known}`;
   });
 
-  const NOT_SET = '__not_set';
 
   function onPick(value: string) {
     // '' = not set (null): the job borrows its fallback's profile / Hiro doesn't speak.
@@ -94,13 +93,13 @@
       <PickSelect
         class="h-8 w-full text-sm"
         label={field.label}
-        value={picked || NOT_SET}
+        value={picked}
         options={[
-          { value: NOT_SET, label: kind === 'ai' ? 'Not set' : 'None' },
+          { value: '', label: kind === 'ai' ? 'Not set' : 'None' },
           ...options.map((option) => ({ value: option.id, label: option.name })),
           ...(missing ? [{ value: picked, label: `${picked} (missing)` }] : [])
         ]}
-        onchange={(v) => onPick(v === NOT_SET ? '' : v)}
+        onchange={onPick}
       />
     </FormField>
     <p class="font-sans text-xs leading-snug text-muted-foreground">{line}</p>

@@ -118,8 +118,8 @@
     dimSearchId != null && row.search_id != null && row.search_id !== dimSearchId;
 </script>
 
-<div class="recalled-scroll max-h-[60vh] overflow-auto rounded-md border">
-  <Table.Root class="border-collapse font-sans text-xs">
+<div class="max-h-[60vh] overflow-auto rounded-md border">
+  <Table.Root scroll={false} class="border-collapse font-sans text-xs">
     <Table.Header>
       <Table.Row class="hover:bg-transparent">
         {#each columns as col (col.key)}
@@ -204,9 +204,3 @@
     </Table.Body>
   </Table.Root>
 </div>
-
-<style>
-  .recalled-scroll :global([data-slot='table-container']) {
-    overflow: visible;
-  }
-</style>

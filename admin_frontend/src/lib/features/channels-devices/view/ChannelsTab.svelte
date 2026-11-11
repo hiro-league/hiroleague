@@ -2,6 +2,7 @@
   import { Lock, Power, PowerOff, Settings2 } from '@lucide/svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import SectionCard from '$lib/components/page/SectionCard.svelte';
   import AdminTableShell from '$lib/components/page/table/AdminTableShell.svelte';
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
@@ -56,16 +57,14 @@
       </span>
     </div>
     <div class="flex flex-wrap items-center gap-2">
-      <select
-        class="h-9 rounded-md border border-input bg-background px-2 text-sm"
-        bind:value={chosen}
-        aria-label="Channel to install"
+      <PickSelect
+        class="h-9 w-48 text-sm"
+        value={chosen}
+        onchange={(v) => (chosen = v)}
+        options={ctrl.available.map((ch) => ({ value: ch.name, label: ch.label }))}
+        label="Channel to install"
         disabled={!!ctrl.installing}
-      >
-        {#each ctrl.available as ch (ch.name)}
-          <option value={ch.name}>{ch.label}</option>
-        {/each}
-      </select>
+      />
       <Button size="sm" onclick={() => void handleInstall()} disabled={!!ctrl.installing || !chosen}>
         {ctrl.installing ? 'Installing…' : 'Install'}
       </Button>

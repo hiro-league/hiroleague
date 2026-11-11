@@ -6,8 +6,7 @@
  */
 import {
   ADMIN_INPUT,
-  ADMIN_INPUT_LG,
-  ADMIN_SELECT
+  ADMIN_INPUT_LG
 } from '$lib/styling/admin-tokens';
 
 export const KNOWLEDGE_SECTION_CARD = 'rounded-md border bg-card p-4 shadow-sm';
@@ -21,8 +20,6 @@ export const KNOWLEDGE_FIELD_LABEL_TEXT = 'font-medium';
 export const KNOWLEDGE_INPUT = ADMIN_INPUT;
 
 export const KNOWLEDGE_INPUT_LG = ADMIN_INPUT_LG;
-
-export const KNOWLEDGE_SELECT = ADMIN_SELECT;
 
 export const KNOWLEDGE_METADATA_SHELL = 'grid gap-2 rounded-md border bg-background p-3';
 

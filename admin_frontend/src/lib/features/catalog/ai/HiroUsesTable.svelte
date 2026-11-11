@@ -11,8 +11,8 @@
   import { ADMIN_TABLE_GRID_ROW } from '$lib/components/page/table/admin-table-grid-row';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { isPlanModel } from '$lib/catalog/hiro-jobs';
-  import { ADMIN_SELECT } from '$lib/styling/admin-tokens';
   import Notice from '$kit/ui/notice.svelte';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import { cn } from '$lib/utils';
   import type { VoiceController } from '$lib/features/catalog/voice/voice-controller.svelte';
   import type { AiController } from './ai-controller.svelte';
@@ -95,19 +95,18 @@
             {/each}
           </span>
           <span>
-            <select
-              class={cn(ADMIN_SELECT, 'w-full')}
-              aria-label={`Profile for ${job.label}`}
+            <PickSelect
+              class="h-9 w-full text-sm"
+              label={`Profile for ${job.label}`}
               value={job.profileId ?? ''}
               disabled={ai.jobBusy[job.id]}
-              onchange={(event) => void ai.setJobProfile(job.id, event.currentTarget.value)}
-            >
-              <option value="">Not set</option>
-              {#each jobProfiles as p (p.id)}
-                <option value={p.id}>{p.name}</option>
-              {/each}
-              {#if !known}<option value={job.profileId}>{job.profileId} (missing)</option>{/if}
-            </select>
+              options={[
+                { value: '', label: 'Not set' },
+                ...jobProfiles.map((p) => ({ value: p.id, label: p.name })),
+                ...(!known && job.profileId ? [{ value: job.profileId, label: `${job.profileId} (missing)` }] : [])
+              ]}
+              onchange={(v) => void ai.setJobProfile(job.id, v)}
+            />
           </span>
           <span class={cn('text-sm', n.warn ? 'text-warning' : 'text-muted-foreground')}>
             {n.text}
@@ -138,19 +137,18 @@
         <span class="font-sans text-sm font-semibold">Hiro's voice</span>
         <span><Badge variant="secondary">a voice clip</Badge></span>
         <span>
-          <select
-            class={cn(ADMIN_SELECT, 'w-full')}
-            aria-label="Voice for Hiro's voice replies"
+          <PickSelect
+            class="h-9 w-full text-sm"
+            label="Voice for Hiro's voice replies"
             value={voice.hiroProfile ?? ''}
             disabled={voiceBusy}
-            onchange={(e) => void pickVoice(e.currentTarget.value)}
-          >
-            <option value="">None</option>
-            {#each voice.profiles as vp (vp.id)}<option value={vp.id}>{vp.label}</option>{/each}
-            {#if voice.hiroProfile && !hiroVoice}
-              <option value={voice.hiroProfile}>{voice.hiroProfile} (missing)</option>
-            {/if}
-          </select>
+            options={[
+              { value: '', label: 'None' },
+              ...voice.profiles.map((vp) => ({ value: vp.id, label: vp.label })),
+              ...(voice.hiroProfile && !hiroVoice ? [{ value: voice.hiroProfile, label: `${voice.hiroProfile} (missing)` }] : [])
+            ]}
+            onchange={(v) => void pickVoice(v)}
+          />
         </span>
         <span class="text-sm text-muted-foreground">
           {#if hiroVoice}{hiroVoice.line}{:else}Hiro doesn't speak its replies until a voice is picked.{/if}

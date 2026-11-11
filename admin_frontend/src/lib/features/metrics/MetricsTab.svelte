@@ -6,7 +6,7 @@
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import { Checkbox } from '$kit/components/ui/checkbox/index.js';
-  import { Slider } from '$kit/components/ui/slider/index.js';
+  import SliderField from '$kit/ui/slider-field.svelte';
   import { setupMetricsTabRuntime } from '$lib/features/metrics/shared/metrics-page-lifecycle';
   import { createMetricsController } from '$lib/features/metrics/state/metrics-controller.svelte';
   import MetricsPanel from '$lib/features/metrics/view/MetricsPanel.svelte';
@@ -31,25 +31,18 @@
         onCheckedChange={ctrl.onEnabledChange}
       />
     </FormField>
-    <FormField label="Interval" class="min-w-60">
-      <div class="flex items-center gap-3">
-        <Slider
-          class="min-w-36 flex-1"
-          type="single"
-          min={1}
-          max={10}
-          step={0.5}
-          value={ctrl.intervalValue}
-          disabled={!ctrl.available || ctrl.applying}
-          onValueChange={ctrl.onIntervalInput}
-          onValueCommit={() => ctrl.onIntervalChange()}
-          aria-label="Interval"
-        />
-        <span class="w-12 text-right font-sans text-sm tabular-nums text-muted-foreground">
-          {ctrl.intervalValue.toFixed(1)}s
-        </span>
-      </div>
-    </FormField>
+    <SliderField
+      label="Interval"
+      class="min-w-60"
+      min={1}
+      max={10}
+      step={0.5}
+      value={ctrl.intervalValue}
+      disabled={!ctrl.available || ctrl.applying}
+      onchange={ctrl.onIntervalInput}
+      oncommit={() => ctrl.onIntervalChange()}
+      format={(v) => `${v.toFixed(1)}s`}
+    />
     <Button variant="outline" size="sm" disabled={ctrl.polling} onclick={() => void ctrl.loadTick(true)}>
       <RefreshCw size={15} class={cn(ctrl.polling && 'animate-spin')} />
       Refresh

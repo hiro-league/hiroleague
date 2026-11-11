@@ -192,9 +192,8 @@
     { value: 'library', label: 'Voice library' },
     { value: 'mine', label: 'My voices' }
   ];
-  const ANY = '__any';
   const GENDERS = [
-    { value: ANY, label: 'Any gender' },
+    { value: '', label: 'Any gender' },
     { value: 'female', label: 'female' },
     { value: 'male', label: 'male' }
   ];
@@ -262,11 +261,11 @@
       <PickSelect
         class="h-8 w-full text-sm"
         label="Language"
-        value={language || ANY}
-        options={[{ value: ANY, label: 'Any language' }, ...languages.map((l) => ({ value: l.code, label: `${langName(l.code)} (${l.count})` }))]}
-        onchange={(v) => (language = v === ANY ? '' : v)}
+        value={language}
+        options={[{ value: '', label: 'Any language' }, ...languages.map((l) => ({ value: l.code, label: `${langName(l.code)} (${l.count})` }))]}
+        onchange={(v) => (language = v)}
       />
-      <PickSelect class="h-8 w-full text-sm" label="Gender" value={gender || ANY} options={GENDERS} onchange={(v) => (gender = v === ANY ? '' : v)} />
+      <PickSelect class="h-8 w-full text-sm" label="Gender" value={gender} options={GENDERS} onchange={(v) => (gender = v)} />
       <input class={ADMIN_INPUT} bind:value={query} placeholder="Search: warm, narrator, Egyptian…" />
     </div>
     <div class="grid max-h-72 gap-0.5 overflow-y-auto">
@@ -305,11 +304,11 @@
           <PickSelect
             class="h-8 w-full text-sm"
             label="Language"
-            value={form.language || ANY}
-            options={[{ value: ANY, label: 'Any language' }, ...designLanguages.map((l) => ({ value: l, label: langName(l) }))]}
-            onchange={(v) => (form.language = v === ANY ? '' : v)}
+            value={form.language}
+            options={[{ value: '', label: 'Any language' }, ...designLanguages.map((l) => ({ value: l, label: langName(l) }))]}
+            onchange={(v) => (form.language = v)}
           />
-          <PickSelect class="h-8 w-full text-sm" label="Gender" value={form.gender || ANY} options={GENDERS} onchange={(v) => (form.gender = v === ANY ? '' : v)} />
+          <PickSelect class="h-8 w-full text-sm" label="Gender" value={form.gender} options={GENDERS} onchange={(v) => (form.gender = v)} />
         </div>
         <div class="flex flex-wrap items-center gap-3">
           <Button onclick={design} disabled={!canDesign}>

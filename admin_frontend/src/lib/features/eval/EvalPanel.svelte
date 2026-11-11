@@ -27,6 +27,7 @@
   import EvalCorpusPane from '$lib/features/eval/corpus/EvalCorpusPane.svelte';
   import EvalAnswersPane from '$lib/features/eval/answers/EvalAnswersPane.svelte';
   import EvalReportPane from '$lib/features/eval/report/EvalReportPane.svelte';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import GraphRunsRetrievalTraceDialog from '$lib/features/graph-runs/GraphRunsRetrievalTraceDialog.svelte';
   import GraphRunsIngestTraceDialog from '$lib/features/graph-runs/GraphRunsIngestTraceDialog.svelte';
   import { ingestState } from '$lib/features/eval/shared/eval-display';
@@ -36,7 +37,7 @@
   import { getPreferences, type WorkspacePreferences } from '$lib/api/preferences';
   import type { EvalModel } from '$lib/features/eval/state/eval-model.svelte';
   import type { ToastKind } from '$kit/ui/toast.svelte';
-  import { ADMIN_INPUT, ADMIN_SELECT } from '$lib/styling/admin-tokens';
+  import { ADMIN_INPUT } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
 
   interface Props {
@@ -236,40 +237,30 @@
     {#if eval_.benchmarks.length > 0}
       <label class="flex select-none items-center gap-2 font-sans text-sm">
         <span class="text-muted-foreground">Benchmark</span>
-        <select
-          class={cn(ADMIN_SELECT, 'h-8 min-w-40 disabled:opacity-50')}
+        <PickSelect
+          class="h-8 min-w-40 text-sm"
+          label="Benchmark"
           value={eval_.selectedBenchmarkId}
-          onchange={(e) => onBenchmarkChange(e.currentTarget.value)}
+          onchange={onBenchmarkChange}
           disabled={isBusy}
-        >
-          {#each eval_.benchmarks as b (b.id)}
-            <option value={b.id}>{b.label}</option>
-          {/each}
-        </select>
+          options={eval_.benchmarks.map((b) => ({ value: b.id, label: b.label }))}
+        />
       </label>
     {/if}
     <label class="flex select-none items-center gap-2 font-sans text-sm">
       <span class="text-muted-foreground">Corpus</span>
-      <select
-        class={cn(ADMIN_SELECT, 'h-8 min-w-48 disabled:opacity-50')}
+      <PickSelect
+        class="h-8 min-w-48 text-sm"
+        label="Corpus"
         value={eval_.selectedCorpusId}
-        onchange={(e) => void requestSelectCorpus(e.currentTarget.value)}
+        onchange={(v) => void requestSelectCorpus(v)}
         disabled={isBusy || eval_.visibleCorpuses.length === 0}
-      >
-        {#if eval_.visibleCorpuses.length === 0}
-          <option value="">No corpuses found</option>
-        {:else if cfg.tracksIngestion}
-          {#each eval_.visibleCorpuses as c (c.id)}
-            <option value={c.id} title={ingestState(c).word}>
-              {ingestState(c).dot} {c.label ?? c.name}
-            </option>
-          {/each}
-        {:else}
-          {#each eval_.visibleCorpuses as c (c.id)}
-            <option value={c.id}>{c.label ?? c.name}</option>
-          {/each}
-        {/if}
-      </select>
+        options={eval_.visibleCorpuses.length === 0
+          ? [{ value: '', label: 'No corpuses found' }]
+          : cfg.tracksIngestion
+            ? eval_.visibleCorpuses.map((c) => ({ value: c.id, label: `${ingestState(c).dot} ${c.label ?? c.name}`, title: ingestState(c).word }))
+            : eval_.visibleCorpuses.map((c) => ({ value: c.id, label: c.label ?? c.name }))}
+      />
     </label>
   </div>
 

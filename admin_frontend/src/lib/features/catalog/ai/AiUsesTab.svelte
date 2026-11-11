@@ -14,10 +14,11 @@
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import { dateTime } from '$lib/format/time';
-  import { ADMIN_SECTION_HEADING_LG, ADMIN_SELECT } from '$lib/styling/admin-tokens';
+  import { ADMIN_SECTION_HEADING_LG } from '$lib/styling/admin-tokens';
   import Notice from '$kit/ui/notice.svelte';
   import EmptyState from '$kit/ui/empty-state.svelte';
   import Loading from '$kit/ui/loading.svelte';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import { cn } from '$lib/utils';
   import type { AiController } from './ai-controller.svelte';
   import { chainLabel, fallbackChain, needsMismatch } from './ai-profile-rules';
@@ -149,18 +150,14 @@
                 {/if}
               </span>
               <span>
-                <select
-                  class={cn(ADMIN_SELECT, 'w-full')}
-                  aria-label={`Profile for ${use.label}`}
+                <PickSelect
+                  class="h-9 w-full text-sm"
+                  label={`Profile for ${use.label}`}
                   value={use.profileId ?? ''}
                   disabled={removed || busy}
-                  onchange={(event) => void ai.setUseProfile(use.id, event.currentTarget.value)}
-                >
-                  <option value="">No profile</option>
-                  {#each ai.profiles as p (p.id)}
-                    <option value={p.id}>{p.name}</option>
-                  {/each}
-                </select>
+                  options={[{ value: '', label: 'No profile' }, ...ai.profiles.map((p) => ({ value: p.id, label: p.name }))]}
+                  onchange={(v) => void ai.setUseProfile(use.id, v)}
+                />
               </span>
               <span class="flex flex-wrap items-start justify-between gap-2">
                 <span class={cn('text-sm', n.warn ? 'text-warning' : 'text-muted-foreground')}>

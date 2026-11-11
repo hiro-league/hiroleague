@@ -278,7 +278,7 @@
           variant="link"
           size="inline"
           onclick={() => (summaryExpanded = !summaryShowFull)}
-          class="ml-1 text-xs not-italic"
+          class="ml-1 not-italic"
         >
           {summaryShowFull ? 'Show less' : 'Show more'}
         </Button>

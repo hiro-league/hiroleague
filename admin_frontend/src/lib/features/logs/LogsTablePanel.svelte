@@ -96,7 +96,7 @@
   {:else}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
     <div
-      class="logs-table-scroll outline-none"
+      class="outline-none"
       tabindex="0"
       role="application"
       aria-label="Log rows"
@@ -104,6 +104,7 @@
       onkeydown={onTableKeydown}
     >
       <Table.Root
+        scroll={false}
         class={cn(
           'w-full table-fixed border-collapse font-sans text-xs',
           detailPanelOpen ? 'min-w-[1180px]' : 'min-w-[1280px]'
@@ -281,10 +282,3 @@
     </div>
   {/if}
 </div>
-
-<style>
-  /* The kit table's container scrolls sideways, which would stop the head pinning to the page. */
-  .logs-table-scroll :global([data-slot='table-container']) {
-    overflow: visible;
-  }
-</style>

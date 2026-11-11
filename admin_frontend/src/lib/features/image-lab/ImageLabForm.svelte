@@ -19,15 +19,17 @@
 
   <FormField label="Model">
     {#snippet children()}
-      <select bind:value={ctl.model}>
-        {#each ctl.models as modelRow (modelRow.id)}
-          <option value={modelRow.id} disabled={!modelRow.available}>
-            {modelRow.display_name} — {modelRow.provider_display_name}{modelRow.available
-              ? ''
-              : ' (provider not configured)'}
-          </option>
-        {/each}
-      </select>
+      <PickSelect
+        class="h-9 w-full text-sm"
+        label="Model"
+        value={ctl.model}
+        options={ctl.models.map((modelRow) => ({
+          value: modelRow.id,
+          label: `${modelRow.display_name} — ${modelRow.provider_display_name}${modelRow.available ? '' : ' (provider not configured)'}`,
+          disabled: !modelRow.available
+        }))}
+        onchange={(v) => (ctl.model = v)}
+      />
     {/snippet}
   </FormField>
   {#if !ctl.modelReady && ctl.selectedModel}

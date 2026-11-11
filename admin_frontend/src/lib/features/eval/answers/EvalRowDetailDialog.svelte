@@ -371,8 +371,8 @@
 {/snippet}
 
 {#snippet evidencePane(ev: EvidenceRecall)}
-  <div class="evidence-scroll max-h-[60vh] overflow-auto rounded-md border">
-    <Table.Root class="border-collapse font-sans text-xs">
+  <div class="max-h-[60vh] overflow-auto rounded-md border">
+    <Table.Root scroll={false} class="border-collapse font-sans text-xs">
       <Table.Header>
         <Table.Row class="hover:bg-transparent">
           {@render evTh('status', 'Status', 'left', '')}
@@ -414,9 +414,3 @@
     </Table.Root>
   </div>
 {/snippet}
-
-<style>
-  .evidence-scroll :global([data-slot='table-container']) {
-    overflow: visible;
-  }
-</style>

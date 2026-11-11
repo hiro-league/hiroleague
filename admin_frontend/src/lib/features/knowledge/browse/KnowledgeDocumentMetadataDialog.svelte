@@ -2,6 +2,7 @@
   import type { KnowledgeDocument, KnowledgeIngestMetadata } from '$lib/api/knowledge';
   import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import CreatableCategorySelect from '$lib/features/knowledge/shared/CreatableCategorySelect.svelte';
   import CreatableTagsSelect from '$lib/features/knowledge/shared/CreatableTagsSelect.svelte';
   import KnowledgeAffectedDocumentsList from '$lib/features/knowledge/browse/KnowledgeAffectedDocumentsList.svelte';
@@ -13,10 +14,8 @@
     KNOWLEDGE_BROWSE_BULK_DIALOG_AFFECTED_LIST,
     KNOWLEDGE_BROWSE_BULK_DIALOG_BODY,
     KNOWLEDGE_FIELD_LABEL,
-    KNOWLEDGE_FIELD_LABEL_TEXT,
-    KNOWLEDGE_SELECT
+    KNOWLEDGE_FIELD_LABEL_TEXT
   } from '$lib/features/knowledge/shared/knowledge-ui';
-  import { cn } from '$lib/utils';
 
   type Props = {
     open: boolean;
@@ -107,34 +106,45 @@
       <div class="flex flex-wrap items-end gap-3">
         <label class={KNOWLEDGE_FIELD_LABEL}>
           <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Owner</span>
-          <select
-            class={cn(KNOWLEDGE_SELECT, 'w-[180px]')}
-            bind:value={ownerKind}
+          <PickSelect
+            class="h-9 w-[180px] text-sm"
+            label="Owner"
+            value={ownerKind}
             disabled={saving}
-            onchange={handleOwnerKindChange}
-          >
-            <option value="system">System</option>
-            <option value="character">Character</option>
-            <option value="user">User</option>
-          </select>
+            options={[
+              { value: 'system', label: 'System' },
+              { value: 'character', label: 'Character' },
+              { value: 'user', label: 'User' }
+            ]}
+            onchange={(v) => {
+              ownerKind = v as KnowledgeIngestMetadata['owner_kind'];
+              handleOwnerKindChange();
+            }}
+          />
         </label>
         {#if ownerKind === 'character'}
           <label class={KNOWLEDGE_FIELD_LABEL}>
             <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Character</span>
-            <select class={cn(KNOWLEDGE_SELECT, 'w-[220px]')} bind:value={ownerId} disabled={saving}>
-              {#each options.characters as character (character.id)}
-                <option value={String(character.id)}>{character.name} ({character.id})</option>
-              {/each}
-            </select>
+            <PickSelect
+              class="h-9 w-[220px] text-sm"
+              label="Character"
+              value={ownerId}
+              disabled={saving}
+              options={options.characters.map((character) => ({ value: String(character.id), label: `${character.name} (${character.id})` }))}
+              onchange={(v) => (ownerId = v)}
+            />
           </label>
         {:else if ownerKind === 'user'}
           <label class={KNOWLEDGE_FIELD_LABEL}>
             <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>User</span>
-            <select class={cn(KNOWLEDGE_SELECT, 'w-[220px]')} bind:value={ownerId} disabled={saving}>
-              {#each options.users as user (user.id)}
-                <option value={String(user.id)}>{user.name} ({user.id})</option>
-              {/each}
-            </select>
+            <PickSelect
+              class="h-9 w-[220px] text-sm"
+              label="User"
+              value={ownerId}
+              disabled={saving}
+              options={options.users.map((user) => ({ value: String(user.id), label: `${user.name} (${user.id})` }))}
+              onchange={(v) => (ownerId = v)}
+            />
           </label>
         {/if}
         <label class={KNOWLEDGE_FIELD_LABEL}>

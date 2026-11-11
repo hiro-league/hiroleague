@@ -7,8 +7,7 @@
    */
   import { ArrowDown, ArrowUp, ExternalLink, Plus, X } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
-  import { ADMIN_SELECT } from '$lib/styling/admin-tokens';
-  import { cn } from '$lib/utils';
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import { moveInList } from '$lib/features/characters/shared/characters-pure';
   import type { ProfileOption } from '$lib/features/characters/shared/profile-option';
 
@@ -86,15 +85,17 @@
     {/each}
   </ol>
   <div class="flex flex-wrap items-center gap-2">
-    <select
-      class={cn(ADMIN_SELECT, 'w-64')}
-      aria-label={`Add ${noun}`}
-      bind:value={adding}
+    <PickSelect
+      class="h-9 w-64 text-sm"
+      label={`Add ${noun}`}
+      value={adding}
+      onchange={(v) => (adding = v)}
       disabled={disabled || addable.length === 0}
-    >
-      <option value="">{addable.length ? `Add ${kind === 'ai' ? 'an' : 'a'} ${noun}…` : `No other ${noun}s`}</option>
-      {#each addable as option (option.id)}<option value={option.id}>{option.label}</option>{/each}
-    </select>
+      options={[
+        { value: '', label: addable.length ? `Add ${kind === 'ai' ? 'an' : 'a'} ${noun}…` : `No other ${noun}s` },
+        ...addable.map((option) => ({ value: option.id, label: option.label }))
+      ]}
+    />
     <Button size="sm" variant="outline" disabled={disabled || !adding} onclick={add}><Plus size={13} /> Add</Button>
     <a
       class="inline-flex items-center gap-1 font-sans text-xs text-primary hover:underline"

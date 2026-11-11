@@ -136,9 +136,15 @@
 
         <FormField label="Type">
           {#snippet children()}
-            <select class="opacity-70" aria-readonly="true" disabled title="Conversation type">
-              <option value="direct" selected>direct</option>
-            </select>
+            <PickSelect
+              class="h-9 w-full text-sm opacity-70"
+              label="Type"
+              value="direct"
+              disabled
+              title="Conversation type"
+              options={[{ value: 'direct', label: 'direct' }]}
+              onchange={() => {}}
+            />
           {/snippet}
         </FormField>
       </div>

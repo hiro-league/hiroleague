@@ -17,8 +17,6 @@
   const rows = $derived(voice.uses.extensions.find((e) => e.extension === extension)?.uses ?? []);
   let error = $state<string | null>(null);
 
-  const NONE = '__none';
-
   async function pick(key: string, profileId: string) {
     error = await voice.setUse(key, profileId || null);
   }
@@ -53,9 +51,9 @@
               <PickSelect
                 class="h-8 w-full text-sm"
                 label="Voice for {u.name}"
-                value={u.profile_id || NONE}
-                options={[{ value: NONE, label: 'No voice picked' }, ...voice.profiles.map((vp) => ({ value: vp.id, label: vp.label }))]}
-                onchange={(v) => pick(u.key, v === NONE ? '' : v)}
+                value={u.profile_id ?? ''}
+                options={[{ value: '', label: 'No voice picked' }, ...voice.profiles.map((vp) => ({ value: vp.id, label: vp.label }))]}
+                onchange={(v) => pick(u.key, v)}
               />
             </span>
             <span class="text-sm text-muted-foreground">

@@ -43,7 +43,6 @@
   type Take = { clip: VoiceClip; profile: string; provider: string; text: string; note?: string; sending?: boolean };
 
   let tryWith = $state(''); // '' = the editor's profile
-  const EDITING = '__editing';
   let text = $state('Someone is at the front door. <short pause> It looks like the delivery guy.');
   let allTags = $state(false);
   let sendTo = $state('');
@@ -119,9 +118,9 @@
       <PickSelect
         class="h-8 w-full text-sm"
         label="Speak with"
-        value={tryWith || EDITING}
-        options={[{ value: EDITING, label: editingLabel }, ...others.map((p) => ({ value: p.id, label: p.label }))]}
-        onchange={(v) => (tryWith = v === EDITING ? '' : v)}
+        value={tryWith}
+        options={[{ value: '', label: editingLabel }, ...others.map((p) => ({ value: p.id, label: p.label }))]}
+        onchange={(v) => (tryWith = v)}
       />
     </label>
     <p class="-mt-2 text-xs text-muted-foreground">{speaker.provider} · {speaker.voice || 'no voice picked'}</p>

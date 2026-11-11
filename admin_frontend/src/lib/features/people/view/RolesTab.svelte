@@ -88,13 +88,13 @@
 
   {#if ctrl.tab === ALL_ROLES}
     <div class="overflow-x-auto rounded-lg border">
-      <Table.Root class="font-sans">
+      <Table.Root scroll={false} class="font-sans">
         <Table.Header>
           <Table.Row class="hover:bg-transparent">
             <Table.Head class="h-auto px-3 py-2 text-xs text-muted-foreground">Feature</Table.Head>
             {#each ctrl.roles as r (r.role_id)}
               <Table.Head class="h-auto px-3 py-2 text-xs text-muted-foreground">
-                <Button variant="link" size="inline" class="text-xs" onclick={() => (ctrl.tab = r.role_id)}>{r.name}</Button>
+                <Button variant="link" size="inline" onclick={() => (ctrl.tab = r.role_id)}>{r.name}</Button>
               </Table.Head>
             {/each}
           </Table.Row>

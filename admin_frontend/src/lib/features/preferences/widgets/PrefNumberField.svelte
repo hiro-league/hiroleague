@@ -6,7 +6,7 @@
     preferenceNumberBounds,
     type PreferencePath
   } from '$lib/features/preferences/shared/preferences-schema';
-  import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
+  import { ADMIN_INPUT_LG } from '$lib/features/preferences/shared/preferences-ui';
 
   type Props = {
     ctrl: PreferencesController;
@@ -25,7 +25,7 @@
     path,
     label,
     class: className = '',
-    inputClass = ADMIN_SELECT_LG,
+    inputClass = ADMIN_INPUT_LG,
     disabled = false,
     hint: hintOverride
   }: Props = $props();

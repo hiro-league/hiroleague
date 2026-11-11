@@ -150,7 +150,7 @@
                 <Button
                   variant="link"
                   size="inline"
-                  class="min-w-0 justify-start font-sans text-sm font-semibold"
+                  class="min-w-0 justify-start font-semibold"
                   onclick={() => void ctrl.openModelsForProvider(provider.id)}
                   title={`View models for ${provider.display_name}`}
                 >

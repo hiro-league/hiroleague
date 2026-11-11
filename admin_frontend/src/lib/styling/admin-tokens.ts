@@ -155,10 +155,6 @@ export const ADMIN_INPUT_LG = cn(
   ADMIN_FOCUS_RING
 );
 
-export const ADMIN_SELECT = ADMIN_INPUT;
-
-export const ADMIN_SELECT_LG = ADMIN_INPUT_LG;
-
 /** Destructive icon button for clearing a single filter (AdminFilterBarSelect + LogsFiltersPanel). */
 export const FILTER_CLEAR_ICON_BTN =
   'size-8 shrink-0 text-destructive hover:bg-destructive/15 hover:text-destructive';

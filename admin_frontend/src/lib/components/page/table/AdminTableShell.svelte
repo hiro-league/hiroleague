@@ -100,7 +100,7 @@
       class={cn(maxBodyHeight && 'overflow-auto', !pageStickyHead && 'overflow-x-auto')}
       style:max-height={maxBodyHeight}
     >
-      <Table.Root class={ADMIN_TABLE}>
+      <Table.Root scroll={false} class={ADMIN_TABLE}>
         {@render children?.()}
       </Table.Root>
     </div>
@@ -108,11 +108,6 @@
 </div>
 
 <style>
-  /* The shell owns scrolling: the kit table's own overflow box would trap the sticky head. */
-  .admin-table-shell :global([data-slot='table-container']) {
-    overflow: visible;
-  }
-
   /* Page scroll: pin beneath shell bar + sticky page header + sticky toolbar.
      `--admin-table-sticky-top` is set inline by the shell; v-bind cannot bind a
      plain JS constant, so we publish the value via a CSS variable instead. */

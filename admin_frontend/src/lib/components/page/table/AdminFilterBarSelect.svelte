@@ -37,12 +37,11 @@
     title
   }: Props = $props();
 
-  /** The placeholder choice ("All …") stands for ''; PickSelect cannot pick an empty value. */
-  const ANY = '__any';
-  const choices = $derived(placeholder ? [{ value: ANY, label: placeholder }, ...options] : options);
+  /** The placeholder choice ("All …") is the empty choice. */
+  const choices = $derived(placeholder ? [{ value: '', label: placeholder }, ...options] : options);
 
   function pick(v: string) {
-    value = v === ANY ? '' : v;
+    value = v;
     onValueChange?.(value);
   }
 
@@ -63,7 +62,7 @@
   <div class={cn('flex items-center gap-0.5', className)}>
     <span class="inline-flex min-w-0" {title}>
       <PickSelect
-        value={value || (placeholder ? ANY : '')}
+        {value}
         options={choices}
         onchange={pick}
         {placeholder}
@@ -91,7 +90,7 @@
     <div class="flex items-center gap-0.5">
       <span class="flex min-w-0 flex-1" {title}>
         <PickSelect
-          value={value || (placeholder ? ANY : '')}
+          {value}
           options={choices}
           onchange={pick}
           {placeholder}

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PickSelect from '$kit/ui/pick-select.svelte';
   import FormField from '$lib/components/ui/form-field.svelte';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import {
@@ -8,7 +9,6 @@
   } from '$lib/features/preferences/shared/preferences-field-options';
   import { usePrefField } from '$lib/features/preferences/shared/preferences-field.svelte';
   import { type PreferencePath } from '$lib/features/preferences/shared/preferences-schema';
-  import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
 
   type Props = {
     ctrl: PreferencesController;
@@ -46,12 +46,12 @@
     onReset={field.reset}
     class={className}
   >
-    <select class={ADMIN_SELECT_LG} bind:value={field.value}>
-      {#each resolvedOptions as option (option.value)}
-        <option value={option.value} disabled={option.disabled} title={option.title}>
-          {option.label}
-        </option>
-      {/each}
-    </select>
+    <PickSelect
+      class="h-10 w-full text-sm"
+      label={field.label}
+      value={field.value}
+      options={resolvedOptions}
+      onchange={(v) => (field.value = v)}
+    />
   </FormField>
 {/if}

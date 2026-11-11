@@ -3,7 +3,7 @@
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import { usePrefField } from '$lib/features/preferences/shared/preferences-field.svelte';
   import { type PreferencePath } from '$lib/features/preferences/shared/preferences-schema';
-  import { ADMIN_SELECT_LG } from '$lib/features/preferences/shared/preferences-ui';
+  import { ADMIN_INPUT_LG } from '$lib/features/preferences/shared/preferences-ui';
 
   type Props = {
     ctrl: PreferencesController;
@@ -24,7 +24,7 @@
     path,
     label,
     class: className = '',
-    inputClass = ADMIN_SELECT_LG,
+    inputClass = ADMIN_INPUT_LG,
     disabled = false,
     placeholder,
     maxlength,

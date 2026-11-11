@@ -9,7 +9,7 @@
   import FormField from '$lib/components/ui/form-field.svelte';
   import Notice from '$kit/ui/notice.svelte';
   import PickSelect from '$kit/ui/pick-select.svelte';
-  import { Slider } from '$kit/components/ui/slider/index.js';
+  import SliderField from '$kit/ui/slider-field.svelte';
   import SingleModelPicker from '$lib/features/preferences/SingleModelPicker.svelte';
   import AiProfileTryIt from './AiProfileTryIt.svelte';
   import type { AiController } from './ai-controller.svelte';
@@ -29,7 +29,6 @@
     local: "Free, and nothing leaves the home. The server's PC must be on.",
     plan: 'Counts against your plan, shared with your own use of it.'
   } as const;
-  const NOBODY = '__nobody';
 </script>
 
 <Dialog.Root
@@ -85,16 +84,14 @@
           <div class="grid items-start gap-3 sm:grid-cols-3">
             <FormField label="Thinking">
               <!-- '' = the model's default (stored as null). -->
-              <select
+              <PickSelect
+                class="h-9 w-full text-sm"
+                label="Thinking"
                 value={d.thinking ?? ''}
                 disabled={!levels.length}
-                onchange={(event) => (ai.draft.thinking = (event.currentTarget.value || null) as typeof d.thinking)}
-              >
-                <option value="">Model default</option>
-                {#each levels as level (level)}
-                  <option value={level}>{THINKING_LABELS[level]}</option>
-                {/each}
-              </select>
+                options={[{ value: '', label: 'Model default' }, ...levels.map((level) => ({ value: level, label: THINKING_LABELS[level] }))]}
+                onchange={(v) => (ai.draft.thinking = (v || null) as typeof d.thinking)}
+              />
             </FormField>
             <FormField label="Max tokens" hint="Empty = the model default.">
               <input type="number" min="1" step="64" placeholder="Default" bind:value={ai.draft.maxTokens} />
@@ -105,32 +102,19 @@
               </FormField>
             {/if}
           </div>
-          <FormField
+          <SliderField
             label="Temperature"
             hint={ai.draftTemperatureNote ?? 'Lower answers the same way each time; higher varies more.'}
-          >
-            <span class="flex items-center gap-3">
-              <Slider
-                type="single"
-                min={0}
-                max={2}
-                step={0.1}
-                class="w-full"
-                aria-label="Temperature"
-                value={d.temperature ?? 1}
-                disabled={temperatureOff}
-                onValueChange={(v: number) => (ai.draft.temperature = v)}
-              />
-              <span class="w-16 shrink-0 text-right font-mono text-sm tabular-nums">
-                {temperatureOff ? '—' : (d.temperature?.toFixed(1) ?? 'Default')}
-              </span>
-              {#if !temperatureOff && d.temperature !== null}
-                <Button size="sm" variant="ghost" class="shrink-0" onclick={() => (ai.draft.temperature = null)}>
-                  Default
-                </Button>
-              {/if}
-            </span>
-          </FormField>
+            min={0}
+            max={2}
+            step={0.1}
+            value={d.temperature ?? 1}
+            disabled={temperatureOff}
+            onchange={(v) => (ai.draft.temperature = v)}
+            onreset={() => (ai.draft.temperature = null)}
+            modified={!temperatureOff && d.temperature !== null}
+            format={() => (temperatureOff ? '—' : (d.temperature?.toFixed(1) ?? 'Default'))}
+          />
           <FormField label="Extra instructions (optional)" hint="Added to every question; leave empty for none.">
             <textarea rows="2" bind:value={ai.draft.instructions} placeholder="e.g. Answer only from what the picture shows."></textarea>
           </FormField>
@@ -170,9 +154,9 @@
             hint="Used when a budget is reached, the provider fails, or the ask must stay local."
           >
             <PickSelect
-              value={d.fallbackId ?? NOBODY}
-              options={[{ value: NOBODY, label: 'Nobody: the ask fails' }, ...fallbackOptions.map((p) => ({ value: p.id, label: p.name }))]}
-              onchange={(v) => (ai.draft.fallbackId = v === NOBODY ? null : v)}
+              value={d.fallbackId ?? ''}
+              options={[{ value: '', label: 'Nobody: the ask fails' }, ...fallbackOptions.map((p) => ({ value: p.id, label: p.name }))]}
+              onchange={(v) => (ai.draft.fallbackId = v || null)}
               label="Fallback"
               class="h-8 w-full text-sm"
             />
