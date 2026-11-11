@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { Action } from './action.svelte';
 import { Draft, Drafts } from './draft.svelte';
 import { KeyedAction } from './keyed-action.svelte';
 
@@ -119,5 +120,38 @@ describe('KeyedAction', () => {
 		expect(then).toHaveBeenCalledTimes(1);
 		run.clear('a');
 		expect(run.result('a')).toBeNull();
+	});
+});
+
+describe('Draft extras', () => {
+	it('says "Saved." after a good save', async () => {
+		const d = new Draft<Form>({ name: '', tags: [] }, { save: async () => undefined, done: 'Saved.', guard: false });
+		d.load(saved);
+		d.value.name = 'x';
+		await d.save();
+		expect(d.action.done).toBe('Saved.');
+		const f = new Draft<Form>({ name: '', tags: [] }, { save: async () => undefined, done: (s) => `Saved ${s.name}`, guard: false });
+		f.load(saved);
+		f.value.name = 'Den';
+		await f.save();
+		expect(f.action.done).toBe('Saved Den');
+	});
+
+	it('tells an error hook when a run fails', async () => {
+		const onError = vi.fn();
+		const a = new Action({ onError });
+		await a.run(async () => Promise.reject(new Error('down')));
+		expect(onError).toHaveBeenCalledWith('down');
+		const k = new KeyedAction({ onError });
+		await k.run('x', async () => Promise.reject(new Error('gone')));
+		expect(onError).toHaveBeenLastCalledWith('gone', 'x');
+	});
+
+	it('keeps one line for the latest run of any key', async () => {
+		const k = new KeyedAction();
+		expect(k.last).toBeNull();
+		await k.run('a', async () => 'did a');
+		await k.run('b', async () => Promise.reject(new Error('no b')));
+		expect(k.last).toEqual({ text: 'no b', error: true });
 	});
 });

@@ -11,15 +11,20 @@ export class KeyedAction {
 	/** What the last run of a key did, when it said (a run that returns text). */
 	#done = $state<Record<string, string>>({});
 	readonly #then?: (key: string) => unknown;
+	readonly #onError?: (message: string, key: string) => void;
+	/** The key of the latest run: for one page-level line (`last`). */
+	#lastKey = $state<string | null>(null);
 
 	/** `then`: after every run that worked (e.g. read the list again). Its own failure counts as the run's. */
-	constructor(options: { then?: (key: string) => unknown } = {}) {
+	constructor(options: { then?: (key: string) => unknown; onError?: (message: string, key: string) => void } = {}) {
 		this.#then = options.then;
+		this.#onError = options.onError;
 	}
 
 	/** Run `fn` for `key`. Resolves with its result, or undefined when it failed. Never rejects. */
 	run = async <R>(key: string, fn: () => Promise<R>): Promise<R | undefined> => {
 		this.#busy[key] = true;
+		this.#lastKey = key;
 		this.#errors[key] = this.#done[key] = '';
 		try {
 			const result = await fn();
@@ -28,6 +33,7 @@ export class KeyedAction {
 			return result;
 		} catch (e) {
 			this.#errors[key] = errorMessage(e);
+			this.#onError?.(this.#errors[key], key);
 			return undefined;
 		} finally {
 			this.#busy[key] = false;
@@ -47,6 +53,10 @@ export class KeyedAction {
 		if (this.#errors[key]) return { text: this.#errors[key], error: true };
 		return this.#done[key] ? { text: this.#done[key], error: false } : null;
 	};
+	/** The result of the latest run, whichever key it was: one line for the whole page. */
+	get last(): { text: string; error: boolean } | null {
+		return this.#lastKey === null ? null : this.result(this.#lastKey);
+	}
 	/** Forget a key's last result (its form closed). */
 	clear = (key: string) => {
 		this.#errors[key] = this.#done[key] = '';

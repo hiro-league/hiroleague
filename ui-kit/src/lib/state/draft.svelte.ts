@@ -8,8 +8,15 @@
 //   <Button disabled={!form.dirty || form.action.busy} onclick={form.save}>Save</Button>
 //   <Button onclick={form.undo} disabled={!form.dirty}>Undo changes</Button>
 //
-// Leaving the page with changes asks first (guardUnsaved), unless `guard: false`: set that when the draft is one of
-// several (Drafts asks once for all of them) or when it is made outside a component's setup.
+// Leaving the page with changes asks first (guardUnsaved). `guard: false` turns that off: set it when the draft is one of
+// several (Drafts asks once for all of them), when something else asks (an EditorSheet), or when it is made outside a
+// component's setup. `guard: () => open` asks only while that is true (a dialog's form: only while it is open).
+//
+// Before anything is loaded, a Draft<T | null> with `null` as `initial` is the usual "nothing here yet".
+// Where the save answers with the data read again (save, reload, take the reload as saved), return it from `save`:
+// `save: async (d) => { await put(d); await list.reload(); return pick(list.data); }`.
+// Make drafts when their data arrives (in the fetcher, or a handler), not while a template is drawn.
+import { untrack } from 'svelte';
 import { guardUnsaved } from '$kit/ui/unsaved.svelte';
 import { Action } from './action.svelte';
 
@@ -20,8 +27,10 @@ export type DraftOptions<T> = {
 	equal?: (a: T, b: T) => boolean;
 	/** Save the draft; resolves with what is saved now (the answer), or nothing (then the draft is what is saved). */
 	save?: (draft: T) => Promise<T | void>;
-	/** Ask before leaving the page with unsaved changes. Default true. */
-	guard?: boolean;
+	/** Ask before leaving the page with unsaved changes. Default true; false for never; a function asks while it says true. */
+	guard?: boolean | (() => boolean);
+	/** What a good save says ("Saved."), in `action.done`; a function gets what is saved now. */
+	done?: string | ((saved: T) => string);
 };
 
 const sameJson = <T>(a: T, b: T) => JSON.stringify(a) === JSON.stringify(b);
@@ -37,15 +46,18 @@ export class Draft<T> {
 	readonly #clone: (v: T) => T;
 	readonly #equal: (a: T, b: T) => boolean;
 	readonly #save?: (draft: T) => Promise<T | void>;
+	readonly #done?: string | ((saved: T) => string);
 
 	/** `initial`: what to edit before anything is saved (a blank form). */
 	constructor(initial: T, options: DraftOptions<T> = {}) {
 		this.#clone = options.clone ?? ((v) => structuredClone($state.snapshot(v)) as T);
 		this.#equal = options.equal ?? sameJson;
 		this.#save = options.save;
+		this.#done = options.done;
 		this.#initial = this.#clone(initial);
 		this.value = this.#clone(initial);
-		if (options.guard !== false) guardUnsaved(() => this.dirty);
+		const guard = options.guard;
+		if (guard !== false) guardUnsaved(() => this.dirty && (typeof guard === 'function' ? guard() : true));
 	}
 
 	/** The draft differs from what is saved (or from `initial`, while nothing is saved). */
@@ -58,9 +70,12 @@ export class Draft<T> {
 	 * keeps its edits unless `discard` is true.
 	 */
 	load(saved: T, discard = false) {
-		const edited = this.dirty;
-		this.saved = this.#clone(saved);
-		if (discard || !edited) this.value = this.#clone(saved);
+		// untracked: it reads and writes the draft, so called from an $effect it must not make the effect depend on it
+		untrack(() => {
+			const edited = this.dirty;
+			this.saved = this.#clone(saved);
+			if (discard || !edited) this.value = this.#clone(saved);
+		});
 	}
 
 	/** Throw the edits away: the draft is what is saved again. */
@@ -75,6 +90,8 @@ export class Draft<T> {
 		await this.action.run(async () => {
 			const answer = await save(this.#clone(this.value));
 			this.load(answer ?? this.value, true);
+			const done = this.#done;
+			return typeof done === 'function' ? done(this.saved as T) : done;
 		});
 		return !this.action.error;
 	};
@@ -89,9 +106,10 @@ export class Drafts<T> {
 	readonly #make: (key: string) => Draft<T>;
 
 	/** `make` builds the draft for a key (give it `guard: false`; this asks once for all). */
-	constructor(make: (key: string) => Draft<T>, options: { guard?: boolean } = {}) {
+	constructor(make: (key: string) => Draft<T>, options: { guard?: boolean | (() => boolean) } = {}) {
 		this.#make = make;
-		if (options.guard !== false) guardUnsaved(() => this.dirty);
+		const guard = options.guard;
+		if (guard !== false) guardUnsaved(() => this.dirty && (typeof guard === 'function' ? guard() : true));
 	}
 
 	/** The draft of a key, made on first use. */

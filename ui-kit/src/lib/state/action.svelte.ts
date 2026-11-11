@@ -6,6 +6,8 @@ export type ActionOptions = {
 	/** After every run that worked, e.g. reload what the page shows. Its own failure counts as the
 	 * action's. */
 	then?: () => unknown;
+	/** Called with the message when a run fails (a toast; a page that wants one line more). */
+	onError?: (message: string) => void;
 };
 
 export class Action {
@@ -16,9 +18,11 @@ export class Action {
 	/** What the last run did, when it said (a run that returns text); '' otherwise. */
 	done = $state('');
 	#then?: () => unknown;
+	#onError?: (message: string) => void;
 
 	constructor(options: ActionOptions = {}) {
 		this.#then = options.then;
+		this.#onError = options.onError;
 	}
 
 	/** Run `fn`. Resolves with its result, or undefined when it failed. Never rejects. */
@@ -32,6 +36,7 @@ export class Action {
 			return result;
 		} catch (e) {
 			this.error = errorMessage(e);
+			this.#onError?.(this.error);
 			return undefined;
 		} finally {
 			this.busy = false;
