@@ -37,8 +37,7 @@
   import { createShellPreferences } from '$lib/preferences/shell-preferences.svelte';
   import { ADMIN_SHELL_CONTENT_PADDING, ADMIN_SHELL_HEADER_PADDING } from '$lib/styling/admin-tokens';
   import { cn } from '$lib/utils';
-  import { navItems } from './nav';
-  import { isFeatureActive } from './features';
+  import { navItems, pageShows } from './nav';
   import { getChatEngine } from '$lib/features/chat-channels/state/chat-engine-singleton.svelte';
   import { chatOverlay } from '$lib/features/chat-channels/overlay/chat-overlay-store.svelte';
   import GlobalChatOverlay from '$lib/features/chat-channels/overlay/GlobalChatOverlay.svelte';
@@ -75,11 +74,12 @@
       : headerStatusLabel
   );
 
-  // Hide nav items whose feature is turned off in the ledger (features.ts). An empty
-  // group produces no <section>, so a fully-hidden group disappears too.
+  // Hide nav items whose feature is turned off in the ledger (features.ts) or whose right the
+  // person's role lacks (step 1d: each page declares its right in nav.ts). An empty group
+  // produces no <section>, so a fully-hidden group disappears too.
   const groups = $derived(
     navItems
-      .filter((item) => !item.feature || isFeatureActive(item.feature))
+      .filter((item) => pageShows(item, adminSession.hasRight))
       .reduce<Record<string, typeof navItems>>((acc, item) => {
         acc[item.group] = [...(acc[item.group] ?? []), item];
         return acc;
