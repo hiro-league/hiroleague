@@ -16,7 +16,11 @@
           }
           localStorage.removeItem('hiro.admin.theme');
         }
-        if (localStorage.getItem('mode-watcher-mode') === 'light') {
+        // With nothing saved, mode-watcher stores "system" before it reads its defaultMode, so the
+        // dark default is written here, where it is read first.
+        var saved = localStorage.getItem('mode-watcher-mode');
+        if (!saved) localStorage.setItem('mode-watcher-mode', (saved = 'dark'));
+        if (saved === 'light' || (saved === 'system' && matchMedia('(prefers-color-scheme: light)').matches)) {
           document.documentElement.classList.remove('dark');
           document.documentElement.style.colorScheme = 'light';
         }
