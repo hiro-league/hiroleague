@@ -1,10 +1,12 @@
 // Who is using the app (backend /api/me, auth/api.py): asked once when the app starts, again after
 // signing out, and while someone waits for a role. The layout shows the "taking you to HiroLeague" page, the "no access"
 // page or the app from `state`. An app-wide singleton: every page reads the same answer.
-// Phase 8 (one sign-in): signing in happens at HiroLeague, which sends the browser back signed in (auth/api.py
-// /api/auth/start and /api/auth/hiro); the app has no sign-in page of its own.
-import { api, apiUrl, ApiError, errorMessage } from '$kit/api/client';
-import { getMe, type Me } from '$hiro-app/api';
+// Phase 8 (one sign-in): signing in happens at HiroLeague. An app sends the browser there and gets it back signed
+// in; the HiroLeague core itself shows its sign-in form (the shell's `signedOut` view).
+// UI kit, step 2: how to ask who is there, start a sign-in and sign out are the app's ($hiro-app/api), so the
+// same state serves an app and the core.
+import { ApiError, errorMessage } from '$kit/api/client';
+import { getMe, signOut, startSignIn, type Me } from '$hiro-app/api';
 
 export type WhoState =
 	| 'loading' // not asked yet
@@ -37,17 +39,17 @@ class Who {
 		}
 	};
 
-	/** Off to HiroLeague's sign-in page (through the backend, which knows its address); back to this page afterwards. */
+	/** Start a sign-in, to come back to this page afterwards (an app: off to HiroLeague's sign-in page). */
 	signIn = () => {
 		const url = new URL(location.href);
 		url.searchParams.delete('signin_error');
-		location.href = apiUrl(`auth/start?next=${encodeURIComponent(url.pathname + url.search)}`);
+		startSignIn(url.pathname + url.search);
 	};
 
-	/** Signs out of the app and HiroLeague both (Phase 8): the backend names HiroLeague's sign-out to go to next, which
-	 * ends that session too and shows its sign-in page. Without HiroLeague's address, only the app's ends. */
+	/** Signs out of the app and HiroLeague both (Phase 8): the app's sign-out names where the browser goes next
+	 * (HiroLeague's sign-out, which ends that session too). With nowhere to go, only this app's session ends. */
 	signOut = async () => {
-		const { then } = await api<{ then: string | null }>('auth/logout', { method: 'POST' });
+		const { then } = await signOut();
 		if (then) {
 			location.assign(then);
 			return;

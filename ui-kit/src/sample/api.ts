@@ -29,6 +29,12 @@ export const getMe = async (): Promise<Me> => ({
 	access: { gallery: 'use' }
 });
 
+/** Start a sign-in and come back to `next` (an app sends the browser to its backend's /api/auth/start). */
+export const startSignIn = (next: string) => console.info('sample app: a sign-in would start, back to', next);
+
+/** End the session; `then` is where the browser goes next (HiroLeague's sign-out), or null. */
+export const signOut = async (): Promise<{ then: string | null }> => ({ then: null });
+
 /** An AI profile of the HiroLeague core, as an app's backend passes it on. */
 export type CoreProfile = {
 	id: string;
