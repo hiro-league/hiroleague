@@ -5,7 +5,7 @@
 	import type { Component } from 'svelte';
 
 	interface Props {
-		options: readonly { value: T; label: string; title?: string; icon?: Component; count?: number }[];
+		options: readonly { value: T; label: string; title?: string; icon?: Component; count?: number; iconOnly?: boolean }[];
 		value: T | null; // null: none is picked (e.g. days picked on a calendar instead)
 		onchange: (v: T) => void;
 		size?: 'xs' | 'sm';
@@ -23,9 +23,10 @@
 			type="button"
 			class={['inline-flex items-center gap-1 rounded whitespace-nowrap [&_svg]:size-3.5', stretch && 'flex-1 justify-center', size === 'xs' ? 'px-2 py-1' : 'px-3 py-1', value === o.value ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:text-foreground']}
 			aria-pressed={value === o.value}
-			title={o.title}
+			title={o.title ?? (o.iconOnly ? o.label : undefined)}
+			aria-label={o.iconOnly ? o.label : undefined}
 			onclick={() => onchange(o.value)}
-			>{#if o.icon}<o.icon />{/if}{o.label}{#if o.count !== undefined}<span class="text-muted-foreground tabular-nums">{o.count}</span>{/if}</button
+			>{#if o.icon}<o.icon />{/if}{#if !o.iconOnly}{o.label}{/if}{#if o.count !== undefined}<span class="text-muted-foreground tabular-nums">{o.count}</span>{/if}</button
 		>
 	{/each}
 </div>

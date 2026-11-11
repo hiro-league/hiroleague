@@ -1,6 +1,7 @@
 // A dropdown's choices and its search (PickSelect). Pure, tested next to it.
 
-export type PickOption = { value: string; label: string };
+// UI kit, step 3: `disabled` and `title` per choice. A choice may have the empty value ("All", "None", "Default").
+export type PickOption = { value: string; label: string; disabled?: boolean; title?: string };
 
 /** A list this long gets a search box: shorter ones are read at a glance. */
 export const SEARCH_FROM = 9;

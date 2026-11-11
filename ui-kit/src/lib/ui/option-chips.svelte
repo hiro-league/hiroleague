@@ -1,4 +1,4 @@
-<script lang="ts" generics="T extends string">
+<script lang="ts" generics="T extends string | number">
 	// A choice from a longer list (hair styles, tops, shoes): small buttons that wrap onto more lines, the
 	// picked one standing out.
 	interface Props {
