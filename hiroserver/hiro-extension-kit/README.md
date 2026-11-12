@@ -69,10 +69,16 @@ disk and nothing in its API.
 | `llm` | optional, for an app that asks the core's AI: `profiles.ask()`, `core_ai` (the core's profiles and the app's uses, kept), `recorder` and `requests_api` (Logs → LLM requests), `ai_api`, and its table (`llm.models.LlmRequest`, which the app's models.py imports) |
 | `voices` | optional: the core's voice profiles for the pickers (`read`, `choices`, the `reader` worker), and for an app with a voice use (`Extension.voice_uses`) `speak()` and `set_default()` |
 | `whatsapp` | optional: `send()` (text, picture, voice note; honours `Extension.outputs`), `check()`, `status()`, `notify()` through the core's WhatsApp |
+| `predeploy` | a deploy's safety steps for the app's one database (`snapshot`, `trial`, `restore`, `main`); HomeHiro takes its helpers (`copy_db`, `counts`, `losses`) for its own two-database steps |
+| `api_types` | the frontend's types from the API description (`generate`, `clashes`); each app's `scripts/api_types.py` says where they go |
 | `notices` | `Browsers(notices, hello=...)` and `events_router(browsers)`: `GET /api/events`, the notices open pages reload on |
 | `testing` | for an app's tests only: `guard_network()`, `RunLog`, `CleanDatabases`, `wait_until()`, `FakeCore`, `FakeLink`, `auth()` and `outputs()` (sign-in or sending on or off for one test) |
 
 ## Rules
+
+- **Each repo keeps its own build and deploy files**: `scripts/check.sh`, `deploy.sh`, the Dockerfile, `deploy/`
+  (nightly check, post-receive) and `dev.ps1`. They are the repo's own entry points: the Docker build and the server's
+  hook run them from the repo, and a change to the kit must never change an app's deploy without that app's commit.
 
 - **Nothing here names an app.** What differs comes from `identity`; an app's own additions stay in the app.
 - **A move changes no behaviour**: no route, no answer's shape, no file name. Each app's `./scripts/check.sh` passes

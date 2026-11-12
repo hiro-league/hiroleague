@@ -21,7 +21,6 @@ import asyncio
 import base64
 import binascii
 import json
-import logging
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
