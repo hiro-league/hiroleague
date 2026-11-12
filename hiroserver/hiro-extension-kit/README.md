@@ -29,9 +29,10 @@ from pathlib import Path
 import hiro_extension_kit
 
 from .config import config
+from .extension import EXTENSION  # Extension(name="net", port=8130, features=..., rules=..., ...)
 
 hiro_extension_kit.setup(name="nethiro", title="NetHiro", package=Path(__file__).parent,
-                         data_dir=config.data_dir, static_dir=config.static_dir)
+                         data_dir=config.data_dir, static_dir=config.static_dir, extension=EXTENSION)
 ```
 
 Everything that differs between apps comes from that one call (`identity.py`): logger names (`nethiro.<area>`), the
@@ -55,12 +56,18 @@ disk and nothing in its API.
 | `logs` | `setup(folder)`: the console and the rotating files, uncaught exceptions, crashes |
 | `logfiles`, `logs_api` | reading those files; the Logs page's routes (`router`) and its `notifier` worker |
 | `db` | `Database`; the app's own: `engine`, `get_session`, `run_db()`, `migrate()` |
-| `models` | the tables every app has (`Setting`); the app's `models.py` imports them |
+| `models` | the tables every app has (`Setting`, `CorePerson`, `Role`, `AppUser`, `WebSession`); the app's `models.py` imports them |
 | `settings` | `get()` and `put()` for key/value settings; each app names its own keys |
 | `timeline` | `slots()`: counting times into slots |
 | `ui` | `router`: the app's built UI, for every path that isn't the API |
+| `extension` | `Extension`: what the app is as an extension (name in the core, port, Apps card, features, route rules, offers, AI uses), passed to `setup(..., extension=)` |
+| `hiroleague`, `hiroleague_api` | `link`: the connection to the core (pairing, the app's LAN name, `info_for`); Settings → HiroLeague's routes |
+| `pair` | `main(argv)`: the first pairing from the server's shell (an app's `pair.py` runs it) |
+| `family` | the copy of the core's family list and roles (`worker`, `sync`, `update_person`, `reachable`), and the one-time copy of rights from the app a feature came from |
+| `auth` | `identity`, `sessions`, `access` (rights per role), `api` (`/api/me`, sign-in, Settings → Users and Roles), `guard` (every route's check), `rules` (`Rule`, `for_features`) |
+| `site_name` | the LAN name rules (`site_name`, `name_of`) |
 | `notices` | `Browsers(notices, hello=...)` and `events_router(browsers)`: `GET /api/events`, the notices open pages reload on |
-| `testing` | for an app's tests only: `guard_network()`, `RunLog`, `CleanDatabases`, `wait_until()`, `FakeCore` and `FakeLink` |
+| `testing` | for an app's tests only: `guard_network()`, `RunLog`, `CleanDatabases`, `wait_until()`, `FakeCore`, `FakeLink`, `auth()` (sign-in on or off for one test) |
 
 ## Rules
 
