@@ -116,6 +116,17 @@ def test_sign_in_and_sessions(tmp_path: Path) -> None:
     assert session_person(tmp_path, token) is None
 
 
+def test_someone_signed_in_by_an_offered_way_has_a_session_without_a_password(tmp_path: Path) -> None:
+    """Home Assistant's login (an extension's offered way) gives a person a session though they have no name and
+    password of their own; removing them still ends it."""
+    mark = add_person(tmp_path, name="Mark", role_id="adult")
+    assert mark.sign_in is None
+    token, _ = start_session(tmp_path, mark.person_id)
+    assert session_person(tmp_path, token).name == "Mark"
+    remove_person(tmp_path, mark.person_id)
+    assert session_person(tmp_path, token) is None
+
+
 def test_a_new_password_ends_the_old_sessions(tmp_path: Path) -> None:
     michel = add_person(tmp_path, name="Michel", role_id="owner")
     give_sign_in(tmp_path, michel.person_id, sign_in="michel", password="correct horse")

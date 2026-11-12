@@ -115,7 +115,11 @@ def start_session(workspace_path: Path, person_id: str) -> tuple[str, datetime]:
 
 
 def session_person(workspace_path: Path, token: str | None) -> Person | None:
-    """Who the session belongs to, while it lasts and they still have a sign-in."""
+    """Who the session belongs to, while it lasts and they are still in the family list.
+
+    Not "while they have a name and password": someone signed in with an extension's offered way (Home Assistant's
+    login) has none, and their session must count. What ends a session is done where it happens: signing out, a new
+    password, a cleared sign-in and a removed person each delete theirs (``people.py``)."""
     if not token:
         return None
     with _connect(workspace_path) as conn:
@@ -124,8 +128,7 @@ def session_person(workspace_path: Path, token: str | None) -> Person | None:
         ).fetchone()
     if row is None or row[1] < utc_iso(datetime.now(UTC)):
         return None
-    person = get_person(workspace_path, row[0])
-    return person if person is not None and person.sign_in is not None else None
+    return get_person(workspace_path, row[0])
 
 
 def end_session(workspace_path: Path, token: str | None) -> None:
