@@ -13,7 +13,7 @@ from ..errors import NotAllowed
 from ..extension import ext
 from .models import AppUser, Role
 from .access import OWNER, SEE, can
-from .api import caller, seen
+from .api import caller, not_linked, seen
 from .identity import Caller
 from .rules import Rule
 
@@ -79,6 +79,8 @@ async def guard(request: Request) -> None:
     request.state.caller = c
     if c.way == "dev":
         return
+    if not c.user_id:  # the app's other way in names someone not linked to a core person (HomeHiro: HA's add-on)
+        raise NotAllowed(f"You can't use {identity.app().title} yet: {not_linked(c.name)}")
     user, role = await run_db(_user_and_role, c)
     if user is None or role is None:
         raise NotAllowed(f"You can't use {identity.app().title} yet: the owner hasn't given you a role.")

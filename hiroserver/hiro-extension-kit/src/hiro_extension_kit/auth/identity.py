@@ -3,8 +3,8 @@
 - **Signed in at the app's address** through HiroLeague's sign-in (Phase 8): a session cookie (api.py).
 - **Sign-in off** (AUTH=off, a dev copy): everyone is the owner.
 
-HomeHiro has one more way in, HA's add-on with its user headers: that one is HomeHiro's own (it reads the headers
-before it asks the kit). No header names anyone here.
+- **Another way in**, the app's own (`Extension.other_way`): HomeHiro's HA add-on, whose headers name an HA user;
+  api.py maps them to the core person through the app's links.
 
 Pure: it reads the headers and whether sign-in is on.
 """
@@ -13,15 +13,18 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
-Way = Literal["web", "dev"]
+Way = Literal["ha", "web", "dev"]  # "ha": HomeHiro's other way in (HA's add-on)
 
 
 @dataclass(frozen=True)
 class Caller:
-    user_id: str  # the core person's id (AppUser.id); "dev" with sign-in off
+    # the core person's id (AppUser.id); "dev" with sign-in off; "" for someone the other way in names who isn't
+    # linked to anyone in the family list (they wait)
+    user_id: str
     name: str
     way: Way
     device: str  # "iPhone", "Android phone", "Windows PC"... from the browser's User-Agent
+    other_id: str = ""  # through the other way in: who it names there (HomeHiro: the HA user's id)
 
 
 DEV = "dev"  # the user id with sign-in off

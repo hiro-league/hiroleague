@@ -5,13 +5,42 @@ Backend kit, step 3: each app's hiroleague.py, auth/access.py and auth/guard.py 
 around them was the same in every app and is the kit's now.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 from hiro_channel_sdk import ExtensionFeature, ExtensionUse, ExtensionVoiceUse
 
+from .auth.identity import Caller
 from .auth.rules import Rule
+
+
+@dataclass(frozen=True)
+class OtherWay:
+    """An app's own way in beside HiroLeague's sign-in (HomeHiro: HA's add-on, whose headers name an HA user).
+
+    `caller(headers)`: who the headers name (a Caller whose `way` says which way, `other_id` who it names there), or
+    None. `person_of(session, other_id)`: the core person they are (the app's links), or "": they wait, and
+    `not_linked(name)` says why. `elsewhere`: the words the sign-in page's failure adds before "ask the owner"."""
+
+    caller: Callable[[Mapping[str, str]], Caller | None]
+    person_of: Callable[[Any, str], str]
+    not_linked: Callable[[str], str]
+    elsewhere: str = ""
+
+
+@dataclass(frozen=True)
+class UsersScope:
+    """What an app keeps per user beside their role (HomeHiro's My room: the linked person, and the rooms and things
+    picked), shown and set on Settings → Users (the UI kit's `UsersScope`).
+
+    `read(session, user)`: the user's extra fields (`person`, `person_things`, `areas`, `things`). `check(session,
+    user, areas, things)`: raises Invalid for a pick the user can't have. `write(session, user, areas, things)`: keeps
+    them (the caller commits)."""
+
+    read: Callable[[Any, Any], dict[str, Any]]
+    check: Callable[[Any, Any, list[str], list[str]], None]
+    write: Callable[[Any, Any, list[str], list[str]], None]
 
 
 @dataclass(frozen=True)
@@ -34,6 +63,12 @@ class Extension:
     # Its address until a name is claimed, e.g. HomeHiro's hand-written http://homehiro.local. "": none, and the app
     # claims <name>.hiro.local by itself on its first connection.
     site_default: str = ""
+    other_way: OtherWay | None = None  # another way in beside HiroLeague's sign-in (HomeHiro: HA's add-on)
+    users_scope: UsersScope | None = None  # what the app keeps per user beside their role (HomeHiro: My room)
+    # Each time the family copy is written (family.py), before the users' roles are worked out again: the app tidies its
+    # own rows that name core people, `fn(session, core_person_ids, now)`, and says what it changed (HomeHiro: its
+    # people's links to someone gone from the list)
+    family_tidy: Callable[[Any, set[str], Any], list[str]] | None = None
     auth: bool = True  # False: sign-in off (AUTH=off, a dev copy), everyone is the owner
     outputs: bool = True  # False: nothing is sent or spoken (OUTPUTS=off, a dev copy): whatsapp.py logs it instead
     # Where each role's rights were copied from once, when this app took a feature over from another (Phase 9b, 9c:

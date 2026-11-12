@@ -198,6 +198,9 @@ def _apply(session: Session, people: list[tuple[FamilyPerson, str]], roles: list
     if changed:
         said.append(f"{changed} changed")
     session.flush()
+    if tidy := ext().family_tidy:  # the app's own rows that name core people (HomeHiro: its people's links)
+        said += tidy(session, {p.id for p, _ in people}, now)
+    session.flush()
     said += recompute_roles(session)
     session.commit()
     return said

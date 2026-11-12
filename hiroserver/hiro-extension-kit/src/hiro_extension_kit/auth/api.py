@@ -11,6 +11,7 @@ in HiroLeague's People → Roles; Settings → Roles here shows them. No access 
 and rights are its `Extension.features` (access.py); every route's check is guard.py.
 """
 
+import dataclasses
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from urllib.parse import quote, urlencode, urlsplit
@@ -52,11 +53,22 @@ def _signed_in_user(session: Session, token: str) -> AppUser | None:
     return session.get(AppUser, uid) if uid else None
 
 
+def not_linked(name: str) -> str:
+    """Why someone the app's other way in names waits: not linked to anyone in the family list (the app's words)."""
+    other = ext().other_way
+    return other.not_linked(name) if other else ""
+
+
 async def caller(request: Request) -> Caller:
-    """Who sent this request: signed in here (the session cookie), or sign-in off."""
+    """Who sent this request: signed in here (the session cookie), the app's other way in (HomeHiro: HA's add-on,
+    mapped to the core person through its links; user_id "" when not linked), or sign-in off."""
     c = caller_of(request.headers, ext().auth)
     if c is not None:
         return c
+    other = ext().other_way
+    if other is not None and (c := other.caller(request.headers)) is not None:
+        named = c
+        return await run_db(lambda s: dataclasses.replace(named, user_id=other.person_of(s, named.other_id)))
     token = request.cookies.get(sessions.COOKIE, "")
     if token:
         user = await run_db(_signed_in_user, token)
@@ -70,7 +82,7 @@ async def owner(request: Request) -> Caller:
     c = await caller(request)
     if c.way == "dev":
         return c
-    user = await run_db(lambda s: s.get(AppUser, c.user_id))
+    user = await run_db(lambda s: s.get(AppUser, c.user_id)) if c.user_id else None
     if user is None or user.role_id != OWNER:
         raise NotAllowed("Only an owner can manage users and roles.")
     return c
@@ -80,9 +92,9 @@ async def owner(request: Request) -> Caller:
 
 
 class MeOut(BaseModel):
-    id: str  # the core person's id
+    id: str  # the core person's id ("" for someone the other way in names, not linked to one yet)
     name: str
-    way: Literal["web", "dev"]
+    way: Literal["ha", "web", "dev"]
     state: Literal["ok", "waiting", "denied"]  # waiting: no role yet; denied: the owner chose No access
     role_id: str | None
     role_name: str | None
@@ -138,6 +150,9 @@ async def me(request: Request) -> MeOut:
     if c.way == "dev":
         return MeOut(id=c.user_id, name=c.name, way="dev", state="ok", role_id=OWNER, role_name="Owner", owner=True,
                      access=levels(OWNER, []), rights=rights_of(OWNER, []))
+    if not c.user_id:  # the other way in names someone not linked to a core person: no user row, they wait
+        return MeOut(id="", name=c.name, way=c.way, state="waiting", role_id=None, role_name=None, owner=False,
+                     access=levels(None, []), reason=not_linked(c.name))
     return await run_db(lambda s: _me(s, seen(s, c)))
 
 
@@ -159,8 +174,10 @@ async def sign_in(next: str = "/") -> RedirectResponse:
     code."""
     admin = link.admin_url()
     if not admin:
+        other = ext().other_way
+        ask = f"{other.elsewhere}ask the owner" if other and other.elsewhere else "Ask the owner"
         return _failed_sign_in(f"{_title()} doesn't know HiroLeague's address yet, so it can't send you there to sign in. "
-                               "Ask the owner to set it (Settings → HiroLeague).")
+                               f"{ask} to set it (Settings → HiroLeague).")
     return RedirectResponse(f"{admin}/sign-in?{urlencode({'for': ext().name, 'next': local_path(next)})}", 303)
 
 
@@ -253,6 +270,11 @@ async def signed_out_by_hiroleague(request: Request, next: str = "/") -> Redirec
 # ---- Settings → Users
 
 
+class Ref(BaseModel):
+    id: str
+    name: str
+
+
 class UserOut(BaseModel):
     id: str  # the core person's id
     name: str
@@ -262,15 +284,25 @@ class UserOut(BaseModel):
     last_seen: datetime
     last_way: str
     last_device: str
+    # Only in an app with a users scope (Extension.users_scope, HomeHiro's My room): the linked person, their things,
+    # and what is picked
+    person: Ref | None = None
+    person_things: list[Ref] | None = None
+    areas: list[str] | None = None
+    things: list[str] | None = None
 
 
 class UserIn(BaseModel):
     role_id: str | None = None  # None with denied: No access
     denied: bool = False
+    areas: list[str] | None = None  # an app with a users scope: what is picked (None: as it was)
+    things: list[str] | None = None
 
 
 def users_out(session: Session) -> list[UserOut]:
-    return [UserOut.model_validate(u.model_dump()) for u in session.exec(select(AppUser).order_by(col(AppUser.first_seen)))]
+    scope = ext().users_scope
+    return [UserOut.model_validate({**u.model_dump(), **(scope.read(session, u) if scope else {})})
+            for u in session.exec(select(AppUser).order_by(col(AppUser.first_seen)))]
 
 
 @router.get("/users")
@@ -292,18 +324,24 @@ def _checked_user(session: Session, user_id: str, body: UserIn) -> tuple[AppUser
         owners = session.exec(select(AppUser).where(AppUser.role_id == OWNER, col(AppUser.denied).is_(False))).all()
         if len(owners) == 1:
             raise Invalid(f"{u.name} is the only owner. Make someone else an owner first.")
+    scope = ext().users_scope
+    if scope is not None:
+        scope.check(session, u, body.areas or [], body.things or [])
     core = session.get(CorePerson, user_id)  # the user is this core person
     if role is not None and role.id != u.role_id and core is None:
         raise Invalid(f"{u.name} isn't in HiroLeague's family list any more, so their role can't be set here.")
     return u, role, core
 
 
-def _write_user(session: Session, user_id: str, denied: bool) -> list[UserOut]:
+def _write_user(session: Session, user_id: str, body: UserIn) -> list[UserOut]:
     row = session.get(AppUser, user_id)
     if row is None:
         raise NotFound(f"No such user: they appear here once they have opened {_title()}.")
-    row.denied = denied
+    row.denied = body.denied
     session.add(row)
+    scope = ext().users_scope
+    if scope is not None and (body.areas is not None or body.things is not None):
+        scope.write(session, row, list(dict.fromkeys(body.areas or [])), list(dict.fromkeys(body.things or [])))
     session.flush()
     family.recompute_roles(session)
     session.commit()
@@ -313,11 +351,11 @@ def _write_user(session: Session, user_id: str, denied: bool) -> list[UserOut]:
 @router.put("/users/{user_id}")
 async def put_user(user_id: str, body: UserIn, c: Caller = Depends(owner)) -> list[UserOut]:
     """A user's role (asked of HiroLeague: their core person's role; it refuses taking the only Owner's away and says
-    why), or No access (the app's own)."""
+    why), or No access, and with a users scope what is picked there (both the app's own)."""
     u, role, core = await run_db(_checked_user, user_id, body)
     if role is not None and core is not None and role.id != u.role_id and role.id != core.role_id:
         await family.update_person(core.id, role_id=role.id)
-    out = await run_db(_write_user, user_id, body.denied)
+    out = await run_db(_write_user, user_id, body)
     log.info("Users: %s gave %s %s", c.name, u.name, f"the role {role.name}" if role else "No access")
     return out
 
@@ -343,6 +381,7 @@ class RoleOut(BaseModel):
     name: str
     says: str
     built_in: bool
+    core: bool  # in HiroLeague's family list (every role the app keeps is: the copy follows the core's)
     rights: list[str]  # what it may do in the app, granted in HiroLeague ("<feature>.<right>")
     access: dict[str, Literal["no", "see", "use"]]  # every feature's level, from the rights
     users: list[str]  # the names of the users who have it
