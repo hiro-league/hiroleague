@@ -66,8 +66,10 @@ disk and nothing in its API.
 | `family` | the copy of the core's family list and roles (`worker`, `sync`, `update_person`, `reachable`), and the one-time copy of rights from the app a feature came from |
 | `auth` | `identity`, `sessions`, `access` (rights per role), `api` (`/api/me`, sign-in, Settings → Users and Roles), `guard` (every route's check), `rules` (`Rule`, `for_features`) |
 | `site_name` | the LAN name rules (`site_name`, `name_of`) |
+| `llm` | optional, for an app that asks the core's AI: `profiles.ask()`, `core_ai` (the core's profiles and the app's uses, kept), `recorder` and `requests_api` (Logs → LLM requests), `ai_api`, and its table (`llm.models.LlmRequest`, which the app's models.py imports) |
+| `whatsapp` | optional: `send()` (text, picture, voice note; honours `Extension.outputs`), `check()`, `status()`, `notify()` through the core's WhatsApp |
 | `notices` | `Browsers(notices, hello=...)` and `events_router(browsers)`: `GET /api/events`, the notices open pages reload on |
-| `testing` | for an app's tests only: `guard_network()`, `RunLog`, `CleanDatabases`, `wait_until()`, `FakeCore`, `FakeLink`, `auth()` (sign-in on or off for one test) |
+| `testing` | for an app's tests only: `guard_network()`, `RunLog`, `CleanDatabases`, `wait_until()`, `FakeCore`, `FakeLink`, `auth()` and `outputs()` (sign-in or sending on or off for one test) |
 
 ## Rules
 

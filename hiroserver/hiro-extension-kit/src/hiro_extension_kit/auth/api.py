@@ -11,7 +11,6 @@ in HiroLeague's People → Roles; Settings → Roles here shows them. No access 
 and rights are its `Extension.features` (access.py); every route's check is guard.py.
 """
 
-import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from urllib.parse import quote, urlencode, urlsplit

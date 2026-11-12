@@ -232,6 +232,15 @@ def auth(monkeypatch, on: bool) -> None:
     monkeypatch.setattr(extension, "_extension", replace(extension.ext(), auth=on))
 
 
+def outputs(monkeypatch, on: bool) -> None:
+    """Sending on or off for one test (the app's Extension.outputs; its tests run with OUTPUTS=off)."""
+    from dataclasses import replace
+
+    from . import extension
+
+    monkeypatch.setattr(extension, "_extension", replace(extension.ext(), outputs=on))
+
+
 def wait_until(condition: Callable[[], Any], timeout: float = 5.0, what: str = "condition") -> Any:
     """Poll `condition` until it is truthy (returns its value) or fail after `timeout` seconds."""
     end = time.monotonic() + timeout

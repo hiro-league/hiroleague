@@ -22,7 +22,6 @@ Backend kit, step 3: each app had its own copy of this module, the same but for 
 """
 
 import asyncio
-import logging
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime

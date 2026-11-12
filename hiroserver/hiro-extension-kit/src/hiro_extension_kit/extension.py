@@ -28,6 +28,7 @@ class Extension:
     knows: Sequence[dict[str, Any]] = ()  # the questions other apps may ask it (offers.knows)
     uses: Sequence[ExtensionUse] = ()  # what it asks the core's AI for
     auth: bool = True  # False: sign-in off (AUTH=off, a dev copy), everyone is the owner
+    outputs: bool = True  # False: nothing is sent or spoken (OUTPUTS=off, a dev copy): whatsapp.py logs it instead
     # Where each role's rights were copied from once, when this app took a feature over from another (Phase 9b, 9c:
     # "home"), and that feature's name for the log line ("System health"). None: nothing to copy.
     rights_from: str | None = None
