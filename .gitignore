@@ -47,8 +47,8 @@ hiroserver/_smoke_clean_install/
 
 # LangSmith trace dumps are huge (tens of MB) and live outside the repo now
 # (see scripts/dump_langsmith_trace.py / $HIRO_TRACE_DIR -> ../hiro-traces).
-# Guard against ever re-committing one into reports/.
-reports/trace_*.json
+# reports/ only holds local eval scratch (audits, prompt dumps, signals); ignore it whole.
+reports/
 
 # HiroAdmin Svelte POC
 admin_frontend/node_modules/
@@ -59,3 +59,15 @@ hiroserver/hirocli/src/hirocli/admin_svelte/static/
 
 # Stray runtime workspace DB if the server is ever started from the source tree
 hiroserver/hirocli/db/
+
+# Svelte/Vite build output and installs in any folder (a stray nested
+# admin_frontend/admin_frontend/ build was once committed)
+**/.svelte-kit/
+**/node_modules/
+admin_frontend/admin_frontend/
+
+# Runtime output when the server runs with a workspace inside the source tree:
+# the graph-indexed marker (graph_index_marker.py), the Graph Runs ledger, scratch workspaces
+**/.graph_indexed
+hiroserver/logs/
+hiroserver/_tmp_ws/
