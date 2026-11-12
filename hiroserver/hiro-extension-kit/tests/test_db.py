@@ -42,3 +42,15 @@ def test_run_db_drops_what_it_did_not_commit_and_passes_errors_on():
         asyncio.run(run_db(fail))
     with Session(engine) as s:
         assert s.get(Setting, "db-test") is None
+
+
+def test_a_second_file_can_skip_foreign_keys_and_fsync_less(tmp_path):
+    """HomeHiro's streams.db: many rows all day, so synchronous=NORMAL, and no foreign keys."""
+    from hiro_extension_kit.db import Database
+
+    records = Database(tmp_path / "streams.db", tmp_path / "migrations_streams", foreign_keys=False, synchronous="NORMAL")
+    with records.engine.connect() as conn:
+        assert conn.execute(text("PRAGMA synchronous")).scalar() == 1  # NORMAL
+        assert conn.execute(text("PRAGMA foreign_keys")).scalar() == 0
+        assert conn.execute(text("PRAGMA journal_mode")).scalar() == "wal"
+    records.engine.dispose()

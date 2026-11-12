@@ -57,8 +57,9 @@ def _title() -> str:
 
 
 def site_url_default() -> str:
-    """The address the app claims by itself while none is set: http://<Extension.name>.hiro.local."""
-    return site_name(ext().name, DEFAULT_KIND).url
+    """The app's address while none is set: `Extension.site_default` (HomeHiro's http://homehiro.local), else the name
+    it claims by itself, http://<Extension.name>.hiro.local."""
+    return ext().site_default or site_name(ext().name, DEFAULT_KIND).url
 
 
 def info_for(site_url: str) -> ExtensionInfo:
@@ -67,9 +68,10 @@ def info_for(site_url: str) -> ExtensionInfo:
     e = ext()
     offers = ExtensionOffers(
         knows=list(e.knows),
+        can_do=list(e.can_do),
         shows=[{"kind": OFFER_KIND_SITE, "title": e.site_title, "icon": e.site_icon, "url": site_url, "roles": []}],
     )
-    return ExtensionInfo(name=e.name, version=e.version, description=e.description, offers=offers, uses=list(e.uses),
+    return ExtensionInfo(name=e.name, version=e.version, description=e.description, offers=offers, uses=list(e.uses), voice_uses=list(e.voice_uses),
                          repo=e.repo,  # its repo: the code reports keep a report for it (HiroLeague's extensions.list)
                          features=list(e.features))  # its features and rights, granted per role in HiroLeague
 
@@ -152,7 +154,8 @@ class HiroLeagueLink(Worker):
         # subscribers on the loop, so they start their requests on their own (family.py).
         if status == STATUS_CONNECTED:
             bus.publish(CONNECTED)
-            if not self.site_url_set:  # no name yet: claim <name>.hiro.local (not awaited here, see above)
+            # no name yet and no default address: claim <name>.hiro.local (not awaited here, see above)
+            if not self.site_url_set and not ext().site_default:
                 self.spawn(self._claim_default(), "claim the default name")
 
     def on_start(self) -> None:

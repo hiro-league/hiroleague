@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 from sqlmodel import Session, col, delete, select
 
 from .. import identity
-from ..models import WebSession
+from .models import WebSession
 
 COOKIE = f"{identity.app().name}_session"  # nethiro_session
 SESSION_DAYS = 90

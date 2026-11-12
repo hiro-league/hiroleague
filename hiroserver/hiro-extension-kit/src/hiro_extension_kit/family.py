@@ -38,7 +38,7 @@ from .errors import AppError, Invalid, OutsideError, Unavailable, failed, transl
 from .events import bus
 from .extension import ext
 from .hiroleague import CONNECTED, link
-from .models import AppUser, CorePerson, Role
+from .auth.models import AppUser, CorePerson, Role
 
 log = identity.logger("family")
 

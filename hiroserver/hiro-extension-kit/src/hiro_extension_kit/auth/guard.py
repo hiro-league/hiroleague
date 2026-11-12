@@ -11,7 +11,7 @@ from .. import identity
 from ..db import run_db
 from ..errors import NotAllowed
 from ..extension import ext
-from ..models import AppUser, Role
+from .models import AppUser, Role
 from .access import OWNER, SEE, can
 from .api import caller, seen
 from .identity import Caller

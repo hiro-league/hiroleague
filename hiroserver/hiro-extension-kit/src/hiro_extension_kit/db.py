@@ -28,20 +28,28 @@ BUSY_TIMEOUT_MS = 5000
 
 
 class Database:
-    """One SQLite file (made with its folder if missing) and the Alembic migrations that keep its schema."""
+    """One SQLite file (made with its folder if missing) and the Alembic migrations that keep its schema.
 
-    def __init__(self, path: Path, migrations: Path) -> None:
+    `foreign_keys`: SQLite checks them (off by default in SQLite). `synchronous`: SQLite's setting, e.g. "NORMAL" for a
+    file of many rows written all day (HomeHiro's streams.db: no fsync per commit; with WAL the file can't be corrupted
+    by it, a power cut can lose the rows of the last moment). Backend kit step 5: HomeHiro's second file."""
+
+    def __init__(self, path: Path, migrations: Path, *, foreign_keys: bool = True, synchronous: str | None = None) -> None:
         self.path = path
         self.migrations = migrations
+        self.foreign_keys = foreign_keys
+        self.synchronous = synchronous
         path.parent.mkdir(parents=True, exist_ok=True)
         self.engine = create_engine(f"sqlite:///{path.as_posix()}", connect_args={"check_same_thread": False})
         event.listen(self.engine, "connect", self._pragmas)
 
-    @staticmethod
-    def _pragmas(conn, _record) -> None:
-        # WAL lets the UI read while a sync writes; foreign keys are off by default in SQLite.
+    def _pragmas(self, conn, _record) -> None:
+        # WAL lets the UI read while a sync writes.
         conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA foreign_keys=ON")
+        if self.foreign_keys:
+            conn.execute("PRAGMA foreign_keys=ON")
+        if self.synchronous:
+            conn.execute(f"PRAGMA synchronous={self.synchronous}")
         conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
 
     def get_session(self) -> Iterator[Session]:

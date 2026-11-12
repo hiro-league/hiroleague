@@ -27,7 +27,7 @@ from ..db import get_session, run_db
 from ..errors import Invalid, AppError, NotAllowed, NotFound, NotSignedIn, OutsideError, Unavailable, failed
 from ..extension import ext
 from ..hiroleague import link
-from ..models import AppUser, CorePerson, Role
+from .models import AppUser, CorePerson, Role
 from . import sessions
 from .access import OWNER, levels, rights_of
 from .identity import Caller, caller_of, device_of

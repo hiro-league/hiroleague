@@ -9,7 +9,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from hiro_channel_sdk import ExtensionFeature, ExtensionUse
+from hiro_channel_sdk import ExtensionFeature, ExtensionUse, ExtensionVoiceUse
 
 from .auth.rules import Rule
 
@@ -24,9 +24,16 @@ class Extension:
     site_title: str  # its Apps card in the core ("Network")
     site_icon: str  # the card's icon ("network")
     features: Sequence[ExtensionFeature]  # what a role may do in it, granted per role in the core
-    rules: Sequence[Rule]  # every route's rule (auth/guard.py), first match wins
+    # Every route's rule (auth/guard.py), first match wins. Only for an app on the kit's route check (HomeHiro keeps
+    # its own for now: its users come in one more way).
+    rules: Sequence[Rule] = ()
     knows: Sequence[dict[str, Any]] = ()  # the questions other apps may ask it (offers.knows)
+    can_do: Sequence[dict[str, Any]] = ()  # what other apps may ask it to do, and sign-ins it offers (offers.can_do)
     uses: Sequence[ExtensionUse] = ()  # what it asks the core's AI for
+    voice_uses: Sequence[ExtensionVoiceUse] = ()  # what it asks the core to say aloud
+    # Its address until a name is claimed, e.g. HomeHiro's hand-written http://homehiro.local. "": none, and the app
+    # claims <name>.hiro.local by itself on its first connection.
+    site_default: str = ""
     auth: bool = True  # False: sign-in off (AUTH=off, a dev copy), everyone is the owner
     outputs: bool = True  # False: nothing is sent or spoken (OUTPUTS=off, a dev copy): whatsapp.py logs it instead
     # Where each role's rights were copied from once, when this app took a feature over from another (Phase 9b, 9c:
