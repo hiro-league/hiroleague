@@ -19,6 +19,7 @@
 	import { tabLink } from '$kit/state/url-tab.svelte';
 	import { firstLeaf, menuFor, onPage, tabShown, tabsFit, type MenuPage, type MenuTab } from './menu';
 	import SidebarResize from './sidebar-resize.svelte';
+	import AppSwitcher from './app-switcher.svelte';
 
 	interface Props {
 		width: number; // the menu's width in pixels
@@ -49,10 +50,10 @@
 
 <Sidebar.Root collapsible="icon">
 	<!-- The collapse button sits here, so pages start at the top of the window. Collapsed to icons, the
-	     name makes way for it. -->
+	     name makes way for it, and the app switcher goes under it. -->
 	<Sidebar.Header>
 		<Sidebar.Menu>
-			<Sidebar.MenuItem class="flex items-center gap-1">
+			<Sidebar.MenuItem class="flex items-center gap-1 group-data-[collapsible=icon]:flex-col">
 				<!-- The name goes to the home page (someone without it is sent on to their first page). -->
 				<Sidebar.MenuButton class="group-data-[collapsible=icon]:hidden">
 					{#snippet child({ props })}
@@ -62,6 +63,8 @@
 						</a>
 					{/snippet}
 				</Sidebar.MenuButton>
+				<!-- Every app the person may open, to move between them (app-switcher.svelte) -->
+				<AppSwitcher />
 				<Sidebar.Trigger
 					class="shrink-0 text-muted-foreground"
 					title={sidebar.state === 'collapsed' ? 'Expand menu' : 'Collapse menu'}

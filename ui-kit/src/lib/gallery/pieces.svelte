@@ -41,6 +41,17 @@
 	import { Sorter } from '$kit/ui/sort.svelte';
 	import { TABLE_GRID_ROW } from '$kit/ui/table-grid';
 	import { Inbox, Plus, Trash2 } from '@lucide/svelte';
+	import AppSwitcher from '$kit/components/app-switcher.svelte';
+	import type { AppTile } from '$kit/api/apps';
+
+	// The app switcher's sample list: HiroLeague (no core here: its logo falls back to an icon), this app, one offline.
+	const sampleApps = async (): Promise<AppTile[]> => [
+		{ extension: 'hiroleague', title: 'HiroLeague', icon: 'hiroleague', url: 'http://hiro.local', online: true, here: false },
+		{ extension: 'home', title: 'Home', icon: 'house', url: '#home', online: true, here: true },
+		{ extension: 'net', title: 'Network', icon: 'network', url: '#net', online: true, here: false },
+		{ extension: 'train', title: 'Training', icon: 'scan-face', url: '#train', online: false, here: false },
+		{ extension: 'study', title: 'Study', icon: 'graduation-cap', url: '#study', online: true, here: false }
+	];
 
 	let level = $state(50);
 	let range = $state('24h');
@@ -273,6 +284,12 @@
 						{#snippet icon()}<Inbox />{/snippet}
 						{#snippet actions()}<Button size="sm"><Plus /> Connect</Button>{/snippet}
 					</EmptyState>
+				</div>
+			</Panel>
+
+			<Panel title="App switcher" description="In every app's menu head (and the phone bar): the apps this person may open. Here with sample apps; the menu's own asks the backend, which the gallery hasn't got.">
+				<div class="flex items-center gap-2 text-sm text-muted-foreground">
+					<AppSwitcher load={sampleApps} /> Open it
 				</div>
 			</Panel>
 

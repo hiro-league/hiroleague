@@ -24,10 +24,16 @@ def _matches(rule: Rule, method: str, path: str) -> bool:
     return path == rule.path or path.startswith(rule.path + "/")
 
 
+# The kit's own routes that every app mounts, with the kit's rule, before the app's own rules: an app needn't list them.
+KIT_RULES: tuple[Rule, ...] = (
+    Rule("/api/apps", "signed_in"),  # the app switcher's list (hiroleague_api.py): everyone with a role
+)
+
+
 def rule_for(method: str, path: str) -> Rule | None:
     """The rule for a route (its path as declared, e.g. /api/service-status/alerts/{alert_id}), or None."""
     method = "GET" if method == "HEAD" else method
-    return next((r for r in ext().rules if _matches(r, method, path)), None)
+    return next((r for r in (*KIT_RULES, *ext().rules) if _matches(r, method, path)), None)
 
 
 def needed(rule: Rule, feature: str, method: str) -> str:

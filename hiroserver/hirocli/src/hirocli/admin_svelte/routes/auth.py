@@ -47,6 +47,7 @@ from hirocli.domain.admin_sign_in import (
 from hirocli.domain.people import anyone_signs_in, get_person, get_role
 from hirocli.runtime.sign_in_for_extensions import (
     CODES,
+    app_entry,
     back_url,
     find_site,
     list_sign_in_offers,
@@ -347,11 +348,14 @@ async def sign_in_with(method: str, request: Request, next: str = "/") -> Redire
 
 @auth_router.get("/apps")
 async def apps(request: Request) -> Any:
-    """Phase 8: the extensions' sites this person's role sees (the dashboard's Apps card)."""
+    """Phase 8: the extensions' sites this person's role sees (the dashboard's Apps card). The app switcher (UI kit)
+    reads the same list, every app's own /api/apps alike: HiroLeague first, the app it is shown in marked ``here``
+    (the Apps card leaves that one out)."""
     person = await signed_in_person(request)
     if person is None:
         return api_failure("Sign in first.", 401)
     sites = await run_in_threadpool(list_sites, _manager(request), _workspace_path(request))
     shown = sites_for_role(sites, person.role_id)
-    data = [{"extension": s.extension, "title": s.title, "icon": s.icon, "url": s.url, "online": s.online} for s in shown]
-    return {"apps": data}
+    core = {"extension": "hiroleague", "title": "HiroLeague", "icon": "hiroleague", "url": _origin(request),
+            "online": True, "here": True}
+    return {"apps": [core, *({**app_entry(s), "here": False} for s in shown)]}

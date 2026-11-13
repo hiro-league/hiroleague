@@ -245,6 +245,11 @@ METHOD_SITES_CLAIM: str = "sites.claim"
 SITES_ERROR_INVALID: str = "invalid"
 SITES_ERROR_TAKEN: str = "taken"
 SITES_DOMAIN: str = "hiro.local"  # an app's name is <label>.hiro.local, or a one-word <label>.local
+# The app switcher (the grid of apps in every app's menu head) lists the apps one person may open.
+#   sites.list    extension -> core, {person_id} -> {"apps": [{extension, title, icon, url, online}],
+#                 "opens_settings": bool}: every paired extension's site this person's role sees (the core's Apps card),
+#                 and whether their role opens HiroLeague's settings. An unknown person gets no apps. Extensions only.
+METHOD_SITES_LIST: str = "sites.list"
 
 EXTENSION_AUTH_TIMEOUT_SECONDS: float = 10.0
 EXTENSION_REQUEST_TIMEOUT_SECONDS: float = 15.0

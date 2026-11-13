@@ -104,7 +104,12 @@ def test_a_kid_signs_in_for_the_apps_only(family: dict[str, Any]) -> None:
     me = client.get("/api/auth/me").json()
     assert me["can_open_settings"] is False and me["role_name"] == "Kid"
     apps = client.get("/api/apps").json()["apps"]
-    assert apps == [{"extension": "home", "title": "Home", "icon": "house", "url": "http://homehiro.local", "online": True}]
+    assert apps == [
+        {"extension": "hiroleague", "title": "HiroLeague", "icon": "hiroleague", "url": "http://testserver",
+         "online": True, "here": True},
+        {"extension": "home", "title": "Home", "icon": "house", "url": "http://homehiro.local", "online": True,
+         "here": False},
+    ]
 
     set_role_admin(family["path"], "kid", True)
     assert client.get("/api/secret").json() == "settings"
@@ -145,6 +150,21 @@ def test_a_signed_in_browser_goes_back_with_a_code_the_extension_redeems_once(fa
     assert who == {"person_id": family["mark"].person_id, "name": "Mark", "role_id": "kid", "role_name": "Kid"}
     with pytest.raises(RequestRefused):  # one use
         _run(sign_in.handle_auth_code({"code": code}, ctx))
+
+
+def test_an_app_asks_which_apps_a_person_may_open(family: dict[str, Any]) -> None:
+    """The app switcher: an app asks (sites.list) for the person using it; the sites their role sees, and whether their
+    role opens HiroLeague's settings."""
+    ctx = SimpleNamespace(
+        msg=SimpleNamespace(routing=SimpleNamespace(sender_id="ext-home")),
+        server_ctx=SimpleNamespace(workspace_path=family["path"], extension_manager=family["ext"]),
+    )
+    home = {"extension": "home", "title": "Home", "icon": "house", "url": "http://homehiro.local", "online": True}
+    owner = _run(sign_in.handle_sites_list({"person_id": family["michel"].person_id}, ctx))
+    assert owner == {"apps": [home], "opens_settings": True}
+    kid = _run(sign_in.handle_sites_list({"person_id": family["mark"].person_id}, ctx))
+    assert kid == {"apps": [home], "opens_settings": False}
+    assert _run(sign_in.handle_sites_list({"person_id": "nobody"}, ctx)) == {"apps": [], "opens_settings": False}
 
 
 def test_a_next_off_the_site_goes_to_its_start(family: dict[str, Any]) -> None:

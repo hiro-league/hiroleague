@@ -29,6 +29,7 @@ from hiro_channel_sdk.constants import (
     AUTH_CODE_SECONDS,
     AUTH_ERROR_INVALID_CODE,
     METHOD_AUTH_CODE,
+    METHOD_SITES_LIST,
     OFFER_KIND_SIGN_IN,
     OFFER_KIND_SITE,
 )
@@ -272,6 +273,33 @@ async def handle_auth_code(params: dict[str, Any], ctx: RequestContext) -> dict[
     }
 
 
+# ---------------------------------------------------------------------------
+# sites.list (extension → core): the app switcher
+# ---------------------------------------------------------------------------
+
+
+def app_entry(site: Site) -> dict[str, Any]:
+    """One app as the Apps card and the app switcher show it."""
+    return {"extension": site.extension, "title": site.title, "icon": site.icon, "url": site.url, "online": site.online}
+
+
+async def handle_sites_list(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
+    """The apps one person may open, for an app's app switcher: the sites their role sees, and whether their role
+    opens HiroLeague's settings (the app then shows HiroLeague too)."""
+    workspace_path = Path(ctx.server_ctx.workspace_path)
+    person_id = str(params.get("person_id") or "")
+    person = await asyncio.to_thread(get_person, workspace_path, person_id) if person_id else None
+    if person is None:
+        return {"apps": [], "opens_settings": False}
+    sites = await asyncio.to_thread(list_sites, ctx.server_ctx.extension_manager, workspace_path)
+    role = await asyncio.to_thread(get_role, workspace_path, person.role_id)
+    return {
+        "apps": [app_entry(s) for s in sites_for_role(sites, person.role_id)],
+        "opens_settings": bool(role and role.admin),
+    }
+
+
 SIGN_IN_REQUEST_HANDLERS: tuple[tuple[str, Any, frozenset[str]], ...] = (
     (METHOD_AUTH_CODE, handle_auth_code, EXTENSIONS_ONLY),
+    (METHOD_SITES_LIST, handle_sites_list, EXTENSIONS_ONLY),  # the app switcher in every app
 )

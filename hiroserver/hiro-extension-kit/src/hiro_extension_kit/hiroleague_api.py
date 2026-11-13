@@ -3,9 +3,10 @@ names change), pairing, and the test call (hiroleague.py keeps the connection)."
 
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
+from .auth.api import caller
 from .hiroleague import link
 
 router = APIRouter()
@@ -64,6 +65,29 @@ class SiteNameOut(BaseModel):
 
 class PairIn(BaseModel):
     code: str
+
+
+class AppTile(BaseModel):
+    """One app in the app switcher: the core's Apps card entry, `here` = the app it is shown in."""
+
+    extension: str  # its name in the core ("net"); "hiroleague" for the core itself
+    title: str
+    icon: str  # a name the UI kit draws ("network"), "hiroleague" = the core's logo
+    url: str
+    online: bool  # connected to HiroLeague now
+    here: bool
+
+
+class AppsOut(BaseModel):
+    apps: list[AppTile]
+
+
+@router.get("/api/apps")
+async def apps(request: Request) -> AppsOut:
+    """The app switcher (the grid in the menu's head, UI kit): the apps the person using this app may open. The core
+    answers the same at its own /api/apps. Anyone with a role may ask (the kit's own rule, auth/guard.py)."""
+    c = await caller(request)
+    return AppsOut.model_validate({"apps": await link.apps_for(c.user_id)})
 
 
 @router.get("/api/hiroleague")

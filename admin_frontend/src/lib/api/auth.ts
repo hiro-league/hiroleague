@@ -1,4 +1,5 @@
 import { apiRequest } from './client';
+import type { AppTile } from '$kit/api/apps';
 
 /** The person signed in to the admin (Phase 6: HiroLeague's own sign-in). */
 export type SignedInPerson = {
@@ -22,8 +23,6 @@ export type AuthMe = {
   sign_in_offers: SignInOffer[];
 };
 
-/** An extension's own site on the dashboard's Apps card (Phase 8). */
-export type AppSite = { extension: string; title: string; icon: string; url: string; online: boolean };
 
 export async function getAuthMe() {
   return apiRequest<AuthMe>('/auth/me');
@@ -42,7 +41,7 @@ export async function signOut() {
 }
 
 export async function listApps() {
-  return apiRequest<{ apps: AppSite[] }>('/apps');
+  return apiRequest<{ apps: AppTile[] }>('/apps'); // the dashboard's Apps card; the app switcher (UI kit) reads the same
 }
 
 /**

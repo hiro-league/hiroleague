@@ -6,30 +6,28 @@
    * sign-in lets you in. Nothing shows when no extension declares a site.
    */
   import { onMount } from 'svelte';
-  import { AppWindow, ChartColumn, ExternalLink, House } from '@lucide/svelte';
+  import { ExternalLink } from '@lucide/svelte';
+  import { appIcon } from '$kit/components/app-icons';
   import Panel from '$kit/ui/panel.svelte';
   import Notice from '$kit/ui/notice.svelte';
   import StatusDot from '$kit/ui/status-dot.svelte';
-  import { listApps, type AppSite } from '$lib/api/auth';
+  import { listApps } from '$lib/api/auth';
+  import type { AppTile } from '$kit/api/apps';
 
-  // The icons extensions may name (offers.shows "icon"); anything else gets a plain app icon.
-  const ICONS = { house: House, chart: ChartColumn } as const; // chart: the code reports
-
-  let apps = $state<AppSite[]>([]);
+  let apps = $state<AppTile[]>([]);
   let loaded = $state(false);
   let error = $state<string | null>(null);
 
   onMount(async () => {
     try {
-      apps = (await listApps()).apps;
+      // The app switcher reads the same list: it starts with HiroLeague itself (`here`), not a tile here.
+      apps = (await listApps()).apps.filter((a) => !a.here);
     } catch (err) {
       error = errorMessage(err);
     } finally {
       loaded = true;
     }
   });
-
-  const iconFor = (name: string) => ICONS[name as keyof typeof ICONS] ?? AppWindow;
 </script>
 
 {#if error}
@@ -42,7 +40,7 @@
     </div>
     <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
       {#each apps as app (app.extension)}
-        {@const Icon = iconFor(app.icon)}
+        {@const Icon = appIcon(app.icon)}
         <a
           href={app.url}
           target="_blank"

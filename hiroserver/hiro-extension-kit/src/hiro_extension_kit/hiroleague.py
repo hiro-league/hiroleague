@@ -22,13 +22,14 @@ import time
 from typing import Any
 
 from hiro_channel_sdk import ExtensionClient, ExtensionCredentials, ExtensionInfo, ExtensionOffers, ExtensionRequestError
-from hiro_channel_sdk.constants import (METHOD_CORE_INFO, METHOD_SITES_CLAIM, OFFER_KIND_SITE, SITES_DOMAIN, SITES_ERROR_INVALID,
-                                        SITES_ERROR_TAKEN)
+from hiro_channel_sdk.constants import (CORE_REPO, METHOD_CORE_INFO, METHOD_SITES_CLAIM, METHOD_SITES_LIST, OFFER_KIND_SITE,
+                                        SITES_DOMAIN, SITES_ERROR_INVALID, SITES_ERROR_TAKEN)
 from hiro_channel_sdk.extension import STATUS_CONNECTED
 from hiro_channel_sdk.workers import Worker
 from sqlmodel import Session
 
 from . import calls, identity, settings
+from .auth.identity import DEV
 from .db import run_db
 from .errors import AppError, Invalid, OutsideError, Unavailable, failed, translate
 from .events import bus
@@ -47,6 +48,8 @@ SITE_URL_KEY = f"{identity.app().name}_url"  # nethiro_url
 DEFAULT_KIND = "subdomain"  # the name the app claims by itself while none is set: <Extension.name>.hiro.local
 # A claim may reload the core's proxy (the core waits up to 60 s for it).
 SITES_TIMEOUT = 75.0
+APPS_TIMEOUT = 5.0  # the app switcher's list of apps (sites.list): someone is waiting with the grid open
+CORE_NAME = CORE_REPO  # "hiroleague": the core's tile in the app switcher (its icon is the core's own logo)
 HOME = "home"  # HomeHiro's name in the core
 CONNECTED = "hiroleague connected"  # published on the bus each time the link is connected (signed in)
 LOOPBACK = {"127.0.0.1", "localhost", "[::1]"}  # the core on the app's own machine
@@ -116,6 +119,10 @@ def check_url(url: str) -> str:
 class SiteNameError(OutsideError):
     """Setting up the app's name through HiroLeague failed, didn't answer, or answered something the app can't read
     (502). Its refusals (the name is taken or can't be a name) are `Invalid` in the core's words."""
+
+
+class AppsListError(OutsideError):
+    """HiroLeague couldn't list a person's apps (the app switcher), or answered something the app can't read (502)."""
 
 
 def _no_core_for_name() -> str:
@@ -265,6 +272,36 @@ class HiroLeagueLink(Worker):
     def forget(self) -> dict[str, Any]:
         self.client.forget()
         return self.status()
+
+    async def apps_for(self, person_id: str) -> list[dict[str, Any]]:
+        """The app switcher (UI kit): the apps this person may open, as the core's Apps card lists them, HiroLeague
+        first when their role opens its settings and its address is known, this app marked `here`."""
+        here = {"extension": ext().name, "title": ext().site_title, "icon": ext().site_icon, "url": self.site_url(),
+                "online": True, "here": True}
+        if person_id == DEV:
+            return [here]  # sign-in off (a dev copy): nobody to ask the core about
+        if not self.client.connected:
+            raise Unavailable(f"{_title()} isn't connected to HiroLeague right now, so it can't list your other apps.")
+        started = calls.start()
+        try:
+            answer = await self.client.request(METHOD_SITES_LIST, {"person_id": person_id}, timeout=APPS_TIMEOUT)
+        except ExtensionRequestError as exc:
+            if exc.code in ("not_connected", "timeout"):
+                raise Unavailable(f"HiroLeague didn't answer, so {_title()} can't list your other apps.") from exc
+            raise AppsListError(f"HiroLeague couldn't list your apps ({exc.code}): {exc.message}") from exc
+        calls.done(log, f"HiroLeague: {METHOD_SITES_LIST}", started, timeout=APPS_TIMEOUT)
+        with translate(AppsListError, "HiroLeague's list of apps can't be read"):
+            apps = [{"extension": str(a["extension"]), "title": str(a["title"]), "icon": str(a.get("icon") or ""),
+                     "url": str(a["url"]), "online": bool(a["online"]), "here": a["extension"] == ext().name}
+                    for a in answer["apps"]]
+            opens_settings = bool(answer["opens_settings"])
+        if not any(a["here"] for a in apps):
+            apps.insert(0, here)  # this app's site isn't declared yet (no name): it still shows, as the one you're in
+        admin = self.admin_url()
+        if opens_settings and admin:
+            apps.insert(0, {"extension": CORE_NAME, "title": "HiroLeague", "icon": CORE_NAME, "url": admin,
+                            "online": True, "here": False})
+        return apps
 
     async def test(self) -> dict[str, Any]:
         """The app's test call: ask the core its name and version."""

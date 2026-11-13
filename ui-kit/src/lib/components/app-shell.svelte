@@ -28,6 +28,7 @@
 	import ErrorBar from '$kit/ui/error-bar.svelte';
 	import ToastHost from '$kit/ui/toast-host.svelte';
 	import AppSidebar from './app-sidebar.svelte';
+	import AppSwitcher from './app-switcher.svelte';
 	import NoAccess from './no-access.svelte';
 	import NotYours from './not-yours.svelte';
 	import { isWidth, SIDEBAR_DEFAULT } from './sidebar-width';
@@ -102,6 +103,8 @@
 		<header class={['flex min-h-12 items-center gap-2 border-b px-3', topBar ? 'sticky top-0 z-30 bg-background/85 backdrop-blur' : 'md:hidden']} bind:offsetHeight={barHeight}>
 			<Sidebar.Trigger class="md:hidden" />
 			{@render topBar?.()}
+			<!-- On phones the menu (with its app switcher) is hidden: the switcher is in this bar too -->
+			<AppSwitcher class="ml-auto md:hidden" />
 		</header>
 		{@render banners?.()}
 		<!-- min-w-0: let wide tables scroll inside their box instead of widening the page -->
