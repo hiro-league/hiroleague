@@ -4,6 +4,7 @@
 	// its first tab, and neither it nor a tab icon changes the tab a page remembers. Collapsed to icons, a page
 	// with tabs opens a small menu of them instead. Its edge resizes it (dragged) or collapses it (clicked). A tab
 	// with sub-tabs (Settings' groups) opens its first one; its tooltip names them, the small menu lists them.
+	import type { Snippet } from 'svelte';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import * as Sidebar from '$kit/components/ui/sidebar/index.js';
@@ -24,8 +25,12 @@
 	interface Props {
 		width: number; // the menu's width in pixels
 		onwidth: (px: number) => void;
+		/** The app's own part of the menu, items that change (Code reports' projects): after the group `extraAfter`
+		 * names, else after the last group. Kit pieces (Sidebar.Group and its menu), so it looks like the rest. */
+		extra?: Snippet;
+		extraAfter?: string;
 	}
-	let { width, onwidth }: Props = $props();
+	let { width, onwidth, extra, extraAfter }: Props = $props();
 
 	const sidebar = Sidebar.useSidebar();
 
@@ -93,7 +98,9 @@
 					{/each}
 				</Sidebar.Menu>
 			</Sidebar.Group>
+			{#if extra && g.id === (extraAfter ?? menu[menu.length - 1].id)}{@render extra()}{/if}
 		{/each}
+		{#if extra && !menu.length}{@render extra()}{/if}
 	</Sidebar.Content>
 	<Sidebar.Footer>
 		<Sidebar.Menu>
