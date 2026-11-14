@@ -13,7 +13,8 @@
 // What it writes: the files in scripts/app-template/ (the project's own files, with the name filled in), the app's facts
 // (src/lib/app/*) from this kit's src/sample/ with the name filled in, and the files that depend on the flags (package.json,
 // the menu, the pages, the prefs, the Settings route). Then, in the new folder: `npm install` and `npm run check`
-// (HIRO_KIT_DIR names this kit's folder when the app does not sit beside the HiroLeague checkout; README.md).
+// (the app's frontend runs this kit's scripts/kit-sync.mjs from ../../hiroleague/ui-kit: its repo sits beside the HiroLeague
+// checkout; README.md).
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -94,13 +95,13 @@ write(
 			version: '0.0.1',
 			type: 'module',
 			scripts: {
-				kit: 'node scripts/kit-sync.mjs',
+				kit: 'node ../../hiroleague/ui-kit/scripts/kit-sync.mjs',
 				// Every script that reads vite.config.ts starts with `kit`: the config imports the kit's copy (.kit/lib/vite-preset.js),
 				// which a fresh clone only has after `npm run kit` (`prepare` runs it on npm install).
 				dev: 'npm run kit && vite dev',
 				build: 'npm run kit && vite build',
 				preview: 'vite preview',
-				prepare: "node scripts/kit-sync.mjs && svelte-kit sync || echo ''",
+				prepare: "node ../../hiroleague/ui-kit/scripts/kit-sync.mjs && svelte-kit sync || echo ''",
 				check: 'npm run kit && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && eslint . && vitest run',
 				'check:watch': 'svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch',
 				lint: 'eslint .',
@@ -312,7 +313,7 @@ write(
 
 console.log(`new-app: wrote ${name} to ${folder}
 Next, in that folder:
-  npm install       (the kit is read from ../../../hiroleague/ui-kit; set HIRO_KIT_DIR to ${kitDir} if it is elsewhere)
+  npm install       (the kit is read from ../../hiroleague/ui-kit: the app's repo sits beside the HiroLeague checkout)
   npm run check
   npm run dev
 Then: add the app's pages under src/routes (and to src/lib/app/menu.ts and pages.ts), and its backend's /api/me, /api/auth/*

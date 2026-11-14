@@ -7,8 +7,8 @@ stream (`live.ts`). It started as HomeHiro's frontend; the palette and colour st
 
 ## How an app uses it
 
-- **A copy, kept current:** each app has `scripts/kit-sync.mjs` (`npm run kit`, run by its dev, build, check and
-  test). It copies this folder's `src/lib` to the app's `.kit/lib` (not committed). A copy, not a link, so the kit's
+- **A copy, kept current:** each app's `npm run kit` (run by its dev, build, check and test) runs this kit's
+  `scripts/kit-sync.mjs` from `../../hiroleague/ui-kit` (the app's repo sits beside the HiroLeague checkout). It copies this folder's `src/lib` to the app's `.kit/lib` (not committed). A copy, not a link, so the kit's
   files use the app's own svelte and bits-ui (one of each); a folder of the app's own, not `node_modules`, so the dev
   server watches it and reloads on a change.
 - **Read as source:** the app's SvelteKit `alias` maps `$kit` to `.kit/lib`
@@ -23,12 +23,13 @@ stream (`live.ts`). It started as HomeHiro's frontend; the palette and colour st
   `hiroVite` imported from `./.kit/lib/vite-preset.js` (Tailwind, SvelteKit with the `$kit` and `$hiro-app` aliases,
   the `/api` dev proxy, the vitest settings). The file only exists after `npm run kit`, so every script that reads
   `vite.config.ts` runs it first.
-- **Lint rules:** the house rules are `hiroRules` in `./.kit/lib/eslint-rules.js`; the app's `eslint.config.js` spreads them.
+- **Lint:** the app's `eslint.config.js` is `defineConfig(...hiroEslint({ dirname: import.meta.dirname }), ...its own rules)`,
+  with `hiroEslint` from `./.kit/lib/eslint-preset.js` (type-aware rules, the settings every app shares, and the house
+  rules, `hiroRules` in `eslint-rules.js`).
 - **Settings page:** `$kit/pages/settings/settings-page.svelte` does the Settings tab handling; the app's
   `routes/settings/+page.svelte` passes `content={{ tabId: snippet }}`.
 - **Standard pages:** `$kit/pages/logs`, `users`, `hiroleague`, `ai`; what is the app's own comes from
   `$hiro-app/<page>.ts`. Their backend contract: `mintdocs/build/ui-kit/standard-pages-api.mdx` in hiro-docs.
-- **Where the kit is:** `scripts/kit-sync.mjs` takes it from `HIRO_KIT_DIR`, else from the HiroLeague checkout beside the app.
 
 Change shared code here, never in an app's `.kit`. No published release yet: apps take it from the
 HiroLeague checkout beside them.
@@ -39,7 +40,7 @@ This folder is also a small SvelteKit app: the **gallery** (`src/lib/gallery`), 
 shared shell, running against a **sample app** (`src/sample`: what a real app keeps in its `src/lib/app`). A new
 app starts with `node scripts/new-app.mjs <folder> <Name> [--port 8050] [--ai] [--icon Shapes]`, which writes the
 whole frontend (from `scripts/app-template/` and `src/sample`); then `npm install` and `npm run check` in that
-folder, with `HIRO_KIT_DIR` set when it does not sit beside the HiroLeague checkout. The gallery is a kit component (`Gallery`), so the HiroLeague
+folder. The gallery is a kit component (`Gallery`), so the HiroLeague
 admin shows it too, at `/ui-kit` (Configuration, UI kit): the kit as that admin has it. Its tabs: **Pieces**, **Theme**
 (the Theme designer) and **Standard pages** (`pages/logs`, `users`, `hiroleague`, `ai`: what they are, with the parts that
 need no backend).

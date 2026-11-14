@@ -137,7 +137,9 @@ def restore(data_dir: Path, stamp: str) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    steps = ("snapshot", "trial", "restore")
+    # settled: run by the shared deploy (build-kit/deploy.sh) once the new version is healthy; nothing to tidy here
+    # (the database copies stay, the last 5). An app with copies to remove then (HomeHiro's streams.db) has its own.
+    steps = ("snapshot", "trial", "restore", "settled")
     if len(argv) != 2 or argv[0] not in steps:
         print(f"usage: python -m {identity.app().name}.predeploy {'|'.join(steps)} <stamp>", file=sys.stderr)
         return 2
@@ -149,6 +151,8 @@ def main(argv: list[str]) -> int:
             print(*snapshot(data_dir, stamp), sep="\n")
         elif step == "restore":
             print(*restore(data_dir, stamp), sep="\n")
+        elif step == "settled":
+            print("Nothing to tidy: the copies stay (the last 5)")
         elif not (folder / copy_name(stamp)).exists():
             print(f"No {DB} yet: no migration to try")
             print("migrations-seconds=0")

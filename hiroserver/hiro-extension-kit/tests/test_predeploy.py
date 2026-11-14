@@ -76,3 +76,11 @@ def test_restore_puts_it_back_and_drops_the_new_versions_wal(tmp_path):
     assert predeploy.counts(tmp_path / predeploy.DB) == {"person": 2}
     assert (tmp_path / predeploy.BACKUPS / f"{STAMP}.db").exists()  # the copy stays with the others
     assert predeploy.restore(tmp_path, "pre-deploy-none") == ["No copy to put back"]
+
+
+def test_settled_is_a_step_that_tidies_nothing(capsys):
+    """The shared deploy (build-kit/deploy.sh) runs `settled` for every app once the new version is healthy; only an app
+    with copies to remove then (HomeHiro) has its own."""
+    assert predeploy.main(["settled", STAMP]) == 0
+    assert "Nothing to tidy" in capsys.readouterr().out
+    assert predeploy.main(["tidy", STAMP]) == 2

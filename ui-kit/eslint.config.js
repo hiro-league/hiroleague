@@ -1,46 +1,7 @@
-// Lint (npm run lint, also part of npm run check). Type-aware, so it can see promises nobody waits
-// for or catches: a rejected one fails silently in the browser.
-import js from '@eslint/js';
-import svelte from 'eslint-plugin-svelte';
+// Lint (npm run lint, also part of npm run check): the setup every Hiro frontend shares (src/lib/eslint-preset.js, the
+// same one the apps use from their .kit copy). shadcn's components (src/lib/components/ui/) are added with its CLI and
+// kept as it writes them; the kit has no "shared layers never import a feature" rule, it has no features.
 import { defineConfig } from 'eslint/config';
-import globals from 'globals';
-import ts from 'typescript-eslint';
-import { hiroRules } from './src/lib/eslint-rules.js';
+import { hiroEslint } from './src/lib/eslint-preset.js';
 
-export default defineConfig(
-	{ ignores: ['build/', '.svelte-kit/', 'node_modules/', 'src/lib/components/ui/', 'scripts/'] }, // scripts/: plain Node and the new-app template, outside the TypeScript project; shadcn's components: added with its CLI, kept as it writes them
-	js.configs.recommended,
-	ts.configs.recommended,
-	svelte.configs.recommended,
-	{
-		languageOptions: {
-			globals: { ...globals.browser },
-			parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname, extraFileExtensions: ['.svelte'] }
-		}
-	},
-	{
-		files: ['**/*.svelte', '**/*.svelte.ts'],
-		languageOptions: { parserOptions: { parser: ts.parser } }
-	},
-	{
-		rules: {
-			'@typescript-eslint/no-floating-promises': 'error',
-			// Off: it flags every local Map, Set or Date, also the plain ones used inside a function.
-			// Reactive collections here are $state arrays and records.
-			'svelte/prefer-svelte-reactivity': 'off',
-			// Off: the links it flags are API files (apiUrl already adds the base path) and HA pages.
-			// Links to the app's own pages use resolve().
-			'svelte/no-navigation-without-resolve': 'off',
-			// `_name` marks a value left out on purpose (e.g. `const { version: _v, ...rest } = plan`).
-			'@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', destructuredArrayIgnorePattern: '^_' }]
-		}
-	},
-	// House rules checked by pattern: the kit's own fragment, the same one the apps use (src/lib/eslint-rules.js).
-	...hiroRules,
-	{
-		// Config files run in Node, outside the app's TypeScript project.
-		files: ['*.js', '*.ts'],
-		extends: [ts.configs.disableTypeChecked],
-		languageOptions: { globals: { ...globals.node } }
-	}
-);
+export default defineConfig(...hiroEslint({ dirname: import.meta.dirname, ignores: ['src/lib/components/ui/'] }));

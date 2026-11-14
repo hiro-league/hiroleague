@@ -77,9 +77,11 @@ disk and nothing in its API.
 
 ## Rules
 
-- **Each repo keeps its own build and deploy files**: `scripts/check.sh`, `deploy.sh`, the Dockerfile, `deploy/`
-  (nightly check, post-receive) and `dev.ps1`. They are the repo's own entry points: the Docker build and the server's
-  hook run them from the repo, and a change to the kit must never change an app's deploy without that app's commit.
+- **The build, check and deploy files are shared too**, in HiroLeague's `build-kit/` (shared-code plan, step 2): the
+  Dockerfile, the deploy, the nightly check, `check.sh`'s engine and `dev.ps1`. Each app keeps its entry points
+  (`deploy.sh`, `deploy/nightly-check.sh`, `scripts/check.sh`, `dev.ps1`: a few lines each) and its facts (`app.env`).
+  So a change there reaches every app's next deploy without a commit in the app: deploy the core first, and run each
+  app's `./scripts/check.sh --all` before (`build-kit/README.md`).
 
 - **Nothing here names an app.** What differs comes from `identity`; an app's own additions stay in the app.
 - **A move changes no behaviour**: no route, no answer's shape, no file name. Each app's `./scripts/check.sh` passes

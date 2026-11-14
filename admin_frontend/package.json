@@ -15,7 +15,7 @@
     "check:svelte": "npm run kit && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test:unit": "npm run kit && node scripts/run-vitest.mjs run",
     "package:python": "npm run build",
-    "kit": "node scripts/kit-sync.mjs"
+    "kit": "node ../ui-kit/scripts/kit-sync.mjs"
   },
   "devDependencies": {
     "@internationalized/date": "^3.12.4",

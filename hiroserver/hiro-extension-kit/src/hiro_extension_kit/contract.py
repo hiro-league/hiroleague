@@ -166,6 +166,23 @@ class AppContract:
 
         assert 20000 <= asyncio.run(through_asyncio()) < 40000
 
+    # --- the port it serves on ---
+
+    def test_it_declares_the_port_it_listens_on(self):
+        """The core points its web proxy at the port the app declares (sites.claim): the one its app.env gives the shared
+        image (build-kit/Dockerfile starts uvicorn on APP_PORT). Shared-code plan, step 2: the port moved from each
+        app's Dockerfile to app.env."""
+        from . import identity
+        from .extension import ext
+
+        app_env = identity.app().package.parents[2] / "app.env"  # <repo>/backend/src/<app> → <repo>/app.env
+        if not app_env.exists():
+            pytest.skip("no app.env here (the Docker check builds the backend alone)")
+        facts = dict(line.split("=", 1) for line in app_env.read_text(encoding="utf-8").splitlines()
+                     if line and not line.startswith("#") and "=" in line)
+        assert facts.get("APP") == identity.app().name
+        assert int(facts["APP_PORT"]) == ext().port
+
     # --- the app's routes ---
 
     def test_every_route_has_a_rule(self):

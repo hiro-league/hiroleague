@@ -11,7 +11,7 @@ const fastBuild = process.env.HIRO_FAST_BUILD === '1';
 
 export default defineConfig({
   plugins: [tailwindcss(), sveltekit()],
-  // The shared UI kit's copy (.kit, scripts/kit-sync.mjs) brings the kit's own tests with it; they run in the
+  // The shared UI kit's copy (.kit, ui-kit/scripts/kit-sync.mjs) brings the kit's own tests with it; they run in the
   // kit (ui-kit/), against its sample app, not here.
   test: {
     exclude: [...configDefaults.exclude, '.kit/**']
