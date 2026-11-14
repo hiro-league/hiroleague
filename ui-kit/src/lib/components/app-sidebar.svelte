@@ -1,5 +1,6 @@
 <script lang="ts">
-	// The menu in two levels (menu.ts). A group's name folds it away (remembered in this browser); a folded
+	// The menu in two levels (menu.ts). A group's name folds it away (remembered in this browser), and a group with no
+	// name is its pages alone, never folded; a folded
 	// group still shows the page you are on. A page's tabs are the icons on its row. A page's link always opens
 	// its first tab, and neither it nor a tab icon changes the tab a page remembers. Collapsed to icons, a page
 	// with tabs opens a small menu of them instead. Its edge resizes it (dragged) or collapses it (clicked). A tab
@@ -80,18 +81,19 @@
 	<!-- On a phone the menu is a sheet over the page: a link closes it. -->
 	<Sidebar.Content class="gap-0" onclick={(e) => sidebar.isMobile && e.target instanceof Element && e.target.closest('a') && sidebar.setOpenMobile(false)}>
 		{#each menu as g, i (g.id)}
-			{@const open = !closed.current[g.id]}
+			<!-- A group with no title is its pages alone: no heading, never folded. -->
+			{@const open = !g.title || !closed.current[g.id]}
 			{#if iconMenu && i > 0}<Sidebar.Separator class="mx-3" />{/if}
 			<Sidebar.Group class="py-1">
 				<!-- Collapsed to icons, a group's name fades out and moves up over the page above it: it mustn't take that page's clicks. -->
-				<Sidebar.GroupLabel>
+				{#if g.title}<Sidebar.GroupLabel>
 					{#snippet child({ props })}
 						<button {...props} type="button" class={cn(props.class as string, 'w-full uppercase tracking-wide hover:text-sidebar-foreground group-data-[collapsible=icon]:pointer-events-none')} aria-expanded={open} onclick={() => toggle(g.id)}>
 							<span class="accent-text-gradient font-semibold">{g.title}</span>
 							<ChevronRight class={['ml-auto transition-transform', open && 'rotate-90']} />
 						</button>
 					{/snippet}
-				</Sidebar.GroupLabel>
+				</Sidebar.GroupLabel>{/if}
 				<Sidebar.Menu>
 					{#each g.pages.filter((p) => open || iconMenu || onPage(p, page.route.id)) as p (p.route)}
 						{@render pageItem(p)}

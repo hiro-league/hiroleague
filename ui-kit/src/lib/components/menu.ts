@@ -15,6 +15,7 @@ export type MenuSub = { value: string; title: string; icon: Component; shown?: (
 export type MenuTab = MenuSub & { subs?: MenuSub[] };
 // pref: where the page remembers its tab; first: the tab of a first visit, when not the first one
 export type MenuPage = { route: string; title: string; icon: Component; tabs?: MenuTab[]; pref?: PrefKey; first?: string };
+// title: the heading that folds the group away; "" for pages alone, with no heading (an app's Dashboard, its Settings)
 export type MenuGroup = { id: string; title: string; pages: MenuPage[] };
 
 const allowed = (me: Me | null) => (t: MenuSub) => !t.shown || t.shown(me);
