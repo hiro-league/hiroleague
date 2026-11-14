@@ -1,1 +1,0 @@
-When Plans are executed and they include new features, new designs, architecture, consider reviewing mintdocs for updates, adding new documentation.

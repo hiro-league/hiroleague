@@ -1,1 +1,0 @@
-When a New feature/code change requires special steps to reflect the new updates (especially breaking changes in no-backward-compatibility mode), like removing workspace, changing content of a config file, etc.. please state what is needed at the end of response to get me up to speed.

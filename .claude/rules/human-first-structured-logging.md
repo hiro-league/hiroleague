@@ -13,6 +13,6 @@ For **operational / message-flow** logs: the **first argument** (message string)
 
 **Direction (server-centric):** `⬇️` **inbound** = traffic that **ends up at the server** (hirocli / HiroServer). `⬆️` **outbound** = traffic that **leaves the server** toward clients, devices, channels, or upstream services — whatever the hop, the arrow matches the path **relative to the server**.
 
-**Kind helpers:** Reuse shared helpers where they exist (e.g. `_comm_kind` / `_comm_content_hint` / `_comm_extras` in hirocli; `_relay_kind` / `_relay_content_hint` on the gateway). **Kind** belongs in the message string; rich detail belongs in extras, ordered as above.
+**Kind helpers:** Reuse shared helpers where they exist (e.g. `comm_kind` / `_comm_content_hint` / `comm_extras` in hirocli's `runtime/comm_log.py`; `_relay_kind` / `_relay_content_hint` on the gateway). **Kind** belongs in the message string; rich detail belongs in extras, ordered as above.
 
 **Label the server** as **HiroServer** in gateway logs when referring to the desktop/hirocli side.

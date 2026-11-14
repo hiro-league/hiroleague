@@ -1,1 +1,0 @@
-When fixing issues that change specific code, add comments in the code indicating the reason for the code change. do not apply this rule for large scale refactoring, code reorganization unless specifically requested.
