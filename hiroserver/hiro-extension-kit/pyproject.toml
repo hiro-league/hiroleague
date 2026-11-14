@@ -25,7 +25,10 @@ classifiers = [
 dependencies = [
     "alembic>=1.13",
     "fastapi>=0.115",
-    "sqlmodel>=0.0.21",
+    # 0.0.46: every datetime field is stored and read back in UTC (refused without a zone). The kit's sessions, family
+    # copy and LLM log compare those times with aware ones; with 0.0.38 (the workspace's lock before the shared-code
+    # plan's step 1 tested the kit here) they came back naive and every sign-in failed. The apps already pinned it.
+    "sqlmodel>=0.0.46",
     "hiro-channel-sdk~=0.2.0",
 ]
 

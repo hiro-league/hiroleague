@@ -7,6 +7,10 @@
 - `wait_until()`: poll until something is true.
 - `FakeCore` and `FakeLink`: the HiroLeague core as an app asks it (the family list, roles, `answers` for anything else,
   and other extensions' answers to `ask()`).
+- `join_family()`, `ai_answer()`, `ai_profiles()`: someone added to the fake core's family list and synced; the core's AI
+  answers (shared-code plan, step 1).
+
+What every app's tests check of the app itself is contract.py.
 
 Imported only by tests: it needs pytest, which an app installs as a dev tool.
 """
@@ -409,3 +413,45 @@ class FakeLink:
     def status(self) -> dict[str, Any]:
         return {"url": "ws://127.0.0.1:18082", "status": "connected" if self.client.connected else "disconnected",
                 "error": None, "core": self.client.status_detail.get("core") if self.client.connected else None}
+
+
+def join_family(core: FakeCore, name: str, role_id: str = "adult", *, whatsapp: str = "") -> dict[str, Any]:
+    """A new person in the fake core's family list, with the app's copy synced (family.py). Returns the core person.
+    (Shared-code plan, step 1: NetHiro's and TrainHiro's tests/fakes.py each had this.)"""
+    import asyncio
+
+    from . import family
+
+    p = core.person(name, role_id, whatsapp)
+    asyncio.run(family.sync())
+    return p
+
+
+# --- the core's AI, as `ai.ask` and `ai.profiles` answer (llm/profiles.py, llm/core_ai.py) ---------------------------
+# Shared-code plan, step 1: HomeHiro's and NetHiro's tests/fakes.py each had these, apart only in their `uses`.
+
+_AI_ANSWER: dict[str, Any] = {
+    "text": '{"answer": "yes"}', "profile_id": "camera", "profile_name": "Camera questions", "provider": "google",
+    "model": "gemini-3.8-flash", "plan": False, "ms": 1400, "tokens": 120, "tokens_in": 100, "tokens_out": 20,
+    "cost": 0.0012, "estimate": None, "notes": [],
+    "tries": [{"profile_id": "camera", "provider": "google", "model": "gemini-3.8-flash", "status": "ok", "ms": 1400}],
+}
+_AI_PROFILES: list[dict[str, Any]] = [
+    {"id": "camera", "label": "Camera questions", "model": "google:gemini-3.8-flash", "model_label": "Gemini 3.8 Flash",
+     "provider_label": "Google", "kind": "api", "max_cost_day": 1.0, "at_once": 2, "fallback": "camera-codex",
+     "chain": ["camera", "camera-codex"], "today": {"asks": 41, "cost": 0.34, "this_hour": 3}},
+    {"id": "camera-codex", "label": "Camera on Codex", "model": "codex:gpt-6.1-sol", "provider_label": "Codex",
+     "kind": "plan", "max_per_hour": 30, "chain": ["camera-codex"], "today": {"asks": 2, "this_hour": 2}},
+    {"id": "hh-wake1", "label": "Wake word check", "model": "google:gemini-3.5-flash-lite", "provider_label": "Google",
+     "kind": "api", "max_cost_day": 0.2},
+]
+
+
+def ai_answer() -> dict[str, Any]:
+    """`ai.ask`'s answer: the question answered by the "camera" profile (a fresh copy, for a test to change)."""
+    return copy.deepcopy(_AI_ANSWER)
+
+
+def ai_profiles(uses: dict[str, str | None]) -> dict[str, Any]:
+    """`ai.profiles`' answer: three profiles, and which one each of the app's uses (`"<extension>:<use>"`) points at."""
+    return {"profiles": copy.deepcopy(_AI_PROFILES), "uses": dict(uses)}

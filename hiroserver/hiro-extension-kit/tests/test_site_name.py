@@ -1,5 +1,5 @@
 """The app's LAN name (site_name.py): the label rules and reading a name back from an address. Pure. Claiming the name
-through the core is each app's test (it runs the app's link with its Extension)."""
+through the core is test_site_claim.py (shared-code plan, step 1: it was each app's test)."""
 
 import pytest
 

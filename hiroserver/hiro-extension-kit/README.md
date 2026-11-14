@@ -72,7 +72,8 @@ disk and nothing in its API.
 | `predeploy` | a deploy's safety steps for the app's one database (`snapshot`, `trial`, `restore`, `main`); HomeHiro takes its helpers (`copy_db`, `counts`, `losses`) for its own two-database steps |
 | `api_types` | the frontend's types from the API description (`generate`, `clashes`); each app's `scripts/api_types.py` says where they go |
 | `notices` | `Browsers(notices, hello=...)` and `events_router(browsers)`: `GET /api/events`, the notices open pages reload on |
-| `testing` | for an app's tests only: `guard_network()`, `RunLog`, `CleanDatabases`, `wait_until()`, `FakeCore`, `FakeLink`, `auth()` and `outputs()` (sign-in or sending on or off for one test) |
+| `testing` | for an app's tests only: `guard_network()`, `RunLog`, `CleanDatabases`, `wait_until()`, `FakeCore`, `FakeLink`, `join_family()`, `ai_answer()` and `ai_profiles()` (the core's AI answers), `auth()` and `outputs()` (sign-in or sending on or off for one test) |
+| `contract` | for an app's tests only: `AppContract`, what every app checks of itself (below) |
 
 ## Rules
 
@@ -91,11 +92,20 @@ disk and nothing in its API.
 
 An app's `tests/conftest.py` builds on `testing`: it sets its environment, imports its package (which calls
 `setup()`), then calls `testing.guard_network()`, registers `testing.RunLog`, and copies its databases back for every
-test with `testing.CleanDatabases`. Its `tests/fakes.py` gives `testing.FakeCore` its own defaults (NetHiro: the AI's
-answers and HomeHiro's) and keeps the fakes of its own outside systems (HA, Frigate).
+test with `testing.CleanDatabases`. Its `tests/fakes.py` gives `testing.FakeCore` its own defaults (NetHiro: its AI
+use and HomeHiro's answers) and keeps the fakes of its own outside systems (HA, Frigate).
+
+**The kit's features are tested here, once** (shared-code plan, step 1): sign-in, the route check, the family copy,
+WhatsApp, voices, the core's AI and the LLM requests log, the site name, Settings → HiroLeague, predeploy, times. An
+app's tests keep only its own code: its routes' rules, what it declares (`tests/test_extension.py`), its hooks
+(HomeHiro's HA add-on sign-in, My room, family tidy) and its features. What only the app can show (its test setup is
+safe, every route has a rule and declares its answer, its frontend's types are fresh, its workers can run, its
+migrations match its models and lose nothing, it writes files through `files` and logs to its data folder, the kit's
+routes are mounted) is `contract.AppContract`, which each app subclasses in `tests/test_contract.py`.
 
 `./scripts/check.sh` in the HiroLeague repo runs them with the rest of the workspace (`hiroserver: pytest`). Only
 this package: from `hiroserver/`, `uv run pytest hiro-extension-kit`. The tests run as an app called `testapp` with
-an empty data folder of their own (`tests/conftest.py`).
+an empty data folder of their own and every table the kit ships (`tests/conftest.py`): an extension shaped like
+NetHiro's, with sign-in off and nothing sent unless a test turns them on.
 
 A change here doesn't start an app's own check: after one, run `./scripts/check.sh --all` in each app that uses it.
