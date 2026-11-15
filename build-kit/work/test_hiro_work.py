@@ -47,6 +47,18 @@ def test_asking_for_a_busy_place_is_refused():
         hw.pick_env(["homehiro"], [task("a", 3, ["nethiro"])], 3)
 
 
+def test_a_task_record_from_a_newer_hiro_work_is_read_and_its_new_fields_kept(tmp_path, monkeypatch):
+    monkeypatch.setattr(hw, "TASKS", tmp_path)
+    (tmp_path / "t.json").write_text('{"id": "t", "title": "t", "env": 3, "repos": ["hiroleague"], "real": ["ai"]}',
+                                     encoding="utf-8")
+    [t] = hw.load_tasks()
+    assert (t.id, t.env) == ("t", 3)
+    t.title = "renamed"
+    hw.save(t)
+    saved = hw.json.loads((tmp_path / "t.json").read_text(encoding="utf-8"))
+    assert saved["real"] == ["ai"] and saved["title"] == "renamed"
+
+
 def test_when_every_environment_is_busy_a_new_task_is_refused():
     tasks = [task("a", 0, ["homehiro"])] + [task(f"t{e}", e, ["nethiro"]) for e in range(1, 6)]
     with pytest.raises(hw.Stop):
