@@ -13,6 +13,7 @@
 #   - admin_frontend: unit tests (vitest);
 #   - ui-kit: the shared UI kit's own check (svelte-check, ESLint, vitest);
 #   - build-kit: the shared build, check and deploy scripts read by bash (`bash -n`: no syntax error reaches a deploy);
+#   - build-kit: hiro-work's tests (build-kit/work: the environments' commands);
 #   - hiroserver: the whole pytest suite over the uv workspace, on every core with pytest-xdist (scripts/run-tests.sh:
 #     Ctrl-C won't stop it, use Ctrl-Break or close the terminal; a running Hiro server may hold the venv's lock:
 #     `hiro stop` first).
@@ -41,6 +42,9 @@ part "ui-kit: check" "ui-kit" \
 # every app's deploy.
 part "build-kit: bash -n" "build-kit" \
     bash -c "cd '${REPO_ROOT}/build-kit' && for f in *.sh; do bash -n \"\$f\" || exit 1; done"
+# hiro-work, the environments' commands (build-kit/work): its choices of ports, claims and environment.
+part "build-kit: hiro-work tests" "build-kit/work" \
+    bash -c "cd '${REPO_ROOT}/hiroserver' && uv run python -m pytest ../build-kit/work -q -p no:cacheprovider"
 part "hiroserver: pytest" "hiroserver scripts/run-tests.sh" \
     "${REPO_ROOT}/scripts/run-tests.sh" -n auto
 
