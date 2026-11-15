@@ -142,9 +142,8 @@ def git(repo_path: Path, *args: str, check: bool = True) -> str:
 
 
 def dirty(repo_path: Path) -> list[str]:
-    """Uncommitted work. The apps' checks leave an untracked backend/.coverage that no .gitignore lists: not work."""
-    out = git(repo_path, "status", "--porcelain", "--", ".", ":(exclude,glob)**/.coverage")
-    return [line for line in out.splitlines() if line.strip()]
+    """Uncommitted work: changed, staged or untracked files (.gitignore respected)."""
+    return [line for line in git(repo_path, "status", "--porcelain").splitlines() if line.strip()]
 
 
 # ---------------------------------------------------------------------------------------------------------- state
@@ -601,9 +600,10 @@ def cmd_land(a) -> None:
     failed = []
     for repo in to_check:
         install(env, repo, task.id)
-        mode = [] if repo in task.repos else ["--all"]  # an app beside a changed kit: its own files didn't change
+        # An app beside a changed kit: its parts name the core files they read (@hiroleague:...), so the check runs
+        # exactly the parts the kit change reaches
         with step(task.id, env, "check", repo):
-            out = subprocess.run([bash(), "-lc", "./scripts/check.sh " + " ".join(mode)], cwd=repo_dir(env, repo),
+            out = subprocess.run([bash(), "-lc", "./scripts/check.sh"], cwd=repo_dir(env, repo),
                                  capture_output=True, text=True, encoding="utf-8", errors="replace")
             log = LOGS / "check" / f"{task.id}-{repo}.log"
             log.parent.mkdir(parents=True, exist_ok=True)
@@ -852,7 +852,7 @@ def cmd_status(a) -> None:
         up = [n for n, p in ports(env).items() if listening(p)]
         what = "; ".join(f"{t.id} ({', '.join(t.repos)})" for t in here) or ("Michel's dev" if env == 0 else "free")
         exists = env == 0 or (env_dir(env) / "hiroleague" / ".git").exists()
-        say(f"  env{env}  {'' if exists else '(not made yet) '}{what}" + (f"  · up: {', '.join(up)}" if up else ""))
+        say(f"  env{env}  {'' if exists else '(not made yet) '}{what}" + (f"  | up: {', '.join(up)}" if up else ""))
     parked = [t for t in tasks if t.state == "parked"]
     if parked:
         say("Parked: " + ", ".join(f"{t.id} ({t.updated[:10]})" for t in parked))
