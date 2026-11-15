@@ -430,7 +430,8 @@ def copy_db(src: Path, dst: Path) -> None:
 
 
 def refresh_data(env: int, task: str | None = None) -> None:
-    """envN's data from env0's: the databases copied, the big folders left out (workflow.md, Data)."""
+    """envN's data from env0's: the databases copied, the pictures hard-linked, the big folders left out (workflow.md,
+    Data and real systems). Removing the old folder first removes only its links: env0's pictures stay."""
     if env == 0:
         return
     for app in APPS:
@@ -444,6 +445,9 @@ def refresh_data(env: int, task: str | None = None) -> None:
             # The app's link to the core: its key and identity (the core copy below knows the same key)
             if (src / "hiroleague").is_dir():
                 shutil.copytree(src / "hiroleague", dst / "hiroleague")
+            # Pictures the databases point at: hard links to env0's (data.py)
+            for line in data.link_pictures(src, dst, app):
+                say(f"  {line}")
     with step(task, env, "data copy", "core"):
         src, dst = data_dir(0) / "core" / "default", data_dir(env) / "core" / "default"
         if dst.exists():

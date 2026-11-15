@@ -109,6 +109,33 @@ def make_safe(data: Path, real: list[str]) -> list[str]:
     return did
 
 
+def link_pictures(src: Path, dst: Path, app: str) -> list[str]:
+    """An env1..env5 app folder gets env0's picture folders (LIVE_FILES) as hard links: same drive, so instant and
+    no extra space. A file a task adds stays in its environment and deleting one there removes only its link; editing
+    one in place would change env0's too (these apps write a picture once). Camera history (HomeHiro's streams/),
+    recognition clips, LLM request files and agents stay out."""
+    lines = []
+    for folder in LIVE_FILES.get(app, []):
+        if not (src / folder).is_dir():
+            continue
+        linked = copied = 0
+        for path in (src / folder).rglob("*"):
+            target = dst / folder / path.relative_to(src / folder)
+            if path.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.unlink(missing_ok=True)
+            try:
+                os.link(path, target)
+                linked += 1
+            except OSError:  # another drive, or a file system without hard links: a copy instead
+                shutil.copy2(path, target)
+                copied += 1
+        lines.append(f"{app}/{folder}: {linked} file(s) linked" + (f", {copied} copied" if copied else ""))
+    return lines
+
+
 def describe(real: list[str]) -> str:
     """The card's line about real systems."""
     reads = "real reads ON (HA, Frigate, MQTT, health checks)" if READS in real else "real reads off"

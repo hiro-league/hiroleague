@@ -70,6 +70,23 @@ def test_app_settings_and_the_core_environment_follow_what_the_task_asked():
     assert data.core_env(environ, [data.AI]) == {}
 
 
+def test_an_environment_gets_env0s_pictures_as_hard_links_and_its_own_changes_stay_there(tmp_path):
+    env0, env = tmp_path / "env0" / "studyhiro", tmp_path / "env1" / "studyhiro"
+    (env0 / "files" / "sub").mkdir(parents=True)
+    (env0 / "files" / "a.jpg").write_bytes(b"a")
+    (env0 / "files" / "sub" / "b.jpg").write_bytes(b"b")
+    (env0 / "streams").mkdir()  # not a picture folder: never linked
+    (env0 / "streams" / "clip.mp4").write_bytes(b"c")
+    assert data.link_pictures(env0, env, "studyhiro") == ["studyhiro/files: 2 file(s) linked"]
+    assert (env / "files" / "a.jpg").samefile(env0 / "files" / "a.jpg")  # the same file, no copy
+    assert (env / "files" / "sub" / "b.jpg").read_bytes() == b"b"
+    assert not (env / "streams").exists()
+    (env / "files" / "new.jpg").write_bytes(b"n")  # a task's new picture stays in its environment
+    (env / "files" / "a.jpg").unlink()  # removing one there removes only its link
+    assert not (env0 / "files" / "new.jpg").exists() and (env0 / "files" / "a.jpg").read_bytes() == b"a"
+    assert data.link_pictures(env0, env, "nethiro") == []  # an app with no picture folders
+
+
 def test_per_place_settings_are_addresses_logins_and_tokens():
     for key in ("ha_url", "ha_token", "mqtt_password", "adguard_login", "tv_key", "hiroleague_url", "nethiro_url",
                 "core_ai_profiles", "some_new_secret"):
