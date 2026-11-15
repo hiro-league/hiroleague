@@ -14,6 +14,8 @@ a task in env1..env5 lands: its branches merge into dev/main and env0 is brought
     hiro-work up <env> [server ...] / down <env> [server ...]   servers, in Windows Terminal outside Claude
     hiro-work init <env>                     make (or repair) an environment: worktrees, installs, settings
     hiro-work sweep                          what is left behind (report only)
+    hiro-work real <task> [--reads] [--ai]   env1..5: which real systems the task's copy reads (data.py)
+    hiro-work refresh-data [--apply STAMP]   live -> env0: a scrubbed live copy, then env0 replaced (data.py)
 
 State lives in C:\hiro\tasks (one JSON file per task) and every step is logged to C:\hiro\logs\events.jsonl (with
 its time) for CodeHiro's Work area. Standard library only: it runs on the system Python.
@@ -34,6 +36,8 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+
+import data
 
 ROOT = Path(os.environ.get("HIRO_ROOT", r"C:\hiro"))
 TASKS = ROOT / "tasks"
@@ -159,6 +163,8 @@ class Task:
     base: dict[str, str] = field(default_factory=dict)
     # In env0: what was already uncommitted in each claimed repo when the task started (someone else's): not its own
     before: dict[str, list[str]] = field(default_factory=dict)
+    # In env1..env5: the real systems its copy may reach ("reads", "ai"); none by default (data.py)
+    real: list[str] = field(default_factory=list)
     created: str = ""
     updated: str = ""
 
@@ -331,14 +337,21 @@ ENV_DEV_FORCED = {"OUTPUTS": "off", "HA_AUTO_WRITES": "off", "AUTH": "off"}
 
 def write_env_dev(env: int) -> None:
     """Each app's .env.dev in envN: env0's, with this environment's data folder, no sends or HA writes, and sign-in
-    off (everyone is the owner, so the built-in browser can show its pages)."""
+    off (everyone is the owner, so the built-in browser can show its pages); real systems as the task asks
+    (data.env_overrides: None drops env0's line)."""
+    real = real_of(env)
     for app in APPS:
         src = repo_dir(0, app) / ".env.dev"
         lines = src.read_text(encoding="utf-8").splitlines() if src.exists() else []
-        forced = {**ENV_DEV_FORCED, "DATA_DIR": (data_dir(env) / app).as_posix()}
+        forced = {**ENV_DEV_FORCED, "DATA_DIR": (data_dir(env) / app).as_posix(), **data.env_overrides(app, real)}
         keep = [ln for ln in lines if ln.split("=", 1)[0].strip() not in forced]
-        keep += [f"{k}={v}" for k, v in forced.items()]
+        keep += [f"{k}={v}" for k, v in forced.items() if v is not None]
         (repo_dir(env, app) / ".env.dev").write_text("\n".join(keep) + "\n", encoding="utf-8")
+
+
+def real_of(env: int) -> list[str]:
+    """The real systems the task working in envN asked for (data.py); none for env0, which is real already."""
+    return next((t.real for t in load_tasks() if t.state == "working" and t.env == env and env), [])
 
 
 def set_setting(db: Path, key: str, value: str) -> None:
@@ -382,6 +395,9 @@ def configure(env: int, task: str | None = None) -> None:
             if workspace_name(env) not in registry_names():
                 run(["uv", "run", "hiro", "workspaces", "create", workspace_name(env), "--path", str(ws)],
                     cwd=repo_dir(env, "hiroleague") / "hiroserver")
+            # Real systems off unless the task asks (data.py): run on every configure, the copy may be fresh
+            for line in data.make_safe(data_dir(env), real_of(env)):
+                say(f"  {line}")
 
 
 def registry_names() -> set[str]:
@@ -466,6 +482,7 @@ def cmd_start(a) -> None:
         repos = expand(a.repos.split(","), a.kit)
         env = pick_env(repos, tasks, a.env)
         task = Task(id=a.task, title=a.title or a.task, env=env, repos=repos,
+                    real=[k for k, on in ((data.READS, a.real_reads), (data.AI, a.real_ai)) if on],
                     created=datetime.now().astimezone().isoformat(timespec="seconds"))
         save(task)  # the claim holds from here
     event(task=task.id, env=env, step="task", phase="start", repos=repos, title=task.title)
@@ -511,6 +528,22 @@ def card(task: Task) -> None:
     say(f"Task {task.id}: env{task.env} | claims {', '.join(task.repos)} | {where}")
     if task.env:
         say(f"  branch {task.branch} | data {data_dir(task.env)} | ports {min(p.values())}-{max(p.values())}")
+        say(f"  {data.describe(task.real)}")
+
+
+def cmd_real(a) -> None:
+    """Change which real systems a task's copy reaches: the data is copied again from env0 (servers down)."""
+    task = get(a.task)
+    if not task.env:
+        raise Stop("env0 is real already; a parked task changes this when it resumes.")
+    up = [n for n, s in servers(task.env).items() if listening(s.port)]
+    if up:
+        raise Stop(f"env{task.env}'s servers are up ({', '.join(up)}): hiro-work down {task.env} first.")
+    with locked():
+        task.real = [k for k, on in ((data.READS, a.reads), (data.AI, a.ai)) if on]
+        save(task)
+    refresh_data(task.env, task.id)
+    card(task)
 
 
 def cmd_move(a) -> None:
@@ -711,6 +744,8 @@ def servers(env: int) -> dict[str, Server]:
         "core-ui": Server("core-ui", core / "admin_frontend", f"npm.cmd run dev -- --port {p['core-ui']} --strictPort",
                           p["core-ui"], {"HIRO_ADMIN_ORIGIN": f"http://127.0.0.1:{p['core-admin']}"}),
     }
+    if env:  # the provider keys in the PC's environment, blanked unless the task asks for AI (data.py)
+        out["core"].env.update(data.core_env(dict(os.environ), real_of(env)))
     for app in APPS:
         api, ui = p[f"{app}-api"], p[f"{app}-ui"]
         out[f"{app}-api"] = Server(
@@ -895,6 +930,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--kit", action="store_true", help="a kit, SDK or build-kit change: also claims the apps")
     s.add_argument("--title")
     s.add_argument("--env", type=int, choices=list(ENVS))
+    s.add_argument("--real-reads", action="store_true", help="env1..5: read the real HA, Frigate and MQTT")
+    s.add_argument("--real-ai", action="store_true", help="env1..5: keep the copied AI providers")
     for verb in ("move", "finish", "land", "park"):
         sub.add_parser(verb).add_argument("task")
     r = sub.add_parser("resume")
@@ -913,8 +950,18 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("env", type=int, choices=list(ENVS))
     sub.add_parser("status")
     sub.add_parser("sweep")
+    rl = sub.add_parser("real", help="env1..5: which real systems a task's copy reaches (copies the data again)")
+    rl.add_argument("task")
+    rl.add_argument("--reads", action="store_true")
+    rl.add_argument("--ai", action="store_true")
+    rl.set_defaults(func=cmd_real)
+    rd = sub.add_parser("refresh-data", help="live -> env0: fetch a scrubbed live copy; --apply puts it in env0")
+    rd.add_argument("--apply", metavar="STAMP", help="a copy in C:\\hiro\\data\\live-copies, or 'latest'")
+    rd.set_defaults(func=lambda a: data.cmd_refresh_data(a, sys.modules[__name__]))
     a = p.parse_args(argv)
     try:
+        if getattr(a, "func", None):
+            return a.func(a) or 0
         {"start": cmd_start, "move": cmd_move, "finish": cmd_finish, "land": cmd_land, "park": cmd_park,
          "resume": cmd_resume, "status": cmd_status, "sweep": cmd_sweep, "up": cmd_up, "down": cmd_down,
          "configure": lambda a: configure(a.env), "init": lambda a: init_env(a.env)}[a.cmd](a)
