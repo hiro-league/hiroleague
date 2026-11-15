@@ -1,5 +1,7 @@
 """hiro-work's choices: the ports of an environment, what a task claims, where a new task goes."""
 
+import json
+
 import pytest
 
 import hiro_work as hw
@@ -79,3 +81,59 @@ def test_launch_json_lists_each_repos_servers_on_the_environments_own_ports(tmp_
     assert homehiro_api["runtimeExecutable"] == "powershell"
     script = hw.Path(homehiro_api["runtimeArgs"][-1])  # the same runner as `hiro-work up`: reads .env.dev
     assert script.exists() and ".env.dev" in script.read_text(encoding="utf-8-sig")
+
+
+def _events(tmp_path, monkeypatch):
+    """hiro-work's events go to a log of the test's own (never the real one, which the sender sends)."""
+    monkeypatch.setattr(hw, "LOGS", tmp_path)
+    monkeypatch.setattr(hw, "EVENTS", tmp_path / "events.jsonl")
+    return lambda: [json.loads(x) for x in (tmp_path / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+
+
+def test_a_step_inside_another_names_it_as_its_parent(tmp_path, monkeypatch):
+    read = _events(tmp_path, monkeypatch)
+    with hw.step("t", 1, "land"):
+        with hw.step("t", 1, "check", "codehiro"):
+            pass
+    with hw.step("t", 1, "after"):
+        pass
+    by = {(e["step"], e["phase"]): e for e in read()}
+    assert "parent" not in by[("land", "start")]
+    assert by[("check", "start")]["parent"] == "land" and by[("check", "end")]["parent"] == "land"
+    assert "parent" not in by[("after", "start")]
+
+
+def test_a_step_can_fail_without_stopping_and_carries_its_logs_last_lines(tmp_path, monkeypatch):
+    read = _events(tmp_path, monkeypatch)
+    log = tmp_path / "check.log"
+    log.write_text("\n".join(f"line {i}" for i in range(150)), encoding="utf-8")
+    with hw.step("t", 1, "check", "codehiro", log=log) as outcome:
+        outcome.fail("check.sh failed")
+    end = read()[-1]
+    assert (end["ok"], end["error"], end["log"] if "log" in end else None) == (False, "check.sh failed", None)
+    assert read()[0]["log"] == str(log)
+    assert end["tail"].splitlines() == [f"line {i}" for i in range(50, 150)]
+
+
+def test_servers_up_names_its_servers_on_both_events(tmp_path, monkeypatch):
+    read = _events(tmp_path, monkeypatch)
+    with hw.step(None, 2, "servers up", servers=["core", "core-ui"]):
+        pass
+    assert [e["servers"] for e in read()] == [["core", "core-ui"], ["core", "core-ui"]]
+
+
+def test_review_marks_a_working_task_and_refuses_a_parked_one(tmp_path, monkeypatch):
+    read = _events(tmp_path, monkeypatch)
+    monkeypatch.setattr(hw, "TASKS", tmp_path / "tasks")
+    hw.TASKS.mkdir()
+    hw.save(task("t", 1, ["codehiro"]))
+    hw.cmd_review(type("A", (), {"task": "t"})())
+    assert read()[-1] == {**read()[-1], "task": "t", "env": 1, "step": "review", "phase": "start"}
+    hw.save(task("p", None, ["codehiro"], state="parked"))
+    with pytest.raises(hw.Stop):
+        hw.cmd_review(type("A", (), {"task": "p"})())
+
+
+def test_sweep_leaves_out_branches_in_use():
+    listing = "* dev\n+ task/open-one\n  task/old\n  main\n  (HEAD detached at 1234)\n"
+    assert hw.merged_left(listing, "dev") == ["task/old"]
