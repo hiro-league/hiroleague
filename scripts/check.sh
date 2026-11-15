@@ -5,18 +5,21 @@
 #
 #   ./scripts/check.sh          # the parts the change touched
 #   ./scripts/check.sh --all    # every part (a release)
+#   ./scripts/check.sh --serial # one part at a time
 #
-# The engine (when a part runs or is skipped, the summary) is build-kit/check-engine.sh, shared by every Hiro repo; the
-# parts are HiroLeague's own, run in turn even when one fails (exits 1 if any did, naming them):
+# The engine (when a part runs or is skipped, which run side by side, the summary) is build-kit/check-engine.sh, shared
+# by every Hiro repo. The parts are HiroLeague's own, in four lanes that run side by side (the text before ":"; parts
+# in one lane run in turn), every part even when one fails (exits 1 if any did, naming them):
 #   - admin_frontend: generated files (preferences types and the features registry, made from hiroserver's code);
 #   - admin_frontend: svelte-check;
 #   - admin_frontend: unit tests (vitest);
 #   - ui-kit: the shared UI kit's own check (svelte-check, ESLint, vitest);
 #   - build-kit: the shared build, check and deploy scripts read by bash (`bash -n`: no syntax error reaches a deploy);
 #   - build-kit: hiro-work's tests (build-kit/work: the environments' commands);
-#   - hiroserver: the whole pytest suite over the uv workspace, on every core with pytest-xdist (scripts/run-tests.sh:
-#     Ctrl-C won't stop it, use Ctrl-Break or close the terminal; a running Hiro server may hold the venv's lock:
-#     `hiro stop` first).
+#   - hiroserver: the pytest suite, one part per area of the uv workspace, each with the packages it depends on (the
+#     kit needs the SDK, which needs commons), so a change runs only the areas it reaches. The two big areas run on
+#     every core with pytest-xdist (scripts/run-tests.sh: Ctrl-C won't stop it, use Ctrl-Break or close the terminal;
+#     a running Hiro server may hold the venv's lock: `hiro stop` first).
 #
 # Without --all a part is skipped when its files are the same as on GitHub's dev (origin/dev), or as when it last
 # passed here. Files nothing here checks (device_apps, docs, *.md outside these folders...) never start a part.
@@ -45,7 +48,19 @@ part "build-kit: bash -n" "build-kit" \
 # hiro-work, the environments' commands (build-kit/work): its choices of ports, claims and environment.
 part "build-kit: hiro-work tests" "build-kit/work" \
     bash -c "cd '${REPO_ROOT}/hiroserver' && uv run python -m pytest ../build-kit/work -q -p no:cacheprovider"
-part "hiroserver: pytest" "hiroserver scripts/run-tests.sh" \
-    "${REPO_ROOT}/scripts/run-tests.sh" -n auto
+# What every area reads: the workspace's own settings and lock, and the runner
+ws="hiroserver/pyproject.toml hiroserver/uv.lock scripts/run-tests.sh"
+part "hiroserver: commons and SDK tests" "hiroserver/hiro-commons hiroserver/hiro-channel-sdk ${ws}" \
+    "${REPO_ROOT}/scripts/run-tests.sh" -q hiro-commons hiro-channel-sdk
+part "hiroserver: extension kit tests" "hiroserver/hiro-extension-kit hiroserver/hiro-channel-sdk hiroserver/hiro-commons ${ws}" \
+    "${REPO_ROOT}/scripts/run-tests.sh" -q -n auto hiro-extension-kit
+part "hiroserver: gateway and channels tests" "hiroserver/gateway hiroserver/channels hiroserver/hiro-channel-sdk hiroserver/hiro-commons ${ws}" \
+    "${REPO_ROOT}/scripts/run-tests.sh" -q gateway channels
+# hirocli's tests also read the knowledge corpus in eval/
+part "hiroserver: hirocli tests" "hiroserver/hirocli hiroserver/hiroleague hiroserver/knowledge hiroserver/hiro-channel-sdk hiroserver/hiro-commons eval ${ws}" \
+    "${REPO_ROOT}/scripts/run-tests.sh" -q -n auto hirocli
 
+# The core's tests run alone: onnxruntime's phantom Ctrl-C reaches every process in the console, and a Node check
+# beside them dies of it (and the tests use every core and much of the memory)
+CHECK_SOLO_LANES="hiroserver"
 check_done
