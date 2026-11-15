@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -26,6 +27,15 @@ async def _bus_attached_to_loop():
     bus.attach_loop(asyncio.get_running_loop())
     yield
     bus.reset()
+
+
+async def _until(done: Callable[[], bool], timeout: float = 5.0) -> None:
+    """Wait until a reload has landed, polling. A fixed sleep (0.08 to 0.1 s) was sometimes too short with every core
+    busy (tests in parallel); the asserts after this fail if it never lands."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while not done() and loop.time() < deadline:
+        await asyncio.sleep(0.01)
 
 
 def _stt_double(tag: str):
@@ -103,7 +113,7 @@ async def test_default_stt_change_swaps_stt_on_manager_and_graph(
             mgr._ctx.preferences.update(
                 "llm.default_stt", "openai:gpt-4o-mini-transcribe",
             )
-            await asyncio.sleep(0.1)
+            await _until(lambda: mgr._stt is new_stt)
 
         assert rebuilds == [tmp_path]
         assert mgr._stt is new_stt
@@ -155,7 +165,7 @@ async def test_providers_changed_event_reloads_stt_and_clears_compiled_cache(
                     payload={"reason": "test"},
                 ),
             )
-            await asyncio.sleep(0.08)
+            await _until(lambda: mgr._memory is new_memory)  # the handler's last step
         finally:
             bus.unsubscribe(DomainEventType.PROVIDERS_CHANGED, mgr._handle_providers_changed)
 
@@ -196,7 +206,7 @@ async def test_memory_model_preferences_swap_memory_on_manager_and_graph(
         ):
             # memory.enabled defaults to True — must flip for an effective change / reload.
             mgr._ctx.preferences.update_many({"memory.enabled": False})
-            await asyncio.sleep(0.1)
+            await _until(lambda: mgr._memory is new_memory)
 
         assert rebuilds == [(tmp_path, None)]
         assert mgr._memory is new_memory
@@ -237,7 +247,7 @@ async def test_graph_engine_change_reloads_memory(
                 "graph.search_recipe",
                 "mmr",
             )
-            await asyncio.sleep(0.1)
+            await _until(lambda: mgr._memory is new_memory)
 
         assert rebuilds == [tmp_path]
         assert mgr._memory is new_memory
@@ -267,7 +277,7 @@ async def test_chat_profile_change_evicts_compiled_cache(
         )
 
         mgr._ctx.preferences.update_many({"ai.profiles.p1": _PROFILE, "llm.chat_profile": "p1"})
-        await asyncio.sleep(0.1)
+        await _until(lambda: not mgr._compiled_cache)
 
         assert mgr._compiled_cache == {}
     finally:
@@ -300,12 +310,12 @@ async def test_ai_profile_edit_rebuilds_memory_only_for_a_job_profile(
             mgr._compiled_cache["cached"] = object()
             # The admin writes a whole profile by path (ai.profiles.<id>).
             mgr._ctx.preferences.update("ai.profiles.other", {**_PROFILE, "temperature": 0.1})
-            await asyncio.sleep(0.1)
+            await _until(lambda: not mgr._compiled_cache)  # the handler decides on a rebuild right after
             assert rebuilds == []
             assert mgr._compiled_cache == {}
 
             mgr._ctx.preferences.update("ai.profiles.job", {**_PROFILE, "temperature": 0.1})
-            await asyncio.sleep(0.1)
+            await _until(lambda: rebuilds == [tmp_path])
             assert rebuilds == [tmp_path]
     finally:
         reactor.close()
