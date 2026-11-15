@@ -27,7 +27,7 @@ APP_NAME=HomeHiro            # as people read it
 APP_PORT=8100                # where it listens on the server, loopback only (hiroleague.py SITE_PORT says the same)
 START_PATIENCE=30            # seconds a new version may take to answer after a deploy (plus twice its migrations)
 DEV_PORT=8000                # the backend in .\dev
-DEV_UI_PORT=5173             # the UI in .\dev (the one to open)
+DEV_UI_PORT=5175             # the UI in .\dev (the one to open)
 BACKEND_CHECKS="ruff pytest" # what backend-check.sh runs: ruff, pyright, imports, pytest
 ```
 

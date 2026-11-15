@@ -35,4 +35,5 @@ def ui(path: str) -> FileResponse:
             continue
         if file.is_file() and file.is_relative_to(STATIC_DIR):
             return FileResponse(file, headers={"Cache-Control": cache_control(candidate)})
-    raise NotFound("UI not built; in dev open the Vite server on :5173")
+    # The dev UI port is each app's own (app.env DEV_UI_PORT), so the message names none.
+    raise NotFound("UI not built; in dev open the Vite server (app.env DEV_UI_PORT)")
