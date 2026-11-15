@@ -1,0 +1,30 @@
+#!/bin/sh
+# Hiro League post-checkout hook (every repo's core.hooksPath points here: build-kit/git-hooks/install.py).
+# Warns when a checkout in C:\hiro\env0 leaves the repo's main branch (dev for hiroleague and hiro-docs, main for the
+# rest): env0's checkouts stay on it, since every app and every session reads them (working rules, "Shared folders
+# stay current"). Branch work runs in env1 to env5 (hiro-work start). It only warns: the checkout is already done.
+
+common=$(git rev-parse --git-common-dir) || exit 0
+own="$common/hooks/post-checkout"
+if [ -x "$own" ]; then
+    "$own" "$@" || exit $?
+fi
+
+[ "$3" = "1" ] || exit 0  # a file checkout, not a branch one
+top=$(git rev-parse --show-toplevel) || exit 0
+case "$top" in
+    [Cc]:/hiro/env0/*|/[Cc]/hiro/env0/*) ;;
+    *) exit 0 ;;
+esac
+repo=$(basename "$top")
+case "$repo" in
+    hiroleague|hiro-docs) main=dev ;;
+    *) main=main ;;
+esac
+branch=$(git branch --show-current)
+if [ "$branch" != "$main" ]; then
+    echo "Hiro League: env0's $repo is now on '${branch:-a detached HEAD}', not $main. env0's checkouts stay on" \
+         "$main: go back with 'git switch $main'. Branch work runs in env1 to env5:" \
+         "hiro-work start <task> --repos $repo." >&2
+fi
+exit 0

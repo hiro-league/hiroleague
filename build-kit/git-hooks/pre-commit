@@ -1,0 +1,23 @@
+#!/bin/sh
+# Hiro League pre-commit hook (every repo's core.hooksPath points here: build-kit/git-hooks/install.py).
+# Runs the repo's one check, ./scripts/check.sh, before every commit. Parts that already passed on these files are
+# skipped, so a checked change commits in seconds and an unchecked one can't commit. A repo without a check.sh
+# (aicam, hiro-docs) commits as before. `git commit --no-verify` skips it: only for a commit Michel asked for that way
+# (hiro-work park uses it for its WIP commit).
+
+top=$(git rev-parse --show-toplevel) || exit 1
+common=$(git rev-parse --git-common-dir) || exit 1
+
+# The repo's own hook in .git/hooks, if any, still runs first (the core's pre-commit framework hook).
+own="$common/hooks/pre-commit"
+if [ -x "$own" ]; then
+    "$own" "$@" || exit $?
+fi
+
+[ -f "$top/scripts/check.sh" ] || exit 0
+echo "Hiro League pre-commit: ./scripts/check.sh (the parts this change touched)" >&2
+if ! (cd "$top" && bash ./scripts/check.sh); then
+    echo "" >&2
+    echo "Commit stopped: ./scripts/check.sh failed (the parts above). Fix them and commit again." >&2
+    exit 1
+fi
