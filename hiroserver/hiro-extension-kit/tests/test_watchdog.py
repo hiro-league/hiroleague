@@ -32,8 +32,8 @@ def test_a_blocked_loop_is_logged_with_where(monkeypatch, caplog):
         dog.start()
         await asyncio.sleep(0)
         hold_the_loop(seen)
-        for _ in range(500):  # the stall is logged by the watchdog's thread once the loop is back
-            if dog.stalls:
+        for _ in range(500):  # the watchdog's thread notes the stall, then logs it, once the loop is back
+            if "Event loop blocked" in caplog.text:
                 break
             await asyncio.sleep(0.01)
         await dog.stop()
