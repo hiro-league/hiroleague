@@ -184,17 +184,19 @@ class Out:
 
 
 @contextlib.contextmanager
-def timed(out: Out, task: str, name: str, repo: str | None = None):
-    """One timed step, as hiro-work's own (start and end events), printed through the train's output."""
+def timed(out: Out, task: str, name: str, repo: str | None = None, log: Path | None = None):
+    """One timed step, as hiro-work's own (start and end events), printed through the train's output. ``log``: its
+    own log, whose last lines go with a failed end (CodeHiro's Work area shows them)."""
     label = name + (f" [{repo}]" if repo else "")
     out(f"> {label}")
-    hw.event(task=task, env=0, repo=repo, step=name, phase="start")
+    hw.event(task=task, env=0, repo=repo, step=name, phase="start", **({"log": str(log)} if log else {}))
     t = time.monotonic()
     try:
         yield
     except BaseException as e:
         s = round(time.monotonic() - t, 1)
-        hw.event(task=task, env=0, repo=repo, step=name, phase="end", ok=False, seconds=s, error=str(e)[:300])
+        hw.event(task=task, env=0, repo=repo, step=name, phase="end", ok=False, seconds=s, error=str(e)[:300],
+                 tail=hw.tail(log))
         out(f"x {label} failed after {s} s: {e}")
         raise
     s = round(time.monotonic() - t, 1)
@@ -356,9 +358,10 @@ def stream(out: Out, args: list[str], cwd: Path | None, repo: str, log: Path) ->
 
 def push_github(out: Out, task: str, f: Facts, r: Result) -> None:
     main = hw.main_of(f.repo)
-    with timed(out, task, "push github", f.repo):
+    log = hw.LOGS / "train" / f"{task}-{f.repo}-github.log"
+    with timed(out, task, "push github", f.repo, log):
         code, text = stream(out, ["git", "-C", str(hw.repo_dir(0, f.repo)), "push", "origin", f"{main}:{main}"],
-                            None, f.repo, hw.LOGS / "train" / f"{task}-{f.repo}-github.log")
+                            None, f.repo, log)
         if code != 0:
             raise hw.Stop(f"git refused the push to GitHub (never forced): {text[-300:]}")
     r.pushed = len(f.github_lacks)
@@ -370,7 +373,7 @@ def deploy(out: Out, task: str, f: Facts, r: Result) -> None:
     since = int(time.time()) - 5  # Simone's log lines from here on are this deploy's (clocks within seconds)
     log = hw.LOGS / "train" / f"{task}-{f.repo}-deploy.log"
     try:
-        with timed(out, task, "deploy", f.repo):
+        with timed(out, task, "deploy", f.repo, log):
             code, text = stream(out, ["git", "-C", str(d), "push", "server", f"{main}:main"], None, f.repo, log)
             if code != 0:
                 raise hw.Stop(f"git refused the push to Simone (never forced): {text[-300:]}")
