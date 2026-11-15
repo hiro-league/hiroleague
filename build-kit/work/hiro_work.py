@@ -14,12 +14,13 @@ a task in env1..env5 lands: its branches merge into dev/main and env0 is brought
     hiro-work up <env> [server ...] / down <env> [server ...]   servers, in Windows Terminal outside Claude
     hiro-work init <env>                     make (or repair) an environment: worktrees, installs, settings
     hiro-work sweep                          what is left behind (report only)
+    hiro-work review <task>                  the task waits for Michel's review (until its next step)
     hiro-work real <task> [--reads] [--ai]   env1..5: which real systems the task's copy reads (data.py)
     hiro-work refresh-data [--apply STAMP] [--files]   live -> env0: a scrubbed live copy, then env0 (data.py)
     hiro-work train [repo ...] [--dry-run]   the deploy train: push and deploy, when Michel says (train.py)
 
 State lives in C:\hiro\tasks (one JSON file per task) and every step is logged to C:\hiro\logs\events.jsonl (with
-its time) for CodeHiro's Work area. Standard library only: it runs on the system Python.
+its time) for CodeHiro's Work area, where ship.py sends it. Standard library only: it runs on the system Python.
 """
 
 from __future__ import annotations
@@ -39,6 +40,7 @@ from datetime import datetime
 from pathlib import Path
 
 import data
+import ship
 
 ROOT = Path(os.environ.get("HIRO_ROOT", r"C:\hiro"))
 TASKS = ROOT / "tasks"
@@ -102,29 +104,76 @@ def say(msg: str) -> None:
     print(msg, flush=True)
 
 
+_shipping = False  # this process has started the sender (ship.py) once
+
+
 def event(**fields) -> None:
+    global _shipping
     LOGS.mkdir(parents=True, exist_ok=True)
     fields = {"at": datetime.now().astimezone().isoformat(timespec="seconds"), **fields}
     with open(EVENTS, "a", encoding="utf-8") as f:
         f.write(json.dumps(fields) + "\n")
+    # The log is the outbox: the sender posts the new lines to CodeHiro. Only the real log is sent (a test's isn't).
+    if not _shipping and EVENTS == ship.EVENTS:
+        _shipping = True
+        ship.kick()
+
+
+TAIL_LINES = 100  # a failed step's last lines of log, sent with its end (CodeHiro can't read the PC's files)
+TAIL_CHARS = 20_000
+_open_steps: list[str] = []  # the steps running now in this process, the innermost last: a new one runs inside it
+
+
+def tail(log: Path | None) -> str | None:
+    if not log or not log.exists():
+        return None
+    with contextlib.suppress(OSError):
+        lines = log.read_text(encoding="utf-8", errors="replace").splitlines()[-TAIL_LINES:]
+        return "\n".join(lines)[-TAIL_CHARS:]
+    return None
+
+
+class Outcome:
+    """What a step yields: ``fail()`` marks it failed without stopping the command (a repo's check that failed while
+    the others go on)."""
+
+    def __init__(self) -> None:
+        self.error: str | None = None
+
+    def fail(self, error: str) -> None:
+        self.error = error
 
 
 @contextlib.contextmanager
-def step(task: str | None, env: int | None, name: str, repo: str | None = None):
-    """One timed step: printed, and logged as a start and an end event."""
+def step(task: str | None, env: int | None, name: str, repo: str | None = None, log: Path | None = None,
+         **more):
+    """One timed step: printed, and logged as a start and an end event. A step inside another names it as its
+    ``parent`` (land's own steps); ``log`` is its log file, whose last lines go with a failed end; ``more`` rides on
+    both events (the servers of servers up)."""
     label = f"{name}" + (f" [{repo}]" if repo else "")
     say(f"> {label}")
-    event(task=task, env=env, repo=repo, step=name, phase="start")
+    where = {"task": task, "env": env, "repo": repo, "step": name}
+    if _open_steps:
+        where["parent"] = _open_steps[-1]
+    event(**where, phase="start", **({"log": str(log)} if log else {}), **more)
+    _open_steps.append(name)
     t = time.monotonic()
+    outcome = Outcome()
     try:
-        yield
+        yield outcome
     except BaseException as e:
         s = round(time.monotonic() - t, 1)
-        event(task=task, env=env, repo=repo, step=name, phase="end", ok=False, seconds=s, error=str(e)[:300])
+        event(**where, phase="end", ok=False, seconds=s, error=str(e)[:300], tail=tail(log), **more)
         say(f"x {label} failed after {s} s")
         raise
+    finally:
+        _open_steps.pop()
     s = round(time.monotonic() - t, 1)
-    event(task=task, env=env, repo=repo, step=name, phase="end", ok=True, seconds=s)
+    if outcome.error:
+        event(**where, phase="end", ok=False, seconds=s, error=outcome.error[:300], tail=tail(log), **more)
+        say(f"x {label} failed after {s} s")
+        return
+    event(**where, phase="end", ok=True, seconds=s, **more)
     say(f"  done in {s} s")
 
 
@@ -634,6 +683,26 @@ def cmd_land(a) -> None:
     for repo in task.repos:
         if dirty(repo_dir(env, repo)):
             raise Stop(f"env{env}'s {repo} has uncommitted files: commit them on {task.branch} first.")
+    # Landing is one step with its own inside (CodeHiro shows the task as landing while it runs)
+    with step(task.id, env, "land"):
+        land_steps(task, env)
+    # 5. Free the environment, keep it warm
+    for repo in task.repos:
+        d = repo_dir(env, repo)
+        git(d, "switch", "-q", "--detach", main_of(repo))
+        git(d, "branch", "-q", "-D", task.branch)
+    with step(task.id, env, "servers down"):
+        servers_down(env)
+    with locked():
+        task.state = "done"
+        save(task)
+    event(task=task.id, env=env, step="task", phase="end", ok=True, landed=True)
+    say(f"Task {task.id} landed: {', '.join(task.repos)} in env0; env{env} is free. Not pushed: the deploy train "
+        "pushes.")
+
+
+def land_steps(task: Task, env: int) -> None:
+    """Merge the latest, check, then fast-forward env0 (cmd_land's own steps)."""
     # 1. Bring each branch up to GitHub and to env0's dev/main
     for repo in task.repos:
         d = repo_dir(env, repo)
@@ -655,14 +724,15 @@ def cmd_land(a) -> None:
         install(env, repo, task.id)
         # An app beside a changed kit: its parts name the core files they read (@hiroleague:...), so the check runs
         # exactly the parts the kit change reaches
-        with step(task.id, env, "check", repo):
+        log = LOGS / "check" / f"{task.id}-{repo}.log"
+        with step(task.id, env, "check", repo, log=log) as outcome:
             out = subprocess.run([bash(), "-lc", "./scripts/check.sh"], cwd=repo_dir(env, repo),
                                  capture_output=True, text=True, encoding="utf-8", errors="replace")
-            log = LOGS / "check" / f"{task.id}-{repo}.log"
             log.parent.mkdir(parents=True, exist_ok=True)
             log.write_text(out.stdout + out.stderr, encoding="utf-8")
             if out.returncode != 0:
                 failed.append(f"{repo} (log: {log})")
+                outcome.fail(f"check.sh failed (log: {log})")
     if failed:
         raise Stop("Checks failed: " + "; ".join(failed) + ". Fix, commit, land again.")
     # 3. Wait for nobody: refuse when a task in env0 holds one of these repos with unfinished edits
@@ -672,21 +742,9 @@ def cmd_land(a) -> None:
                    + ": landing waits until that task finishes.")
     # 4. dev/main moves to the branch; env0's checkouts follow (a fast-forward)
     for repo in task.repos:
-        with step(task.id, env, "land", repo):
+        with step(task.id, env, "fast-forward", repo):
             git(repo_dir(0, repo), "merge", "--ff-only", "-q", task.branch)
             install(0, repo, task.id)
-    # 5. Free the environment, keep it warm
-    for repo in task.repos:
-        d = repo_dir(env, repo)
-        git(d, "switch", "-q", "--detach", main_of(repo))
-        git(d, "branch", "-q", "-D", task.branch)
-    servers_down(env)
-    with locked():
-        task.state = "done"
-        save(task)
-    event(task=task.id, env=env, step="task", phase="end", ok=True, landed=True)
-    say(f"Task {task.id} landed: {', '.join(task.repos)} in env0; env{env} is free. Not pushed: the deploy train "
-        "pushes.")
 
 
 def cmd_park(a) -> None:
@@ -700,7 +758,8 @@ def cmd_park(a) -> None:
             git(d, "add", "-A")
             git(d, "commit", "-q", "--no-verify", "-m", f"WIP (parked) {task.id}")
         git(d, "switch", "-q", "--detach", main_of(repo))
-    servers_down(env)
+    with step(task.id, env, "servers down"):
+        servers_down(env)
     with locked():
         task.state, task.env = "parked", None
         save(task)
@@ -847,7 +906,7 @@ def cmd_up(a) -> None:
             wt.append(";")
         wt += ["new-tab", "--title", f"env{env} {s.name}", "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
                "-File", str(runner(env, s))]
-    with step(None, env, "servers up"):
+    with step(None, env, "servers up", servers=[s.name for s in chosen]):
         subprocess.Popen(wt, creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
         deadline = time.monotonic() + a.wait
         waiting = list(chosen)
@@ -886,7 +945,8 @@ def servers_down(env: int, names: list[str] | None = None) -> None:
 
 
 def cmd_down(a) -> None:
-    with step(None, a.env, "servers down"):
+    named = [s.name for s in pick_servers(a.env, a.servers)] if a.servers else None  # none named: all of them
+    with step(None, a.env, "servers down", **({"servers": named} if named else {})):
         servers_down(a.env, a.servers)
     up = [n for n, s in servers(a.env).items() if listening(s.port)]
     say("Still up: " + ", ".join(up) if up else f"env{a.env}'s servers are down.")
@@ -913,29 +973,55 @@ def cmd_status(a) -> None:
         say("Parked: " + ", ".join(f"{t.id} ({t.updated[:10]})" for t in parked))
 
 
+def merged_left(listing: str, main: str) -> list[str]:
+    """The merged branches left behind, from `git branch --merged`: not the main branch, and not one checked out here
+    ("*") or in another worktree ("+", an open task's branch in env1..env5: it is in use, not left)."""
+    out = []
+    for line in listing.splitlines():
+        if line[:1] in ("*", "+"):
+            continue
+        b = line.strip()
+        if b and b not in (main, "main", "dev") and not b.startswith("("):
+            out.append(b)
+    return out
+
+
 def cmd_sweep(a) -> None:
     say("Left behind (nothing is removed here):")
-    found = 0
+    findings: list[dict] = []
+
+    def found(kind: str, repo: str, what: str, fix: str) -> None:
+        say(f"  {repo}: {what}")
+        findings.append({"kind": kind, "where": repo, "what": what, "since": None, "fix": fix})
+
     for repo in REPOS:
         d = repo_dir(0, repo)
         for block in git(d, "worktree", "list", "--porcelain").split("\n\n"):
             path = block.splitlines()[0].removeprefix("worktree ").replace("/", "\\")
             if path.lower() == str(d).lower() or path.lower().startswith(str(ROOT).lower() + "\\env"):
                 continue
-            say(f"  {repo}: worktree outside C:\\hiro\\env1-5: {path}")
-            found += 1
+            found("worktree", repo, f"worktree outside C:\\hiro\\env1-5: {path}", f"git -C {d} worktree remove {path}")
         main = main_of(repo)
-        merged = [b.strip("* ").strip() for b in git(d, "branch", "--merged", main).splitlines()]
-        merged = [b for b in merged if b and b not in (main, "main", "dev") and not b.startswith("(")]
+        merged = merged_left(git(d, "branch", "--merged", main), main)
         if merged:
-            say(f"  {repo}: {len(merged)} merged branch(es) kept")
-            found += 1
+            found("merged", repo, f"{len(merged)} merged branch(es) kept: {', '.join(merged)}",
+                  f"git -C {d} branch -d {' '.join(merged)}")
         branch = git(d, "branch", "--show-current")
         if branch != main:
-            say(f"  {repo}: env0 checkout is on '{branch}', not {main}")
-            found += 1
-    if not found:
+            found("off-main", repo, f"env0 checkout is on '{branch}', not {main}", f"git -C {d} switch {main}")
+    if not findings:
         say("  nothing")
+    # CodeHiro's Sweep shows the last report, beside the parked tasks and the servers left up it works out itself
+    event(task=None, env=None, step="sweep", phase="end", ok=True, findings=findings)
+
+
+def cmd_review(a) -> None:
+    """The task's work waits for Michel's review: CodeHiro shows it so until the task's next step."""
+    task = get(a.task)
+    if task.state != "working":
+        raise Stop(f"Task {task.id} isn't working (it is {task.state}).")
+    event(task=task.id, env=task.env, step="review", phase="start")
+    say(f"Task {task.id} waits for your review (CodeHiro's Work page says so until its next step).")
 
 
 # ---------------------------------------------------------------------------------------------------------- main
@@ -952,7 +1038,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--env", type=int, choices=list(ENVS))
     s.add_argument("--real-reads", action="store_true", help="env1..5: read the real HA, Frigate and MQTT")
     s.add_argument("--real-ai", action="store_true", help="env1..5: keep the copied AI providers")
-    for verb in ("move", "finish", "land", "park"):
+    for verb in ("move", "finish", "land", "park", "review"):
         sub.add_parser(verb).add_argument("task")
     r = sub.add_parser("resume")
     r.add_argument("task")
@@ -990,6 +1076,7 @@ def main(argv: list[str] | None = None) -> int:
             return a.func(a) or 0
         {"start": cmd_start, "move": cmd_move, "finish": cmd_finish, "land": cmd_land, "park": cmd_park,
          "resume": cmd_resume, "status": cmd_status, "sweep": cmd_sweep, "up": cmd_up, "down": cmd_down,
+         "review": cmd_review,
          "configure": lambda a: configure(a.env), "init": lambda a: init_env(a.env),
          "train": train.cmd_train}[a.cmd](a)
     except Stop as e:

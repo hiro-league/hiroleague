@@ -15,6 +15,7 @@ they drifted (shared-code plan, step 2). A change to how apps are built, checked
 | `git-hooks/` | Every Hiro repo's git hooks: `pre-commit` runs `./scripts/check.sh`, `post-checkout` warns when an env0 checkout leaves `dev`/`main` (hiro-docs `standards/workflow.md`, "Enforcement") | git, through each repo's `core.hooksPath`, set by `git-hooks/install.py` |
 | `work/hiro_work.py` | `hiro-work`: the environments (env0 to env5), tasks and their claims, servers, landing (hiro-docs `standards/workflow.md`); its tests beside it | `C:\hiro\bin\hiro-work.cmd`; the core's check runs its tests |
 | `work/train.py` | `hiro-work train`: the deploy train (what GitHub and live lack, the pushes, the core's deploy then the apps' side by side through each one's own deploy, a check of each, one report; hiro-docs `standards/building-and-releasing.md`); its tests beside it | `hiro-work train`, when Michel says; the core's check runs its tests |
+| `work/ship.py` | The sender: posts `events.jsonl`'s new lines to CodeHiro's Work area with the key in `C:\hiro\secrets\work.key` (hiro-docs `standards/workflow.md`, "Tracking"); its tests beside it | Started by hiro-work whenever it writes an event; the core's check runs its tests |
 
 The UI kit has the two frontend pieces: `ui-kit/scripts/kit-sync.mjs` (each app's `npm run kit`) and
 `ui-kit/src/lib/eslint-preset.js` (each app's `eslint.config.js`).
