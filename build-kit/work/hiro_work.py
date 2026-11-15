@@ -172,26 +172,41 @@ def task_path(task_id: str) -> Path:
     return TASKS / f"{task_id}.json"
 
 
+def task_from(data: dict) -> Task:
+    """A task record as this hiro-work knows it. Environments can run different versions of hiro-work, all sharing
+    C:\\hiro\\tasks: a field a newer one wrote is left out here (it stays in the file, see record())."""
+    return Task(**{k: v for k, v in data.items() if k in Task.__dataclass_fields__})
+
+
+def record(task: Task) -> dict:
+    """The task as JSON, keeping the fields a newer hiro-work wrote that this one doesn't know."""
+    old: dict = {}
+    with contextlib.suppress(OSError, ValueError):
+        old = json.loads(task_path(task.id).read_text(encoding="utf-8"))
+    return {**old, **task.__dict__}
+
+
 def load_tasks() -> list[Task]:
     TASKS.mkdir(parents=True, exist_ok=True)
-    return [Task(**json.loads(p.read_text(encoding="utf-8"))) for p in sorted(TASKS.glob("*.json"))]
+    return [task_from(json.loads(p.read_text(encoding="utf-8"))) for p in sorted(TASKS.glob("*.json"))]
 
 
 def save(task: Task) -> None:
     task.updated = datetime.now().astimezone().isoformat(timespec="seconds")
+    data = record(task)
     if task.state == "done":
         (TASKS / "done").mkdir(parents=True, exist_ok=True)
         task_path(task.id).unlink(missing_ok=True)
-        (TASKS / "done" / f"{task.id}.json").write_text(json.dumps(task.__dict__, indent=2), encoding="utf-8")
+        (TASKS / "done" / f"{task.id}.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
     else:
-        task_path(task.id).write_text(json.dumps(task.__dict__, indent=2), encoding="utf-8")
+        task_path(task.id).write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 def get(task_id: str) -> Task:
     p = task_path(task_id)
     if not p.exists():
         raise Stop(f"No open task '{task_id}' (hiro-work status lists them).")
-    return Task(**json.loads(p.read_text(encoding="utf-8")))
+    return task_from(json.loads(p.read_text(encoding="utf-8")))
 
 
 @contextlib.contextmanager
