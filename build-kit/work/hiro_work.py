@@ -158,6 +158,8 @@ class Task:
     repos: list[str]
     state: str = "working"  # working | parked | done
     base: dict[str, str] = field(default_factory=dict)
+    # In env0: what was already uncommitted in each claimed repo when the task started (someone else's): not its own
+    before: dict[str, list[str]] = field(default_factory=dict)
     created: str = ""
     updated: str = ""
 
@@ -479,6 +481,7 @@ def cmd_start(a) -> None:
                     git(d, "fetch", "-q", "origin", check=False)
                     git(d, "merge", "--ff-only", "-q", f"origin/{main_of(repo)}", check=False)
                 task.base[repo] = git(d, "rev-parse", "HEAD")
+                task.before[repo] = dirty(d)
         else:
             init_env(env, task.id)
             for repo in REPOS:
@@ -528,9 +531,12 @@ def cmd_move(a) -> None:
         base = git(src, "rev-parse", "HEAD")
         with step(task.id, env, "move", repo):
             if repo in task.repos:
-                stashed = bool(dirty(src))
+                # Only the task's own files move; what was there before it started stays in env0
+                own = [line[3:].split(" -> ")[-1].strip('"') for line in dirty(src)
+                       if line not in task.before.get(repo, [])]
+                stashed = bool(own)
                 if stashed:
-                    git(src, "stash", "push", "-u", "-q", "-m", f"hiro-work move {task.id}")
+                    git(src, "stash", "push", "-u", "-q", "-m", f"hiro-work move {task.id}", "--", *own)
                 git(dst, "switch", "-q", "-C", task.branch, base)
                 if stashed:
                     git(dst, "stash", "pop", "-q")
@@ -548,7 +554,7 @@ def cmd_finish(a) -> None:
     task = get(a.task)
     if task.env != 0:
         raise Stop(f"Task {task.id} is in env{task.env}: it lands (hiro-work land {task.id}).")
-    left = {r: dirty(repo_dir(0, r)) for r in task.repos}
+    left = {r: [f for f in dirty(repo_dir(0, r)) if f not in task.before.get(r, [])] for r in task.repos}
     left = {r: files for r, files in left.items() if files}
     if left:
         raise Stop("Not committed yet: " + "; ".join(f"{r}: {len(f)} file(s)" for r, f in left.items())
