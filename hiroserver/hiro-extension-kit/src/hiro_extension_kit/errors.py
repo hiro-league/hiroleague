@@ -1,5 +1,5 @@
 """The app's errors: the types, the one way to log a caught one, and the one place that turns every
-error into an HTTP answer. The rule: each app's docs/backend-best-practices.md, section 5.
+error into an HTTP answer. The rule: the shared backend guide (hiro-docs standards/guides/backend.md), sections 1.5 and 2.5.
 
 Every expected error is an `AppError`: its message is for the user, its `status` the HTTP answer.
 
