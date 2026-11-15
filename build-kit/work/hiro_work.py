@@ -16,6 +16,7 @@ a task in env1..env5 lands: its branches merge into dev/main and env0 is brought
     hiro-work sweep                          what is left behind (report only)
     hiro-work real <task> [--reads] [--ai]   env1..5: which real systems the task's copy reads (data.py)
     hiro-work refresh-data [--apply STAMP] [--files]   live -> env0: a scrubbed live copy, then env0 (data.py)
+    hiro-work train [repo ...] [--dry-run]   the deploy train: push and deploy, when Michel says (train.py)
 
 State lives in C:\hiro\tasks (one JSON file per task) and every step is logged to C:\hiro\logs\events.jsonl (with
 its time) for CodeHiro's Work area. Standard library only: it runs on the system Python.
@@ -177,26 +178,41 @@ def task_path(task_id: str) -> Path:
     return TASKS / f"{task_id}.json"
 
 
+def task_from(data: dict) -> Task:
+    """A task record as this hiro-work knows it. Environments can run different versions of hiro-work, all sharing
+    C:\\hiro\\tasks: a field a newer one wrote is left out here (it stays in the file, see record())."""
+    return Task(**{k: v for k, v in data.items() if k in Task.__dataclass_fields__})
+
+
+def record(task: Task) -> dict:
+    """The task as JSON, keeping the fields a newer hiro-work wrote that this one doesn't know."""
+    old: dict = {}
+    with contextlib.suppress(OSError, ValueError):
+        old = json.loads(task_path(task.id).read_text(encoding="utf-8"))
+    return {**old, **task.__dict__}
+
+
 def load_tasks() -> list[Task]:
     TASKS.mkdir(parents=True, exist_ok=True)
-    return [Task(**json.loads(p.read_text(encoding="utf-8"))) for p in sorted(TASKS.glob("*.json"))]
+    return [task_from(json.loads(p.read_text(encoding="utf-8"))) for p in sorted(TASKS.glob("*.json"))]
 
 
 def save(task: Task) -> None:
     task.updated = datetime.now().astimezone().isoformat(timespec="seconds")
+    data = record(task)
     if task.state == "done":
         (TASKS / "done").mkdir(parents=True, exist_ok=True)
         task_path(task.id).unlink(missing_ok=True)
-        (TASKS / "done" / f"{task.id}.json").write_text(json.dumps(task.__dict__, indent=2), encoding="utf-8")
+        (TASKS / "done" / f"{task.id}.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
     else:
-        task_path(task.id).write_text(json.dumps(task.__dict__, indent=2), encoding="utf-8")
+        task_path(task.id).write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 def get(task_id: str) -> Task:
     p = task_path(task_id)
     if not p.exists():
         raise Stop(f"No open task '{task_id}' (hiro-work status lists them).")
-    return Task(**json.loads(p.read_text(encoding="utf-8")))
+    return task_from(json.loads(p.read_text(encoding="utf-8")))
 
 
 @contextlib.contextmanager
@@ -959,13 +975,19 @@ def main(argv: list[str] | None = None) -> int:
     rd.add_argument("--apply", metavar="STAMP", help="a copy in C:\\hiro\\data\\live-copies, or 'latest'")
     rd.add_argument("--files", action="store_true", help="only the picture folders (avatars, StudyHiro's files)")
     rd.set_defaults(func=lambda a: data.cmd_refresh_data(a, sys.modules[__name__]))
+    # The deploy train lives in train.py, which imports this module: run as a script, this is __main__, so it is
+    # named hiro_work too, or train.py would load a second copy (and its Stop wouldn't be caught here)
+    sys.modules.setdefault("hiro_work", sys.modules[__name__])
+    import train
+    train.add_parser(sub)
     a = p.parse_args(argv)
     try:
         if getattr(a, "func", None):
             return a.func(a) or 0
         {"start": cmd_start, "move": cmd_move, "finish": cmd_finish, "land": cmd_land, "park": cmd_park,
          "resume": cmd_resume, "status": cmd_status, "sweep": cmd_sweep, "up": cmd_up, "down": cmd_down,
-         "configure": lambda a: configure(a.env), "init": lambda a: init_env(a.env)}[a.cmd](a)
+         "configure": lambda a: configure(a.env), "init": lambda a: init_env(a.env),
+         "train": train.cmd_train}[a.cmd](a)
     except Stop as e:
         say(f"\nStopped: {e}")
         return 1

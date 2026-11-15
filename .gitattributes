@@ -1,3 +1,5 @@
 # Deploy files run on the Linux server and are copied there from Windows (scp): keep them LF so the
 # shebang lines and bash parse there.
 deploy/** text eol=lf
+# The git hooks run under Git's sh on every checkout: keep them LF.
+build-kit/git-hooks/** text eol=lf
