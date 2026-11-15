@@ -3,6 +3,7 @@
 #
 # Usage (args forward to pytest):
 #   ./scripts/run-tests.sh                                  # whole workspace
+#   ./scripts/run-tests.sh -n auto                          # on every core (what scripts/check.sh runs)
 #   ./scripts/run-tests.sh hirocli/src/hirocli/domain -q    # a subtree
 #   ./scripts/run-tests.sh -k preferences
 #
@@ -16,7 +17,9 @@
 #   ~86% through. Headless / CI never sees it — no console handler fires there.
 #   Ignoring SIGINT makes asyncio skip installing its per-test handler, so the
 #   stray signal is dropped and the suite completes. The suite itself is healthy;
-#   this only neutralizes the phantom console signal.
+#   this only neutralizes the phantom console signal. With -n auto, each
+#   pytest-xdist worker ignores it too (hirocli/conftest.py): a worker doesn't
+#   inherit this process's SIG_IGN.
 #
 #   Trade-off: Ctrl-C will NOT stop the run. Use Ctrl-Break, or close the
 #   terminal, to abort.

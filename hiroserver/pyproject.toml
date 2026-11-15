@@ -2,7 +2,7 @@
 members = ["hiroleague", "hirocli", "gateway", "hiro-channel-sdk", "hiro-commons", "hiro-extension-kit", "channels/*"]
 
 [dependency-groups]
-dev = ["debugpy>=1.8,<2"]
+dev = ["debugpy>=1.8,<2", "pytest-xdist>=3.8.0"]
 
 # Workspace-level runs collect several test files with the same basename.
 # Importlib mode gives each file a unique import path during collection.

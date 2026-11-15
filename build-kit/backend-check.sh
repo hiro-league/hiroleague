@@ -8,9 +8,10 @@
 #   - ruff:    `ruff check src tests`
 #   - pyright: the types, as pyproject.toml's [tool.pyright] sets them up
 #   - imports: `lint-imports`, the import rules pyproject.toml's [tool.importlinter] gives
-#   - pytest:  the tests (their own temporary database, no network: tests/conftest.py)
+#   - pytest:  the tests (their own temporary database, no network: tests/conftest.py), on every core when the app
+#              has pytest-xdist, on the PC and in the image alike (every app has it: testing plan, step 2.1)
 # In the image: IN_IMAGE=1 runs them on the environment its `uv sync` made (no second sync), and pytest without its
-# cache folder and, when the app has pytest-xdist, on every core.
+# cache folder.
 set -euo pipefail
 
 checks=("$@")
@@ -20,7 +21,9 @@ pytest_args=(-q)
 if [ -n "${IN_IMAGE:-}" ]; then
     run+=(--no-sync)
     pytest_args+=(-p no:cacheprovider)
-    if "${run[@]}" python -c "import xdist" 2>/dev/null; then pytest_args+=(-n auto); fi
+fi
+if [[ " ${checks[*]} " == *" pytest "* ]] && "${run[@]}" python -c "import xdist" 2>/dev/null; then
+    pytest_args+=(-n auto)
 fi
 
 for check in "${checks[@]}"; do

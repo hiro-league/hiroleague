@@ -13,8 +13,9 @@
 #   - admin_frontend: unit tests (vitest);
 #   - ui-kit: the shared UI kit's own check (svelte-check, ESLint, vitest);
 #   - build-kit: the shared build, check and deploy scripts read by bash (`bash -n`: no syntax error reaches a deploy);
-#   - hiroserver: the whole pytest suite over the uv workspace (scripts/run-tests.sh: Ctrl-C won't stop it, use
-#     Ctrl-Break or close the terminal; a running Hiro server may hold the venv's lock: `hiro stop` first).
+#   - hiroserver: the whole pytest suite over the uv workspace, on every core with pytest-xdist (scripts/run-tests.sh:
+#     Ctrl-C won't stop it, use Ctrl-Break or close the terminal; a running Hiro server may hold the venv's lock:
+#     `hiro stop` first).
 #
 # Without --all a part is skipped when its files are the same as on GitHub's dev (origin/dev), or as when it last
 # passed here. Files nothing here checks (device_apps, docs, *.md outside these folders...) never start a part.
@@ -41,6 +42,6 @@ part "ui-kit: check" "ui-kit" \
 part "build-kit: bash -n" "build-kit" \
     bash -c "cd '${REPO_ROOT}/build-kit' && for f in *.sh; do bash -n \"\$f\" || exit 1; done"
 part "hiroserver: pytest" "hiroserver scripts/run-tests.sh" \
-    "${REPO_ROOT}/scripts/run-tests.sh"
+    "${REPO_ROOT}/scripts/run-tests.sh" -n auto
 
 check_done

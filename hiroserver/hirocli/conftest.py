@@ -9,6 +9,7 @@ which lacks the custom ``fineinfo`` method and raises ``AttributeError`` at runt
 from __future__ import annotations
 
 import os
+import signal
 
 from hiro_commons.log import Logger
 
@@ -24,3 +25,15 @@ os.environ["LANGCHAIN_TRACING_V2"] = "false"
 
 Logger.set_level("DEBUG")
 Logger.setup(console=False)
+
+
+def pytest_configure(config) -> None:
+    """In a pytest-xdist worker, ignore SIGINT, as scripts/run-tests.sh does for the main process.
+
+    The phantom console Ctrl-C that onnxruntime's handler sends mid-suite (run-tests.sh says why) reaches every
+    process on the console, and a worker doesn't inherit the main process's SIG_IGN: in parallel runs every worker
+    died of a KeyboardInterrupt about 80% through. Workers still stop with the run: Ctrl-Break or closing the
+    terminal ends the main process, and xdist ends its workers.
+    """
+    if hasattr(config, "workerinput"):
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
