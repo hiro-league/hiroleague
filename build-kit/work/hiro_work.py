@@ -15,7 +15,7 @@ a task in env1..env5 lands: its branches merge into dev/main and env0 is brought
     hiro-work init <env>                     make (or repair) an environment: worktrees, installs, settings
     hiro-work sweep                          what is left behind (report only)
     hiro-work real <task> [--reads] [--ai]   env1..5: which real systems the task's copy reads (data.py)
-    hiro-work refresh-data [--apply STAMP]   live -> env0: a scrubbed live copy, then env0 replaced (data.py)
+    hiro-work refresh-data [--apply STAMP] [--files]   live -> env0: a scrubbed live copy, then env0 (data.py)
 
 State lives in C:\hiro\tasks (one JSON file per task) and every step is logged to C:\hiro\logs\events.jsonl (with
 its time) for CodeHiro's Work area. Standard library only: it runs on the system Python.
@@ -957,6 +957,7 @@ def main(argv: list[str] | None = None) -> int:
     rl.set_defaults(func=cmd_real)
     rd = sub.add_parser("refresh-data", help="live -> env0: fetch a scrubbed live copy; --apply puts it in env0")
     rd.add_argument("--apply", metavar="STAMP", help="a copy in C:\\hiro\\data\\live-copies, or 'latest'")
+    rd.add_argument("--files", action="store_true", help="only the picture folders (avatars, StudyHiro's files)")
     rd.set_defaults(func=lambda a: data.cmd_refresh_data(a, sys.modules[__name__]))
     a = p.parse_args(argv)
     try:

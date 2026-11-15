@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import re
 import shutil
 import sqlite3
@@ -145,9 +146,13 @@ PLACE_TABLES = {
                      "local_models"],
     **{f"{a}.db": ["websession"] for a in APPS},
 }
+# The folders of pictures the databases point at, copied with them (small: HomeHiro's avatars, StudyHiro's stored
+# files). The big ones (HomeHiro's recognition clips 12 GB, streams/ 2 GB, agents/, llm-requests/) are left out:
+# env0 has its own, and they wait for Michel's OK.
+LIVE_FILES = {"homehiro": ["people"], "studyhiro": ["files"]}
 # Left out of a refresh, said in the report: files beside the databases, the core's memory graph and vector store
 LEFT_OUT = [
-    "files beside the databases (HomeHiro's people/, recognition/, streams/, llm-requests/; StudyHiro's files/)",
+    "HomeHiro's big folders (recognition/, streams/, agents/, llm-requests/) and the other apps' file folders",
     "the core's memory graph (graphiti_kuzu.db, locked while the live core runs) and vector store (qdrant/)",
     "the core's preferences.json, providers.json, config.json, characters/ and plans/ (env0's own)",
     "the WhatsApp session, each app's pairing key (hiroleague/), sign-in sessions, tokens and logins in settings",
@@ -359,6 +364,46 @@ def prune(hw: ModuleType) -> list[str]:
     return [p.name for p in old]
 
 
+def live_file_count(group: str, folder: str) -> int:
+    return int(ssh(["find", f"~/{group}/data/{folder}", "-type", "f"], timeout=120).count("\n"))
+
+
+def copy_files(hw: ModuleType, archive: Path) -> list[str]:
+    """LIVE_FILES from Simone into env0 (a tar stream over ssh, into a folder beside env0's; env0's own folder moves
+    to the archive): one line per folder with its file counts, live and env0."""
+    lines = []
+    for group, folders in LIVE_FILES.items():
+        for folder in folders:
+            target = hw.data_dir(0) / group / folder
+            stage = hw.data_dir(0) / group / f".{folder}.refresh"
+            if stage.exists():
+                shutil.rmtree(stage)
+            stage.mkdir(parents=True)
+            with hw.step(None, 0, "files", f"{group}/{folder}"):
+                live = live_file_count(group, folder)
+                sender = subprocess.Popen(["ssh", "-o", "BatchMode=yes", LIVE_HOST, "tar", "-C", f"~/{group}/data",
+                                           "-cf", "-", folder], stdout=subprocess.PIPE)
+                # Windows' own tar (bsdtar): Git's GNU tar reads "C:" in a path as a remote host
+                tar = str(Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) / "System32" / "tar.exe")
+                got = subprocess.run([tar, "-xf", "-", "-C", str(stage)], stdin=sender.stdout, capture_output=True)
+                sender.stdout.close()
+                if sender.wait() != 0 or got.returncode != 0:
+                    shutil.rmtree(stage)
+                    raise hw.Stop(f"Copying {group}/{folder} failed: {got.stderr.decode(errors='replace')[-500:]}")
+                here = sum(1 for p in (stage / folder).rglob("*") if p.is_file())
+                if here != live:
+                    shutil.rmtree(stage)
+                    raise hw.Stop(f"{group}/{folder}: {live} files on Simone, {here} arrived. env0 unchanged.")
+                if target.exists():
+                    keep = archive / group / folder
+                    keep.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(target), str(keep))
+                (stage / folder).rename(target)
+                stage.rmdir()
+            lines.append(f"{group}/{folder}: {live} files on Simone, {here} in env0")
+    return lines
+
+
 def apply(hw: ModuleType, src: Path) -> None:
     """Put a live copy into env0: servers stopped, env0's databases moved to the archive, the copies in their place
     with env0's own settings, servers started again, row counts reported."""
@@ -400,7 +445,7 @@ def apply(hw: ModuleType, src: Path) -> None:
                 if f.exists():
                     shutil.move(str(f), str(keep.with_name(keep.name + suffix)))
             tmp.rename(target)
-    text = report(meta, {}, after, backs)
+    text = report(meta, {}, after, backs) + "\n\nFiles:\n" + "\n".join(copy_files(hw, archive))
     (archive / "report.txt").write_text(f"Live copy {src.name} into env0\n{text}\n", encoding="utf-8")
     hw.say(text)
     hw.say(f"\nenv0's databases before the refresh: {archive} (put them back by moving them in, servers stopped).")
@@ -412,7 +457,17 @@ def apply(hw: ModuleType, src: Path) -> None:
 
 
 def cmd_refresh_data(a, hw: ModuleType) -> None:
-    """hiro-work refresh-data [--apply STAMP|latest]: fetch a live copy and show the plan; --apply puts it in env0."""
+    """hiro-work refresh-data [--apply STAMP|latest] [--files]: fetch a live copy and show the plan; --apply puts it
+    in env0; --files copies only the picture folders (LIVE_FILES), env0's servers down."""
+    if getattr(a, "files", False):
+        if [n for n, s in hw.servers(0).items() if hw.listening(s.port)]:
+            raise hw.Stop("env0's servers are up: hiro-work down 0 first (or use --apply, which stops them).")
+        archive = hw.ROOT / "archive" / f"env0-before-refresh-{datetime.now().strftime('%Y-%m-%d_%H%M')}-files"
+        for line in copy_files(hw, archive):
+            hw.say(line)
+        if archive.exists():
+            hw.say(f"env0's folders before: {archive}")
+        return
     if a.apply:
         src = latest(hw) if a.apply == "latest" else live_copies(hw) / a.apply
         if src is None or not (src / "counts.json").exists():
