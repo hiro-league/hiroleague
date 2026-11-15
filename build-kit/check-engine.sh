@@ -149,15 +149,27 @@ part() {
     q_ids+=("$now")
 }
 
+# Each part's start and end as a Work event (build-kit/work/check_events.py: on the PC, under C:\hiro, only); never
+# fails the check.
+work_event() {
+    local helper="${HIROLEAGUE}/build-kit/work/check_events.py"
+    [[ -f "$helper" ]] || return 0
+    python "$helper" "${REPO_ROOT}" "$@" >/dev/null 2>&1 || true
+}
+
 # One lane: its parts in turn, each one's output in its own file, then its exit code and seconds.
 run_lane() {
-    local lane="$1" dir="$2" i t
+    local lane="$1" dir="$2" i t rc secs
     for i in "${!q_names[@]}"; do
         [[ "${q_lanes[$i]}" == "$lane" ]] || continue
         : > "${dir}/${i}.started"
+        work_event start "${q_names[$i]}"
         t=$SECONDS
         ( eval "${q_cmds[$i]}" ) > "${dir}/${i}.log" 2>&1
-        echo "$? $((SECONDS - t))" > "${dir}/${i}.rc"
+        rc=$?
+        secs=$((SECONDS - t))
+        work_event end "${q_names[$i]}" "$rc" "$secs" "${dir}/${i}.log"
+        echo "$rc $secs" > "${dir}/${i}.rc"
     done
 }
 

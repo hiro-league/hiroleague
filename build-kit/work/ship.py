@@ -169,6 +169,25 @@ def only_one(lock: Path) -> Iterator[bool]:
         f.close()
 
 
+def append(events: Path, record: dict) -> None:
+    """Add one event to the log, whole, even while other processes add theirs (the check engine's parts run side by
+    side): the log's lock file is held for the write."""
+    events.parent.mkdir(parents=True, exist_ok=True)
+    line = (json.dumps(record) + "\n").encode("utf-8")
+    with open(events.with_name(events.name + ".lock"), "a+b") as lock:
+        if os.name == "nt":
+            import msvcrt
+
+            lock.seek(0)
+            msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)  # waits up to 10 s, then raises
+        else:
+            import fcntl
+
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        with open(events, "ab") as f:
+            f.write(line)
+
+
 def key() -> str:
     with contextlib.suppress(OSError):
         return KEY_FILE.read_text(encoding="utf-8").strip()
