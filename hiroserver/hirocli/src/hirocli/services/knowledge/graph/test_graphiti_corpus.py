@@ -100,11 +100,11 @@ def test_oversized_body_raises() -> None:
 # ---- integrity of the shipped Adam corpus + question bank ----
 
 # Skip, don't fail, when the sibling eval-corpus checkout isn't there: a git worktree (under
-# .claude/worktrees) or a machine without hiro-code-reports can't see ../hiro-code-reports, and
+# .claude/worktrees) or a machine without codehiro can't see ../codehiro, and
 # that says nothing about this code. Set $HIRO_EVAL_CORPUS_DIR to run them anywhere.
 _needs_corpus = pytest.mark.skipif(
     not (_EVAL_DIR / "adam_year.episodes.jsonl").exists(),
-    reason="eval corpus not found (sibling ../hiro-code-reports, or set $HIRO_EVAL_CORPUS_DIR)",
+    reason="eval corpus not found (sibling ../codehiro, or set $HIRO_EVAL_CORPUS_DIR)",
 )
 
 

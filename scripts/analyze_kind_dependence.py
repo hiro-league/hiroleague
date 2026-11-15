@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 
 DB = Path(r"C:\Users\augr\AppData\Local\hiro\workspaces\default\knowledge\eval_results.db")
-CORPUS = Path(r"D:\projects\hiro-code-reports\eval-corpus")
+CORPUS = Path(r"C:\hiro\env0\codehiro\eval-corpus")
 THRESH = 0.6  # token-recall threshold for fuzzy text coverage (episode/entity)
 PASS_MARKS = {"✓", "pass", "abstain", "~"}  # "correct or partially-correct/abstain" population
 

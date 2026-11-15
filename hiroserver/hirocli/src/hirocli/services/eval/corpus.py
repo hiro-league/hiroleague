@@ -18,14 +18,14 @@ log = Logger.get("SVC.KNOWLEDGE.EVAL")
 
 
 # Default corpus + questions locations.
-#  - MEMORY corpora live in the SIBLING `eval-corpus` repo (hiro-code-reports/eval-corpus): the
+#  - MEMORY corpora live in the SIBLING `eval-corpus` repo (codehiro/eval-corpus): the
 #    benchmark manifest + LoCoMo/BEAM/adam/scratch corpora. Resolution: $HIRO_EVAL_CORPUS_DIR, else
-#    the sibling clone at ../hiro-code-reports/eval-corpus (same convention as ../hiro-docs).
+#    the sibling clone at ../codehiro/eval-corpus (same convention as ../hiro-docs).
 #  - KNOWLEDGE corpus (l3_synthetic) stays in hiroleague's own `eval/` dir.
 # The runner takes these as parameters so tests can point at fixtures; the Tool falls back here.
 _REPO_ROOT = Path(__file__).resolve().parents[6]  # services/eval → … → hiroleague repo
 _EVAL_CORPUS_ROOT = Path(
-    os.environ.get("HIRO_EVAL_CORPUS_DIR") or (_REPO_ROOT.parent / "hiro-code-reports" / "eval-corpus")
+    os.environ.get("HIRO_EVAL_CORPUS_DIR") or (_REPO_ROOT.parent / "codehiro" / "eval-corpus")
 )
 # Knowledge defaults — hiroleague-local.
 DEFAULT_CORPUS_DIR = _REPO_ROOT / "eval" / "l3_synthetic"

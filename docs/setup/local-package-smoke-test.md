@@ -9,7 +9,7 @@ tests can miss.
 From the workspace root:
 
 ```powershell
-cd D:\projects\hiroleague\hiroserver
+cd C:\hiro\env0\hiroleague\hiroserver
 
 uv build --package hiro-commons
 uv build --package hiro-channel-sdk
@@ -24,7 +24,7 @@ uv build --package hiroleague
 Create the venv outside the uv workspace:
 
 ```powershell
-cd D:\projects\hiroleague
+cd C:\hiro\env0\hiroleague
 python -m venv .smoke-runtime
 .\.smoke-runtime\Scripts\Activate.ps1
 ```

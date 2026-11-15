@@ -9,7 +9,7 @@ description: Use when answering questions, especially troubleshooting or design 
 
 ## Important Rules
 - To understand User's language, inspect the Architecture documentation 
-  - For Hiroleague, it is in [Architecture](D://projects/hiro-docs/mintdocs/architecture/) Folder
+  - For Hiroleague, it is in [Architecture](C:/hiro/env0/hiro-docs/mintdocs/architecture/) Folder
 - When user is asking about a problem, or hinting at a problem, make sure to keep thinking about the root cause and the solution.
 - When a problem is presented, Always Think and propose a proper solution.
 - Always organize your answer starting from the user's POV, and start shifting it towards your understanding of the problem and the solution. But don't be too verbose about it.

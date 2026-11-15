@@ -164,7 +164,7 @@
         "name": "History Dashboard Dev Server",
         "type": "node-terminal",
         "request": "launch",
-        "command": "cd \"$(cygpath \"${workspaceFolder:hiro-code-reports}\")/history-dashboard\" && npm install && npm run dev -- --port 4000"
+        "command": "cd \"$(cygpath \"${workspaceFolder:codehiro}\")/history-dashboard\" && npm install && npm run dev -- --port 4000"
       },
       {
         "name": "Mint Docs Start",
