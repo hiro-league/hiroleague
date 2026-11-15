@@ -14,6 +14,7 @@ a task in env1..env5 lands: its branches merge into dev/main and env0 is brought
     hiro-work up <env> [server ...] / down <env> [server ...]   servers, in Windows Terminal outside Claude
     hiro-work init <env>                     make (or repair) an environment: worktrees, installs, settings
     hiro-work sweep                          what is left behind (report only)
+    hiro-work train [repo ...] [--dry-run]   the deploy train: push and deploy, when Michel says (train.py)
 
 State lives in C:\hiro\tasks (one JSON file per task) and every step is logged to C:\hiro\logs\events.jsonl (with
 its time) for CodeHiro's Work area. Standard library only: it runs on the system Python.
@@ -913,11 +914,17 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("env", type=int, choices=list(ENVS))
     sub.add_parser("status")
     sub.add_parser("sweep")
+    # The deploy train lives in train.py, which imports this module: run as a script, this is __main__, so it is
+    # named hiro_work too, or train.py would load a second copy (and its Stop wouldn't be caught here)
+    sys.modules.setdefault("hiro_work", sys.modules[__name__])
+    import train
+    train.add_parser(sub)
     a = p.parse_args(argv)
     try:
         {"start": cmd_start, "move": cmd_move, "finish": cmd_finish, "land": cmd_land, "park": cmd_park,
          "resume": cmd_resume, "status": cmd_status, "sweep": cmd_sweep, "up": cmd_up, "down": cmd_down,
-         "configure": lambda a: configure(a.env), "init": lambda a: init_env(a.env)}[a.cmd](a)
+         "configure": lambda a: configure(a.env), "init": lambda a: init_env(a.env),
+         "train": train.cmd_train}[a.cmd](a)
     except Stop as e:
         say(f"\nStopped: {e}")
         return 1

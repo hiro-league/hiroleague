@@ -13,6 +13,7 @@ they drifted (shared-code plan, step 2). A change to how apps are built, checked
 | `backend-check.sh` | The backend checks (ruff, pyright, import rules, pytest), the same on the PC and in the image | the app's `scripts/check.sh` and the Dockerfile's `check` stage |
 | `dev.ps1` | `.\dev` on the PC: packages installed, backend and UI started with live reload (env0's ports) | the app's `dev.ps1` |
 | `work/hiro_work.py` | `hiro-work`: the environments (env0 to env5), tasks and their claims, servers, landing (hiro-docs `standards/workflow.md`); its tests beside it | `C:\hiro\bin\hiro-work.cmd`; the core's check runs its tests |
+| `work/train.py` | `hiro-work train`: the deploy train (what GitHub and live lack, the pushes, the core's deploy then the apps' side by side through each one's own deploy, a check of each, one report; hiro-docs `standards/building-and-releasing.md`); its tests beside it | `hiro-work train`, when Michel says; the core's check runs its tests |
 
 The UI kit has the two frontend pieces: `ui-kit/scripts/kit-sync.mjs` (each app's `npm run kit`) and
 `ui-kit/src/lib/eslint-preset.js` (each app's `eslint.config.js`).
