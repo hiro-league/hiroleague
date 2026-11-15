@@ -63,3 +63,19 @@ def test_when_every_environment_is_busy_a_new_task_is_refused():
     tasks = [task("a", 0, ["homehiro"])] + [task(f"t{e}", e, ["nethiro"]) for e in range(1, 6)]
     with pytest.raises(hw.Stop):
         hw.pick_env(["homehiro"], tasks, None)
+
+
+def test_launch_json_lists_each_repos_servers_on_the_environments_own_ports(tmp_path, monkeypatch):
+    for name in ("ROOT", "RUN", "LOGS", "TASKS"):
+        monkeypatch.setattr(hw, name, tmp_path / name.lower())
+    configs = hw.launch_configs(3)
+    assert sorted(configs) == sorted(["hiroleague", *hw.APPS])  # codehiro and aicam have no servers in the table
+    assert [c["name"] for c in configs["hiroleague"]] == ["core", "core-ui"]
+    ports = [c["port"] for repo in configs.values() for c in repo]
+    p = hw.ports(3)  # the core's server is its admin API; its other listeners come with it
+    apps = [p[f"{a}-{side}"] for a in hw.APPS for side in ("api", "ui")]
+    assert sorted(ports) == sorted([p["core-admin"], p["core-ui"], *apps])
+    homehiro_api = configs["homehiro"][0]
+    assert homehiro_api["runtimeExecutable"] == "powershell"
+    script = hw.Path(homehiro_api["runtimeArgs"][-1])  # the same runner as `hiro-work up`: reads .env.dev
+    assert script.exists() and ".env.dev" in script.read_text(encoding="utf-8-sig")

@@ -339,6 +339,10 @@ def init_env(env: int, task: str | None = None) -> None:
             shutil.copy2(local, dst / ".claude" / "settings.local.json")
         memory_link(env, repo)
     install_all(env, REPOS, task)
+    # The git hooks (pre-commit check, post-checkout warning): every repo's core.hooksPath points at env0's core.
+    # Worktrees share their repo's config, so this only matters for a repo env0 didn't have before.
+    with step(task, env, "git hooks"):
+        run([sys.executable, str(repo_dir(0, "hiroleague") / "build-kit" / "git-hooks" / "install.py")])
 
 
 def install_all(env: int, repos: list[str], task: str | None = None) -> None:
@@ -379,7 +383,8 @@ def set_setting(db: Path, key: str, value: str) -> None:
 def configure(env: int, task: str | None = None) -> None:
     """Point an environment's copies at its own ports: the core's listeners (its workspace's config.json), each
     app's link to the core. In env1..env5 also: the copied WhatsApp channel off (two clients on one account break
-    it), LAN names off, and the core's workspace registered under its own name."""
+    it), LAN names off, and the core's workspace registered under its own name. Every environment: each repo's
+    .claude/launch.json (write_launch)."""
     p = ports(env)
     with step(task, env, "configure"):
         ws = data_dir(env) / "core" / "default"
@@ -414,6 +419,37 @@ def configure(env: int, task: str | None = None) -> None:
             # Real systems off unless the task asks (data.py): run on every configure, the copy may be fresh
             for line in data.make_safe(data_dir(env), real_of(env)):
                 say(f"  {line}")
+        write_launch(env)
+
+
+def launch_configs(env: int) -> dict[str, list[dict]]:
+    """Each repo's servers for the browser pane (its .claude/launch.json): the environment's own ports, each started
+    by the same runner script as `hiro-work up`, so an app reads its .env.dev (sends off in env1..env5) and logs to
+    C:\\hiro\\logs\\envN. Only the servers in the port table: a repo with none gets no file."""
+    out: dict[str, list[dict]] = {}
+    for s in servers(env).values():
+        repo = s.cwd.relative_to(env_dir(env)).parts[0]
+        out.setdefault(repo, []).append({
+            "name": s.name, "runtimeExecutable": "powershell", "port": s.port,
+            "runtimeArgs": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(runner(env, s))]})
+    return out
+
+
+def write_launch(env: int) -> None:
+    """Write each repo's .claude/launch.json from launch_configs(), kept out of git through the repo's
+    info/exclude (shared by every environment's worktree), since its ports differ per environment."""
+    for repo, configs in launch_configs(env).items():
+        d = repo_dir(env, repo)
+        if not (d / ".git").exists():
+            continue
+        (d / ".claude").mkdir(exist_ok=True)
+        (d / ".claude" / "launch.json").write_text(
+            json.dumps({"version": "0.0.1", "configurations": configs}, indent=2) + "\n", encoding="utf-8")
+        exclude = d / git(d, "rev-parse", "--git-path", "info/exclude")
+        lines = exclude.read_text(encoding="utf-8").splitlines() if exclude.exists() else []
+        if ".claude/launch.json" not in lines:
+            exclude.parent.mkdir(parents=True, exist_ok=True)
+            exclude.write_text("\n".join([*lines, ".claude/launch.json"]) + "\n", encoding="utf-8")
 
 
 def registry_names() -> set[str]:

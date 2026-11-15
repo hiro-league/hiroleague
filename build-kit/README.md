@@ -13,7 +13,7 @@ they drifted (shared-code plan, step 2). A change to how apps are built, checked
 | `backend-check.sh` | The backend checks (ruff, pyright, import rules, pytest), the same on the PC and in the image | the app's `scripts/check.sh` and the Dockerfile's `check` stage |
 | `dev.ps1` | `.\dev` on the PC: packages installed, backend and UI started with live reload (env0's ports) | the app's `dev.ps1` |
 | `git-hooks/` | Every Hiro repo's git hooks: `pre-commit` runs `./scripts/check.sh`, `post-checkout` warns when an env0 checkout leaves `dev`/`main` (hiro-docs `standards/workflow.md`, "Enforcement") | git, through each repo's `core.hooksPath`, set by `git-hooks/install.py` |
-| `work/hiro_work.py` | `hiro-work`: the environments (env0 to env5), tasks and their claims, servers, landing (hiro-docs `standards/workflow.md`); its tests beside it | `C:\hiro\bin\hiro-work.cmd`; the core's check runs its tests |
+| `work/hiro_work.py` | `hiro-work`: the environments (env0 to env5), tasks and their claims, servers (and each repo's `.claude/launch.json` for the browser pane), landing (hiro-docs `standards/workflow.md`); its tests beside it | `C:\hiro\bin\hiro-work.cmd`; the core's check runs its tests |
 | `work/train.py` | `hiro-work train`: the deploy train (what GitHub and live lack, the pushes, the core's deploy then the apps' side by side through each one's own deploy, a check of each, one report; hiro-docs `standards/building-and-releasing.md`); its tests beside it | `hiro-work train`, when Michel says; the core's check runs its tests |
 
 The UI kit has the two frontend pieces: `ui-kit/scripts/kit-sync.mjs` (each app's `npm run kit`) and
@@ -53,9 +53,8 @@ an app's check by itself). HiroLeague's own check reads every script here with `
 
 `git-hooks/install.py` points every repo's `core.hooksPath` at env0's copy of `git-hooks/`
 (`C:/hiro/env0/hiroleague/build-kit/git-hooks`, the core folder every repo reads the build kit from). env1 to env5 are
-worktrees of env0's repos and share their config, so one setting per repo covers every environment. Run it after
-`hiro-work init` makes an environment (`--check` lists which repos have them, `--remove` takes them off); `hiro-work
-init` should call it once step 3's changes to `hiro_work.py` have landed.
+worktrees of env0's repos and share their config, so one setting per repo covers every environment. `hiro-work init`
+runs it when it makes an environment; by hand, `--check` lists which repos have them and `--remove` takes them off.
 
 - **`pre-commit`** runs the repo's own `.git/hooks/pre-commit` first, when it has one (the core's pre-commit framework
   hook), then `./scripts/check.sh` when the repo has one (aicam and hiro-docs don't). Parts that passed on these files
