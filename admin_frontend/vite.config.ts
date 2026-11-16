@@ -23,6 +23,9 @@ export default defineConfig({
     sourcemap: false
   },
   server: {
+    // The UI kit's copy (.kit) is outside the folders SvelteKit lets the dev server read: without this, its files
+    // answer 404 ("outside of Vite serving allow list") and the admin's pages half-load. Vite adds this to SvelteKit's list.
+    fs: { allow: ['.kit'] },
     proxy: {
       '/api': {
         target: hiroAdminOrigin,

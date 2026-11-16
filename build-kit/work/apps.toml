@@ -1,0 +1,101 @@
+# The Hiro League apps, one [[app]] each: what hiro-work, the deploy train and the data copies know about an app.
+# A new app adds its row here (hiro-docs standards/new-extension.md) and nothing else in build-kit/work.
+#
+#   repo         its repo's folder name (C:\hiro\envN\<repo>, ~/<repo> on Simone)
+#   name         its extension name, declared to the core (home, net...): its key everywhere (design.md, rule 6)
+#   title        what people call it
+#   api_port     its API's port in an environment's block: 7N<api_port> (two digits, 03 to 49; the core has 00-02, 13-14)
+#   ui_port      its UI's port (Vite) in the block: 7N<ui_port>
+#   backend      the folder its API runs in, and where `uv sync` installs
+#   api          its API's command ({port} = its port)
+#   frontend     the folder its UI runs in, and where `npm ci` installs
+#   ui_api_env   the variable that points its UI's /api at its API
+#   api_env      more variables for its API ({port}, {data} = its data folder); its repo's .env.dev is read first
+#   data         where env0 keeps its data: "env" (C:\hiro\data\env0\<repo>) or "repo" (the repo's own data/);
+#                env1 to env5 always C:\hiro\data\envN\<repo>
+#   settings_db  its database with the `setting` table, in its data folder
+#   site_key     the setting that holds its own address (where the one sign-in sends people back)
+#   live_port    its port on Simone (127.0.0.1), where the train checks /api/health
+#   copy_data    whether an environment's data starts as a copy of env0's: its databases and its key (hiroleague/),
+#                and its pictures as hard links (data.py); other folders (mirrors, reports, caches) are left out
+
+[[app]]
+repo = "homehiro"
+name = "home"
+title = "HomeHiro"
+api_port = 3
+ui_port = 4
+backend = "backend"
+api = "uv run uvicorn homehiro.main:app --reload --reload-dir src --port {port} --timeout-graceful-shutdown 3"
+frontend = "frontend"
+ui_api_env = "HOMEHIRO_API"
+data = "env"
+settings_db = "homehiro.db"
+site_key = "homehiro_url"
+live_port = 8100
+copy_data = true
+
+[[app]]
+repo = "nethiro"
+name = "net"
+title = "NetHiro"
+api_port = 5
+ui_port = 6
+backend = "backend"
+api = "uv run uvicorn nethiro.main:app --reload --reload-dir src --port {port} --timeout-graceful-shutdown 3"
+frontend = "frontend"
+ui_api_env = "NETHIRO_API"
+data = "env"
+settings_db = "nethiro.db"
+site_key = "nethiro_url"
+live_port = 8130
+copy_data = true
+
+[[app]]
+repo = "trainhiro"
+name = "train"
+title = "TrainHiro"
+api_port = 7
+ui_port = 8
+backend = "backend"
+api = "uv run uvicorn trainhiro.main:app --reload --reload-dir src --port {port} --timeout-graceful-shutdown 3"
+frontend = "frontend"
+ui_api_env = "TRAINHIRO_API"
+data = "env"
+settings_db = "trainhiro.db"
+site_key = "trainhiro_url"
+live_port = 8140
+copy_data = true
+
+[[app]]
+repo = "studyhiro"
+name = "study"
+title = "StudyHiro"
+api_port = 9
+ui_port = 10
+backend = "backend"
+api = "uv run uvicorn studyhiro.main:app --reload --reload-dir src --port {port} --timeout-graceful-shutdown 3"
+frontend = "frontend"
+ui_api_env = "STUDYHIRO_API"
+data = "env"
+settings_db = "studyhiro.db"
+site_key = "studyhiro_url"
+live_port = 8110
+copy_data = true
+
+[[app]]
+repo = "codehiro"
+name = "reports"
+title = "Code reports"
+api_port = 11
+ui_port = 12
+backend = "scc_report"
+api = "uv run scc-report-service"
+api_env = { REPORTS_PORT = "{port}", REPORTS_DATA_DIR = "{data}", REPORTS_SOURCES = "simone:{repo}.git" }
+frontend = "history-dashboard"
+ui_api_env = "REPORTS_API"
+data = "repo"
+settings_db = "reports.db"
+site_key = "reports_url"
+live_port = 8120
+copy_data = true

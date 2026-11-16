@@ -43,17 +43,17 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+import apps as appfile
 import hiro_work as hw
 from stages import Stages
 
 # How each repo goes live (the standard's table). hiro-docs only goes to GitHub here: publishing its site (dev merged
 # into main, then the mintdocs policy script) stays a step of its own.
 CORE, APP, AICAM = "core", "app", "aicam"
-DEPLOY = {"hiroleague": CORE, "homehiro": APP, "nethiro": APP, "trainhiro": APP, "studyhiro": APP, "codehiro": APP,
-          "aicam": AICAM}
+DEPLOY = {"hiroleague": CORE, **{a.repo: APP for a in appfile.APPS}, "aicam": AICAM}
 # Where each deploy is checked on Simone (127.0.0.1 there): the core's /status, each app's /api/health
 CORE_HEALTH = "http://127.0.0.1:18080/status"
-APP_PORT = {"homehiro": 8100, "nethiro": 8130, "trainhiro": 8140, "studyhiro": 8110, "codehiro": 8120}
+APP_PORT = {a.repo: a.live_port for a in appfile.APPS}  # apps.toml
 SERVER = "simone"
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", SERVER]
 # Log lines that count as an error after a deploy

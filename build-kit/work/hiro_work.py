@@ -2,7 +2,7 @@ r"""hiro-work: the environments every Hiro League task works in (hiro-docs stand
 
 Every task claims the repos it changes. It works in env0 (Michel's dev: the main checkouts in C:\hiro\env0) while
 those repos are free there, else in one of env1..env5: the same repos as git worktrees, kept warm between tasks, each
-with its own data (C:\hiro\data\envN) and its own block of ports (7N00-7N12). A task in env0 commits when it finishes;
+with its own data (C:\hiro\data\envN) and its own block of ports (7N00-7N49). A task in env0 commits when it finishes;
 a task in env1..env5 lands: its branches merge into dev/main and env0 is brought up to them.
 
     hiro-work status                         environments, tasks, claims, servers
@@ -40,6 +40,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+import apps as appfile
 import data
 import ship
 
@@ -49,22 +50,21 @@ LOGS = ROOT / "logs"
 EVENTS = LOGS / "events.jsonl"
 ENVS = range(0, 6)
 
-# The repos every environment holds, the core first (it lands first). hiroleague-website lives in env0 only.
-REPOS = ["hiroleague", "homehiro", "nethiro", "trainhiro", "studyhiro", "codehiro", "aicam", "hiro-docs"]
+# The repos every environment holds, the core first (it lands first), the apps as apps.toml lists them.
+# hiroleague-website lives in env0 only.
+REPOS = ["hiroleague", *(a.repo for a in appfile.APPS), "aicam", "hiro-docs"]
 MAIN = {"hiroleague": "dev", "hiro-docs": "dev"}  # every other repo's main branch is main
 # The apps that read the core's kits, SDK and build kit (../hiroleague): a change there claims them too.
-KIT_READERS = ["homehiro", "nethiro", "trainhiro", "studyhiro", "codehiro"]
+KIT_READERS = [a.repo for a in appfile.APPS]
 KIT_PATHS = ["hiroserver/hiro-extension-kit", "hiroserver/hiro-channel-sdk", "hiroserver/hiro-commons",
              "ui-kit", "build-kit"]
 # What each repo installs, and the lock file that says when to install again
-PYTHON = {"hiroleague": ["hiroserver"], "homehiro": ["backend"], "nethiro": ["backend"], "trainhiro": ["backend"],
-          "studyhiro": ["backend"], "codehiro": ["scc_report"]}
-NODE = {"hiroleague": ["admin_frontend", "ui-kit"], "homehiro": ["frontend"], "nethiro": ["frontend"],
-        "trainhiro": ["frontend"], "studyhiro": ["frontend"], "codehiro": ["history-dashboard"]}
-# Each app's data folder name in C:\hiro\data\envN (the core's is "core")
-APPS = ["homehiro", "nethiro", "trainhiro", "studyhiro"]
-# The apps `up` runs: the build kit's apps, and Code reports (its own folders: scc_report and history-dashboard)
-SERVED = [*APPS, "codehiro"]
+PYTHON = {"hiroleague": ["hiroserver"], **{a.repo: [a.backend] for a in appfile.APPS}}
+NODE = {"hiroleague": ["admin_frontend", "ui-kit"], **{a.repo: [a.frontend] for a in appfile.APPS}}
+# The apps whose data an environment copies from env0 (C:\hiro\data\envN\<repo>; the core's is "core")
+APPS = [a.repo for a in appfile.APPS if a.copy_data]
+# The apps `up` runs: every app
+SERVED = [a.repo for a in appfile.APPS]
 # The core's other listeners come with its server: their port names start it too (`up 0 core-admin` = `up 0 core`)
 PORT_ALIASES = {"core-admin": "core", "core-socket": "core", "core-http": "core", "core-plugin": "core"}
 # Core workspace folders an environment never gets: the WhatsApp session (two clients on one account break it),
@@ -89,12 +89,14 @@ def data_dir(env: int) -> Path:
 
 
 def ports(env: int) -> dict[str, int]:
-    """The environment's block: 7N00-7N14, in a fixed order (workflow.md, Ports). The core listens on four: its
-    admin API, the apps' extension socket, its HTTP status API and the channel plugins' socket."""
-    names = ["core-admin", "core-socket", "core-ui", "homehiro-api", "homehiro-ui", "nethiro-api", "nethiro-ui",
-             "trainhiro-api", "trainhiro-ui", "studyhiro-api", "studyhiro-ui", "codehiro-api", "codehiro-ui",
-             "core-http", "core-plugin"]
-    return {name: 7000 + 100 * env + i for i, name in enumerate(names)}
+    """The environment's block, 7N00-7N49 (workflow.md, Ports; apps.py). The core listens on four: its admin API, the
+    apps' extension socket, its HTTP status API and the channel plugins' socket."""
+    return appfile.ports(env)
+
+
+def app_data(env: int, a: appfile.App) -> Path:
+    """Where an app keeps its data in an environment: env0's own folder or its repo's data/ (apps.toml), envN's."""
+    return repo_dir(0, a.repo) / "data" if env == 0 and a.data == "repo" else data_dir(env) / a.repo
 
 
 def workspace_name(env: int) -> str:
@@ -434,7 +436,9 @@ def write_env_dev(env: int) -> None:
     real = real_of(env)
     for app in APPS:
         src = repo_dir(0, app) / ".env.dev"
-        lines = src.read_text(encoding="utf-8").splitlines() if src.exists() else []
+        if not src.exists():  # an app with no .env.dev (Code reports) takes its settings from up (apps.toml api_env)
+            continue
+        lines = src.read_text(encoding="utf-8").splitlines()
         forced = {**ENV_DEV_FORCED, "DATA_DIR": (data_dir(env) / app).as_posix(), **data.env_overrides(app, real)}
         keep = [ln for ln in lines if ln.split("=", 1)[0].strip() not in forced]
         keep += [f"{k}={v}" for k, v in forced.items() if v is not None]
@@ -450,6 +454,24 @@ def set_setting(db: Path, key: str, value: str) -> None:
     with sqlite3.connect(db) as con:
         con.execute("insert into setting(key, value) values (?, ?) on conflict(key) do update set value = excluded.value",
                     (key, value))
+
+
+def configure_apps(env: int, apps: list[appfile.App]) -> None:
+    """Point apps at this environment, env0 too: the link to its core, the core's admin, and the app's own address on
+    this environment's dev site, where the one sign-in sends people back (never the live name an app claims by
+    default). Run by configure and by every `up`, before the app starts; an app whose database doesn't exist yet gets
+    them on the next `up`."""
+    p = ports(env)
+    for a in apps:
+        db = app_data(env, a) / a.settings_db
+        if not db.exists():
+            continue
+        with sqlite3.connect(db) as con:
+            if not con.execute("select 1 from sqlite_master where name = 'setting'").fetchone():
+                continue
+        set_setting(db, "hiroleague_url", f"ws://127.0.0.1:{p['core-socket']}")
+        set_setting(db, "hiroleague_admin_url", f"http://127.0.0.1:{p['core-ui']}")
+        set_setting(db, a.site_key, f"http://127.0.0.1:{p[a.repo + '-ui']}")
 
 
 def configure(env: int, task: str | None = None) -> None:
@@ -471,17 +493,7 @@ def configure(env: int, task: str | None = None) -> None:
             if cfg.get(key) is None or env:
                 cfg.pop(key, None)
         cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
-        for app in APPS:
-            db = data_dir(env) / app / f"{app}.db"
-            if not db.exists():
-                continue
-            with sqlite3.connect(db) as con:
-                if not con.execute("select 1 from sqlite_master where name = 'setting'").fetchone():
-                    continue
-            set_setting(db, "hiroleague_url", f"ws://127.0.0.1:{p['core-socket']}")
-            if env:
-                set_setting(db, "hiroleague_admin_url", f"http://127.0.0.1:{p['core-ui']}")
-                set_setting(db, f"{app}_url", f"http://127.0.0.1:{p[app + '-ui']}")
+        configure_apps(env, appfile.APPS)
         if env:
             with sqlite3.connect(ws / "db" / "workspace.db") as con:
                 con.execute("update channel_plugins set enabled = 0")
@@ -541,7 +553,7 @@ def refresh_data(env: int, task: str | None = None) -> None:
     if env == 0:
         return
     for app in APPS:
-        src, dst = data_dir(0) / app, data_dir(env) / app
+        src, dst = app_data(0, appfile.BY_REPO[app]), data_dir(env) / app
         with step(task, env, "data copy", app):
             if dst.exists():
                 shutil.rmtree(dst)
@@ -906,27 +918,16 @@ def servers(env: int) -> dict[str, Server]:
     }
     if env:  # the provider keys in the PC's environment, blanked unless the task asks for AI (data.py)
         out["core"].env.update(data.core_env(dict(os.environ), real_of(env)))
-    for app in APPS:
-        api, ui = p[f"{app}-api"], p[f"{app}-ui"]
-        out[f"{app}-api"] = Server(
-            f"{app}-api", here / app / "backend",
-            f"uv run uvicorn {app}.main:app --reload --reload-dir src --port {api} --timeout-graceful-shutdown 3",
-            api, {"PYTHONUTF8": "1"}, here / app / ".env.dev")
+    for a in appfile.APPS:  # each app as apps.toml says
+        api, ui, repo = p[f"{a.repo}-api"], p[f"{a.repo}-ui"], here / a.repo
+        fill = {"port": str(api), "data": str(app_data(env, a)), "repo": "{repo}"}  # {repo} stays for the app
+        out[f"{a.repo}-api"] = Server(
+            f"{a.repo}-api", repo / a.backend, a.api.format(**fill), api,
+            {"PYTHONUTF8": "1", **{k: v.format(**fill) for k, v in a.api_env.items()}}, repo / ".env.dev")
         # --host: 127.0.0.1 only, as every app (Vite's default "localhost" is IPv6-only on this PC)
-        out[f"{app}-ui"] = Server(f"{app}-ui", here / app / "frontend",
-                                  f"npm.cmd run dev -- --port {ui} --strictPort --host 127.0.0.1", ui,
-                                  {f"{app.upper()}_API": f"http://127.0.0.1:{api}"})
-    # Code reports: the service reads the repos from Simone's bare repos (as live does, read only); env0 keeps its
-    # data in the repo's data/ (paired there), env1..env5 in their data folder
-    reports = here / "codehiro"
-    api_env = {"PYTHONUTF8": "1", "REPORTS_PORT": str(p["codehiro-api"]), "REPORTS_SOURCES": "simone:{repo}.git"}
-    if env:
-        api_env["REPORTS_DATA_DIR"] = str(data_dir(env) / "codehiro")
-    out["codehiro-api"] = Server("codehiro-api", reports / "scc_report", "uv run scc-report-service",
-                                 p["codehiro-api"], api_env)
-    out["codehiro-ui"] = Server("codehiro-ui", reports / "history-dashboard",
-                                f"npm.cmd run dev -- --port {p['codehiro-ui']} --strictPort --host 127.0.0.1",
-                                p["codehiro-ui"], {"REPORTS_API": f"http://127.0.0.1:{p['codehiro-api']}"})
+        out[f"{a.repo}-ui"] = Server(f"{a.repo}-ui", repo / a.frontend,
+                                     f"npm.cmd run dev -- --port {ui} --strictPort --host 127.0.0.1", ui,
+                                     {a.ui_api_env: f"http://127.0.0.1:{api}"})
     return out
 
 
@@ -988,6 +989,53 @@ def listening(port: int) -> bool:
     return False
 
 
+def open_tabs(env: int, chosen: list[Server]) -> None:
+    """Each server in a tab of the environment's own Windows Terminal window (hiro-envN), outside Claude."""
+    if not chosen:
+        return
+    wt = [shutil.which("wt.exe") or "wt.exe", "-w", f"hiro-env{env}"]
+    for i, s in enumerate(chosen):
+        if i:
+            wt.append(";")
+        wt += ["new-tab", "--title", f"env{env} {s.name}", "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+               "-File", str(runner(env, s))]
+    subprocess.Popen(wt, creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+
+
+def core_workspace(env: int) -> Path:
+    return data_dir(env) / "core" / "default"
+
+
+def paired(env: int, a: appfile.App) -> bool:
+    """Whether the app's key (its data folder's hiroleague/) is one this environment's core knows."""
+    identity = app_data(env, a) / "hiroleague" / "extension_identity.json"
+    db = core_workspace(env) / "db" / "workspace.db"
+    try:
+        ext_id = json.loads(identity.read_text(encoding="utf-8")).get("extension_id")
+    except (OSError, ValueError):
+        return False
+    if not ext_id or not db.exists():
+        return False
+    con = sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True)
+    try:
+        return con.execute("select 1 from extensions where extension_id = ?", (ext_id,)).fetchone() is not None
+    finally:
+        con.close()
+
+
+def pair_apps(env: int, apps: list[appfile.App]) -> None:
+    """Pair apps with the environment's running core (pair_apps.py, in the core's own environment), one at a time."""
+    url = f"ws://127.0.0.1:{ports(env)['core-socket']}"
+    args = [f"{x.name}={app_data(env, x) / 'hiroleague'}" for x in apps]
+    out = subprocess.run(["uv", "run", "python", str(Path(__file__).with_name("pair_apps.py")),
+                          str(core_workspace(env)), url, *args],
+                         cwd=repo_dir(env, "hiroleague") / "hiroserver", capture_output=True, text=True)
+    for line in (out.stdout or "").splitlines():
+        say(f"  pairing: {line}")
+    if out.returncode:
+        say(f"  pairing didn't finish: {(out.stderr or '').strip().splitlines()[-1:] or 'see above'}")
+
+
 def cmd_up(a) -> None:
     env = a.env
     if env and not (env_dir(env) / "hiroleague" / ".git").exists():
@@ -996,15 +1044,28 @@ def cmd_up(a) -> None:
     if not chosen:
         say("Already running.")
         return
-    wt = [shutil.which("wt.exe") or "wt.exe", "-w", f"hiro-env{env}"]
-    for i, s in enumerate(chosen):
-        if i:
-            wt.append(";")
-        wt += ["new-tab", "--title", f"env{env} {s.name}", "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
-               "-File", str(runner(env, s))]
-    with step(None, env, "servers up", servers=[s.name for s in chosen]):
-        subprocess.Popen(wt, creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
-        deadline = time.monotonic() + a.wait
+    starting = {s.name for s in chosen}
+    configure_apps(env, [x for x in appfile.APPS if f"{x.repo}-api" in starting])
+    # An app starting without a key this core knows is paired first, while it isn't running: the core starts (or
+    # runs) first, then each such app pairs (pair_apps.py), then the apps start and connect with their keys
+    unpaired = [x for x in appfile.APPS if f"{x.repo}-api" in starting and not paired(env, x)]
+    deadline = time.monotonic() + a.wait
+    with step(None, env, "servers up", servers=sorted(starting)):
+        if unpaired:
+            core_first = [s for s in chosen if s.name in ("core", "core-ui")]
+            open_tabs(env, core_first)
+            socket = ports(env)["core-socket"]
+            while not listening(socket) and time.monotonic() < deadline:
+                time.sleep(1)
+            if listening(socket):
+                pair_apps(env, unpaired)
+            else:
+                say(f"  The core isn't running on {socket}, so {', '.join(x.title for x in unpaired)} can't pair: "
+                    f"start it too (`hiro-work up {env} core`).")
+            open_tabs(env, [s for s in chosen if s not in core_first])
+            deadline = max(deadline, time.monotonic() + a.wait)  # the apps get their own wait after the core's
+        else:
+            open_tabs(env, chosen)
         waiting = list(chosen)
         while waiting and time.monotonic() < deadline:
             time.sleep(1)

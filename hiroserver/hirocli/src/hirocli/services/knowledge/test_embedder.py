@@ -143,3 +143,25 @@ def test_resolve_knowledge_embedder_uses_catalog_factory(
     assert embedder.model_name == "openai:text-embedding-3-small"
     assert embedder.dimension == 1536
     assert len(embedder.embed_texts(["hello"])[0]) == 1536
+
+
+def test_an_embedder_whose_provider_isnt_set_up_lets_the_server_start_and_says_why_on_use(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hirocli.services.knowledge.embedder import UnconfiguredEmbedder
+
+    monkeypatch.setattr(
+        "hirocli.services.knowledge.embedder._is_catalog_embedding_model",
+        lambda model_id: model_id == "openai:text-embedding-3-small",
+    )
+
+    def not_set_up(model_id: str, **kwargs: Any) -> Any:
+        raise ValueError("Provider 'openai' is not configured for this workspace. Run: hiro provider add openai")
+
+    monkeypatch.setattr("hirocli.domain.model_factory.create_embedding_model", not_set_up)
+
+    embedder = resolve_knowledge_embedder(tmp_path, "openai:text-embedding-3-small")
+    assert isinstance(embedder, UnconfiguredEmbedder)
+    with pytest.raises(RuntimeError, match="'openai' is not configured"):
+        embedder.embed_texts(["hello"])

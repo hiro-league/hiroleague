@@ -29,7 +29,9 @@ from datetime import datetime
 from pathlib import Path
 from types import ModuleType
 
-APPS = ["homehiro", "nethiro", "trainhiro", "studyhiro"]
+import apps as appfile
+
+APPS = [a.repo for a in appfile.APPS if a.copy_data]  # the apps whose data an environment copies (apps.toml)
 READS, AI = "reads", "ai"  # what a task may ask for in env1..env5 (Task.real)
 
 # ------------------------------------------------------------------------------------------- env1..env5: safe

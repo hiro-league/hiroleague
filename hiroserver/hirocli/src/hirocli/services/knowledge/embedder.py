@@ -87,22 +87,26 @@ class CatalogEmbeddingsBackend:
 
 
 class UnconfiguredEmbedder:
-    """Placeholder embedder for when no model is configured (default + override both empty).
+    """Placeholder embedder for when no model is configured (default + override both empty), or the chosen one can't
+    be built (its provider isn't set up in this workspace).
 
     Embedding is mandatory and there is NO forced default, so resolution returns this instead of
     silently picking a model. It lets the service be constructed (browsing/listing still works) but
     fails fast with a clear message the moment any embed/dimension is actually needed (ingest or
-    query) — i.e. indexing is blocked until the user chooses an embedder.
+    query) — i.e. indexing is blocked until the user chooses an embedder or sets up its provider.
     """
 
     model_name = ""
 
-    @property
-    def dimension(self) -> int:
-        raise RuntimeError(
+    def __init__(self, reason: str = "") -> None:
+        self.reason = reason or (
             "No embedder configured. Choose one in Preferences → General → Default models "
             "(or set a Knowledge/Graph embedder) before indexing or searching."
         )
+
+    @property
+    def dimension(self) -> int:
+        raise RuntimeError(self.reason)
 
     def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
         # Reuse the dimension guard's message — same root cause (nothing to embed with).
@@ -131,11 +135,19 @@ def resolve_knowledge_embedder(
             create_embedding_model,
         )
 
-        embeddings = create_embedding_model(
-            resolved,
-            workspace_path=workspace_path,
-            credential_store=credential_store,
-        )
+        try:
+            embeddings = create_embedding_model(
+                resolved,
+                workspace_path=workspace_path,
+                credential_store=credential_store,
+            )
+        except ValueError as exc:
+            # The model can't be built here (its provider isn't set up: a fresh workspace, or an environment copy
+            # with AI off). The server still starts; indexing and searching say why until the provider is added.
+            reason = f"The knowledge embedder {resolved} can't be used: {exc}"
+            log.warning("⚠️ Knowledge embedder not available — indexing and search are off", model=resolved,
+                        reason=str(exc))
+            return UnconfiguredEmbedder(reason)
         return CatalogEmbeddingsBackend(
             embeddings,
             model_id=resolved,

@@ -202,3 +202,41 @@ def test_describe_changes_what_a_task_does_or_what_it_is_part_of_and_says_so(tmp
 def test_the_work_card_says_what_a_task_does(capsys):
     hw.card(hw.Task(id="t", title="T", env=0, repos=["codehiro"], about="Shows each deploy's stages"))
     assert "  Shows each deploy's stages" in capsys.readouterr().out
+
+
+def test_up_points_every_app_at_its_environment_env0_too(tmp_path, monkeypatch):
+    import sqlite3
+
+    monkeypatch.setattr(hw, "ROOT", tmp_path)
+    home, reports = hw.appfile.BY_REPO["homehiro"], hw.appfile.BY_REPO["codehiro"]
+    for a in (home, reports):
+        folder = hw.app_data(0, a)
+        folder.mkdir(parents=True)
+        with sqlite3.connect(folder / a.settings_db) as con:
+            con.execute("create table setting (key text primary key, value text not null)")
+    hw.configure_apps(0, [home, reports])
+    read = lambda a, key: sqlite3.connect(hw.app_data(0, a) / a.settings_db).execute(  # noqa: E731
+        "select value from setting where key = ?", (key,)).fetchone()[0]
+    assert read(home, "homehiro_url") == "http://127.0.0.1:7004"  # the dev site, not homehiro.local
+    assert read(reports, "reports_url") == "http://127.0.0.1:7012"
+    assert read(reports, "hiroleague_url") == "ws://127.0.0.1:7001"
+    assert hw.app_data(0, reports) == tmp_path / "env0" / "codehiro" / "data"  # env0 keeps it in the repo
+
+
+def test_an_app_is_paired_only_when_this_core_knows_its_key(tmp_path, monkeypatch):
+    import sqlite3
+
+    monkeypatch.setattr(hw, "ROOT", tmp_path)
+    net = hw.appfile.BY_REPO["nethiro"]
+    assert not hw.paired(1, net)  # no key at all
+    keys = hw.app_data(1, net) / "hiroleague"
+    keys.mkdir(parents=True)
+    (keys / "extension_identity.json").write_text('{"extension_id": "abc"}', encoding="utf-8")
+    db = hw.core_workspace(1) / "db" / "workspace.db"
+    db.parent.mkdir(parents=True)
+    with sqlite3.connect(db) as con:
+        con.execute("create table extensions (extension_id text)")
+    assert not hw.paired(1, net)  # a key this core doesn't know
+    with sqlite3.connect(db) as con:
+        con.execute("insert into extensions values ('abc')")
+    assert hw.paired(1, net)
