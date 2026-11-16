@@ -6,7 +6,7 @@ with its own data (C:\hiro\data\envN) and its own block of ports (7N00-7N12). A 
 a task in env1..env5 lands: its branches merge into dev/main and env0 is brought up to them.
 
     hiro-work status                         environments, tasks, claims, servers
-    hiro-work start <task> --repos a,b [--kit] [--title ...] [--env N]
+    hiro-work start <task> --repos a,b [--kit] [--title ...] [--part-of ...] [--env N]
     hiro-work move <task>                    env0 -> a free environment, carrying the edits
     hiro-work finish <task>                  env0: every claimed repo committed; release the claims
     hiro-work land <task>                    env1..5: merge, check, update env0, free the environment
@@ -229,6 +229,8 @@ class Task:
     before: dict[str, list[str]] = field(default_factory=dict)
     # In env1..env5: the real systems its copy may reach ("reads", "ai"); none by default (data.py)
     real: list[str] = field(default_factory=list)
+    # What bigger work it is a piece of ("Work-flow plan"): CodeHiro names it "<part_of> › <title>" and groups by it
+    part_of: str = ""
     created: str = ""
     updated: str = ""
 
@@ -593,6 +595,16 @@ def fresh_base(repo: str, task: str | None) -> str:
 # ------------------------------------------------------------------------------------------------------- the verbs
 
 
+def part_of_name(value: str | None) -> str:
+    """--part-of as given: a task's id (open or done) stands for its title; anything else is the name itself."""
+    value = (value or "").strip()
+    for p in (task_path(value), TASKS / "done" / f"{value}.json"):
+        if value and p.exists():
+            with contextlib.suppress(OSError, ValueError):
+                return json.loads(p.read_text(encoding="utf-8")).get("title") or value
+    return value
+
+
 def cmd_start(a) -> None:
     with locked():
         tasks = load_tasks()
@@ -602,9 +614,11 @@ def cmd_start(a) -> None:
         env = pick_env(repos, tasks, a.env)
         task = Task(id=a.task, title=a.title or a.task, env=env, repos=repos,
                     real=[k for k, on in ((data.READS, a.real_reads), (data.AI, a.real_ai)) if on],
+                    part_of=part_of_name(a.part_of),
                     created=datetime.now().astimezone().isoformat(timespec="seconds"))
         save(task)  # the claim holds from here
-    event(task=task.id, env=env, step="task", phase="start", repos=repos, title=task.title)
+    event(task=task.id, env=env, step="task", phase="start", repos=repos, title=task.title,
+          **({"part_of": task.part_of} if task.part_of else {}))
     try:
         if env == 0:
             for repo in repos:
@@ -644,7 +658,8 @@ def card(task: Task) -> None:
     p = ports(task.env) if task.env is not None else {}
     where = env_dir(task.env) if task.env is not None else "(parked)"
     say("")
-    say(f"Task {task.id}: env{task.env} | claims {', '.join(task.repos)} | {where}")
+    say(f"Task {task.id}" + (f" (part of {task.part_of})" if task.part_of else "")
+        + f": env{task.env} | claims {', '.join(task.repos)} | {where}")
     if task.env:
         say(f"  branch {task.branch} | data {data_dir(task.env)} | ports {min(p.values())}-{max(p.values())}")
         say(f"  {data.describe(task.real)}")
@@ -845,7 +860,12 @@ def cmd_resume(a) -> None:
             git(d, "switch", "-q", "--detach", main_of(repo))
     install_all(env, REPOS, task.id)
     refresh_data(env, task.id)
-    event(task=task.id, env=env, step="resumed", phase="end", ok=True)
+    if a.part_of is not None:
+        with locked():
+            task.part_of = part_of_name(a.part_of)
+            save(task)
+    event(task=task.id, env=env, step="resumed", phase="end", ok=True,
+          **({"part_of": task.part_of} if a.part_of is not None else {}))
     card(task)
 
 
@@ -1019,7 +1039,7 @@ def cmd_status(a) -> None:
     for env in ENVS:
         here = [t for t in tasks if t.env == env and t.state == "working"]
         up = [n for n, p in ports(env).items() if listening(p)]
-        what = "; ".join(f"{t.id} ({', '.join(t.repos)})" for t in here) or ("Michel's dev" if env == 0 else "free")
+        what = "; ".join((f"{t.part_of} › " if t.part_of else "") + f"{t.id} ({', '.join(t.repos)})" for t in here)             or ("Michel's dev" if env == 0 else "free")
         exists = env == 0 or (env_dir(env) / "hiroleague" / ".git").exists()
         say(f"  env{env}  {'' if exists else '(not made yet) '}{what}" + (f"  | up: {', '.join(up)}" if up else ""))
     parked = [t for t in tasks if t.state == "parked"]
@@ -1090,6 +1110,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--kit", action="store_true", help="a kit, SDK or build-kit change: also claims the apps")
     s.add_argument("--title")
     s.add_argument("--env", type=int, choices=list(ENVS))
+    s.add_argument("--part-of", help="the bigger work it is a piece of: a name, or a task's id (its title is used)")
     s.add_argument("--real-reads", action="store_true", help="env1..5: read the real HA, Frigate and MQTT")
     s.add_argument("--real-ai", action="store_true", help="env1..5: keep the copied AI providers")
     for verb in ("move", "finish", "land", "park", "review"):
@@ -1097,6 +1118,7 @@ def main(argv: list[str] | None = None) -> int:
     r = sub.add_parser("resume")
     r.add_argument("task")
     r.add_argument("--env", type=int, choices=[e for e in ENVS if e])
+    r.add_argument("--part-of", help="the bigger work it is a piece of (sets it)")
     i = sub.add_parser("init")
     i.add_argument("env", type=int, choices=[e for e in ENVS if e])
     u = sub.add_parser("up", help="start servers (none named: the core and the task's apps)")

@@ -156,3 +156,19 @@ def test_a_land_records_the_commits_it_added(tmp_path, monkeypatch):
     [e] = read()
     assert (e["step"], e["how"], e["from"], e["to"], len(e["commits"])) == ("commits", "land", before, after, 2)
     assert e["commits"][0] == after
+
+
+def test_part_of_is_a_name_or_a_tasks_title(tmp_path, monkeypatch):
+    monkeypatch.setattr(hw, "TASKS", tmp_path)
+    hw.save(hw.Task(id="plan", title="Work-flow plan", env=0, repos=["hiro-docs"]))
+    (tmp_path / "done").mkdir()
+    (tmp_path / "done" / "old.json").write_text(json.dumps({"id": "old", "title": "Old work"}), encoding="utf-8")
+    assert hw.part_of_name("plan") == "Work-flow plan"
+    assert hw.part_of_name("old") == "Old work"
+    assert hw.part_of_name(" Work-flow plan ") == "Work-flow plan"
+    assert hw.part_of_name(None) == ""
+
+
+def test_the_work_card_says_what_a_task_is_part_of(capsys):
+    hw.card(hw.Task(id="t", title="T", env=0, repos=["codehiro"], part_of="Work-flow plan"))
+    assert "Task t (part of Work-flow plan): env0" in capsys.readouterr().out
