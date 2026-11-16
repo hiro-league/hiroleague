@@ -6,7 +6,8 @@ with its own data (C:\hiro\data\envN) and its own block of ports (7N00-7N12). A 
 a task in env1..env5 lands: its branches merge into dev/main and env0 is brought up to them.
 
     hiro-work status                         environments, tasks, claims, servers
-    hiro-work start <task> --repos a,b [--kit] [--title ...] [--part-of ...] [--env N]
+    hiro-work start <task> --repos a,b [--kit] [--title ...] [--about ...] [--part-of ...] [--env N]
+    hiro-work describe <task> [--about ...] [--part-of ...]   what it does / what it is part of, changed
     hiro-work move <task>                    env0 -> a free environment, carrying the edits
     hiro-work finish <task>                  env0: every claimed repo committed; release the claims
     hiro-work land <task>                    env1..5: merge, check, update env0, free the environment
@@ -231,6 +232,8 @@ class Task:
     real: list[str] = field(default_factory=list)
     # What bigger work it is a piece of ("Work-flow plan"): CodeHiro names it "<part_of> › <title>" and groups by it
     part_of: str = ""
+    # What it does, in a sentence: the Work area shows it under its name
+    about: str = ""
     created: str = ""
     updated: str = ""
 
@@ -614,11 +617,11 @@ def cmd_start(a) -> None:
         env = pick_env(repos, tasks, a.env)
         task = Task(id=a.task, title=a.title or a.task, env=env, repos=repos,
                     real=[k for k, on in ((data.READS, a.real_reads), (data.AI, a.real_ai)) if on],
-                    part_of=part_of_name(a.part_of),
+                    part_of=part_of_name(a.part_of), about=(a.about or "").strip(),
                     created=datetime.now().astimezone().isoformat(timespec="seconds"))
         save(task)  # the claim holds from here
     event(task=task.id, env=env, step="task", phase="start", repos=repos, title=task.title,
-          **({"part_of": task.part_of} if task.part_of else {}))
+          **({"part_of": task.part_of} if task.part_of else {}), **({"about": task.about} if task.about else {}))
     try:
         if env == 0:
             for repo in repos:
@@ -660,6 +663,8 @@ def card(task: Task) -> None:
     say("")
     say(f"Task {task.id}" + (f" (part of {task.part_of})" if task.part_of else "")
         + f": env{task.env} | claims {', '.join(task.repos)} | {where}")
+    if task.about:
+        say(f"  {task.about}")
     if task.env:
         say(f"  branch {task.branch} | data {data_dir(task.env)} | ports {min(p.values())}-{max(p.values())}")
         say(f"  {data.describe(task.real)}")
@@ -1089,6 +1094,22 @@ def cmd_sweep(a) -> None:
     event(task=None, env=None, step="sweep", phase="end", ok=True, findings=findings)
 
 
+def cmd_describe(a) -> None:
+    """What an open task does, or what bigger work it is a piece of, changed ("" clears it); the Work area follows."""
+    if a.about is None and a.part_of is None:
+        raise Stop("Say what changes: --about and/or --part-of.")
+    with locked():
+        task = get(a.task)
+        changed: dict[str, str] = {}
+        if a.about is not None:
+            task.about = changed["about"] = a.about.strip()
+        if a.part_of is not None:
+            task.part_of = changed["part_of"] = part_of_name(a.part_of)
+        save(task)
+    event(task=task.id, env=task.env, step="describe", phase="end", ok=True, **changed)
+    say(f"Task {task.id}: " + "; ".join(f"{k.replace('_', ' ')} {v or '(none)'}" for k, v in changed.items()))
+
+
 def cmd_review(a) -> None:
     """The task's work waits for Michel's review: CodeHiro shows it so until the task's next step."""
     task = get(a.task)
@@ -1111,10 +1132,15 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--title")
     s.add_argument("--env", type=int, choices=list(ENVS))
     s.add_argument("--part-of", help="the bigger work it is a piece of: a name, or a task's id (its title is used)")
+    s.add_argument("--about", help="what it does, in a sentence (the Work area shows it under its name)")
     s.add_argument("--real-reads", action="store_true", help="env1..5: read the real HA, Frigate and MQTT")
     s.add_argument("--real-ai", action="store_true", help="env1..5: keep the copied AI providers")
     for verb in ("move", "finish", "land", "park", "review"):
         sub.add_parser(verb).add_argument("task")
+    ds = sub.add_parser("describe", help="change what an open task does (--about) or what it is part of (--part-of)")
+    ds.add_argument("task")
+    ds.add_argument("--about", help="what it does, in a sentence; \"\" clears it")
+    ds.add_argument("--part-of", help="the bigger work it is a piece of; \"\" makes it a task of its own")
     r = sub.add_parser("resume")
     r.add_argument("task")
     r.add_argument("--env", type=int, choices=[e for e in ENVS if e])
@@ -1152,7 +1178,7 @@ def main(argv: list[str] | None = None) -> int:
             return a.func(a) or 0
         {"start": cmd_start, "move": cmd_move, "finish": cmd_finish, "land": cmd_land, "park": cmd_park,
          "resume": cmd_resume, "status": cmd_status, "sweep": cmd_sweep, "up": cmd_up, "down": cmd_down,
-         "review": cmd_review,
+         "review": cmd_review, "describe": cmd_describe,
          "configure": lambda a: configure(a.env), "init": lambda a: init_env(a.env),
          "train": train.cmd_train}[a.cmd](a)
     except Stop as e:

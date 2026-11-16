@@ -31,12 +31,14 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
 import hiro_work as hw
+from stages import Stages
 
 # How each repo goes live (the standard's table). hiro-docs only goes to GitHub here: publishing its site (dev merged
 # into main, then the mintdocs policy script) stays a step of its own.
@@ -158,6 +160,11 @@ def restart_hints(changed: list[str]) -> list[str]:
     """aicam: what may need a restart (or another step) for the files a pull brought, by their top folder."""
     tops = sorted({path.split("/", 1)[0] for path in changed if path})
     return [f"{top}: {AICAM_RESTART[top]}" for top in tops if top in AICAM_RESTART]
+
+
+def iso(at: float) -> str:
+    """Epoch seconds as hiro-work's events say a time."""
+    return datetime.fromtimestamp(at).astimezone().isoformat(timespec="seconds")
 
 
 def task_id(now: datetime) -> str:
@@ -339,8 +346,10 @@ class Result:
     failed: str = ""
 
 
-def stream(out: Out, args: list[str], cwd: Path | None, repo: str, log: Path) -> tuple[int, str]:
-    """A command's output, live with the repo's name before each line, and kept in its own log."""
+def stream(out: Out, args: list[str], cwd: Path | None, repo: str, log: Path,
+           on_line: Callable[[str], None] | None = None) -> tuple[int, str]:
+    """A command's output, live with the repo's name before each line, and kept in its own log. ``on_line`` reads
+    each line as it comes (a deploy's stages)."""
     log.parent.mkdir(parents=True, exist_ok=True)
     proc = subprocess.Popen(args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                             encoding="utf-8", errors="replace")
@@ -353,6 +362,8 @@ def stream(out: Out, args: list[str], cwd: Path | None, repo: str, log: Path) ->
             lines.append(line)
             f.write(line + "\n")
             out(f"  {repo:10} | {redact(line)}")
+            if on_line:
+                on_line(line)
     return proc.wait(), "\n".join(lines)
 
 
@@ -373,9 +384,18 @@ def deploy(out: Out, task: str, f: Facts, r: Result) -> None:
     d, main = hw.repo_dir(0, f.repo), hw.main_of(f.repo)
     since = int(time.time()) - 5  # Simone's log lines from here on are this deploy's (clocks within seconds)
     log = hw.LOGS / "train" / f"{task}-{f.repo}-deploy.log"
+    # Its stages (the checks, the build and the tests in it, the migrations' trial, the start), timed inside "deploy"
+    # as the deploy's own lines name them
+    stages = Stages(f.repo, lambda at, **e: hw.event(task=task, env=0, repo=f.repo, parent="deploy", at=iso(at), **e))
     try:
         with timed(out, task, "deploy", f.repo, log):
-            code, text = stream(out, ["git", "-C", str(d), "push", "server", f"{main}:main"], None, f.repo, log)
+            went = False
+            try:
+                code, text = stream(out, ["git", "-C", str(d), "push", "server", f"{main}:main"], None, f.repo, log,
+                                    stages.line)
+                went = code == 0 and (DEPLOY[f.repo] == AICAM or deployed(f.repo, text))
+            finally:
+                stages.close(went)
             if code != 0:
                 raise hw.Stop(f"git refused the push to Simone (never forced): {text[-300:]}")
             if DEPLOY[f.repo] == AICAM:

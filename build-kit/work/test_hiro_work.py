@@ -172,3 +172,24 @@ def test_part_of_is_a_name_or_a_tasks_title(tmp_path, monkeypatch):
 def test_the_work_card_says_what_a_task_is_part_of(capsys):
     hw.card(hw.Task(id="t", title="T", env=0, repos=["codehiro"], part_of="Work-flow plan"))
     assert "Task t (part of Work-flow plan): env0" in capsys.readouterr().out
+
+
+def test_describe_changes_what_a_task_does_or_what_it_is_part_of_and_says_so(tmp_path, monkeypatch):
+    read = _events(tmp_path, monkeypatch)
+    monkeypatch.setattr(hw, "TASKS", tmp_path / "tasks")
+    hw.TASKS.mkdir()
+    hw.save(hw.Task(id="t", title="T", env=1, repos=["codehiro"], part_of="Work-flow plan"))
+    args = lambda about=None, part_of=None: type("A", (), {"task": "t", "about": about, "part_of": part_of})()  # noqa: E731
+    hw.cmd_describe(args(about=" Shows each deploy's stages ", part_of=""))
+    assert (hw.get("t").about, hw.get("t").part_of) == ("Shows each deploy's stages", "")
+    e = read()[-1]
+    assert (e["step"], e["phase"], e["about"], e["part_of"]) == ("describe", "end", "Shows each deploy's stages", "")
+    hw.cmd_describe(args(about="Better words"))
+    assert "part_of" not in read()[-1]  # only what changed
+    with pytest.raises(hw.Stop):
+        hw.cmd_describe(args())
+
+
+def test_the_work_card_says_what_a_task_does(capsys):
+    hw.card(hw.Task(id="t", title="T", env=0, repos=["codehiro"], about="Shows each deploy's stages"))
+    assert "  Shows each deploy's stages" in capsys.readouterr().out
