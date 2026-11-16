@@ -426,13 +426,14 @@ def install_all(env: int, repos: list[str], task: str | None = None) -> None:
         install(env, repo, task)
 
 
-ENV_DEV_FORCED = {"OUTPUTS": "off", "HA_AUTO_WRITES": "off", "AUTH": "off"}
+# Sends and HA's automatic writes off; sign-in on, as in env0 (an AUTH line of env0's is dropped), so users and
+# roles can be tried in every environment
+ENV_DEV_FORCED = {"OUTPUTS": "off", "HA_AUTO_WRITES": "off", "AUTH": None}
 
 
 def write_env_dev(env: int) -> None:
-    """Each app's .env.dev in envN: env0's, with this environment's data folder, no sends or HA writes, and sign-in
-    off (everyone is the owner, so the built-in browser can show its pages); real systems as the task asks
-    (data.env_overrides: None drops env0's line)."""
+    """Each app's .env.dev in envN: env0's, with this environment's data folder, no sends or HA's automatic writes,
+    sign-in on; real systems as the task asks (data.env_overrides: None drops env0's line)."""
     real = real_of(env)
     for app in APPS:
         src = repo_dir(0, app) / ".env.dev"
@@ -639,7 +640,8 @@ def cmd_start(a) -> None:
         repos = expand(a.repos.split(","), a.kit)
         env = pick_env(repos, tasks, a.env)
         task = Task(id=a.task, title=a.title or a.task, env=env, repos=repos,
-                    real=[k for k, on in ((data.READS, a.real_reads), (data.AI, a.real_ai)) if on],
+                    real=[k for k, on in ((data.READS, not a.no_real_reads), (data.WRITES, a.real_writes),
+                                          (data.AI, a.real_ai)) if on],
                     part_of=part_of_name(a.part_of), about=(a.about or "").strip(),
                     created=datetime.now().astimezone().isoformat(timespec="seconds"))
         save(task)  # the claim holds from here
@@ -818,7 +820,7 @@ def cmd_real(a) -> None:
     if up:
         raise Stop(f"env{task.env}'s servers are up ({', '.join(up)}): hiro-work down {task.env} first.")
     with locked():
-        task.real = [k for k, on in ((data.READS, a.reads), (data.AI, a.ai)) if on]
+        task.real = [k for k, on in ((data.READS, a.reads), (data.WRITES, a.writes), (data.AI, a.ai)) if on]
         save(task)
     refresh_data(task.env, task.id)
     card(task)
@@ -1360,7 +1362,10 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--env", type=int, choices=list(ENVS))
     s.add_argument("--part-of", help="the bigger work it is a piece of: a name, or a task's id (its title is used)")
     s.add_argument("--about", help="what it does, in a sentence (the Work area shows it under its name)")
-    s.add_argument("--real-reads", action="store_true", help="env1..5: read the real HA, Frigate and MQTT")
+    s.add_argument("--no-real-reads", action="store_true",
+                   help="env1..5: read no real system (HA, Frigate, MQTT, health checks), which they do by default")
+    s.add_argument("--real-writes", action="store_true",
+                   help="env1..5: keep the logins that write (TrainHiro's Frigate, NetHiro's AdGuard rules)")
     s.add_argument("--real-ai", action="store_true", help="env1..5: keep the copied AI providers")
     for verb in ("move", "finish", "park", "review"):
         sub.add_parser(verb).add_argument("task")
@@ -1398,6 +1403,7 @@ def main(argv: list[str] | None = None) -> int:
     rl = sub.add_parser("real", help="env1..5: which real systems a task's copy reaches (copies the data again)")
     rl.add_argument("task")
     rl.add_argument("--reads", action="store_true")
+    rl.add_argument("--writes", action="store_true")
     rl.add_argument("--ai", action="store_true")
     rl.set_defaults(func=cmd_real)
     rd = sub.add_parser("refresh-data", help="live -> env0: fetch a scrubbed live copy; --apply puts it in env0")

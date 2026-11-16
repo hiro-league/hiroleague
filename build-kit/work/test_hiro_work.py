@@ -304,3 +304,8 @@ def test_claim_adds_a_free_repo_and_refuses_one_held(tmp_path, monkeypatch):
     assert read()[-1]["step"] == "claim"
     with pytest.raises(hw.Stop, match="nethiro by other"):
         hw.cmd_claim(type("A", (), {"task": "t", "repos": "nethiro", "kit": False})())
+
+
+def test_env1_to_5_sign_in_as_env0_does_with_sends_and_has_automatic_writes_off():
+    # AUTH None: env0's line (if any) is dropped and nothing is written, so the apps' sign-in is on and roles apply
+    assert hw.ENV_DEV_FORCED == {"OUTPUTS": "off", "HA_AUTO_WRITES": "off", "AUTH": None}

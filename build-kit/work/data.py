@@ -2,10 +2,12 @@ r"""Data and real systems for hiro-work (hiro-docs standards/workflow.md, "Data 
 
 Two jobs, both on copies of the family's data:
 
-- **env1..env5 are safe by default** (`make_safe`, `env_overrides`, `core_env`): their copy of env0's data reads no
-  real system (Home Assistant, Frigate through HA, MQTT, AdGuard, NetHiro's health checks of the house) and can start
-  no AI call (the core's providers are left out), unless the task asks: `hiro-work start ... --real-reads` and/or
-  `--real-ai`, or later `hiro-work real <task> --reads --ai`. Sends, HA writes and sign-in stay off either way
+- **env1..env5 read, but don't write or spend, by default** (`make_safe`, `env_overrides`, `core_env`): their copy
+  of env0's data reads the real systems as env0 does (Home Assistant, Frigate through HA, MQTT, NetHiro's health checks
+  of the house), keeps no login that writes to one (TrainHiro's Frigate, which trains faces; NetHiro's AdGuard login,
+  which changes the blocking rules) and can start no AI call (the core's providers are left out), unless the task
+  asks: `hiro-work start ... --no-real-reads`, `--real-writes`, `--real-ai`, or later `hiro-work real <task> --reads
+  --writes --ai`. Sends and HA's automatic writes stay off either way, and sign-in is on, as in env0
   (hiro_work.ENV_DEV_FORCED).
 - **`hiro-work refresh-data`: live -> env0** (`cmd_refresh_data`). On Simone each live database is copied with
   SQLite's backup (as a deploy does) and scrubbed there of what is never copied (tokens and logins in settings,
@@ -32,17 +34,22 @@ from types import ModuleType
 import apps as appfile
 
 APPS = [a.repo for a in appfile.APPS if a.copy_data]  # the apps whose data an environment copies (apps.toml)
-READS, AI = "reads", "ai"  # what a task may ask for in env1..env5 (Task.real)
+READS, WRITES, AI = "reads", "writes", "ai"  # what a task's copy in env1..env5 reaches (Task.real)
 
 # ------------------------------------------------------------------------------------------- env1..env5: safe
 
-# The setting rows that point an app at a real system (an address or a login): left out of an env1..env5 copy
-# without "reads". With no address, HomeHiro's and NetHiro's HA connection doesn't start (ha/gateway.py), so
+# The setting rows that point an app at a real system it reads (an address or a login): left out of an env1..env5
+# copy without "reads". With no address, HomeHiro's and NetHiro's HA connection doesn't start (ha/gateway.py), so
 # neither does Frigate (its address comes from HA's Frigate integration); HomeHiro's MQTT doesn't connect
-# (streams/sources/frigate.py); NetHiro has no AdGuard login; TrainHiro has no Frigate.
+# (streams/sources/frigate.py). HA's address also serves "Sign in with Home Assistant", which needs no HA token.
 READ_KEYS = {
     "homehiro": ("ha_url", "ha_token", "mqtt_host", "mqtt_port", "mqtt_user", "mqtt_password"),
-    "nethiro": ("ha_url", "ha_token", "adguard_login"),
+    "nethiro": ("ha_url", "ha_token"),
+}
+# The ones that write to a real system: left out without "writes". NetHiro's AdGuard login changes the blocking
+# rules; TrainHiro's Frigate address trains faces there (and FRIGATE_URL in its .env.dev, env_overrides).
+WRITE_KEYS = {
+    "nethiro": ("adguard_login",),
     "trainhiro": ("frigate_url",),
 }
 # Provider keys the PC's environment may hold (GEMINI_API_KEY, OPENAI_API_KEY...): blanked for an env1..env5 core
@@ -58,7 +65,7 @@ def env_overrides(app: str, real: list[str]) -> dict[str, str | None]:
         out["TALKER_KEY"] = None  # nothing plays with OUTPUTS off: Talker's key stays in env0
         if AI not in real:
             out["AUTOMATION_BUDGET_USD"] = "0"  # automations' LLM lines and voices: nothing to spend
-    if app == "trainhiro" and READS not in real:
+    if app == "trainhiro" and WRITES not in real:
         out["FRIGATE_URL"] = None
     return out
 
@@ -78,8 +85,10 @@ def _tables(con: sqlite3.Connection) -> set[str]:
 def make_safe(data: Path, real: list[str]) -> list[str]:
     """Turn real systems off in an env1..env5 copy (its data folder): what it did, in words."""
     did: list[str] = []
-    if READS not in real:
-        for app, keys in READ_KEYS.items():
+    for kind, table, words in ((READS, READ_KEYS, "reads"), (WRITES, WRITE_KEYS, "writes")):
+        if kind in real:
+            continue
+        for app, keys in table.items():
             db = data / app / f"{app}.db"
             if not db.exists():
                 continue
@@ -88,7 +97,8 @@ def make_safe(data: Path, real: list[str]) -> list[str]:
                     gone = con.execute(f"delete from setting where key in ({','.join('?' * len(keys))})",
                                        keys).rowcount
                     if gone:
-                        did.append(f"{app}: {gone} address/login setting(s) left out")
+                        did.append(f"{app}: {gone} setting(s) that {words} a real system left out")
+    if READS not in real:
         # NetHiro's health checks ping and ask the house's devices, Frigate and HA every round: none is enabled
         db = data / "nethiro" / "nethiro.db"
         if db.exists():
@@ -140,9 +150,10 @@ def link_pictures(src: Path, dst: Path, app: str) -> list[str]:
 
 def describe(real: list[str]) -> str:
     """The card's line about real systems."""
-    reads = "real reads ON (HA, Frigate, MQTT, health checks)" if READS in real else "real reads off"
+    reads = "real reads (HA, Frigate, MQTT, health checks)" if READS in real else "real reads off"
+    writes = "writes ON (TrainHiro's Frigate, AdGuard rules)" if WRITES in real else "writes off"
     ai = "AI ON (the copied providers)" if AI in real else "AI off"
-    return f"{reads} | {ai} | sends, HA writes and sign-in off"
+    return f"{reads} | {writes} | {ai} | sends and HA's automatic writes off | sign-in on"
 
 
 # ------------------------------------------------------------------------------------------- live -> env0

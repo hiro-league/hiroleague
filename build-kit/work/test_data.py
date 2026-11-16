@@ -1,4 +1,4 @@
-"""data.py: env1..env5 read no real system and call no AI unless asked; a live copy is scrubbed before it leaves
+"""data.py: env1..env5 read the real systems but write to none and call no AI unless asked; a live copy is scrubbed before it leaves
 Simone; env0 keeps its own settings when a live copy takes its place."""
 
 import json
@@ -40,7 +40,18 @@ def env_copy(tmp_path):
     return d
 
 
-def test_by_default_an_environment_copy_reads_no_real_system_and_has_no_ai(tmp_path):
+def test_by_default_an_environment_copy_reads_the_real_systems_but_keeps_no_login_that_writes_and_no_ai(tmp_path):
+    d = env_copy(tmp_path)
+    did = data.make_safe(d, [data.READS])
+    assert len(rows(d / "homehiro" / "homehiro.db", "select key from setting")) == 5  # HA and MQTT kept
+    assert rows(d / "nethiro" / "nethiro.db", "select key from setting order by key") == [("dns_blocking",), ("ha_url",)]
+    assert rows(d / "nethiro" / "nethiro.db", "select count(*) from statusitem where enabled") == [(2,)]
+    assert rows(d / "trainhiro" / "trainhiro.db", "select count(*) from setting") == [(0,)]  # Frigate writes
+    assert json.loads((d / "core" / "default" / "providers.json").read_text())["providers"] == []
+    assert any("AI provider" in line for line in did)
+
+
+def test_a_task_that_reads_nothing_has_no_address_of_a_real_system(tmp_path):
     d = env_copy(tmp_path)
     did = data.make_safe(d, [])
     assert rows(d / "homehiro" / "homehiro.db", "select key from setting") == [("status_home_tz",)]
@@ -52,10 +63,11 @@ def test_by_default_an_environment_copy_reads_no_real_system_and_has_no_ai(tmp_p
     assert data.make_safe(d, []) == []  # again: nothing left to do
 
 
-def test_a_task_that_asks_keeps_the_real_reads_and_the_ai(tmp_path):
+def test_a_task_that_asks_keeps_the_writes_and_the_ai(tmp_path):
     d = env_copy(tmp_path)
-    assert data.make_safe(d, [data.READS, data.AI]) == []
+    assert data.make_safe(d, [data.READS, data.WRITES, data.AI]) == []
     assert len(rows(d / "homehiro" / "homehiro.db", "select key from setting")) == 5
+    assert rows(d / "trainhiro" / "trainhiro.db", "select count(*) from setting") == [(1,)]
     assert rows(d / "nethiro" / "nethiro.db", "select count(*) from statusitem where enabled") == [(2,)]
     assert len(json.loads((d / "core" / "default" / "providers.json").read_text())["providers"]) == 2
 
@@ -64,7 +76,8 @@ def test_app_settings_and_the_core_environment_follow_what_the_task_asked():
     assert data.env_overrides("homehiro", []) == {"TALKER_KEY": None, "AUTOMATION_BUDGET_USD": "0"}
     assert data.env_overrides("homehiro", [data.AI]) == {"TALKER_KEY": None}
     assert data.env_overrides("trainhiro", []) == {"FRIGATE_URL": None}
-    assert data.env_overrides("trainhiro", [data.READS]) == {}
+    assert data.env_overrides("trainhiro", [data.READS]) == {"FRIGATE_URL": None}  # it writes to Frigate
+    assert data.env_overrides("trainhiro", [data.WRITES]) == {}
     environ = {"GEMINI_API_KEY": "x", "CLOUDFLARE_API_TOKEN": "y", "PATH": "p"}
     assert data.core_env(environ, []) == {"GEMINI_API_KEY": "", "CLOUDFLARE_API_TOKEN": ""}
     assert data.core_env(environ, [data.AI]) == {}
