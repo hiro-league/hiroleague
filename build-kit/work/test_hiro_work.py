@@ -71,16 +71,25 @@ def test_launch_json_lists_each_repos_servers_on_the_environments_own_ports(tmp_
     for name in ("ROOT", "RUN", "LOGS", "TASKS"):
         monkeypatch.setattr(hw, name, tmp_path / name.lower())
     configs = hw.launch_configs(3)
-    assert sorted(configs) == sorted(["hiroleague", *hw.APPS])  # codehiro and aicam have no servers in the table
+    assert sorted(configs) == sorted(["hiroleague", *hw.SERVED])  # aicam has no servers in the table
     assert [c["name"] for c in configs["hiroleague"]] == ["core", "core-ui"]
     ports = [c["port"] for repo in configs.values() for c in repo]
     p = hw.ports(3)  # the core's server is its admin API; its other listeners come with it
-    apps = [p[f"{a}-{side}"] for a in hw.APPS for side in ("api", "ui")]
+    apps = [p[f"{a}-{side}"] for a in hw.SERVED for side in ("api", "ui")]
     assert sorted(ports) == sorted([p["core-admin"], p["core-ui"], *apps])
-    homehiro_api = configs["homehiro"][0]
-    assert homehiro_api["runtimeExecutable"] == "powershell"
-    script = hw.Path(homehiro_api["runtimeArgs"][-1])  # the same runner as `hiro-work up`: reads .env.dev
-    assert script.exists() and ".env.dev" in script.read_text(encoding="utf-8-sig")
+    homehiro_api = configs["homehiro"][0]  # the pane opens what `up` started; it never starts a server itself
+    assert homehiro_api == {"name": "homehiro-api", "url": f"http://127.0.0.1:{p['homehiro-api']}",
+                            "port": p["homehiro-api"]}
+
+
+def test_up_takes_server_app_and_port_names(tmp_path, monkeypatch):
+    monkeypatch.setattr(hw, "TASKS", tmp_path)
+    names = lambda *n: [s.name for s in hw.pick_servers(2, list(n))]  # noqa: E731
+    assert names("codehiro") == ["codehiro-api", "codehiro-ui"]
+    assert names("core-admin", "core-socket", "homehiro-ui") == ["core", "homehiro-ui"]
+    assert names() == ["core", "core-ui", *[f"{a}-{s}" for a in hw.SERVED for s in ("api", "ui")]]
+    with pytest.raises(hw.Stop, match="start the core"):
+        names("nope")
 
 
 def _events(tmp_path, monkeypatch):

@@ -2,12 +2,13 @@ r"""hiro-work train: the deploy train (hiro-docs standards/building-and-releasin
 
 One run, started when Michel says, ships everything committed since the last one:
 
-    hiro-work train [repo ...] [--dry-run] [--yes]
+    hiro-work train [repo ...] [--dry-run]
+    hiro-work train --stop [--force]
 
 1. The plan: for each repo, what GitHub lacks (origin's branch..dev/main) and what live lacks (the server's
    commit..dev/main; aicam: ~/aicam's commit on Simone), shown before anything moves. A repo whose GitHub or server
    has commits this PC lacks stops the whole train here: nothing is ever forced.
-2. A go: the question, or --yes.
+2. No question: the go is Michel's word in the session that starts it (building-and-releasing.md).
 3. Push: every repo with new commits to GitHub, side by side (a plain push, which git refuses unless it fast-forwards).
 4. Deploy: the core first when live lacks something (its own hook: `git push server dev:main`), then the apps and aicam
    side by side (`git push server main`; aicam: then `git -C ~/aicam pull --ff-only` on Simone, and which service may
@@ -15,8 +16,13 @@ One run, started when Michel says, ships everything committed since the last one
    back by itself) is the hook's, untouched here. A failed core deploy stops the apps.
 5. Verify each (it answers; no new errors in its log since its deploy started), then one report.
 
-Without --dry-run, it runs in a Windows Terminal window of its own ("hiro-train") so Michel watches it; the window
-asks the question. Every step is timed into C:\hiro\logs\events.jsonl (task "train-<time>", kind "deploy"), and the
+Without --dry-run, it runs in a tab of the one Windows Terminal window "hiro-train", which Michel watches; the call
+that opens it waits until the train has started, or says why it didn't (another train runs). A train that went live
+closes its tab after 5 minutes; a failed one stays. One train at a time: the lock (C:\hiro\run\train.lock) names its
+process and task, and a lock whose process is gone is taken over. `--stop` ends the running train cleanly (its events,
+its lock); it refuses to cut off a push or a deploy unless --force.
+
+Every step is timed into C:\hiro\logs\events.jsonl (task "train-<time>", kind "deploy"), and the
 window's whole output is kept in C:\hiro\logs\train\<task>.log.
 """
 
@@ -496,36 +502,161 @@ def report(out: Out, task: str, results: list[Result], started: float) -> bool:
 
 # ---------------------------------------------------------------------------------------------- the command
 
+LOCK = hw.RUN / "train.lock"
+# How long the opening call waits for the window's train to say it started (or why it didn't)
+WINDOW_WAIT_S = 30
+# A train that went live leaves its tab open this long, then closes it; a failed one stays until closed
+CLOSE_AFTER_S = 300
+STARTED, REFUSED = "Deploy train ", "Stopped: "
+# Steps that change GitHub or Simone: --stop refuses to cut one off unless --force
+MOVING_STEPS = ("push github", "deploy")
 
-def open_window(a) -> None:
-    """The train runs in a window Michel watches (and answers the question in), outside Claude."""
-    task = task_id(datetime.now())
-    args = [sys.executable, str(Path(hw.__file__).resolve()), "train", "--here", "--id", task, *a.repos]
-    if a.yes:
-        args.append("--yes")
-    wt = [shutil.which("wt.exe") or "wt.exe", "-w", "hiro-train", "new-tab", "--title", "deploy train",
-          "cmd", "/k", *args]
-    subprocess.Popen(wt, creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
-    hw.say(f"The deploy train {task} runs in the 'hiro-train' window. Its log: {hw.LOGS / 'train' / (task + '.log')}")
+
+def alive(pid: int) -> bool:
+    """Whether a process still runs (Windows: OpenProcess + GetExitCodeProcess; os.kill(pid, 0) would end it there)."""
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+    import ctypes
+
+    k32 = ctypes.windll.kernel32
+    handle = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return False
+    try:
+        code = ctypes.c_ulong()
+        return bool(k32.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259  # STILL_ACTIVE
+    finally:
+        k32.CloseHandle(handle)
+
+
+def lock_owner() -> tuple[int, str] | None:
+    """The train holding the lock: its process and its task id (None: no lock, or one that can't be read)."""
+    try:
+        pid, _, task = LOCK.read_text(encoding="utf-8").strip().partition(" ")
+        return int(pid), task
+    except (OSError, ValueError):
+        return None
 
 
 @contextlib.contextmanager
-def one_train():
-    lock = hw.RUN / "train.lock"
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError:
-        raise hw.Stop(f"Another deploy train is running ({lock}; delete it if none is).") from None
-    os.write(fd, str(os.getpid()).encode())
-    os.close(fd)
+def one_train(out: Out, task: str):
+    """One train at a time. The lock names its owner (process and task), so a lock whose train is gone (a window
+    closed, a process ended by hand) is taken over instead of refusing every train after it."""
+    LOCK.parent.mkdir(parents=True, exist_ok=True)
+    for _ in range(2):
+        try:
+            fd = os.open(LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            owner = lock_owner()
+            if owner and alive(owner[0]):
+                raise hw.Stop(f"another deploy train is running ({owner[1]}, process {owner[0]}): one at a time. "
+                              "Wait for it, or end it with `hiro-work train --stop`.") from None
+            out(f"(Taking over the lock left by {owner[1] if owner else 'a train'}, whose process is gone.)")
+            if owner:
+                end_left(owner[1], "its process was gone; the next train took over its lock")
+            LOCK.unlink(missing_ok=True)
+            continue
+        os.write(fd, f"{os.getpid()} {task}".encode())
+        os.close(fd)
+        break
     try:
         yield
     finally:
-        lock.unlink(missing_ok=True)
+        LOCK.unlink(missing_ok=True)
+
+
+def events_of(task: str) -> list[dict]:
+    """A task's events, in order."""
+    import json
+
+    if not hw.EVENTS.exists():
+        return []
+    out = []
+    with open(hw.EVENTS, encoding="utf-8") as f:
+        for line in f:
+            if f'"{task}"' in line:
+                with contextlib.suppress(ValueError):
+                    e = json.loads(line)
+                    if e.get("task") == task:
+                        out.append(e)
+    return out
+
+
+def open_steps(task: str) -> list[dict]:
+    """The steps a train started and hasn't ended (innermost last)."""
+    started: dict[tuple, dict] = {}
+    for e in events_of(task):
+        key = (e.get("step"), e.get("repo"))
+        if e.get("phase") == "start":
+            started[key] = e
+        elif e.get("phase") == "end":
+            started.pop(key, None)
+    return [e for k, e in started.items() if k[0] != "task"]
+
+
+def end_left(task: str, why: str) -> None:
+    """Close a train that ended without its own end event, so CodeHiro's Work area stops showing it running."""
+    evs = events_of(task)
+    if any(e.get("step") == "task" and e.get("phase") == "end" for e in evs):
+        return
+    for e in reversed(open_steps(task)):
+        hw.event(task=task, env=0, repo=e.get("repo"), step=e["step"], phase="end", ok=False, error=why)
+    hw.event(task=task, env=0, step="task", phase="end", ok=False, seconds=0, error=why)
+
+
+def cmd_stop(force: bool) -> None:
+    """End the running train: its process, its open steps and its end event, its lock."""
+    owner = lock_owner()
+    if not owner:
+        hw.say("No deploy train is running.")
+        return
+    pid, task = owner
+    moving = [e for e in open_steps(task) if e.get("step") in MOVING_STEPS]
+    if moving and alive(pid) and not force:
+        where = ", ".join(f"{e['step']} [{e.get('repo')}]" for e in moving)
+        raise hw.Stop(f"{task} is changing GitHub or Simone now ({where}). Stopping it there can leave a deploy half "
+                      "done; wait for it, or add --force.")
+    if alive(pid):
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
+    end_left(task, "stopped by hand (hiro-work train --stop)")
+    LOCK.unlink(missing_ok=True)
+    hw.say(f"Stopped {task}" + (f" during {', '.join(e['step'] for e in open_steps(task))}" if moving else "") + ".")
+
+
+def open_window(a) -> None:
+    """The train runs in a tab of the one 'hiro-train' window, which Michel watches, outside Claude. This call waits
+    until that train has started, or says why it didn't, so nobody is told a train runs when it was refused."""
+    task = task_id(datetime.now())
+    log = hw.LOGS / "train" / f"{task}.log"
+    args = [sys.executable, str(Path(hw.__file__).resolve()), "train", "--here", "--id", task, *a.repos]
+    # cmd /c: the tab ends with the train. Windows Terminal closes a tab whose program ended well and keeps one that
+    # failed, so a failed train stays on screen.
+    wt = [shutil.which("wt.exe") or "wt.exe", "-w", "hiro-train", "new-tab", "--title", f"deploy train {task[-6:]}",
+          "cmd", "/c", *args]
+    subprocess.Popen(wt, creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+    deadline = time.monotonic() + WINDOW_WAIT_S
+    while time.monotonic() < deadline:
+        text = log.read_text(encoding="utf-8") if log.exists() else ""
+        if REFUSED in text:
+            raise hw.Stop(f"the train didn't start: {text.split(REFUSED, 1)[1].strip()}")
+        if f"{STARTED}{task}" in text:
+            hw.say(f"The deploy train {task} is running in the 'hiro-train' window. Its log: {log}")
+            return
+        time.sleep(0.5)
+    raise hw.Stop(f"the 'hiro-train' window didn't start the train within {WINDOW_WAIT_S} s; look at that window "
+                  f"(its log would be {log}).")
 
 
 def cmd_train(a) -> None:
+    if a.stop:
+        cmd_stop(a.force)
+        return
     repos = choose(a.repos)
     if not (a.dry_run or a.here):
         open_window(a)
@@ -542,50 +673,45 @@ def cmd_train(a) -> None:
         if plan.stops:
             out("\nThe train would stop here: " + "; ".join(plan.stops))
         return
-    with one_train():
-        hw.event(task=task, env=0, step="task", phase="start", kind="deploy", repos=repos, title="Deploy train")
-        ok = False
-        try:
-            out(f"Deploy train {task}: {', '.join(repos)}")
-            with timed(out, task, "plan"):
-                facts = gather(repos)
-                plan = make_plan(facts)
-            out("")
-            show(out, facts, plan)
-            if plan.stops:
-                raise hw.Stop("nothing moved: " + "; ".join(f"{r}: {', '.join(w)}" for r, w in plan.stops.items()))
-            if plan.empty:
-                out("\nNothing to ship: GitHub and live have everything.")
-                ok = True
-                return
-            if not a.yes:
-                if not sys.stdin.isatty():
-                    raise hw.Stop("no one to ask: run it in a terminal, or with --yes")
-                try:
-                    answer = input("\nGo? [y/N] ")
-                except EOFError:  # Windows' NUL passes for a terminal: no answer is a no
-                    answer = ""
-                if answer.strip().lower() not in ("y", "yes"):
-                    raise hw.Stop("not started: nothing moved")
-                # The train's time runs from the go: the minutes it waited for Michel's answer aren't the train's
-                started = time.monotonic()
-            out("")
-            results = run_train(out, task, facts, plan)
-            ok = report(out, task, results, started)
-        except hw.Stop as e:
-            out(f"\nStopped: {e}")
-            raise
-        finally:
-            hw.event(task=task, env=0, step="task", phase="end", ok=ok,
-                     seconds=round(time.monotonic() - started, 1))
-        if not ok:
-            raise hw.Stop("the train finished with failures (above)")
+    # No question here: the go is Michel's word in the session that starts the train (building-and-releasing.md)
+    ok = False
+    try:
+        with one_train(out, task):
+            hw.event(task=task, env=0, step="task", phase="start", kind="deploy", repos=repos, title="Deploy train")
+            try:
+                out(f"{STARTED}{task}: {', '.join(repos)}")
+                with timed(out, task, "plan"):
+                    facts = gather(repos)
+                    plan = make_plan(facts)
+                out("")
+                show(out, facts, plan)
+                if plan.stops:
+                    raise hw.Stop("nothing moved: " + "; ".join(f"{r}: {', '.join(w)}" for r, w in plan.stops.items()))
+                if plan.empty:
+                    out("\nNothing to ship: GitHub and live have everything.")
+                    ok = True
+                    return
+                out("")
+                results = run_train(out, task, facts, plan)
+                ok = report(out, task, results, started)
+            finally:
+                hw.event(task=task, env=0, step="task", phase="end", ok=ok,
+                         seconds=round(time.monotonic() - started, 1))
+    except hw.Stop as e:
+        out(f"\n{REFUSED}{e}")
+        raise
+    if not ok:
+        raise hw.Stop("the train finished with failures (above)")
+    if a.id:  # in its tab: leave the report up a while, then close the tab
+        out(f"\nThis tab closes in {CLOSE_AFTER_S // 60} minutes.")
+        time.sleep(CLOSE_AFTER_S)
 
 
 def add_parser(sub) -> None:
     t = sub.add_parser("train", help="the deploy train: push and deploy what GitHub and live lack (when Michel says)")
     t.add_argument("repos", nargs="*", help="only these repos (none: every repo)")
     t.add_argument("--dry-run", action="store_true", help="show what lacks what and the plan; nothing moves")
-    t.add_argument("--yes", action="store_true", help="don't ask before it moves")
-    t.add_argument("--here", action="store_true", help="run in this terminal (else it opens the hiro-train window)")
+    t.add_argument("--stop", action="store_true", help="end the running train (its events and lock too)")
+    t.add_argument("--force", action="store_true", help="with --stop: even while it pushes or deploys")
+    t.add_argument("--here", action="store_true", help=argparse.SUPPRESS)  # the window's own run
     t.add_argument("--id", help=argparse.SUPPRESS)  # the window's run: the task the opening call named

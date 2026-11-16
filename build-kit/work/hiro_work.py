@@ -63,6 +63,10 @@ NODE = {"hiroleague": ["admin_frontend", "ui-kit"], "homehiro": ["frontend"], "n
         "trainhiro": ["frontend"], "studyhiro": ["frontend"], "codehiro": ["history-dashboard"]}
 # Each app's data folder name in C:\hiro\data\envN (the core's is "core")
 APPS = ["homehiro", "nethiro", "trainhiro", "studyhiro"]
+# The apps `up` runs: the build kit's apps, and Code reports (its own folders: scc_report and history-dashboard)
+SERVED = [*APPS, "codehiro"]
+# The core's other listeners come with its server: their port names start it too (`up 0 core-admin` = `up 0 core`)
+PORT_ALIASES = {"core-admin": "core", "core-socket": "core", "core-http": "core", "core-plugin": "core"}
 # Core workspace folders an environment never gets: the WhatsApp session (two clients on one account break it),
 # the AI tool installs, logs and run files.
 CORE_SKIP = {"channels", "plans", "logs", "run"}
@@ -491,15 +495,13 @@ def configure(env: int, task: str | None = None) -> None:
 
 
 def launch_configs(env: int) -> dict[str, list[dict]]:
-    """Each repo's servers for the browser pane (its .claude/launch.json): the environment's own ports, each started
-    by the same runner script as `hiro-work up`, so an app reads its .env.dev (sends off in env1..env5) and logs to
-    C:\\hiro\\logs\\envN. Only the servers in the port table: a repo with none gets no file."""
+    """Each repo's servers for the browser pane (its .claude/launch.json): the environment's own addresses, with no
+    command, so the pane only opens a server `hiro-work up` started in the environment's window and never starts one
+    itself (servers run outside Claude, workflow.md). A repo with no server gets no file."""
     out: dict[str, list[dict]] = {}
     for s in servers(env).values():
         repo = s.cwd.relative_to(env_dir(env)).parts[0]
-        out.setdefault(repo, []).append({
-            "name": s.name, "runtimeExecutable": "powershell", "port": s.port,
-            "runtimeArgs": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(runner(env, s))]})
+        out.setdefault(repo, []).append({"name": s.name, "url": f"http://127.0.0.1:{s.port}", "port": s.port})
     return out
 
 
@@ -914,6 +916,17 @@ def servers(env: int) -> dict[str, Server]:
         out[f"{app}-ui"] = Server(f"{app}-ui", here / app / "frontend",
                                   f"npm.cmd run dev -- --port {ui} --strictPort --host 127.0.0.1", ui,
                                   {f"{app.upper()}_API": f"http://127.0.0.1:{api}"})
+    # Code reports: the service reads the repos from Simone's bare repos (as live does, read only); env0 keeps its
+    # data in the repo's data/ (paired there), env1..env5 in their data folder
+    reports = here / "codehiro"
+    api_env = {"PYTHONUTF8": "1", "REPORTS_PORT": str(p["codehiro-api"]), "REPORTS_SOURCES": "simone:{repo}.git"}
+    if env:
+        api_env["REPORTS_DATA_DIR"] = str(data_dir(env) / "codehiro")
+    out["codehiro-api"] = Server("codehiro-api", reports / "scc_report", "uv run scc-report-service",
+                                 p["codehiro-api"], api_env)
+    out["codehiro-ui"] = Server("codehiro-ui", reports / "history-dashboard",
+                                f"npm.cmd run dev -- --port {p['codehiro-ui']} --strictPort --host 127.0.0.1",
+                                p["codehiro-ui"], {"REPORTS_API": f"http://127.0.0.1:{p['codehiro-api']}"})
     return out
 
 
@@ -923,13 +936,17 @@ def pick_servers(env: int, names: list[str]) -> list[Server]:
     every = servers(env)
     if not names:
         held = [t for t in load_tasks() if t.state == "working" and t.env == env]
-        apps = sorted({r for t in held for r in t.repos if r in APPS}) if held and env else APPS
+        apps = sorted({r for t in held for r in t.repos if r in SERVED}) if held and env else SERVED
         names = ["core", *apps]
     chosen: list[Server] = []
     for n in names:
-        group = [s for k, s in every.items() if k == n or k.startswith(n + "-")]
+        if n in PORT_ALIASES:  # one of the core's own ports: the core's server alone
+            group = [every[PORT_ALIASES[n]]]
+        else:
+            group = [s for k, s in every.items() if k == n or k.startswith(n + "-")]
         if not group:
-            raise Stop(f"No server '{n}'. Servers: {', '.join(every)}.")
+            raise Stop(f"No server '{n}'. Servers: {', '.join(every)} (or an app's name for both of its servers; "
+                       f"{', '.join(PORT_ALIASES)} start the core).")
         chosen += [s for s in group if s not in chosen]
     return chosen
 
