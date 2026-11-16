@@ -545,6 +545,8 @@ def cmd_train(a) -> None:
                     answer = ""
                 if answer.strip().lower() not in ("y", "yes"):
                     raise hw.Stop("not started: nothing moved")
+                # The train's time runs from the go: the minutes it waited for Michel's answer aren't the train's
+                started = time.monotonic()
             out("")
             results = run_train(out, task, facts, plan)
             ok = report(out, task, results, started)

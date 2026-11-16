@@ -88,3 +88,32 @@ def test_aicam_says_what_may_need_a_restart_by_top_folder():
 
 def test_a_trains_task_is_named_by_its_time():
     assert tr.task_id(datetime(2026, 11, 16, 14, 5, 9)) == "train-20261116-140509"
+
+
+def test_a_trains_time_runs_from_the_go_not_from_the_question(monkeypatch, tmp_path):
+    clock = {"now": 1000.0}
+    events = []
+    monkeypatch.setattr(tr.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(hw, "event", lambda **e: events.append(e))
+    monkeypatch.setattr(hw, "LOGS", tmp_path)
+    monkeypatch.setattr(hw, "RUN", tmp_path / "run")
+    monkeypatch.setattr(tr, "gather", lambda repos: [])
+    monkeypatch.setattr(tr, "make_plan", lambda facts: tr.Plan(push=["codehiro"], first=[], then=["codehiro"], stops={}))
+    monkeypatch.setattr(tr, "show", lambda out, facts, plan: None)
+    monkeypatch.setattr(tr.sys.stdin, "isatty", lambda: True)
+
+    def answer(_question):
+        clock["now"] += 200  # Michel reads the plan for 200 s
+        return "y"
+
+    def deploy(out, task, facts, plan):
+        clock["now"] += 30  # the train itself
+        return []
+
+    monkeypatch.setattr("builtins.input", answer)
+    monkeypatch.setattr(tr, "run_train", deploy)
+    monkeypatch.setattr(tr, "report", lambda out, task, results, started: True)
+    args = type("A", (), {"repos": ["codehiro"], "dry_run": False, "here": True, "id": "train-test", "yes": False})()
+    tr.cmd_train(args)
+    end = [e for e in events if e["step"] == "task" and e["phase"] == "end"][0]
+    assert (end["ok"], end["seconds"]) == (True, 30)
