@@ -1190,7 +1190,7 @@ def cmd_up(a) -> None:
     # runs) first, then each such app pairs (pair_apps.py), then the apps start and connect with their keys
     unpaired = [x for x in appfile.APPS if f"{x.repo}-api" in starting and not paired(env, x)]
     deadline = time.monotonic() + a.wait
-    with step(None, env, "servers up", servers=sorted(starting)):
+    with step(None, env, "servers up", servers=sorted(starting), known=list(servers(env))):
         if unpaired:
             core_first = [s for s in chosen if s.name in ("core", "core-ui")]
             open_tabs(env, core_first)
@@ -1243,7 +1243,7 @@ def servers_down(env: int, names: list[str] | None = None) -> None:
 
 def cmd_down(a) -> None:
     named = [s.name for s in pick_servers(a.env, a.servers)] if a.servers else None  # none named: all of them
-    with step(None, a.env, "servers down", **({"servers": named} if named else {})):
+    with step(None, a.env, "servers down", known=list(servers(a.env)), **({"servers": named} if named else {})):
         servers_down(a.env, a.servers)
     up = [n for n, s in servers(a.env).items() if listening(s.port)]
     say("Still up: " + ", ".join(up) if up else f"env{a.env}'s servers are down.")
