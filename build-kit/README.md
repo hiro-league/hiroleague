@@ -1,8 +1,8 @@
 # Build kit
 
 The build, check and deploy files every Hiro app shares (HomeHiro, NetHiro, TrainHiro, StudyHiro): one copy, here,
-that each app runs from its own folder with its own facts. Before it, each app had its own copy of every file, and
-they drifted (shared-code plan, step 2). A change to how apps are built, checked or deployed is one edit here.
+that each app runs from its own folder with its own facts. A change to how apps are built, checked or deployed is one
+edit here.
 
 | File | What it is | Run by |
 |---|---|---|
@@ -14,12 +14,13 @@ they drifted (shared-code plan, step 2). A change to how apps are built, checked
 | `dev.ps1` | `.\dev` on the PC: packages installed, backend and UI started with live reload (env0's ports) | the app's `dev.ps1` |
 | `git-hooks/` | Every Hiro repo's git hooks: `pre-commit` runs `./scripts/check.sh`, `post-checkout` warns when an env0 checkout leaves `dev`/`main` (hiro-docs `standards/workflow.md`, "Enforcement") | git, through each repo's `core.hooksPath`, set by `git-hooks/install.py` |
 | `work/hiro_work.py` | `hiro-work`: the environments (env0 to env5), tasks and their claims, servers (and each repo's `.claude/launch.json` for the browser pane), landing (hiro-docs `standards/workflow.md`); its tests beside it | `C:\hiro\bin\hiro-work.cmd`; the core's check runs its tests |
+| `work/data.py` | Data and real systems: env1 to env5's copy of env0's data, which reads the real systems but doesn't write or spend unless the task asks (`--no-real-reads`, `--real-writes`, `--real-ai`, `hiro-work real`), and `hiro-work refresh-data` (live → env0, scrubbed on Simone) (hiro-docs `standards/workflow.md`, "Data and real systems"); its tests beside it | `hiro_work.py`; the core's check runs its tests |
 | `work/apps.toml`, `work/apps.py` | The apps, one row each (repo, extension name, ports in the 7N00-7N49 block, folders and commands, settings database, own-address setting, live port): what hiro-work, the train and the data copies know about an app; a new app adds its row (hiro-docs `standards/new-extension.md`) | `hiro_work.py`, `train.py`, `data.py` |
 | `work/pair_apps.py` | Pairs apps with an environment's running core (a fresh code, then the SDK), run by `hiro-work up` in the core's own environment for each app whose key that core doesn't know | `hiro-work up` |
 | `work/relay.py` | The PC's helper for CodeHiro's environment cards: asks CodeHiro every few seconds (with the Work key) for the cards' Up and Down, and runs each as `hiro-work up`/`down` in the environment's window (only up and down, an environment 0 to 5, known server names); `--install` puts the shortcut "Hiro League work relay" in the Windows user's Startup folder | the Startup shortcut, at logon |
-| `work/train.py` | `hiro-work train`: the deploy train (what GitHub and live lack, the pushes, the core's deploy then the apps' side by side through each one's own deploy, a check of each, one report; hiro-docs `standards/building-and-releasing.md`). It asks nothing (Michel's word in the session is the go), runs in a tab of the one `hiro-train` window, one train at a time (a lock that names its process), and `--stop` ends a stuck one; its tests beside it | `hiro-work train`, when Michel says; the core's check runs its tests |
+| `work/train.py` | `hiro-work train`: the deploy train (what GitHub and live lack, the pushes, the core's deploy first, then the apps', aicam's and hiro-docs' side by side, each through its own deploy, a check of each, one report; hiro-docs `standards/workflow.md`, "The deploy train"). It asks nothing (Michel's word in the session is the go), runs in a tab of the one `hiro-train` window, one train at a time (a lock that names its process), and `--stop` ends a stuck one; its tests beside it | `hiro-work train`, when Michel says; the core's check runs its tests |
 | `work/stages.py` | A deploy's stages, read from its output as the train streams it (the checks and each part, the image build and the tests in it, the migrations' trial, the start), each timed for CodeHiro's Work area; a deploy script's new line gets a row here | `work/train.py`, for each deploy |
-| `work/ship.py` | The sender: posts `events.jsonl`'s new lines to CodeHiro's Work area with the key in `C:\hiro\secrets\work.key` (hiro-docs `standards/workflow.md`, "Tracking"); its tests beside it | Started by hiro-work whenever it writes an event; the core's check runs its tests |
+| `work/ship.py` | The sender: posts `events.jsonl`'s new lines to CodeHiro's Work area with the key in `C:\hiro\secrets\work.key` (hiro-docs `standards/workflow.md`, "Tracking"); its tests beside it | Started by hiro-work (the train too) and `check_events.py` whenever they write an event; the core's check runs its tests |
 | `work/check_events.py` | A check's parts as Work events, of the task that claims the repo in its environment (hiro-docs `standards/workflow.md`, "Tracking"); its tests beside it | `check-engine.sh`, as each part starts and ends; writes nothing outside `C:\hiro` |
 
 The UI kit has the two frontend pieces: `ui-kit/scripts/kit-sync.mjs` (each app's `npm run kit`) and
@@ -52,8 +53,10 @@ BACKEND_CHECKS="ruff pytest" # what backend-check.sh runs: ruff, pyright, import
 
 The app's repo sits beside the HiroLeague checkout: `../hiroleague` from the app's root, on the PC and on the server
 (`~/hiroleague`, refreshed by the core's deploy). So **a change here reaches every app's next deploy and nightly check**:
-deploy the core first, then each app, and run each app's `./scripts/check.sh --all` before (a change here doesn't start
-an app's check by itself). HiroLeague's own check reads every script here with `bash -n` (part "build-kit").
+deploy the core first, then each app, and run each app's `./scripts/check.sh --all` before (a change here starts an app's
+check by itself only for `backend-check.sh`, which each app's backend part names). HiroLeague's own check reads each
+`build-kit/*.sh` with `bash -n` (part "build-kit: bash -n") and runs `work/`'s tests (part "build-kit: hiro-work
+tests").
 
 ## The git hooks
 
@@ -66,8 +69,8 @@ runs it when it makes an environment; by hand, `--check` lists which repos have 
   hook), then `hiro-work fresh` (no working task claims the repo in its environment: the commit stops; other open
   tasks on it are named; the environment's other repos move up to env0's), then `./scripts/check.sh` when the repo
   has one (aicam and hiro-docs don't). Parts that passed on these files
-  are skipped, so a checked change commits in seconds. `git commit --no-verify` skips it, only when Michel asks
-  (`hiro-work park` uses it for its WIP commit).
+  are skipped, so a checked change commits in seconds. `git commit --no-verify` skips it (hiro-docs `standards/workflow.md`,
+  "Enforcement"; `hiro-work park` uses it for its WIP commit).
 - **`post-checkout`** warns when a branch checkout in `C:\hiro\env0` leaves the repo's main branch.
 - **No push hook:** pushes go through the deploy train (`hiro-work train`).
 - The check reads the working tree, not the staged files: a commit that stages only part of a file is checked as the

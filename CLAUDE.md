@@ -9,7 +9,7 @@ only the core's own facts.
 
 ## The admin UI in dev
 
-Check the admin from the **Vite dev site on the environment's 7N02** (env0: `http://localhost:7002`, started by
+Check the admin from the **Vite dev site on the environment's 7N02** (env0: `http://127.0.0.1:7002`, started by
 `hiro-work up 0`), not the admin the core serves itself, which is rebuilt rarely and usually stale. The environments
 and their ports: hiro-docs `standards/workflow.md`.
 
