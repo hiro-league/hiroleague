@@ -1,4 +1,4 @@
-r"""hiro-work train: the deploy train (hiro-docs standards/building-and-releasing.md, "Commit, push, deploy").
+r"""hiro-work train: the deploy train (hiro-docs standards/workflow.md, "The deploy train").
 
 One run, started when Michel says, ships everything committed since the last one:
 
@@ -697,7 +697,7 @@ def cmd_train(a) -> None:
         if plan.stops:
             out("\nThe train would stop here: " + "; ".join(plan.stops))
         return
-    # No question here: the go is Michel's word in the session that starts the train (building-and-releasing.md)
+    # No question here: the go is Michel's word in the session that starts the train (workflow.md, step 8)
     ok = False
     try:
         with one_train(out, task):
