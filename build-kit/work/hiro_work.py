@@ -680,7 +680,7 @@ def card(task: Task) -> None:
     if task.about:
         say(f"  {task.about}")
     if task.env:
-        say(f"  branch {task.branch} | data {data_dir(task.env)} | ports {min(p.values())}-{max(p.values())}")
+        say(f"  branch {task.branch} | data {data_dir(task.env)} | ports {min(p.values())}-{min(p.values()) + appfile.BLOCK - 1}")
         say(f"  {data.describe(task.real)}")
 
 

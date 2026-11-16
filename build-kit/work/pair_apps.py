@@ -72,12 +72,16 @@ def main(argv: list[str]) -> int:
         folder.mkdir(parents=True, exist_ok=True)
         code = start_extension_pairing(workspace, code_length=6, ttl_seconds=CODE_TTL_S).code
         try:
-            ok = asyncio.run(pair(url, name, folder, code))
+            asyncio.run(pair(url, name, folder, code))
         except Exception as exc:  # one app's failure is said and the others still pair
             print(f"{name}: pairing failed: {type(exc).__name__}: {exc}")
-            ok = False
-        else:
-            print(f"{name}: paired" if ok else f"{name}: the core didn't take the code within {WAIT_S} s")
+            failed += 1
+            continue
+        # Judged by the outcome, not the client's status: the SDK's client may end its run right after the core
+        # took the code, before "connected" is seen. Paired = a key saved here that the core now knows.
+        new_id = ExtensionCredentials(folder).extension_id()
+        ok = bool(new_id) and known(workspace, new_id)
+        print(f"{name}: paired" if ok else f"{name}: the core didn't take the code within {WAIT_S} s")
         failed += not ok
     return 1 if failed else 0
 
