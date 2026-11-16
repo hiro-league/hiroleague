@@ -177,6 +177,20 @@ def step(task: str | None, env: int | None, name: str, repo: str | None = None, 
     say(f"  done in {s} s")
 
 
+COMMITS_MAX = 2000  # one event's commits, at most
+
+
+def record_commits(task: str, env: int | None, repo: str, frm: str | None, to: str | None, how: str) -> None:
+    """The commits a task (or a deploy train) added to a repo, from..to in env0, as a Work event: CodeHiro's Deploys
+    shows the tasks whose work each train shipped. ``how``: land, finish (a task in env0), deploy, push."""
+    if not frm or not to or frm == to:
+        return
+    shas = git(repo_dir(0, repo), "rev-list", f"{frm}..{to}", check=False).split()[:COMMITS_MAX]
+    if shas:
+        event(task=task, env=env, repo=repo, step="commits", phase="end", ok=True, how=how,
+              **{"from": frm, "to": to}, commits=shas)
+
+
 class Stop(Exception):
     """A refusal with a message for the person: nothing half-done is left behind."""
 
@@ -696,6 +710,8 @@ def cmd_finish(a) -> None:
     if left:
         raise Stop("Not committed yet: " + "; ".join(f"{r}: {len(f)} file(s)" for r, f in left.items())
                    + ". Check, commit this task's files, then finish.")
+    for repo in task.repos:  # what it committed in env0 since it started
+        record_commits(task.id, 0, repo, task.base.get(repo), git(repo_dir(0, repo), "rev-parse", "HEAD"), "finish")
     with locked():
         task.state = "done"
         save(task)
@@ -779,7 +795,9 @@ def land_steps(task: Task, env: int) -> None:
     # 4. dev/main moves to the branch; env0's checkouts follow (a fast-forward)
     for repo in task.repos:
         with step(task.id, env, "fast-forward", repo):
+            before = git(repo_dir(0, repo), "rev-parse", "HEAD")
             git(repo_dir(0, repo), "merge", "--ff-only", "-q", task.branch)
+            record_commits(task.id, env, repo, before, git(repo_dir(0, repo), "rev-parse", "HEAD"), "land")
             install(0, repo, task.id)
 
 

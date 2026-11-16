@@ -365,6 +365,7 @@ def push_github(out: Out, task: str, f: Facts, r: Result) -> None:
         if code != 0:
             raise hw.Stop(f"git refused the push to GitHub (never forced): {text[-300:]}")
     r.pushed = len(f.github_lacks)
+    hw.record_commits(task, 0, f.repo, f.github, f.head, "push")
 
 
 def deploy(out: Out, task: str, f: Facts, r: Result) -> None:
@@ -386,6 +387,7 @@ def deploy(out: Out, task: str, f: Facts, r: Result) -> None:
             elif not deployed(f.repo, text):
                 raise hw.Stop(f"its deploy didn't finish (log: {log}); its own way back ran if it got that far")
         r.deployed = True
+        hw.record_commits(task, 0, f.repo, f.live, f.head, "deploy")  # what went live: CodeHiro names its tasks
     except hw.Stop as e:
         r.deployed, r.failed = False, str(e)
     with contextlib.suppress(hw.Stop):

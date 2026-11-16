@@ -137,3 +137,22 @@ def test_review_marks_a_working_task_and_refuses_a_parked_one(tmp_path, monkeypa
 def test_sweep_leaves_out_branches_in_use():
     listing = "* dev\n+ task/open-one\n  task/old\n  main\n  (HEAD detached at 1234)\n"
     assert hw.merged_left(listing, "dev") == ["task/old"]
+
+
+def test_a_land_records_the_commits_it_added(tmp_path, monkeypatch):
+    read = _events(tmp_path, monkeypatch)
+    repo = tmp_path / "env0" / "codehiro"
+    repo.mkdir(parents=True)
+    run = lambda *a: hw.git(repo, *a)  # noqa: E731
+    run("init", "-q")
+    run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "one")
+    before = run("rev-parse", "HEAD")
+    run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "two")
+    run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "three")
+    after = run("rev-parse", "HEAD")
+    monkeypatch.setattr(hw, "repo_dir", lambda env, r: tmp_path / f"env{env}" / r)
+    hw.record_commits("t", 1, "codehiro", before, after, "land")
+    hw.record_commits("t", 1, "codehiro", after, after, "land")  # nothing new: no event
+    [e] = read()
+    assert (e["step"], e["how"], e["from"], e["to"], len(e["commits"])) == ("commits", "land", before, after, 2)
+    assert e["commits"][0] == after
