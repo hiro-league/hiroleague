@@ -447,8 +447,11 @@ def write_env_dev(env: int) -> None:
 
 
 def real_of(env: int) -> list[str]:
-    """The real systems the task working in envN asked for (data.py); none for env0, which is real already."""
-    return next((t.real for t in load_tasks() if t.state == "working" and t.env == env and env), [])
+    """The real systems the task working in envN asked for (data.py); an environment no task holds gets the default
+    (its servers started from its card read as a task's do); none for env0, which is real already."""
+    if not env:
+        return []
+    return next((t.real for t in load_tasks() if t.state == "working" and t.env == env), list(data.DEFAULT_REAL))
 
 
 def set_setting(db: Path, key: str, value: str) -> None:
@@ -809,6 +812,24 @@ def card(task: Task) -> None:
     if task.env:
         say(f"  branch {task.branch} | data {data_dir(task.env)} | ports {min(p.values())}-{min(p.values()) + appfile.BLOCK - 1}")
         say(f"  {data.describe(task.real)}")
+
+
+def cmd_configure(a) -> None:
+    """Point an environment at its ports; with --data, a free env1..env5 gets env0's data again first (its switches
+    as data.DEFAULT_REAL), as a task's start would copy it."""
+    if not a.data:
+        configure(a.env)
+        return
+    if not a.env:
+        raise Stop("env0's data is Michel's own: refresh-data brings live's into it.")
+    held = [t.id for t in load_tasks() if t.state == "working" and t.env == a.env]
+    if held:
+        raise Stop(f"env{a.env} is {held[0]}'s: hiro-work real {held[0]} copies its data again.")
+    up = [n for n, s in servers(a.env).items() if listening(s.port)]
+    if up:
+        raise Stop(f"env{a.env}'s servers are up ({', '.join(up)}): hiro-work down {a.env} first.")
+    refresh_data(a.env)
+    say(f"env{a.env}: {data.describe(real_of(a.env))}")
 
 
 def cmd_real(a) -> None:
@@ -1398,6 +1419,8 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("servers", nargs="*")
     c = sub.add_parser("configure", help="point an environment's core and apps at its own ports")
     c.add_argument("env", type=int, choices=list(ENVS))
+    c.add_argument("--data", action="store_true",
+                   help="env1..5 with no task: copy env0's data again first (servers down)")
     sub.add_parser("status")
     sub.add_parser("sweep")
     rl = sub.add_parser("real", help="env1..5: which real systems a task's copy reaches (copies the data again)")
@@ -1422,7 +1445,7 @@ def main(argv: list[str] | None = None) -> int:
         {"start": cmd_start, "move": cmd_move, "finish": cmd_finish, "land": cmd_land, "park": cmd_park,
          "resume": cmd_resume, "status": cmd_status, "sweep": cmd_sweep, "up": cmd_up, "down": cmd_down,
          "review": cmd_review, "describe": cmd_describe, "claim": cmd_claim, "fresh": cmd_fresh,
-         "configure": lambda a: configure(a.env), "init": lambda a: init_env(a.env),
+         "configure": cmd_configure, "init": lambda a: init_env(a.env),
          "train": train.cmd_train}[a.cmd](a)
     except Stop as e:
         say(f"\nStopped: {e}")

@@ -35,6 +35,7 @@ import apps as appfile
 
 APPS = [a.repo for a in appfile.APPS if a.copy_data]  # the apps whose data an environment copies (apps.toml)
 READS, WRITES, AI = "reads", "writes", "ai"  # what a task's copy in env1..env5 reaches (Task.real)
+DEFAULT_REAL = [READS]  # a task started without flags, and an environment no task holds: reads, no writes, no AI
 
 # ------------------------------------------------------------------------------------------- env1..env5: safe
 

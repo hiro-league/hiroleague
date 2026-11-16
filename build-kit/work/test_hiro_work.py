@@ -309,3 +309,11 @@ def test_claim_adds_a_free_repo_and_refuses_one_held(tmp_path, monkeypatch):
 def test_env1_to_5_sign_in_as_env0_does_with_sends_and_has_automatic_writes_off():
     # AUTH None: env0's line (if any) is dropped and nothing is written, so the apps' sign-in is on and roles apply
     assert hw.ENV_DEV_FORCED == {"OUTPUTS": "off", "HA_AUTO_WRITES": "off", "AUTH": None}
+
+
+def test_an_environment_no_task_holds_reads_as_a_default_task_does(tmp_path, monkeypatch):
+    monkeypatch.setattr(hw, "TASKS", tmp_path)
+    assert hw.real_of(0) == []  # env0 is real already
+    assert hw.real_of(2) == [hw.data.READS]
+    hw.save(hw.Task(id="t", title="t", env=2, repos=["homehiro"], real=[hw.data.READS, hw.data.AI]))
+    assert hw.real_of(2) == [hw.data.READS, hw.data.AI]
