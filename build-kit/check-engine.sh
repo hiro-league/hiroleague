@@ -156,6 +156,11 @@ work_event() {
     [[ -f "$helper" ]] || return 0
     python "$helper" "${REPO_ROOT}" "$@" >/dev/null 2>&1 || true
 }
+# The running count of each part's tests goes to the Work area only from the PC's environments (C:\hiro\envN)
+work_progress=false
+shopt -s nocasematch
+[[ "${REPO_ROOT}" =~ ^(/c|c:)/hiro/env[0-9]/ ]] && work_progress=true
+shopt -u nocasematch
 
 # One lane: its parts in turn, each one's output in its own file, then its exit code and seconds.
 run_lane() {
@@ -165,7 +170,16 @@ run_lane() {
         : > "${dir}/${i}.started"
         work_event start "${q_names[$i]}"
         t=$SECONDS
-        ( eval "${q_cmds[$i]}" ) > "${dir}/${i}.log" 2>&1
+        ( eval "${q_cmds[$i]}" ) > "${dir}/${i}.log" 2>&1 &
+        local pid=$! tick=0
+        # While it runs, the tests it has done so far, every 3 s (a count only; under C:\hiro only). It looks every
+        # half second, so a short part ends as soon as it is done.
+        while kill -0 "$pid" 2>/dev/null; do
+            sleep 0.5
+            tick=$((tick + 1))
+            $work_progress && (( tick % 6 == 0 )) && work_event progress "${q_names[$i]}" "${dir}/${i}.log"
+        done
+        wait "$pid"
         rc=$?
         secs=$((SECONDS - t))
         work_event end "${q_names[$i]}" "$rc" "$secs" "${dir}/${i}.log"

@@ -73,3 +73,32 @@ def test_appends_side_by_side_stay_whole_lines(tmp_path):
         t.join()
     lines = [json.loads(x) for x in log.read_text(encoding="utf-8").splitlines()]
     assert len(lines) == 400
+
+
+def test_tests_are_counted_from_what_the_runners_print():
+    out = "\n".join([
+        "........ [ 10%]",  # pytest -q, with xdist too
+        "..F.s [ 20%]",
+        "All checks passed!",  # a linter: no tests
+        " ✓ src/a.test.ts (12 tests) 4ms",  # vitest
+        " ❯ src/b.test.ts (3 tests | 1 failed) 2ms",
+        "tests/test_a.py::test_one PASSED  [ 1%]",  # pytest -v
+        "...",  # unittest, still writing its line
+    ])
+    assert ce.count_tests(out) == 32
+    assert ce.count_tests("ruff: 0 errors\nbuilt in 3.1s") == 0
+
+
+def test_progress_sends_the_count_only_when_it_changed(hiro, tmp_path):
+    folder, out = str(hiro / "env1" / "codehiro"), tmp_path / "part.log"
+    out.write_text("collecting...\n", encoding="utf-8")
+    ce.main([folder, "progress", "service: tests", str(out)])  # no tests yet: nothing
+    out.write_text(".....", encoding="utf-8")
+    ce.main([folder, "progress", "service: tests", str(out)])
+    ce.main([folder, "progress", "service: tests", str(out)])  # the same count: nothing
+    out.write_text("..........\n", encoding="utf-8")
+    ce.main([folder, "progress", "service: tests", str(out)])
+    ce.main([folder, "end", "service: tests", "0", "9", str(out)])
+    got = events(hiro)
+    assert [(e["phase"], e.get("tests")) for e in got] == [("progress", 5), ("progress", 10), ("end", 10)]
+    assert got[0] == {**got[0], "task": "t", "step": "service: tests", "parent": "check"}

@@ -547,6 +547,15 @@ def copy_db(src: Path, dst: Path) -> None:
         a.backup(b)
 
 
+def remove_tree(path: Path) -> None:
+    """shutil.rmtree that also removes read-only files: git marks its pack files read-only on Windows, and CodeHiro's
+    data holds git mirrors, so a plain rmtree stops on them."""
+    def writable_then_retry(func, p, _exc):
+        os.chmod(p, 0o666)
+        func(p)
+    shutil.rmtree(path, onexc=writable_then_retry)
+
+
 def refresh_data(env: int, task: str | None = None) -> None:
     """envN's data from env0's: the databases copied, the pictures hard-linked, the big folders left out (workflow.md,
     Data and real systems). Removing the old folder first removes only its links: env0's pictures stay."""
@@ -556,7 +565,7 @@ def refresh_data(env: int, task: str | None = None) -> None:
         src, dst = app_data(0, appfile.BY_REPO[app]), data_dir(env) / app
         with step(task, env, "data copy", app):
             if dst.exists():
-                shutil.rmtree(dst)
+                remove_tree(dst)
             dst.mkdir(parents=True)
             for db in src.glob("*.db"):
                 copy_db(db, dst / db.name)
@@ -569,7 +578,7 @@ def refresh_data(env: int, task: str | None = None) -> None:
     with step(task, env, "data copy", "core"):
         src, dst = data_dir(0) / "core" / "default", data_dir(env) / "core" / "default"
         if dst.exists():
-            shutil.rmtree(dst)
+            remove_tree(dst)
         dst.mkdir(parents=True)
         for item in src.iterdir():
             if item.name in CORE_SKIP:
