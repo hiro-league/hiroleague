@@ -41,7 +41,8 @@
 	const TAB =
 		"relative inline-flex h-[calc(100%_-_1px)] items-center justify-center gap-1.5 rounded-md border border-transparent px-2 py-0.5 text-sm font-medium whitespace-nowrap text-foreground/60 transition-all hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none aria-disabled:pointer-events-none aria-disabled:opacity-50 dark:text-muted-foreground dark:hover:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4";
 	const ON = {
-		default: 'bg-background text-foreground shadow-sm dark:border-input dark:bg-input/30 dark:text-foreground',
+		// dark: a blue tint, since the light pill's raised look is lost there (input/30 on muted was nearly the track's grey)
+		default: 'bg-background text-foreground shadow-sm dark:border-primary/60 dark:bg-primary/30 dark:text-foreground',
 		line: "text-foreground after:absolute after:inset-x-0 after:bottom-[-5px] after:h-0.5 after:bg-foreground dark:text-foreground"
 	} as const;
 </script>

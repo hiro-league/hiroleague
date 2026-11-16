@@ -1,7 +1,8 @@
 <script lang="ts">
 	// The menu in two levels (menu.ts). A group's name folds it away (remembered in this browser), and a group with no
 	// name is its pages alone, never folded; a folded
-	// group still shows the page you are on. A page's tabs are the icons on its row. A page's link always opens
+	// group still shows the page you are on. A page's tabs are the icons on its row, shown while the row is hovered
+	// (menu-row.svelte); a group made of one page's tabs (`tabsOf`) has a row per tab instead. A page's link always opens
 	// its first tab, and neither it nor a tab icon changes the tab a page remembers. Collapsed to icons, a page
 	// with tabs opens a small menu of them instead. Its edge resizes it (dragged) or collapses it (clicked). A tab
 	// with sub-tabs (Settings' groups) opens its first one; its tooltip names them, the small menu lists them.
@@ -10,7 +11,6 @@
 	import { resolve } from '$app/paths';
 	import * as Sidebar from '$kit/components/ui/sidebar/index.js';
 	import * as DropdownMenu from '$kit/components/ui/dropdown-menu/index.js';
-	import * as Tooltip from '$kit/components/ui/tooltip/index.js';
 	import { ChevronRight, LogOut, Moon, Sun } from '@lucide/svelte';
 	import { mode, toggleMode } from 'mode-watcher';
 	import { cn } from '$kit/utils';
@@ -19,7 +19,8 @@
 	import { load, isRecord } from '$kit/state/persist';
 	import { persisted } from '$kit/state/persisted.svelte';
 	import { tabLink } from '$kit/state/url-tab.svelte';
-	import { firstLeaf, menuFor, onPage, tabShown, tabsFit, type MenuPage, type MenuTab } from './menu';
+	import { firstLeaf, menuFor, rowKey, rowShown, tabShown, type MenuPage, type MenuTab } from './menu';
+	import MenuRow, { MENU_ROW_HOVER } from './menu-row.svelte';
 	import SidebarResize from './sidebar-resize.svelte';
 	import AppSwitcher from './app-switcher.svelte';
 
@@ -38,19 +39,15 @@
 	const menu = $derived(menuFor(who.me));
 	const closed = persisted<Record<string, boolean>>('sidebar.closedGroups', {}, isRecord);
 	const iconMenu = $derived(sidebar.state === 'collapsed' && !sidebar.isMobile);
-	// A page's tab icons sit on its row when they fit beside its name at the menu's width; else on a line of their own.
-	const canvas = typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d');
-	const nameWidth = (name: string) => {
-		if (!canvas) return name.length * 8;
-		canvas.font = `500 14px ${getComputedStyle(document.body).fontFamily}`;
-		return canvas.measureText(name).width;
-	};
 
 	const path = (p: MenuPage) => resolve(p.route as '/');
-	// A page's link opens its first tab, whatever tab it showed last
-	const href = (p: MenuPage) => (p.tabs?.length ? tabLink(path(p), firstLeaf(p.tabs[0])) : path(p));
+	// A page's link opens its first tab, whatever tab it showed last; a tab's row opens its tab
+	const href = (p: MenuPage) =>
+		p.tab ? tabLink(path(p), firstLeaf(p.tab)) : p.tabs?.length ? tabLink(path(p), firstLeaf(p.tabs[0])) : path(p);
 	const tip = (t: MenuTab) => (t.subs && (t.subs.length > 1 || t.subs[0].title !== t.title) ? `${t.title}: ${t.subs.map((s) => s.title).join(', ')}` : t.title);
-	const shownTab = (p: MenuPage) => tabShown(p, page.url.searchParams.get('tab'), p.pref ? load(p.pref, null) : null);
+	const remembered = (p: MenuPage) => (p.pref ? load(p.pref, null) : null);
+	const shownTab = (p: MenuPage) => tabShown(p, page.url.searchParams.get('tab'), remembered(p));
+	const isShown = (p: MenuPage) => rowShown(p, page.route.id, page.url.searchParams.get('tab'), remembered(p));
 	const toggle = (id: string) => (closed.current = { ...closed.current, [id]: !closed.current[id] });
 </script>
 
@@ -95,7 +92,7 @@
 					{/snippet}
 				</Sidebar.GroupLabel>{/if}
 				<Sidebar.Menu>
-					{#each g.pages.filter((p) => open || iconMenu || onPage(p, page.route.id)) as p (p.route)}
+					{#each g.pages.filter((p) => open || iconMenu || isShown(p)) as p (rowKey(p))}
 						{@render pageItem(p)}
 					{/each}
 				</Sidebar.Menu>
@@ -126,12 +123,11 @@
 	<SidebarResize {width} {onwidth} />
 </Sidebar.Root>
 
-<!-- One page: its name, and its tabs as icons (on the row, or on a line under it when there are many). -->
+<!-- One page: its name, and its tabs as icons at the row's end while it is hovered. -->
 {#snippet pageItem(p: MenuPage)}
-	{@const active = onPage(p, page.route.id)}
+	{@const active = isShown(p)}
 	{@const tabs = p.tabs ?? []}
 	{@const current = active ? shownTab(p) : null}
-	{@const wrap = tabs.length > 0 && !tabsFit(width, nameWidth(p.title), tabs.length)}
 	<Sidebar.MenuItem>
 		{#if iconMenu && tabs.length > 1}
 			<DropdownMenu.Root>
@@ -173,39 +169,24 @@
 				</DropdownMenu.Content>
 			</DropdownMenu.Root>
 		{:else}
-			<Sidebar.MenuButton isActive={active} tooltipContent={p.title} style={tabs.length && !wrap ? `padding-right: ${tabs.length * 26 + 4}px` : undefined}>
-				{#snippet child({ props })}
-					<a href={href(p)} {...props}>
-						<p.icon />
-						<span>{p.title}</span>
-					</a>
-				{/snippet}
-			</Sidebar.MenuButton>
-			{#if tabs.length}
-				<div class={['flex gap-0.5 group-data-[collapsible=icon]:hidden', wrap ? 'flex-wrap pt-0.5 pb-1 pl-7' : 'absolute top-1 right-1']}>
-					{#each tabs as t (t.value)}
-						{@const on = current === t.value}
-						<Tooltip.Root>
-							<Tooltip.Trigger>
-								{#snippet child({ props })}
-									<a
-										{...props}
-										type={undefined}
-										href={tabLink(path(p), firstLeaf(t))}
-										aria-label="{p.title} › {t.title}"
-										aria-current={on ? 'page' : undefined}
-										class={[
-											'flex size-6 items-center justify-center rounded-md [&_svg]:size-3.5',
-											on ? 'bg-background text-foreground shadow-sm ring-1 ring-sidebar-border' : 'text-sidebar-foreground/55 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-										]}><t.icon /></a
-									>
-								{/snippet}
-							</Tooltip.Trigger>
-							<Tooltip.Content side="bottom">{tip(t)}</Tooltip.Content>
-						</Tooltip.Root>
-					{/each}
-				</div>
-			{/if}
+			<MenuRow
+				shortcuts={tabs.map((t) => ({
+					href: tabLink(path(p), firstLeaf(t)),
+					label: `${p.title} › ${t.title}`,
+					tip: tip(t),
+					icon: t.icon,
+					on: current === t.value
+				}))}
+			>
+				<Sidebar.MenuButton isActive={active} tooltipContent={p.title} class={tabs.length ? MENU_ROW_HOVER : undefined}>
+					{#snippet child({ props })}
+						<a href={href(p)} {...props}>
+							<p.icon />
+							<span>{p.title}</span>
+						</a>
+					{/snippet}
+				</Sidebar.MenuButton>
+			</MenuRow>
 		{/if}
 	</Sidebar.MenuItem>
 {/snippet}
