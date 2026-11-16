@@ -240,3 +240,67 @@ def test_an_app_is_paired_only_when_this_core_knows_its_key(tmp_path, monkeypatc
     with sqlite3.connect(db) as con:
         con.execute("insert into extensions values ('abc')")
     assert hw.paired(1, net)
+
+
+def test_overlaps_name_tasks_on_the_same_repos_or_the_kit_beside_an_app():
+    me = task("me", 1, ["codehiro"])
+    others = [me, task("same", 0, ["codehiro", "hiro-docs"]), task("kit", 2, ["hiroleague"]),
+              task("apart", 3, ["aicam"]), task("parked", None, ["codehiro"], state="parked")]
+    lines = hw.overlaps(me, others)
+    assert len(lines) == 2
+    assert lines[0].startswith("codehiro: also changed by same (env0")
+    assert lines[1].startswith("the core's kits and an app that reads them: also changed by kit (env2")
+
+
+def _repo(path, *commits):
+    path.mkdir(parents=True)
+    hw.git(path, "init", "-q", "-b", "main")
+    for c in commits:
+        hw.git(path, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", c)
+    return path
+
+
+def test_an_environments_other_repos_follow_env0_when_clean_and_behind(tmp_path, monkeypatch):
+    monkeypatch.setattr(hw, "ROOT", tmp_path)
+    monkeypatch.setattr(hw, "REPOS", ["hiroleague", "codehiro", "nethiro"])
+    monkeypatch.setattr(hw, "MAIN", {})
+    for repo in ("hiroleague", "nethiro"):
+        _repo(tmp_path / "env0" / repo, "one")
+        hw.git(tmp_path / "env0" / repo, "worktree", "add", "-q", "--detach", str(tmp_path / "env1" / repo), "main")
+        hw.git(tmp_path / "env0" / repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty",
+               "-m", "two")
+    (tmp_path / "env1" / "nethiro" / "edit.txt").write_text("mine", encoding="utf-8")  # someone's unfinished edit
+    notes = hw.bring_up_others(1, task("t", 1, ["codehiro"]))
+    core0, core1 = (hw.git(tmp_path / f"env{e}" / "hiroleague", "rev-parse", "HEAD") for e in (0, 1))
+    assert core1 == core0 and any("hiroleague: brought up" in n for n in notes)
+    assert any("nethiro: has uncommitted files" in n for n in notes)
+    assert hw.bring_up_others(0, task("t", 0, ["codehiro"])) == []  # env0 is the source
+
+
+def test_a_commit_needs_a_task_that_claims_its_repo(tmp_path, monkeypatch):
+    monkeypatch.setattr(hw, "ROOT", tmp_path)
+    monkeypatch.setattr(hw, "TASKS", tmp_path / "tasks")
+    hw.TASKS.mkdir()
+    folder = tmp_path / "env0" / "homehiro" / "backend"
+    folder.mkdir(parents=True)
+    with pytest.raises(hw.Stop, match="claim <task> homehiro"):
+        hw.cmd_fresh(type("A", (), {"path": str(folder)})())
+    hw.save(task("t", 0, ["homehiro"]))
+    hw.cmd_fresh(type("A", (), {"path": str(folder)})())  # claimed: the commit goes on
+    hw.cmd_fresh(type("A", (), {"path": str(tmp_path / "elsewhere")})())  # not an environment's repo
+
+
+def test_claim_adds_a_free_repo_and_refuses_one_held(tmp_path, monkeypatch):
+    read = _events(tmp_path, monkeypatch)
+    monkeypatch.setattr(hw, "ROOT", tmp_path)
+    monkeypatch.setattr(hw, "TASKS", tmp_path / "tasks")
+    hw.TASKS.mkdir()
+    _repo(tmp_path / "env0" / "hiro-docs", "one")
+    hw.save(task("t", 0, ["codehiro"]))
+    hw.save(task("other", 0, ["nethiro"]))
+    hw.cmd_claim(type("A", (), {"task": "t", "repos": "hiro-docs", "kit": False})())
+    t = hw.get("t")
+    assert t.repos == ["codehiro", "hiro-docs"] and t.base["hiro-docs"] and t.before["hiro-docs"] == []
+    assert read()[-1]["step"] == "claim"
+    with pytest.raises(hw.Stop, match="nethiro by other"):
+        hw.cmd_claim(type("A", (), {"task": "t", "repos": "nethiro", "kit": False})())

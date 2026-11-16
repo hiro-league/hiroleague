@@ -653,6 +653,19 @@ def open_window(a) -> None:
                   f"(its log would be {log}).")
 
 
+def still_open(plan) -> list[str]:
+    """Open tasks still working on a repo this train ships: their work isn't in it until they land or finish."""
+    shipping = set(plan.push) | set(plan.first) | set(plan.then)
+    return [f"{t.id} (env{t.env}, {t.title}): {', '.join(sorted(shipping & set(t.repos)))}"
+            for t in hw.load_tasks() if t.state == "working" and shipping & set(t.repos)]
+
+
+def show_open(out: Out, plan) -> None:
+    lines = still_open(plan)
+    if lines:
+        out("\nStill working, not in this train: " + "; ".join(lines))
+
+
 def cmd_train(a) -> None:
     if a.stop:
         cmd_stop(a.force)
@@ -670,6 +683,7 @@ def cmd_train(a) -> None:
         plan = make_plan(facts)
         out("")
         show(out, facts, plan)
+        show_open(out, plan)
         if plan.stops:
             out("\nThe train would stop here: " + "; ".join(plan.stops))
         return
@@ -685,6 +699,7 @@ def cmd_train(a) -> None:
                     plan = make_plan(facts)
                 out("")
                 show(out, facts, plan)
+                show_open(out, plan)
                 if plan.stops:
                     raise hw.Stop("nothing moved: " + "; ".join(f"{r}: {', '.join(w)}" for r, w in plan.stops.items()))
                 if plan.empty:

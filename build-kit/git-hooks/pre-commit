@@ -14,6 +14,16 @@ if [ -x "$own" ]; then
     "$own" "$@" || exit $?
 fi
 
+# A commit belongs to a task that claims this repo in its environment; other open tasks on the same repos are named,
+# and an environment's other repos move up to env0's before the check reads them (hiro-work fresh).
+work="$(cd "$(dirname "$0")/.." && pwd)/work/hiro_work.py"
+if [ -f "$work" ]; then
+    if ! python "$work" fresh "$top" >&2; then
+        echo "Commit stopped: no task claims this repo (above)." >&2
+        exit 1
+    fi
+fi
+
 [ -f "$top/scripts/check.sh" ] || exit 0
 echo "Hiro League pre-commit: ./scripts/check.sh (the parts this change touched)" >&2
 if ! (cd "$top" && bash ./scripts/check.sh); then

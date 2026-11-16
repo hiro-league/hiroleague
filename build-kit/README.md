@@ -62,7 +62,9 @@ worktrees of env0's repos and share their config, so one setting per repo covers
 runs it when it makes an environment; by hand, `--check` lists which repos have them and `--remove` takes them off.
 
 - **`pre-commit`** runs the repo's own `.git/hooks/pre-commit` first, when it has one (the core's pre-commit framework
-  hook), then `./scripts/check.sh` when the repo has one (aicam and hiro-docs don't). Parts that passed on these files
+  hook), then `hiro-work fresh` (no working task claims the repo in its environment: the commit stops; other open
+  tasks on it are named; the environment's other repos move up to env0's), then `./scripts/check.sh` when the repo
+  has one (aicam and hiro-docs don't). Parts that passed on these files
   are skipped, so a checked change commits in seconds. `git commit --no-verify` skips it, only when Michel asks
   (`hiro-work park` uses it for its WIP commit).
 - **`post-checkout`** warns when a branch checkout in `C:\hiro\env0` leaves the repo's main branch.

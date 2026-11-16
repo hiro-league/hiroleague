@@ -669,6 +669,122 @@ def cmd_start(a) -> None:
             task_path(task.id).unlink(missing_ok=True)  # no half-made claim
         raise
     card(task)
+    say_overlaps(task)
+
+
+# ----------------------------------------------------------------------------------- claims at every step (fresh)
+
+
+def overlaps(task: Task, tasks: list[Task] | None = None) -> list[str]:
+    """Other open tasks that change what this one does: the same repos, or the core's kits beside an app that reads
+    them. Said at every solid step (start, each commit, land, finish), since another task can start at any time."""
+    out = []
+    mine = set(task.repos)
+    for other in tasks if tasks is not None else load_tasks():
+        if other.id == task.id or other.state != "working":
+            continue
+        theirs = set(other.repos)
+        shared = sorted(mine & theirs)
+        kit = ("hiroleague" in mine and theirs & set(KIT_READERS)) or ("hiroleague" in theirs and mine & set(
+            KIT_READERS))
+        if shared or kit:
+            what = ", ".join(shared) if shared else "the core's kits and an app that reads them"
+            out.append(f"{what}: also changed by {other.id} (env{other.env}, {other.title})")
+    return out
+
+
+def say_overlaps(task: Task) -> None:
+    for line in overlaps(task):
+        say(f"  note: {line}. Whichever lands second merges the other's work first.")
+
+
+def bring_up_others(env: int, task: Task) -> list[str]:
+    """An environment's repos its task doesn't claim follow env0: each moves forward to env0's dev/main when it is
+    clean and behind, so checks read today's core and kits (a kit changed in env0 meanwhile, as on Mon, Nov 16, 2026,
+    broke a land in env1). A repo with uncommitted files is left as it is, and said."""
+    if not env:
+        return []
+    notes = []
+    for repo in REPOS:
+        d = repo_dir(env, repo)
+        if repo in task.repos or not (d / ".git").exists():
+            continue
+        if dirty(d):
+            notes.append(f"{repo}: has uncommitted files, left as it is")
+            continue
+        target = git(repo_dir(0, repo), "rev-parse", main_of(repo))
+        head = git(d, "rev-parse", "HEAD")
+        if head == target:
+            continue
+        ahead = subprocess.run(["git", "-C", str(d), "merge-base", "--is-ancestor", head, target]).returncode == 0
+        if not ahead:
+            notes.append(f"{repo}: not behind env0's {main_of(repo)}, left as it is")
+            continue
+        git(d, "switch", "-q", "--detach", target)
+        notes.append(f"{repo}: brought up to env0's {main_of(repo)} ({target[:8]})")
+    return notes
+
+
+def task_for_dir(path: Path) -> tuple[int, str, Task | None] | None:
+    """The environment, repo and working task that claims it, for a folder inside C:\\hiro\\envN\\<repo>."""
+    try:
+        rel = path.resolve().relative_to(ROOT.resolve())
+    except ValueError:
+        return None
+    parts = rel.parts
+    if len(parts) < 2 or not parts[0].startswith("env") or not parts[0][3:].isdigit() or parts[1] not in REPOS:
+        return None
+    env, repo = int(parts[0][3:]), parts[1]
+    owner = next((t for t in load_tasks() if t.state == "working" and t.env == env and repo in t.repos), None)
+    return env, repo, owner
+
+
+def cmd_fresh(a) -> None:
+    """The commit hook's step (build-kit/git-hooks/pre-commit): a commit belongs to a task that claims the repo here;
+    other tasks on the same repos are named; the environment's other repos follow env0 before the check runs."""
+    found = task_for_dir(Path(a.path))
+    if found is None:
+        return  # not a Hiro environment's repo
+    env, repo, task = found
+    if task is None:
+        raise Stop(f"no task claims env{env}'s {repo}: a commit belongs to a task. Start one "
+                   f"(`C:\\hiro\\bin\\hiro-work.cmd start <task> --repos {repo}`), or add the repo to yours "
+                   f"(`C:\\hiro\\bin\\hiro-work.cmd claim <task> {repo}`).")
+    say_overlaps(task)
+    for line in bring_up_others(env, task):
+        say(f"  {line}")
+
+
+def cmd_claim(a) -> None:
+    """Add repos to an open task (a change turned out to reach one more repo), free in its environment."""
+    with locked():
+        task = get(a.task)
+        if task.state != "working" or task.env is None:
+            raise Stop(f"Task {task.id} isn't working in an environment (it is {task.state}).")
+        new = [r for r in expand(a.repos.split(","), a.kit) if r not in task.repos]
+        if not new:
+            say(f"Task {task.id} claims {', '.join(task.repos)} already.")
+            return
+        held = {r: t for r, t in claims_in(task.env, load_tasks()).items() if r in new and t != task.id}
+        if held:
+            raise Stop("Claimed already: " + ", ".join(f"{r} by {t}" for r, t in held.items()) + ".")
+        env = task.env
+        for repo in new:
+            d = repo_dir(env, repo)
+            if env == 0:
+                task.base[repo] = git(d, "rev-parse", "HEAD")
+                task.before[repo] = dirty(d)
+            else:
+                if dirty(d):
+                    raise Stop(f"env{env}'s {repo} has uncommitted files: it isn't free (hiro-work sweep).")
+                base = fresh_base(repo, task.id)
+                git(d, "switch", "-q", "-C", task.branch, base)
+                task.base[repo] = base
+            task.repos.append(repo)
+        save(task)
+    event(task=task.id, env=task.env, step="claim", phase="end", ok=True, repos=new)
+    say(f"Task {task.id} now claims {', '.join(task.repos)}.")
+    say_overlaps(task)
 
 
 def card(task: Task) -> None:
@@ -739,6 +855,7 @@ def cmd_finish(a) -> None:
     task = get(a.task)
     if task.env != 0:
         raise Stop(f"Task {task.id} is in env{task.env}: it lands (hiro-work land {task.id}).")
+    say_overlaps(task)
     left = {r: [f for f in dirty(repo_dir(0, r)) if f not in task.before.get(r, [])] for r in task.repos}
     left = {r: files for r, files in left.items() if files}
     if left:
@@ -769,8 +886,13 @@ def cmd_land(a) -> None:
     for repo in task.repos:
         if dirty(repo_dir(env, repo)):
             raise Stop(f"env{env}'s {repo} has uncommitted files: commit them on {task.branch} first.")
+    say_overlaps(task)
+    if a.wait:
+        wait_for_env0(task, a.wait)
     # Landing is one step with its own inside (CodeHiro shows the task as landing while it runs)
     with step(task.id, env, "land"):
+        for line in bring_up_others(env, task):
+            say(f"  {line}")
         land_steps(task, env)
     # 5. Free the environment, keep it warm
     for repo in task.repos:
@@ -785,6 +907,24 @@ def cmd_land(a) -> None:
     event(task=task.id, env=env, step="task", phase="end", ok=True, landed=True)
     say(f"Task {task.id} landed: {', '.join(task.repos)} in env0; env{env} is free. Not pushed: the deploy train "
         "pushes.")
+
+
+def held_in_env0(task: Task) -> dict[str, str]:
+    """The task's repos that a task in env0 holds with unfinished edits: landing would move env0 under them."""
+    return {r: t for r, t in claims_in(0, load_tasks()).items() if r in task.repos and dirty(repo_dir(0, r))}
+
+
+def wait_for_env0(task: Task, minutes: int) -> None:
+    """land --wait: wait (checking every 20 s) until no env0 task holds one of these repos with unfinished edits."""
+    deadline = time.monotonic() + minutes * 60
+    held = held_in_env0(task)
+    if held:
+        say("Waiting for env0: " + ", ".join(f"{r} (task {t})" for r, t in held.items()) + f", up to {minutes} min.")
+    while held and time.monotonic() < deadline:
+        time.sleep(20)
+        held = held_in_env0(task)
+    if held:
+        raise Stop(f"env0 still holds {', '.join(held)} after {minutes} min: land again later.")
 
 
 def land_steps(task: Task, env: int) -> None:
@@ -822,7 +962,7 @@ def land_steps(task: Task, env: int) -> None:
     if failed:
         raise Stop("Checks failed: " + "; ".join(failed) + ". Fix, commit, land again.")
     # 3. Wait for nobody: refuse when a task in env0 holds one of these repos with unfinished edits
-    held = {r: t for r, t in claims_in(0, load_tasks()).items() if r in task.repos and dirty(repo_dir(0, r))}
+    held = held_in_env0(task)
     if held:
         raise Stop("env0 has unfinished edits in " + ", ".join(f"{r} (task {t})" for r, t in held.items())
                    + ": landing waits until that task finishes.")
@@ -1213,8 +1353,18 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--about", help="what it does, in a sentence (the Work area shows it under its name)")
     s.add_argument("--real-reads", action="store_true", help="env1..5: read the real HA, Frigate and MQTT")
     s.add_argument("--real-ai", action="store_true", help="env1..5: keep the copied AI providers")
-    for verb in ("move", "finish", "land", "park", "review"):
+    for verb in ("move", "finish", "park", "review"):
         sub.add_parser(verb).add_argument("task")
+    ld = sub.add_parser("land", help="envN: merge the latest, check, fast-forward env0, free the environment")
+    ld.add_argument("task")
+    ld.add_argument("--wait", type=int, nargs="?", const=120, default=0, metavar="MINUTES",
+                    help="when env0 holds one of its repos with unfinished edits, wait for it (default 120 min)")
+    cl = sub.add_parser("claim", help="add repos to an open task (free in its environment)")
+    cl.add_argument("task")
+    cl.add_argument("repos", help="comma-separated")
+    cl.add_argument("--kit", action="store_true", help="a kit change: the apps that read it too")
+    fr = sub.add_parser("fresh", help="the commit hook's check: the commit's task, overlaps, the other repos")
+    fr.add_argument("path", help="a folder inside the repo being committed")
     ds = sub.add_parser("describe", help="change what an open task does (--about) or what it is part of (--part-of)")
     ds.add_argument("task")
     ds.add_argument("--about", help="what it does, in a sentence; \"\" clears it")
@@ -1256,7 +1406,7 @@ def main(argv: list[str] | None = None) -> int:
             return a.func(a) or 0
         {"start": cmd_start, "move": cmd_move, "finish": cmd_finish, "land": cmd_land, "park": cmd_park,
          "resume": cmd_resume, "status": cmd_status, "sweep": cmd_sweep, "up": cmd_up, "down": cmd_down,
-         "review": cmd_review, "describe": cmd_describe,
+         "review": cmd_review, "describe": cmd_describe, "claim": cmd_claim, "fresh": cmd_fresh,
          "configure": lambda a: configure(a.env), "init": lambda a: init_env(a.env),
          "train": train.cmd_train}[a.cmd](a)
     except Stop as e:
