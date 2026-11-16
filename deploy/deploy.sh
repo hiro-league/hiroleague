@@ -49,12 +49,11 @@ done
   || die "$HIRO_HOME is missing or not writable by $(id -un); see the deploy guide (hiro-docs mintdocs/build/local-build/server-deploy.mdx, First-time setup)."
 
 cd "$REPO_ROOT"
-# The server's checkout is a work tree of the bare repo (~/hiroleague.git), with no .git of its own,
-# and the checks compare generated files with `git diff`: point git at the bare repo, whether the
-# hook or a person runs this (found on the first deploy, 2026-11-06).
-if [ ! -e "$REPO_ROOT/.git" ] && [ -d "$HOME/hiroleague.git" ]; then
-  export GIT_DIR="$HOME/hiroleague.git" GIT_WORK_TREE="$REPO_ROOT"
-fi
+# The checks compare generated files with `git diff`, so the checkout must be a git repo: the post-receive
+# hook makes it one (it fetches the pushed main from ~/hiroleague.git). Never point GIT_DIR at the bare repo
+# here: everything the checks run inherits it, tests included.
+[ -d "$REPO_ROOT/.git" ] \
+  || die "$REPO_ROOT is not a git repo: push to the server again (its post-receive hook makes it one); see the deploy guide (hiro-docs mintdocs/build/local-build/server-deploy.mdx)."
 COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 RELEASE_ID="$(date -u +%Y%m%dT%H%M%SZ)-${COMMIT}"
 RELEASE_DIR="${HIRO_HOME}/releases/${RELEASE_ID}"

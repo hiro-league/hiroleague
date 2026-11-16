@@ -6,15 +6,22 @@
 set -euo pipefail
 unset GIT_DIR
 DEPLOY_BRANCH=main
+CHECKOUT="$HOME/hiroleague"
 while read -r _old _new ref; do
   if [ "$ref" != "refs/heads/$DEPLOY_BRANCH" ]; then
     echo "hiroleague: ignoring $ref (only $DEPLOY_BRANCH deploys)"
     continue
   fi
-  mkdir -p "$HOME/hiroleague"
-  git --git-dir="$HOME/hiroleague.git" --work-tree="$HOME/hiroleague" checkout -f "$DEPLOY_BRANCH"
+  # The checkout is a git repo of its own, fetched from this bare repo by path. Why: the deploy then needs no
+  # GIT_DIR, so nothing the checks run can inherit one and write into this bare repo (a test that ran `git init`
+  # and committed under an exported GIT_DIR re-initialised it as a work tree and put its commits on main).
+  # No remote is set, so the checkout has no origin/* refs: the check never takes its files as "already pushed".
+  mkdir -p "$CHECKOUT"
+  [ -d "$CHECKOUT/.git" ] || git -C "$CHECKOUT" -c init.defaultBranch=main init -q
+  git -C "$CHECKOUT" fetch -q "$HOME/hiroleague.git" "refs/heads/$DEPLOY_BRANCH"
+  git -C "$CHECKOUT" checkout -q -f --detach FETCH_HEAD
   # Files deleted from the repo must not linger in the work tree (check.sh and the build see it).
   # Ignored files (node_modules, .venv, the built admin UI) stay: no -x.
-  git --git-dir="$HOME/hiroleague.git" --work-tree="$HOME/hiroleague" clean -fdq
-  "$HOME/hiroleague/deploy/deploy.sh"
+  git -C "$CHECKOUT" clean -fdq
+  "$CHECKOUT/deploy/deploy.sh"
 done
