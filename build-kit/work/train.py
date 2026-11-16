@@ -47,10 +47,13 @@ import apps as appfile
 import hiro_work as hw
 from stages import Stages
 
-# How each repo goes live (the standard's table). hiro-docs only goes to GitHub here: publishing its site (dev merged
-# into main, then the mintdocs policy script) stays a step of its own.
-CORE, APP, AICAM = "core", "app", "aicam"
-DEPLOY = {"hiroleague": CORE, **{a.repo: APP for a in appfile.APPS}, "aicam": AICAM}
+# How each repo goes live (the standard's table). hiro-docs goes to Simone's ~/hiro-docs.git (its dev as that repo's
+# main), which CodeHiro reads for its Workflow Docs; publishing its site (dev merged into main, then the mintdocs
+# policy script) stays a step of its own.
+CORE, APP, AICAM, DOCS = "core", "app", "aicam", "docs"
+DEPLOY = {"hiroleague": CORE, **{a.repo: APP for a in appfile.APPS}, "aicam": AICAM, "hiro-docs": DOCS}
+# Kinds whose push has no deploy hook: a push git took is the deploy
+NO_HOOK = (AICAM, DOCS)
 # Where each deploy is checked on Simone (127.0.0.1 there): the core's /status, each app's /api/health
 CORE_HEALTH = "http://127.0.0.1:18080/status"
 APP_PORT = {a.repo: a.live_port for a in appfile.APPS}  # apps.toml
@@ -399,7 +402,7 @@ def deploy(out: Out, task: str, f: Facts, r: Result) -> None:
             try:
                 code, text = stream(out, ["git", "-C", str(d), "push", "server", f"{main}:main"], None, f.repo, log,
                                     stages.line)
-                went = code == 0 and (DEPLOY[f.repo] == AICAM or deployed(f.repo, text))
+                went = code == 0 and (DEPLOY[f.repo] in NO_HOOK or deployed(f.repo, text))
             finally:
                 stages.close(went)
             if code != 0:
@@ -410,7 +413,7 @@ def deploy(out: Out, task: str, f: Facts, r: Result) -> None:
                     raise hw.Stop(f"~/aicam's pull failed: {text[-300:]}")
                 changed = hw.git(d, "diff", "--name-only", f"{f.live}..{f.head}").splitlines() if f.live else []
                 r.notes += [f"may need: {h}" for h in restart_hints(changed)]
-            elif not deployed(f.repo, text):
+            elif DEPLOY[f.repo] != DOCS and not deployed(f.repo, text):
                 raise hw.Stop(f"its deploy didn't finish (log: {log}); its own way back ran if it got that far")
         r.deployed = True
         hw.record_commits(task, 0, f.repo, f.live, f.head, "deploy")  # what went live: CodeHiro names its tasks
@@ -425,6 +428,8 @@ def verify(out: Out, task: str, f: Facts, r: Result, since: int) -> None:
     kind = DEPLOY[f.repo]
     if kind == AICAM:
         script = 'git -C ~/aicam rev-parse HEAD; git -C ~/aicam status --porcelain | wc -l'
+    elif kind == DOCS:
+        script = f'git --git-dir="$HOME/{bare_name(f.repo)}.git" rev-parse refs/heads/main'
     elif kind == CORE:
         script = (f"curl -fsS --max-time 5 {CORE_HEALTH} | grep -q '\"running\": *true' && echo ANSWERS || echo SILENT;"
                   f" journalctl -u hiro --since @{since} --no-pager -o cat 2>/dev/null | tail -n 2000")
@@ -435,6 +440,11 @@ def verify(out: Out, task: str, f: Facts, r: Result, since: int) -> None:
         res = subprocess.run([*SSH, script], capture_output=True, text=True, encoding="utf-8", errors="replace",
                              timeout=120)
         lines = res.stdout.splitlines()
+        if kind == DOCS:
+            r.answers = bool(lines) and lines[0].strip() == f.head
+            if not r.answers:
+                raise hw.Stop(f"Simone's {bare_name(f.repo)}.git isn't at the pushed commit")
+            return
         if kind == AICAM:
             r.answers = bool(lines) and lines[0].strip() == f.head and lines[-1].strip() == "0"
             if not r.answers:

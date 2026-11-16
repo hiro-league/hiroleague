@@ -26,11 +26,16 @@ def test_without_a_core_change_the_apps_go_first_and_together():
     assert plan.then == ["homehiro", "nethiro"]
 
 
-def test_github_gets_every_repo_it_lacks_commits_of_and_hiro_docs_only_goes_there():
+def test_github_gets_every_repo_it_lacks_commits_of_and_hiro_docs_goes_to_simone_beside_the_apps():
     plan = tr.make_plan([facts("homehiro", github=["a"], live=["a"]), facts("hiro-docs", github=["d"], live=["d"]),
                          facts("nethiro", live=["n"])])
     assert plan.push == ["homehiro", "hiro-docs"]
-    assert plan.deploys == ["homehiro", "nethiro"]
+    assert plan.deploys == ["homehiro", "hiro-docs", "nethiro"]
+
+
+def test_hiro_docs_has_no_deploy_hook_so_the_push_itself_is_its_deploy():
+    assert tr.DEPLOY["hiro-docs"] in tr.NO_HOOK and tr.DEPLOY["aicam"] in tr.NO_HOOK
+    assert tr.DEPLOY["codehiro"] not in tr.NO_HOOK
 
 
 def test_a_repo_live_already_has_but_github_lacks_is_pushed_not_deployed():
