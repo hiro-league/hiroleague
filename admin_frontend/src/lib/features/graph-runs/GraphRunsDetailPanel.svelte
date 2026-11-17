@@ -1,10 +1,7 @@
 <script lang="ts">
   import type { CharacterDetail } from '$lib/api/characters';
-  import type {
-    GraphLedgerRow,
-    IngestTraceRecord,
-    RetrievalTraceRecord
-  } from '$lib/api/graph-runs';
+  import type { GraphLedgerRow } from '$lib/api/graph-runs';
+  import type { IngestTraceRecord, RetrievalTraceRecord } from '$kit/memory/source';
   import {
     graphRunTabId,
     GRAPH_RUNS_PANEL_IDS,
@@ -16,11 +13,11 @@
   import GraphRunsRunDetailHeading from './view/GraphRunsRunDetailHeading.svelte';
   import GraphRunsNodesTable from './view/GraphRunsNodesTable.svelte';
   import GraphRunsNodeDetailPanel from './GraphRunsNodeDetailPanel.svelte';
-  import GraphRunsRetrievalTraceDialog from './GraphRunsRetrievalTraceDialog.svelte';
-  import GraphRunsIngestTraceDialog from './GraphRunsIngestTraceDialog.svelte';
+  import RetrievalTraceDialog from '$kit/memory/trace/retrieval-trace-dialog.svelte';
+  import IngestTraceDialog from '$kit/memory/trace/ingest-trace-dialog.svelte';
   import RecallDetailDialog from './recall/RecallDetailDialog.svelte';
   import type { ChatRecall } from './recall/chat-recall';
-  import type { RetrievalTraceDialogController } from './state/retrieval-trace-dialog.svelte';
+  import type { RetrievalTraceDialogController } from '$kit/memory/trace/state/retrieval-trace-controller.svelte';
   import { onMount } from 'svelte';
   import { PREF_KEYS } from '$lib/preferences/keys';
   import { readLocalNumber, writeLocalNumber } from '$lib/preferences/storage';
@@ -262,18 +259,18 @@
   </div>
 </div>
 
-<GraphRunsRetrievalTraceDialog trace={activeRetrievalTrace} onClose={onCloseRetrievalTrace} />
+<RetrievalTraceDialog trace={activeRetrievalTrace} onClose={onCloseRetrievalTrace} />
 
 <!-- Chat recall detail, opened from a memory_recall node, plus the stacked per-search trace dialog
      its trace button and Trajectory tab open. -->
 <RecallDetailDialog recall={activeRecall} traces={recallTraces} onClose={onCloseRecall} />
-<GraphRunsRetrievalTraceDialog
+<RetrievalTraceDialog
   trace={recallTraces.activeTrace}
   answer={recallTraces.activeTraceAnswer}
   onClose={recallTraces.closeTrace}
 />
 
-<GraphRunsIngestTraceDialog
+<IngestTraceDialog
   trace={activeIngestTrace}
   onClose={onCloseIngestTrace}
   hasPrev={ingestTraceHasPrev}

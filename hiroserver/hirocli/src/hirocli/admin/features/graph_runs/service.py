@@ -120,29 +120,6 @@ class GraphLedgerService:
         except Exception as exc:
             return Result.failure(str(exc))
 
-    def retrieval_trace(
-        self,
-        workspace: str | None,
-        run_id: str,
-    ) -> Result[list[dict[str, Any]]]:
-        """Return the per-stage Graphiti fact-search traces recorded for ``run_id``.
-
-        Reads the JSONL sidecar written by ``graph_expand`` when retrieval tracing is
-        enabled (one record per fact search, each tagged with its ``step_index`` so the
-        UI can link a trace to its ledger row). Empty list when no sidecar exists — the
-        common case, since tracing is opt-in."""
-        rid = (run_id or "").strip()
-        if not rid:
-            return Result.failure("run_id is required.")
-        try:
-            from hiro_memory.graph.retrieval_trace import read_trace_sidecar
-
-            entry, _ = resolve_workspace(workspace)
-            records = read_trace_sidecar(Path(entry.path), rid)
-            return Result.success(records)
-        except Exception as exc:
-            return Result.failure(str(exc))
-
     def retrieval_loop(
         self,
         workspace: str | None,
@@ -156,7 +133,7 @@ class GraphLedgerService:
         transcript (→ ``build_retrieval_loop_payload``) and the recalled-rows/draft companion (→
         ``read_agent_recall_result``). ``None`` when neither exists
         (tracing is opt-in). The per-sub-query pipeline detail stays reachable via the
-        retrieval-trace endpoint (keyed by ``sid``)."""
+        library's retrieval-trace route (keyed by ``sid``)."""
         rid = (run_id or "").strip()
         if not rid:
             return Result.failure("run_id is required.")
@@ -195,29 +172,6 @@ class GraphLedgerService:
                     },
                 }
             )
-        except Exception as exc:
-            return Result.failure(str(exc))
-
-    def ingest_trace(
-        self,
-        workspace: str | None,
-        run_id: str,
-    ) -> Result[list[dict[str, Any]]]:
-        """Return the per-stage Graphiti ``add_episode`` traces recorded for ``run_id``.
-
-        Reads the JSONL sidecar written by ``ingest_episodes`` when ingest tracing is
-        enabled (one record per episode, each tagged with its ``step_index`` so the UI
-        can link a trace to its episode ledger row). Empty list when no sidecar exists —
-        the common case, since tracing is opt-in."""
-        rid = (run_id or "").strip()
-        if not rid:
-            return Result.failure("run_id is required.")
-        try:
-            from hiro_memory.graph.ingest_trace import read_ingest_trace_sidecar
-
-            entry, _ = resolve_workspace(workspace)
-            records = read_ingest_trace_sidecar(Path(entry.path), rid)
-            return Result.success(records)
         except Exception as exc:
             return Result.failure(str(exc))
 

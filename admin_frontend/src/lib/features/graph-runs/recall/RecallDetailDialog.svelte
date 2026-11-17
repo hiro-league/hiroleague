@@ -13,9 +13,9 @@
   import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
   import Highlight from '$kit/search/highlight.svelte';
-  import TraceTabs, { type TraceTab } from '$lib/features/graph-runs/shared/TraceTabs.svelte';
+  import TraceTabs, { type TraceTab } from '$kit/memory/trace/trace-tabs.svelte';
   import { formatCost } from '$lib/features/graph-runs/graph-runs-pure';
-  import type { RetrievalTraceDialogController } from '$lib/features/graph-runs/state/retrieval-trace-dialog.svelte';
+  import type { RetrievalTraceDialogController } from '$kit/memory/trace/state/retrieval-trace-controller.svelte';
   import type { RecalledFact } from '$lib/api/graph-runs';
   import RecalledTable from './RecalledTable.svelte';
   import RecallTrajectory from './RecallTrajectory.svelte';

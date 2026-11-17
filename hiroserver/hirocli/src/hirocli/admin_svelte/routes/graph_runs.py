@@ -1,19 +1,35 @@
-"""Graph execution ledger admin routes."""
+"""Graph execution ledger admin routes.
+
+A run's per-stage traces (``/graph-runs/{run_id}/retrieval-trace`` and ``/ingest-trace``), which the UI kit's trace
+dialogs read, are the memory library's routes (``hiro_memory.routes.trace_routes``), mounted here over the selected
+workspace.
+"""
 
 from __future__ import annotations
 
 from functools import partial
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter
+from hiro_memory.routes import trace_routes
 from starlette.concurrency import run_in_threadpool
 
 from hirocli.admin.features.graph_runs.service import GraphLedgerService, langsmith_url_for_run
 from hirocli.admin_svelte.deps import SelectedWorkspaceIdDep
 from hirocli.admin_svelte.result_payload import _api_data
 from hirocli.admin_svelte.schemas import GraphRunsTailRequest
+from hirocli.domain.workspace import resolve_workspace
 
 graph_runs_router = APIRouter()
+
+
+def _selected_workspace(workspace_id: SelectedWorkspaceIdDep) -> Path:
+    entry, _ = resolve_workspace(workspace_id)
+    return Path(entry.path).resolve()
+
+
+graph_runs_router.include_router(trace_routes(workspace=_selected_workspace))
 
 
 @graph_runs_router.post("/graph-runs/tail")
@@ -62,23 +78,6 @@ async def get_graph_run_langsmith_url(
     return {"langsmith_url": url}
 
 
-@graph_runs_router.get("/graph-runs/{run_id}/retrieval-trace")
-async def get_graph_run_retrieval_trace(
-    run_id: str,
-    workspace_id: SelectedWorkspaceIdDep,
-) -> Any:
-    """Per-stage Graphiti fact-search traces for a run (candidate legs / hop / rank /
-    temporal). Empty list when tracing wasn't enabled for the run."""
-    result = await run_in_threadpool(
-        GraphLedgerService().retrieval_trace,
-        workspace_id,
-        run_id,
-    )
-    if not result.ok or result.data is None:
-        return _api_data(result)
-    return {"traces": result.data}
-
-
 @graph_runs_router.get("/graph-runs/{run_id}/retrieval-loop")
 async def get_graph_run_retrieval_loop(
     run_id: str,
@@ -96,24 +95,6 @@ async def get_graph_run_retrieval_loop(
     if not result.ok:
         return _api_data(result)
     return result.data or {"loop": None, "recalled": [], "answer": "", "render": None}
-
-
-@graph_runs_router.get("/graph-runs/{run_id}/ingest-trace")
-async def get_graph_run_ingest_trace(
-    run_id: str,
-    workspace_id: SelectedWorkspaceIdDep,
-) -> Any:
-    """Per-stage Graphiti ``add_episode`` traces for a run (extract → resolve → facts →
-    dates → fact-resolution → summarize, plus the persisted result). Empty list when
-    tracing wasn't enabled for the run."""
-    result = await run_in_threadpool(
-        GraphLedgerService().ingest_trace,
-        workspace_id,
-        run_id,
-    )
-    if not result.ok or result.data is None:
-        return _api_data(result)
-    return {"traces": result.data}
 
 
 @graph_runs_router.get("/graph-runs/{run_id}")

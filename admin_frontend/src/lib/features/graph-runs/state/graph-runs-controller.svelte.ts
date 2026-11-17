@@ -24,6 +24,7 @@ import {
   GRAPH_RUN_HEADER_FIELDS,
   GRAPH_RUN_HEADER_TAB_FIELDS,
   GRAPH_RUN_NODE_TABLE_FIELDS,
+  graphRunTraceSource,
   type GraphLedgerRow
 } from '$lib/api/graph-runs';
 import { createPoller } from '$lib/state/create-poller.svelte';
@@ -47,7 +48,7 @@ import {
 } from '../graph-runs-pure';
 import { graphRunsFetchInitialLedger, graphRunsLoadMoreLedger, graphRunsPollLedgerTail } from './graph-runs-ledger-service';
 import { createGraphRunTraceModel } from './graph-runs-trace-model.svelte';
-import { createRetrievalTraceDialogController } from './retrieval-trace-dialog.svelte';
+import { createRetrievalTraceDialogController } from '$kit/memory/trace/state/retrieval-trace-controller.svelte';
 import { chatRecallFromLoop, hasRecallDetail, type ChatRecall } from '../recall/chat-recall';
 import type { ToastKind } from '$kit/ui/toast.svelte';
 
@@ -71,7 +72,7 @@ export function createGraphRunsPageController(
   // A chat `memory_recall` node's run_id names its agent sidecars; we read them live and open the
   // recall detail dialog (Overview / Trajectory / recalled tables). `rowTraces` drives the (stacked)
   // per-search trace dialog its Trajectory tab and trace button open.
-  const rowTraces = createRetrievalTraceDialogController(notify);
+  const rowTraces = createRetrievalTraceDialogController(graphRunTraceSource, notify);
   let activeRecall = $state<ChatRecall | null>(null);
   let retrievalLoopLoadingRunId = $state<string | null>(null);
 

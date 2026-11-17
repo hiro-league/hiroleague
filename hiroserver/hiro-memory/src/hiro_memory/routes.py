@@ -1,12 +1,14 @@
-"""The HTTP routes behind the UI kit's graph viewer and memories table.
+"""The HTTP routes behind the UI kit's graph viewer, memories table and run-trace dialogs.
 
-``graph_routes(...)`` builds one router; its owner mounts it under ``/api`` (the core's admin does; EvalHiro
-will). The routes read the graph and the conversation memory of one workspace folder, which the owner's
-``workspace`` dependency names for each request, and keep the URLs the core's admin always had:
+``graph_routes(...)`` and ``trace_routes(...)`` each build one router; their owner mounts them under ``/api``
+(the core's admin and EvalHiro do). The routes read one workspace folder, which the owner's ``workspace``
+dependency names for each request, and keep the URLs the core's admin always had:
 
 - ``POST /knowledge/graph/export``, ``GET /knowledge/graph/groups``, ``POST /knowledge/graph/episodes``
 - ``POST /knowledge/graph/chunks-detail``, ``POST /knowledge/graph/search-chunks``
 - ``GET /memory/list``, ``POST /memory/delete``, ``POST /memory/clear-group``
+- ``GET /graph-runs/{run_id}/retrieval-trace``, ``GET /graph-runs/{run_id}/ingest-trace`` (trace_routes): a
+  ledger run's per-stage traces, which the library writes beside the run ledger in ``<workspace>/logs/``
 
 Every client-supplied group id is re-validated against the closed group grammar before any read or write
 (docs/graph-group-policy-design.md §6). A failure answers ``{"detail": ...}`` with status 400, as FastAPI's
@@ -24,9 +26,12 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from hiro_commons.log import Logger
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from .graph.graphiti_service import is_kuzu_lock_error
 from .graph.group_scope import KNOWLEDGE_GROUP_ID, GroupPolicyError, validate_group_id
+from .graph.ingest_trace import read_ingest_trace_sidecar
+from .graph.retrieval_trace import read_trace_sidecar
 from .graph.views import (
     graph_episodes_payload,
     graph_groups_payload,
@@ -329,6 +334,46 @@ def graph_routes(
             return {"deleted_count": await service.clear_groups([gid])}
         except Exception as exc:
             log.error("clear group failed", error=str(exc), exc_info=True)
+            return _failure(str(exc))
+
+    return router
+
+
+def trace_routes(*, workspace: Callable[..., Path]) -> APIRouter:
+    """The run-trace dialogs' routes over one workspace folder per request.
+
+    - ``workspace``: a FastAPI dependency answering the folder whose ``logs/`` holds the trace files
+      (``retrieval_trace/<run>.jsonl``, ``ingest_trace/<run>.jsonl``), as the library's writers put them.
+
+    Each answers ``{"traces": [...]}``, one record per fact search or per ingested episode, each tagged with the
+    ``step_index`` of its ledger row; an empty list when the run was not traced (graph observability below
+    ``trace``) or is unknown.
+    """
+    router = APIRouter()
+    workspace_dep = Depends(workspace)
+
+    @router.get("/graph-runs/{run_id}/retrieval-trace")
+    async def retrieval_trace(run_id: str, path: Path = workspace_dep) -> Any:
+        """A run's fact searches, per stage (candidate legs, hop, rank, temporal)."""
+        rid = run_id.strip()
+        if not rid:
+            return _failure("run_id is required.")
+        try:
+            return {"traces": await run_in_threadpool(read_trace_sidecar, path, rid)}
+        except Exception as exc:
+            log.error("retrieval trace read failed", error=str(exc), exc_info=True)
+            return _failure(str(exc))
+
+    @router.get("/graph-runs/{run_id}/ingest-trace")
+    async def ingest_trace(run_id: str, path: Path = workspace_dep) -> Any:
+        """A run's ingested episodes, per ``add_episode`` stage, with what each wrote to the graph."""
+        rid = run_id.strip()
+        if not rid:
+            return _failure("run_id is required.")
+        try:
+            return {"traces": await run_in_threadpool(read_ingest_trace_sidecar, path, rid)}
+        except Exception as exc:
+            log.error("ingest trace read failed", error=str(exc), exc_info=True)
             return _failure(str(exc))
 
     return router

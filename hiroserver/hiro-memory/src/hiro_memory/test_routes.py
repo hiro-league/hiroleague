@@ -1,7 +1,9 @@
-"""The graph viewer's and memories table's router, over a temp workspace and a fake memory store."""
+"""The graph viewer's and memories table's router, over a temp workspace and a fake memory store; and the run-trace
+dialogs' router, over trace files written as the library writes them."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -9,7 +11,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from hiro_memory.routes import graph_routes, sort_memories
+from hiro_memory.routes import graph_routes, sort_memories, trace_routes
 
 
 class _FakeMemory:
@@ -130,3 +132,40 @@ def test_chunk_hooks(tmp_path: Path) -> None:
 def test_sort_memories_handles_odd_dates() -> None:
     rows = [{"id": "old", "created_at": "0001-01-01T00:00:00"}, {"id": "new", "updated_at": 1_800_000_000_000}]
     assert [r["id"] for r in sort_memories(rows)] == ["new", "old"]
+
+
+# --- the run traces --------------------------------------------------------------------------------
+
+
+def _trace_client(tmp_path: Path) -> TestClient:
+    app = FastAPI()
+    app.include_router(trace_routes(workspace=lambda: tmp_path), prefix="/api")
+    return TestClient(app)
+
+
+def _write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # A torn last line (a write cut short) is skipped, not fatal.
+    path.write_text("\n".join(json.dumps(r) for r in records) + "\n{not json\n", encoding="utf-8")
+
+
+def test_a_runs_traces_are_read_from_the_workspace_logs(tmp_path: Path) -> None:
+    searches = [
+        {"run_id": "memory_eval-q1", "step_index": 2, "sid": 1, "query": "where", "stages": []},
+        {"run_id": "memory_eval-q1", "step_index": 2, "sid": 2, "query": "when", "stages": []},
+    ]
+    episodes = [{"run_id": "memory_eval-ingest", "step_index": 4, "chunk_id": "c1", "stages": []}]
+    _write_jsonl(tmp_path / "logs" / "retrieval_trace" / "memory_eval-q1.jsonl", searches)
+    _write_jsonl(tmp_path / "logs" / "ingest_trace" / "memory_eval-ingest.jsonl", episodes)
+    client = _trace_client(tmp_path)
+
+    assert client.get("/api/graph-runs/memory_eval-q1/retrieval-trace").json() == {"traces": searches}
+    assert client.get("/api/graph-runs/memory_eval-ingest/ingest-trace").json() == {"traces": episodes}
+
+
+def test_an_untraced_run_has_no_traces(tmp_path: Path) -> None:
+    client = _trace_client(tmp_path)
+    assert client.get("/api/graph-runs/chat-1/retrieval-trace").json() == {"traces": []}
+    assert client.get("/api/graph-runs/chat-1/ingest-trace").json() == {"traces": []}
+    # A run id can't reach outside the trace folder: it is the file's name, made safe.
+    assert client.get("/api/graph-runs/..%5C..%5Csecret/retrieval-trace").json() == {"traces": []}

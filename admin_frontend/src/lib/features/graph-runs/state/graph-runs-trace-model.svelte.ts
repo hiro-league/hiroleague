@@ -10,13 +10,8 @@
  * Follows getters for `$derived` consumers (avoid returning shorthand `$derived` from a
  * factory — that captures a stale value).
  */
-import {
-  getGraphRunIngestTrace,
-  getGraphRunRetrievalTrace,
-  type GraphLedgerRow,
-  type IngestTraceRecord,
-  type RetrievalTraceRecord
-} from '$lib/api/graph-runs';
+import { graphRunTraceSource, type GraphLedgerRow } from '$lib/api/graph-runs';
+import type { IngestTraceRecord, RetrievalTraceRecord } from '$kit/memory/source';
 import { RUNS_TAB, type ActivePane } from '../graph-runs-pure';
 
 function rowStepIndex(row: GraphLedgerRow): number {
@@ -99,14 +94,14 @@ export function createGraphRunTraceModel(opts: { getActivePane: () => ActivePane
 
   async function resolveRetrievalTrace(runId: string) {
     // Step 1d: a failed read throws; it leaves the cache empty, as the old {ok} check did.
-    const res = await getGraphRunRetrievalTrace(runId).catch(() => null);
-    retrievalTraceByRun[runId] = res?.traces ?? [];
+    const traces = await graphRunTraceSource.retrievalTrace(runId).catch(() => null);
+    retrievalTraceByRun[runId] = traces ?? [];
     retrievalTraceByRun = { ...retrievalTraceByRun };
   }
 
   async function resolveIngestTrace(runId: string) {
-    const res = await getGraphRunIngestTrace(runId).catch(() => null);
-    ingestTraceByRun[runId] = res?.traces ?? [];
+    const traces = await graphRunTraceSource.ingestTrace(runId).catch(() => null);
+    ingestTraceByRun[runId] = traces ?? [];
     ingestTraceByRun = { ...ingestTraceByRun };
   }
 
