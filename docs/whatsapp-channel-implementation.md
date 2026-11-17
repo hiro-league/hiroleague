@@ -329,7 +329,7 @@ numbers are ignored; a config change reaches the running plugin without a restar
 ### Frontend tasks
 - A **Channels admin page** (Svelte, `admin_frontend`): install button, enable/disable,
   config form, **QR panel** (render the cached QR string as a scannable image), status badge.
-  Gate the nav entry on the `whatsapp_channel` feature. (Follow `svelte-best-practice`.)
+  Gate the nav entry on the `whatsapp_channel` feature. (Follow the frontend guide, hiro-docs `standards/guides/frontend.md`.)
 
 ### ✅ Acceptance
 From the Admin UI: install → configure → scan the QR in the browser → see "Connected". No terminal.

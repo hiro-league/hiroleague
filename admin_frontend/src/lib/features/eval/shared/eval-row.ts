@@ -1,7 +1,7 @@
 /**
  * Core eval value types + the pure question-row mapper. Kept in a leaf module (no runtime imports
  * from the model/controllers) so both the corpus/data model and the run-lifecycle controller can
- * share them without a circular `*.svelte.ts` import (see svelte-best-practice §11.6).
+ * share them without a circular `*.svelte.ts` import (frontend guide §8).
  */
 import type {
   EvalQuestionLeg,

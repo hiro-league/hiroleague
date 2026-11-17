@@ -551,7 +551,7 @@ are per-request or per-eval-run inputs and persist nothing).
 - Schema lives in `domain/preferences.py` under `KnowledgePreferences.graph`
   (`KnowledgeGraphPreferences`), with validated writes + `preferences.saved` change events.
 - Frontend renders in `KnowledgeSection.svelte` ("Knowledge Graph (Graphiti)" subsection),
-  following `svelte-best-practice` and reusing the existing settings controls.
+  following the frontend guide (hiro-docs `standards/guides/frontend.md`) and reusing the existing settings controls.
 
 ### 9.B Runtime / eval controls — **not** preferences (persist nothing)
 
