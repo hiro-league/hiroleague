@@ -191,10 +191,15 @@ AI_ERROR_INVALID: str = "invalid"        # the ask itself is wrong (no prompt, b
 #   memory.settings  extension → core, {} → {memory, graph, embedder: {profile_id, model}, reranker: {profile_id,
 #                    model}}: chat's memory settings as the core runs them (preferences memory and graph), and
 #                    the models its memory embeds and reranks with.
+#   knowledge.settings extension → core, {} → {knowledge, embedder: {profile_id, model}, reranker: {profile_id, model},
+#                    sparse_model}: chat's knowledge-base settings as the core runs them (preferences knowledge:
+#                    chunking, retrieval, answering, rewrite), the models its knowledge base embeds and reranks with,
+#                    and the BM25 model its sparse vectors come from. Read only.
 #   Errors (the response's error code): no_profile, invalid, failed (AI_ERROR_*).
 METHOD_AI_EMBED: str = "ai.embed"
 METHOD_AI_RERANK: str = "ai.rerank"
 METHOD_MEMORY_SETTINGS: str = "memory.settings"
+METHOD_KNOWLEDGE_SETTINGS: str = "knowledge.settings"
 
 # Phase 7b: the core speaks (voice profiles; hiroleague services/voice).
 #   voice.speak     extension → core, {text, use? | profile?, person?, label?}

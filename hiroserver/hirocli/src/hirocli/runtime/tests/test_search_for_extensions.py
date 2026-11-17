@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 from langchain_core.documents import Document
 
-from hiro_channel_sdk.constants import METHOD_AI_EMBED, METHOD_AI_RERANK, METHOD_MEMORY_SETTINGS
+from hiro_channel_sdk.constants import METHOD_AI_EMBED, METHOD_AI_RERANK, METHOD_KNOWLEDGE_SETTINGS, METHOD_MEMORY_SETTINGS
 from hiro_channel_sdk.extension import (
     STATUS_CONNECTED,
     STATUS_NOT_PAIRED,
@@ -178,6 +178,12 @@ def test_embed_rerank_and_memory_settings_answer_an_extension(tmp_path: Path, mo
         assert settings["graph"]["reranker"]["min_relevance"] == 0.25
         assert "retrieval" in settings["memory"]
 
+        # knowledge.settings: chat's knowledge-base settings, and the models it embeds and reranks with.
+        knowledge = await client.request(METHOD_KNOWLEDGE_SETTINGS, {})
+        assert set(knowledge) == {"knowledge", "embedder", "reranker", "sparse_model"}
+        assert {"chunking", "retrieval", "answering", "rewrite"} <= set(knowledge["knowledge"])
+        assert set(knowledge["embedder"]) == {"profile_id", "model"} and knowledge["sparse_model"] == "Qdrant/bm25"
+
         # Refusals: a use with no profile, no texts, a bad top_n.
         for method, params, code in (
             (METHOD_AI_EMBED, {"use": "other", "texts": ["x"]}, "no_profile"),
@@ -191,7 +197,7 @@ def test_embed_rerank_and_memory_settings_answer_an_extension(tmp_path: Path, mo
             assert err.value.code == code, (method, params)
 
         # A device can't call them: they look unknown to it.
-        for method in (METHOD_AI_EMBED, METHOD_AI_RERANK, METHOD_MEMORY_SETTINGS):
+        for method in (METHOD_AI_EMBED, METHOD_AI_RERANK, METHOD_MEMORY_SETTINGS, METHOD_KNOWLEDGE_SETTINGS):
             msg = build_request(method, {}, sender_id="phone", direction="inbound")
             refused = await handler.handle(msg, emit_outbound=_Sink(), caller=CALLER_DEVICE)
             assert refused is not None and json.loads(refused.content[0].body)["error"]["code"] == "method_not_found"
