@@ -1,4 +1,4 @@
-"""The PC's helper for CodeHiro's environment cards: only up and down, an environment 0 to 5, known server names."""
+"""The PC's helper for CodeHiro's asks: up and down (an environment 0 to 5, known server names), and the doc audit."""
 
 import pytest
 
@@ -55,3 +55,14 @@ def test_changes_are_said_for_made_environments_only_when_they_differ(tmp_path, 
 
 def test_it_asks_codehiro_beside_the_events_it_sends():
     assert relay.URL.endswith("/api/work/asks/next")
+
+
+def test_the_audit_ask_opens_claude_on_the_skill_in_env0s_hiro_docs(tmp_path, monkeypatch):
+    monkeypatch.setattr(relay, "LOG", tmp_path / "relay.log")
+    started = []
+    monkeypatch.setattr(relay.subprocess, "Popen", lambda *a, **k: started.append(a))
+    assert relay.run({"verb": "audit", "env": 3, "servers": ["anything"]}) is True  # an audit ask takes nothing else
+    [(cmd,)] = started
+    assert cmd[cmd.index("-w") + 1] == "hiro-audit"
+    assert cmd[cmd.index("-d") + 1] == str(relay.AUDIT_DIR) and relay.AUDIT_DIR.name == "hiro-docs"
+    assert cmd[-3:] == ["/k", relay.claude(), "/hiro-doc-audit"]

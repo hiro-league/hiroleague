@@ -19,6 +19,7 @@ a task in env1..env5 lands: its branches merge into dev/main and env0 is brought
     hiro-work real <task> [--reads] [--ai]   env1..5: which real systems the task's copy reads (data.py)
     hiro-work refresh-data [--apply STAMP] [--files]   live -> env0: a scrubbed live copy, then env0 (data.py)
     hiro-work train [repo ...] [--dry-run]   the deploy train: push and deploy, when Michel says (train.py)
+    hiro-work audit latest | RUN | list      the doc audit's runs, and start / report to record one (audit.py)
 
 State lives in C:\hiro\tasks (one JSON file per task) and every step is logged to C:\hiro\logs\events.jsonl (with
 its time) for CodeHiro's Work area, where ship.py sends it. Standard library only: it runs on the system Python.
@@ -206,8 +207,14 @@ class Stop(Exception):
 # ------------------------------------------------------------------------------------------------------- commands
 
 
+# Why: the PC's helper (relay.py) runs as pythonw, with no console; each git it starts would open a console window of
+# its own, flashing on screen every minute. The output is captured, so no command here needs a window.
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
 def run(args: list[str], cwd: Path | None = None, check: bool = True) -> str:
-    out = subprocess.run(args, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    out = subprocess.run(args, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                         creationflags=NO_WINDOW)
     if check and out.returncode != 0:
         raise Stop(f"{' '.join(args[:4])} failed in {cwd}:\n{(out.stderr or out.stdout).strip()[-1500:]}")
     return out.stdout.strip()
@@ -1537,6 +1544,8 @@ def main(argv: list[str] | None = None) -> int:
     sys.modules.setdefault("hiro_work", sys.modules[__name__])
     import train
     train.add_parser(sub)
+    import audit
+    audit.add_parser(sub)
     a = p.parse_args(argv)
     if a.cmd in LONG_COMMANDS:
         ignore_console_interrupt()

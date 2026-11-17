@@ -367,6 +367,19 @@ def test_an_environments_other_repos_follow_env0_when_clean_and_behind(tmp_path,
     assert hw.bring_up_others(0, task("t", 0, ["codehiro"])) == []  # env0 is the source
 
 
+def test_a_command_opens_no_console_window(monkeypatch):
+    """The relay runs as pythonw: each git it started opened a console window, flashing every minute."""
+    seen = {}
+
+    def fake(args, **kw):
+        seen.update(kw)
+        return hw.subprocess.CompletedProcess(args, 0, "ok", "")
+
+    monkeypatch.setattr(hw.subprocess, "run", fake)
+    assert hw.run(["git", "status"]) == "ok"
+    assert seen["creationflags"] == getattr(hw.subprocess, "CREATE_NO_WINDOW", 0)
+
+
 def test_changed_repos_are_a_claims_new_work_or_any_uncommitted_files(tmp_path, monkeypatch):
     monkeypatch.setattr(hw, "ROOT", tmp_path)
     monkeypatch.setattr(hw, "REPOS", ["hiroleague", "codehiro", "nethiro", "homehiro"])

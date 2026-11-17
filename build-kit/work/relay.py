@@ -7,8 +7,13 @@ every few seconds for what is waiting (GET /api/work/asks/next, with the Work ke
     down <env> [servers]   hiro-work down <env> [servers]
 
 in a tab of the environment's own window (hiro-envN), so its output shows there; the servers' events then reach the
-card. Only up and down, an environment 0 to 5 and the server names hiro-work knows pass; anything else is refused and
-logged. One helper at a time (C:\hiro\run\relay.pid). Its log is C:\hiro\logs\relay.log. Standard library only.
+card. Work › Hiro-Audit's Run audit is the one other ask:
+
+    audit                  claude "/hiro-doc-audit" in env0's hiro-docs, in a tab of the hiro-audit window
+
+an interactive Claude session that audits what changed since the last run and records its report (audit.py); Michel
+answers it there. Only these pass, with an environment 0 to 5 and the server names hiro-work knows; anything else is
+refused and logged. One helper at a time (C:\hiro\run\relay.pid). Its log is C:\hiro\logs\relay.log. Standard library only.
 
 Every minute it also says which repos each environment has changed (hiro_work.changed_repos): a "changes" event for
 each environment whose list differs from the last one said (all of them when it starts), so the card can dim a claim
@@ -38,6 +43,7 @@ import hiro_work as hw  # noqa: E402
 import ship  # noqa: E402
 
 LAUNCHER = Path(r"C:\hiro\bin\hiro-work.cmd")
+AUDIT_DIR = hw.ROOT / "env0" / "hiro-docs"  # where the audit's Claude session starts (the audit doc lives there)
 LOG = hw.LOGS / "relay.log"
 PID = hw.RUN / "relay.pid"
 URL = ship.URL.rsplit("/events", 1)[0] + "/asks/next"  # http://reports.local/api/work/asks/next
@@ -74,7 +80,23 @@ def log(line: str) -> None:
         f.write(f"{datetime.now().isoformat(timespec='seconds')} {line}\n")
 
 
+def claude() -> str:
+    """Claude Code's command: on the PATH, else where its installer puts it (a logon process may lack the PATH)."""
+    return shutil.which("claude") or str(Path.home() / ".local" / "bin" / "claude.exe")
+
+
+def run_audit() -> bool:
+    """The doc audit, in Claude: a tab that stays open after it (cmd /k), so Michel reads and answers its report."""
+    log("runs: claude /hiro-doc-audit")
+    wt = [shutil.which("wt.exe") or "wt.exe", "-w", "hiro-audit", "new-tab", "--title", "doc audit", "-d",
+          str(AUDIT_DIR), "cmd", "/k", claude(), "/hiro-doc-audit"]
+    subprocess.Popen(wt, creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+    return True
+
+
 def run(ask: dict) -> bool:
+    if ask.get("verb") == "audit":
+        return run_audit()  # an audit ask carries nothing else: whatever else it holds is ignored
     try:
         verb, env, names = check(ask)
     except Refused as exc:
