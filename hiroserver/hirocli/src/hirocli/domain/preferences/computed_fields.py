@@ -77,12 +77,12 @@ def _graph_embedder_locked(
 # generated field-schema stays byte-stable.
 COMPUTED_PREFERENCE_FIELDS: tuple[ComputedPreferenceField, ...] = (
     ComputedPreferenceField(
-        "knowledge.default_embedding_model_locked",
+        "knowledge.embedder_profile_locked",
         {"type": "boolean", "readOnly": True},
         _knowledge_embedder_locked,
     ),
     ComputedPreferenceField(
-        "graph.embedder_model_locked",
+        "graph.embedder_profile_locked",
         {"type": "boolean", "readOnly": True},
         _graph_embedder_locked,
     ),

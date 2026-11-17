@@ -47,13 +47,16 @@ def test_advanced_flag_surfaces_and_defaults_absent() -> None:
     assert "advanced" not in fields["knowledge.chunking.chunk_size"]
 
 
-def test_embedding_model_is_nullable_with_model_kind() -> None:
+def test_search_profile_picks_are_nullable_with_their_marker() -> None:
     fields = workspace_preferences_field_map()
-    embed = fields["knowledge.default_embedding_model"]
+    embed = fields["knowledge.embedder_profile"]
     assert embed["type"] == "string"
     assert embed["nullable"] is True
-    assert embed["model_kind"] == "embedding"
+    assert embed["embedding_profile_ref"] is True
     assert embed["description"]
+    assert fields["graph.embedder_profile"]["embedding_profile_ref"] is True
+    assert fields["graph.reranker.profile"]["rerank_profile_ref"] is True
+    assert fields["knowledge.retrieval.reranker.profile"]["rerank_profile_ref"] is True
 
 
 def test_literal_enum_surfaces_on_leaf() -> None:
@@ -65,7 +68,7 @@ def test_literal_enum_surfaces_on_leaf() -> None:
 
 def test_schema_payload_includes_version_and_fields() -> None:
     payload = workspace_preferences_schema_payload()
-    assert payload["preferences_version"] == 4
+    assert payload["preferences_version"] == 5
     assert "knowledge.chunking.chunk_size" in payload["fields"]
 
 
@@ -79,11 +82,12 @@ def test_field_map_tags_for_save_policy() -> None:
     assert fields["graph.eval.retrieval_profile"]["ai_profile_ref"] is True
     assert fields["voice.hiro_profile"]["voice_profile_ref"] is True
     assert "tuning_profiles" not in fields and "llm.default_chat" not in fields
-    assert fields["graph.reranker.device"]["nullable"] is True
     assert fields["image_profiles"]["preferencesSaveSkip"] is True
-    assert fields["knowledge.default_embedding_model_locked"]["readOnly"] is True
-    assert fields["graph.embedder_model_locked"]["readOnly"] is True
-    assert fields["llm.default_embedder"]["model_kind"] == "embedding"
+    assert fields["knowledge.embedder_profile_locked"]["readOnly"] is True
+    assert fields["graph.embedder_profile_locked"]["readOnly"] is True
+    assert "llm.default_embedder" not in fields and "llm.default_reranker" not in fields
+    assert fields["embedding.profiles"]["preferencesSaveSkip"] is True
+    assert fields["rerank.uses"]["preferencesSaveSkip"] is True
 
 
 def test_json_schema_marks_nested_properties_required() -> None:

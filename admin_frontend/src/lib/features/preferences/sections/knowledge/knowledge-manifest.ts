@@ -31,7 +31,7 @@ export const KNOWLEDGE_MANIFEST: PrefTabManifest = {
       id: 'knowledgeIndexing',
       title: 'Indexing Options',
       description:
-        'Everything applied when documents are indexed — the knowledge embedder (empty inherits the workspace default), document chunking, and the knowledge graph backend.',
+        'Everything applied when documents are indexed — the knowledge embedding profile, document chunking, and the knowledge graph backend.',
       bodyId: PREFERENCES_SECTION_BODY_IDS.knowledgeEmbedding,
       collapsible: true,
       body: [
@@ -39,10 +39,10 @@ export const KNOWLEDGE_MANIFEST: PrefTabManifest = {
           kind: 'grid',
           fields: [
             {
-              kind: 'embedder',
-              path: 'knowledge.default_embedding_model',
-              lockedPath: 'knowledge.default_embedding_model_locked',
-              heading: 'Knowledge embedder'
+              kind: 'searchProfile',
+              profileKind: 'embedding',
+              path: 'knowledge.embedder_profile',
+              lockedPath: 'knowledge.embedder_profile_locked'
             }
           ]
         },
@@ -96,7 +96,7 @@ export const KNOWLEDGE_MANIFEST: PrefTabManifest = {
         {
           kind: 'panel',
           title: 'Reranker',
-          hint: 'Optional cross-encoder that reorders retrieved candidates by relevance before answering (precision step). Cloud models need a provider key; local models must be downloaded first. Switching is a hot swap — no re-ingest.',
+          hint: 'Optional cross-encoder that reorders retrieved candidates by relevance before answering (precision step): a reranker profile from Catalog → Profiles. Cloud models need a provider key; local models must be downloaded first (in the profile). Switching is a hot swap — no re-ingest.',
           fields: [
             {
               kind: 'toggle',
@@ -106,15 +106,7 @@ export const KNOWLEDGE_MANIFEST: PrefTabManifest = {
             {
               kind: 'gated',
               disabledWhen: rerankerOff,
-              fields: [
-                {
-                  kind: 'model',
-                  modelKind: 'rerank',
-                  path: 'knowledge.retrieval.reranker.model_id',
-                  emptyFallback: 'llm.default_reranker',
-                  download: 'reranker'
-                }
-              ]
+              fields: [{ kind: 'searchProfile', profileKind: 'rerank', path: 'knowledge.retrieval.reranker.profile' }]
             },
             {
               kind: 'gated',

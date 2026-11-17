@@ -63,10 +63,18 @@ const line = (
  *  production answering pipeline (so its Answer line shows that job). The judge model grades both.
  *  Each line is one of Hiro's jobs and its AI profile (Phase 7b step 5), resolved on `prefs` the way
  *  the server does (its own field, else the job it falls back to). */
+/** The model of the embedding / reranker profile a search picked (null: none picked). */
+function embeddingModel(prefs: WorkspacePreferences, profileId: string | null | undefined): string | null {
+  return (profileId && prefs.embedding?.profiles?.[profileId]?.model) || null;
+}
+function rerankModel(prefs: WorkspacePreferences, profileId: string | null | undefined): string | null {
+  return (profileId && prefs.rerank?.profiles?.[profileId]?.model) || null;
+}
+
 export function modelLines(prefs: WorkspacePreferences, cfg: EvalTrackConfig): ModelLine[] {
   const out: ModelLine[] = [line(prefs, 'Extraction', 'graph_extraction', 'ingest')];
   if (cfg.track === 'memory') out.push(line(prefs, 'Small', 'graph_small', 'ingest'));
-  out.push({ label: 'Embedder', model: dash(prefs.graph.embedder_model), tuning: '', group: 'ingest' });
+  out.push({ label: 'Embedder', model: dash(embeddingModel(prefs, prefs.graph.embedder_profile)), tuning: '', group: 'ingest' });
   // Memory recall is fully agentic (runner_memory._recall_via_agent → run_retrieval), so surface the
   // RETRIEVAL AGENT's profile FIRST — before the answer/judge. Unset, it borrows the eval answer job's
   // (then Hiro's chat). Memory-only: the knowledge track answers with the production pipeline.
@@ -126,7 +134,7 @@ export function recallKnobs(prefs: WorkspacePreferences, cfg: EvalTrackConfig): 
     { label: 'Sim floor', value: String(g.sim_min_score) }
   ];
   if (g.search_recipe === 'cross_encoder') {
-    out.push({ label: 'Graph reranker', value: dash(g.reranker.model_id) });
+    out.push({ label: 'Graph reranker', value: dash(rerankModel(prefs, g.reranker.profile)) });
     out.push({ label: 'Rerank floor', value: String(g.reranker.min_relevance) });
   }
   if (cfg.track === 'memory') {
@@ -147,7 +155,7 @@ export function recallKnobs(prefs: WorkspacePreferences, cfg: EvalTrackConfig): 
     out.push({ label: 'Hybrid', value: onOff(r.hybrid) });
     out.push({ label: 'Prefetch', value: String(r.prefetch_limit) });
     if (r.reranker.enabled) {
-      out.push({ label: 'Flat reranker', value: dash(r.reranker.model_id) });
+      out.push({ label: 'Flat reranker', value: dash(rerankModel(prefs, r.reranker.profile)) });
       out.push({ label: 'Rerank top-n', value: String(r.reranker.top_n) });
     }
   }

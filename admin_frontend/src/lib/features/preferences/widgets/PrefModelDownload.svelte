@@ -2,15 +2,18 @@
   /**
    * Inline "download this local model" affordance for embedder OR reranker picks. Only local-registry
    * ids appear in the status rows; cloud ids resolve to nothing (no download needed). `kind` selects
-   * which controller state to read — one widget for both, shared by the model-picker download slot and
-   * the embedder field.
+   * which controller state to read — one widget for both. Used by the Catalog's embedding and reranker
+   * profile editor, with a local-model downloads store (`createLocalModelDownloads`).
    */
   import { Button } from '$kit/components/ui/button/index.js';
   import type { LocalEmbedderRow, LocalRerankerRow } from '$lib/api/knowledge';
-  import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
+  import type { createLocalModelDownloads } from '$lib/features/preferences/state/local-model-downloads.svelte';
+
+  /** The downloads store, and whether its page is busy saving (the buttons wait). */
+  type Downloads = ReturnType<typeof createLocalModelDownloads> & { busy?: boolean };
 
   type Props = {
-    ctrl: PreferencesController;
+    ctrl: Downloads;
     /** Selects the embedder- vs reranker-specific controller state (lists, busy flags, callbacks). */
     kind: 'embedder' | 'reranker';
     /** The model id to show download status for (cloud ids are ignored). */

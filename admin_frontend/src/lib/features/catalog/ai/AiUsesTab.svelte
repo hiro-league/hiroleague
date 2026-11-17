@@ -24,16 +24,23 @@
   import VoiceUsesTable from '$lib/features/catalog/voice/VoiceUsesTable.svelte';
   import type { VoiceController } from '$lib/features/catalog/voice/voice-controller.svelte';
   import HiroUsesTable from './HiroUsesTable.svelte';
+  // Embedding and reranking uses: Hiro's four searches, and the ones extensions declared.
+  import RetrievalUsesTable from '$lib/features/catalog/retrieval/RetrievalUsesTable.svelte';
+  import { retrieval } from '$lib/features/catalog/retrieval/retrieval-controller.svelte';
 
   let { ai, voice }: { ai: AiController; voice: VoiceController } = $props();
 
   // A filter per source: Hiro's own jobs and voice first, then each extension that declared uses.
   const HIRO = 'Hiro';
   let source = $state(HIRO);
+  const retrievalCount = (s: string) => retrieval.uses.filter((u) => u.source === s && !u.removed).length;
+  // Extensions that declared searching uses and no AI use get a pill of their own.
+  const searchOnlySources = $derived(retrieval.sources.filter((s) => !ai.useGroups.some((g) => g.extension === s)));
   const sourceTabs = $derived([
     // Hiro's jobs plus its one speaking use (Hiro's voice).
-    { value: HIRO, label: 'Hiro', count: ai.jobs.length + 1 },
-    ...ai.useGroups.map((g) => ({ value: g.extension, label: g.extension, count: ai.uses.filter((u) => u.extension === g.extension && u.status !== 'removed').length }))
+    { value: HIRO, label: 'Hiro', count: ai.jobs.length + 1 + retrievalCount(HIRO) },
+    ...ai.useGroups.map((g) => ({ value: g.extension, label: g.extension, count: ai.uses.filter((u) => u.extension === g.extension && u.status !== 'removed').length + retrievalCount(g.extension) })),
+    ...searchOnlySources.map((s) => ({ value: s, label: s, count: retrievalCount(s) }))
   ]);
   const activeSource = $derived(sourceTabs.some((t) => t.value === source) ? source : (sourceTabs[0]?.value ?? ''));
 
@@ -93,8 +100,16 @@
     <ResourceView resource={hiroJobs} loadingLabel="Loading Hiro's jobs…" errorTitle="Could not load Hiro's jobs">
       {#snippet children()}
         <HiroUsesTable {ai} {voice} />
+        <RetrievalUsesTable source={HIRO} />
       {/snippet}
     </ResourceView>
+  {:else if searchOnlySources.includes(activeSource)}
+    <div class="grid gap-2">
+      <h4 class="font-sans text-base font-semibold text-primary">
+        {activeSource} <span class="text-sm font-normal text-muted-foreground">· {retrievalCount(activeSource)} uses</span>
+      </h4>
+      <RetrievalUsesTable source={activeSource} />
+    </div>
   {:else}
   <ResourceView
     resource={extensionUses}
@@ -194,6 +209,7 @@
     </div>
       <!-- Phase 7b: the extension's speaking (voice uses), real. -->
       <VoiceUsesTable {voice} extension={group.extension} />
+      <RetrievalUsesTable source={group.extension} />
   {/each}
   {/snippet}
   </ResourceView>

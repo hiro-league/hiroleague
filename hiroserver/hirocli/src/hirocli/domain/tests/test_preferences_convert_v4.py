@@ -72,7 +72,7 @@ def test_v3_preferences_and_character_convert_to_profiles(tmp_path: Path) -> Non
 
     prefs = load_preferences(ws)
 
-    assert prefs.version == 4
+    assert prefs.version == 5  # v3 → v4, then v4 → v5 in the same load
     profiles = prefs.ai.profiles
     # Chat: the old model + the workspace's own balanced_chat tuning, as a "chat" preset profile.
     assert prefs.llm.chat_profile == "hiro-chat"
@@ -120,11 +120,11 @@ def test_v3_preferences_and_character_convert_to_profiles(tmp_path: Path) -> Non
     raw_char = json.loads((char_dir / "character.json").read_text(encoding="utf-8"))
     assert not {"llm_models", "tuning_profile", "voice_models", "tts_instructions", "tts_voice_by_provider"} & set(raw_char)
 
-    # Backups, and the saved file is a clean v4.
+    # Backups, and the saved file is clean (and v5: the v4 → v5 conversion runs right after).
     assert json.loads((ws / PREFERENCES_V3_BACKUP).read_text(encoding="utf-8")) == V3_PREFS
     assert json.loads((char_dir / CHARACTER_V3_BACKUP).read_text(encoding="utf-8")) == V3_CHARACTER
     saved = json.loads(preferences_file(ws).read_text(encoding="utf-8"))
-    assert saved["version"] == 4
+    assert saved["version"] == 5
     assert "tuning_profiles" not in saved
     assert "default_chat" not in saved["llm"] and "default_tts" not in saved["llm"]
 
@@ -171,7 +171,7 @@ def test_unknown_models_never_fail_the_load(tmp_path: Path, caplog: pytest.LogCa
     with caplog.at_level("WARNING"):
         prefs = load_preferences(ws)
 
-    assert prefs.version == 4
+    assert prefs.version == 5  # v3 → v4, then v4 → v5 in the same load
     assert prefs.ai.profiles == {}
     assert prefs.llm.chat_profile is None
     assert prefs.voice.hiro_profile is None

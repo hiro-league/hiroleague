@@ -108,10 +108,10 @@ export const GRAPH_ENGINE_MANIFEST: PrefTabManifest = {
               kind: 'column',
               fields: [
                 {
-                  kind: 'embedder',
-                  path: 'graph.embedder_model',
-                  lockedPath: 'graph.embedder_model_locked',
-                  heading: 'Embedder model'
+                  kind: 'searchProfile',
+                  profileKind: 'embedding',
+                  path: 'graph.embedder_profile',
+                  lockedPath: 'graph.embedder_profile_locked'
                 },
                 { kind: 'select', path: 'graph.entity_ontology', options: ONTOLOGY_OPTIONS }
               ]
@@ -160,7 +160,7 @@ export const GRAPH_ENGINE_MANIFEST: PrefTabManifest = {
       id: 'graphReranker',
       title: 'Graphiti Reranker (Cross-encoder)',
       description:
-        'Reranks graph fact-search candidates with a real cross-encoder. Only active when the Search recipe above is set to Cross-encoder — otherwise these settings are disabled. Reuses the same reranker models as the flat path (cloud or local).',
+        'Reranks graph fact-search candidates with a real cross-encoder: a reranker profile from Catalog → Profiles (cloud or local). Only active when the Search recipe above is set to Cross-encoder — otherwise these settings are disabled.',
       bodyId: PREFERENCES_SECTION_BODY_IDS.graphEngineReranker,
       collapsible: true,
       // Whole card gates on the search recipe via the field-level `gated` spec (banner + disabled
@@ -172,16 +172,10 @@ export const GRAPH_ENGINE_MANIFEST: PrefTabManifest = {
           banner: 'Set Search recipe → Cross-encoder above to enable these settings.',
           fields: [
             {
-              kind: 'model',
-              modelKind: 'rerank',
-              path: 'graph.reranker.model_id',
-              emptyFallback: 'llm.default_reranker'
-            },
-            {
               kind: 'grid',
               fields: [
-                { kind: 'number', path: 'graph.reranker.min_relevance' },
-                { kind: 'text', path: 'graph.reranker.device', placeholder: 'auto' }
+                { kind: 'searchProfile', profileKind: 'rerank', path: 'graph.reranker.profile' },
+                { kind: 'number', path: 'graph.reranker.min_relevance' }
               ]
             }
           ]

@@ -3,13 +3,11 @@
 import type { WorkspacePreferences } from './preferences.generated';
 
 export const DEFAULT_WORKSPACE_PREFERENCES = {
-  "version": 4,
+  "version": 5,
   "llm": {
     "chat_profile": null,
     "vision_profile": null,
     "default_stt": null,
-    "default_reranker": null,
-    "default_embedder": null,
     "http_keepalive_s": 300,
     "request_timeout_s": 180,
     "max_retries": 2,
@@ -67,7 +65,7 @@ export const DEFAULT_WORKSPACE_PREFERENCES = {
     }
   },
   "knowledge": {
-    "default_embedding_model": null,
+    "embedder_profile": null,
     "chunking": {
       "chunk_size": 1200,
       "chunk_overlap": 150,
@@ -83,10 +81,8 @@ export const DEFAULT_WORKSPACE_PREFERENCES = {
       "prefetch_limit": 40,
       "reranker": {
         "enabled": false,
-        "model_id": null,
-        "top_n": 8,
-        "device": null,
-        "batch_size": 32
+        "profile": null,
+        "top_n": 8
       }
     },
     "answering": {
@@ -105,7 +101,7 @@ export const DEFAULT_WORKSPACE_PREFERENCES = {
     "backend": "off",
     "extraction_profile": null,
     "small_profile": null,
-    "embedder_model": null,
+    "embedder_profile": null,
     "temporal_default": "all",
     "k_hop": 2,
     "search_recipe": "rrf",
@@ -116,9 +112,8 @@ export const DEFAULT_WORKSPACE_PREFERENCES = {
     "query_timeout_s": 60,
     "observability": "ledger",
     "reranker": {
-      "model_id": null,
-      "min_relevance": 0.3,
-      "device": null
+      "profile": null,
+      "min_relevance": 0.3
     },
     "eval": {
       "answer_prompts": {
@@ -196,5 +191,13 @@ export const DEFAULT_WORKSPACE_PREFERENCES = {
     "uses": {},
     "hiro_profile": null,
     "clip_cache_mb": 200
+  },
+  "embedding": {
+    "profiles": {},
+    "uses": {}
+  },
+  "rerank": {
+    "profiles": {},
+    "uses": {}
   }
 } as WorkspacePreferences;

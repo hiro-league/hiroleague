@@ -66,29 +66,23 @@ class KnowledgeChunkingPreferences(BaseModel):
 class KnowledgeRerankerPreferences(BaseModel):
     """Cross-encoder reranker over retrieved candidates (precision step).
 
-    Prefs-only, default off. ``model_id`` is a catalog ``provider:model`` (cloud: Voyage /
-    Cohere) OR a local-registry id (FlashRank / FastEmbed / sentence-transformers). It is
-    resolved by ``resolve_reranker`` to a LangChain ``BaseDocumentCompressor`` — the same way
-    ``default_embedding_model`` is resolved by the embedder. Rerankers are dimensionless, so a
-    swap is a hot config change (no re-ingest). ``device`` / ``batch_size`` apply to the local
-    torch lane only and are ignored by cloud models. ``model_id`` null = fall back to the
-    workspace default reranker (``llm.default_reranker``); if that is empty too, no reranker
-    (retrieval order used as-is) even when ``enabled`` is true.
+    Prefs-only, default off. ``profile`` names a reranker profile (``rerank.profiles``: a catalog
+    model or a local one, with its device and batch size), resolved by ``resolve_reranker`` to a
+    LangChain ``BaseDocumentCompressor``. Rerankers are dimensionless, so a swap is a hot config
+    change (no re-ingest). Null = no reranker (retrieval order used as-is) even when ``enabled``.
     """
 
     enabled: bool = Field(default=False, title="Enable reranking")
-    model_id: str | None = pref_field(
-        model_kind="rerank",
+    profile: str | None = pref_field(
+        rerank_profile_ref=True,
         default=None,
-        title="Reranker model",
+        title="Reranker profile",
         description=(
-            "Cross-encoder used to reorder retrieved candidates. Empty = fall back to the "
-            "default reranker (General → Models). Local models must be downloaded first."
+            "The reranker profile that reorders retrieved candidates. Empty = no reranker. "
+            "Local models must be downloaded first."
         ),
     )
     top_n: int = Field(default=8, ge=1, le=100, title="Rerank results (top N)", description="Final returned results if using rerank (top N).")
-    device: str | None = None
-    batch_size: int = Field(default=32, ge=1, le=512)
 
 
 class KnowledgeRetrievalPreferences(BaseModel):
@@ -144,16 +138,17 @@ class KnowledgeRewritePreferences(BaseModel):
 
 
 class KnowledgePreferences(BaseModel):
-    # Knowledge embedder OVERRIDE. Empty = inherit the workspace default (llm.default_embedder),
-    # resolved by ``resolve_knowledge_embedder_model``. Locked (UI badge + pre-save write-guard)
-    # once the knowledge collection has points — embedders are dimension-bound, so changing this
-    # after indexing would orphan the stored vectors. Field name kept (historical) to preserve the
-    # existing lock + value for already-indexed workspaces without a migration.
-    default_embedding_model: str | None = pref_field(
-        model_kind="embedding",
+    # An embedding profile (``embedding.profiles``), resolved by ``resolve_knowledge_embedder_model``.
+    # Locked (UI badge + pre-save write-guard) once the knowledge collection has points: embedders are
+    # dimension-bound, so another model would orphan the stored vectors (``io.check_embedder_transition``).
+    embedder_profile: str | None = pref_field(
+        embedding_profile_ref=True,
         default=None,
-        title="Knowledge embedder",
-        description="Knowledge embedder. Empty inherits the workspace default (General → Models).",
+        title="Embedding profile",
+        description=(
+            "Embeds knowledge documents and questions. Empty = knowledge can't be indexed or "
+            "searched. Locked once the collection holds documents."
+        ),
     )
     chunking: KnowledgeChunkingPreferences = Field(default_factory=KnowledgeChunkingPreferences)
     retrieval: KnowledgeRetrievalPreferences = Field(default_factory=KnowledgeRetrievalPreferences)

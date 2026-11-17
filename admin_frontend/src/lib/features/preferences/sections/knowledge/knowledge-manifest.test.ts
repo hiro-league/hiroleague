@@ -12,11 +12,9 @@ import { KNOWLEDGE_MANIFEST } from './knowledge-manifest';
 
 const paths = manifestFieldPaths(KNOWLEDGE_MANIFEST);
 
-// Editable knowledge-tab fields the UI intentionally does not render.
-const UNEXPOSED = [
-  'knowledge.retrieval.reranker.device',
-  'knowledge.retrieval.reranker.batch_size'
-];
+// Editable knowledge-tab fields the UI intentionally does not render (none: the reranker's device lives in its
+// reranker profile, Catalog → Profiles).
+const UNEXPOSED: string[] = [];
 
 describe('knowledge manifest', () => {
   it('covers exactly the editable knowledge-tab paths (manifest + intentionally-unexposed)', () => {

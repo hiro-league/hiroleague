@@ -34,9 +34,10 @@ export function knowledgeRerankTopNActive(
   rerankActiveProviderIds: Set<string>
 ): boolean {
   const reranker = prefs?.knowledge.retrieval.reranker;
-  if (!reranker?.enabled || !reranker.model_id?.trim()) return false;
+  // The model of the picked reranker profile (rerank.profiles).
+  const modelId = (reranker?.profile ? prefs?.rerank?.profiles?.[reranker.profile]?.model : undefined)?.trim();
+  if (!reranker?.enabled || !modelId) return false;
 
-  const modelId = reranker.model_id.trim();
   const local = localRerankers.find((row) => row.id === modelId);
   if (local) {
     return Boolean(local.downloaded || local.status === 'ready');

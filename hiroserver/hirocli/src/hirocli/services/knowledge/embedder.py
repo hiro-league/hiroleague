@@ -100,8 +100,8 @@ class UnconfiguredEmbedder:
 
     def __init__(self, reason: str = "") -> None:
         self.reason = reason or (
-            "No embedder configured. Choose one in Preferences → General → Default models "
-            "(or set a Knowledge/Graph embedder) before indexing or searching."
+            "No embedding profile picked. Pick one for the knowledge base in Providers/Models → Profiles → "
+            "Uses before indexing or searching."
         )
 
     @property

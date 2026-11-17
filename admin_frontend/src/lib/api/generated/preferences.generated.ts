@@ -12,14 +12,6 @@ export type HiroSChat = string | null;
 export type ReadingPictures = string | null;
 export type DefaultSpeechToTextModel = string | null;
 /**
- * Default cross-encoder reranker. The knowledge and graph rerankers both fall back to this when their own model is empty. Empty = no default. Cloud models need a provider key; local models must be downloaded first.
- */
-export type DefaultRerankerModel = string | null;
-/**
- * Default embedder. The knowledge and graph embedders both fall back to this when their own model is empty. Empty = no default (indexing is blocked until one is chosen). Cloud models need a provider key; local models must be downloaded first.
- */
-export type DefaultEmbedderModel = string | null;
-/**
  * How long idle HTTPS connections to model providers (OpenAI, DeepSeek) are kept warm before closing. Larger avoids a TLS handshake on the first call of each chat turn (~1s). Effective ceiling is the provider's own idle timeout (~60-240s). Takes effect on server restart.
  */
 export type ProviderConnectionKeepaliveSeconds = number;
@@ -113,9 +105,9 @@ export type MaxMessageChars = number;
  */
 export type MaxEntitySummaryChars = number;
 /**
- * Knowledge embedder. Empty inherits the workspace default (General → Models).
+ * Embeds knowledge documents and questions. Empty = knowledge can't be indexed or searched. Locked once the collection holds documents.
  */
-export type KnowledgeEmbedder = string | null;
+export type EmbeddingProfile = string | null;
 /**
  * Target size per chunk at document ingest (characters).
  */
@@ -147,15 +139,13 @@ export type HybridRetrievalDenseBM25RRFFusion = boolean;
 export type CandidatesPerBranch = number;
 export type EnableReranking = boolean;
 /**
- * Cross-encoder used to reorder retrieved candidates. Empty = fall back to the default reranker (General → Models). Local models must be downloaded first.
+ * The reranker profile that reorders retrieved candidates. Empty = no reranker. Local models must be downloaded first.
  */
-export type RerankerModel = string | null;
+export type RerankerProfile = string | null;
 /**
  * Final returned results if using rerank (top N).
  */
 export type RerankResultsTopN = number;
-export type Device = string | null;
-export type BatchSize = number;
 /**
  * The AI profile that answers from the knowledge base. Empty uses Hiro's chat model.
  */
@@ -182,9 +172,9 @@ export type GraphExtraction = string | null;
  */
 export type GraphSmallSteps = string | null;
 /**
- * Embeds entity names + facts into the graph. Null shares the knowledge embedding model. Shared across memory + knowledge graph data — changing it re-indexes everything.
+ * Embeds entity names and facts into the graph. Empty = the graph can't be built or searched. Locked once the graph holds data: another model needs a new graph.
  */
-export type EmbedderModel = string | null;
+export type EmbeddingProfile1 = string | null;
 /**
  * Default time lens at retrieval. Current = only facts valid now (superseded facts hidden). Include historical = also surface invalidated facts. Overridable per query.
  */
@@ -222,17 +212,13 @@ export type QueryTimeoutSeconds = number;
  */
 export type GraphObservability = "off" | "ledger" | "trace";
 /**
- * Cross-encoder used to rerank fact candidates. Empty = fall back to the default reranker (General → Models). Local models must be downloaded first.
+ * The reranker profile that orders fact candidates. Empty = no reranker (the fact search falls back to RRF). Local models must be downloaded first.
  */
-export type RerankerModel1 = string | null;
+export type RerankerProfile1 = string | null;
 /**
  * Drop facts whose cross-encoder relevance is below this (0–1). 0 = keep all. Ignored by RRF/MMR.
  */
 export type MinRelevance = number;
-/**
- * Torch device for local sentence-transformers rerankers (e.g. cpu, cuda). Blank = auto. Ignored by cloud + ONNX models.
- */
-export type DeviceLocalOnly = string | null;
 export type Label = string;
 export type Locked = boolean;
 export type Prompt = string;
@@ -340,6 +326,11 @@ export type HiroSVoice = string | null;
  * Clips Hiro and the extensions had spoken, kept so the same words in the same voice are not paid for again. Once full, the oldest go first. 0 keeps none.
  */
 export type KeepSpokenClipsUpToMB = number;
+export type Name1 = string;
+export type Model3 = string;
+export type Name2 = string;
+export type Model4 = string;
+export type Device = string | null;
 
 /**
  * Root preferences object persisted as preferences.json.
@@ -355,6 +346,8 @@ export interface WorkspacePreferences {
   image_profiles: ImageProfiles;
   ai: AiPreferences;
   voice: VoicePreferences;
+  embedding: EmbeddingPreferences;
+  rerank: RerankPreferences;
 }
 /**
  * Which catalog models to use when the workspace has credentials for them, and the AI profiles
@@ -369,8 +362,6 @@ export interface LLMPreferences {
   chat_profile: HiroSChat;
   vision_profile: ReadingPictures;
   default_stt: DefaultSpeechToTextModel;
-  default_reranker: DefaultRerankerModel;
-  default_embedder: DefaultEmbedderModel;
   http_keepalive_s: ProviderConnectionKeepaliveSeconds;
   request_timeout_s: ProviderResponseTimeoutSeconds;
   max_retries: ProviderRetries;
@@ -461,7 +452,7 @@ export interface MemoryRetrievalRenderPreferences {
   max_summary_chars: MaxEntitySummaryChars;
 }
 export interface KnowledgePreferences {
-  default_embedding_model: KnowledgeEmbedder;
+  embedder_profile: EmbeddingProfile;
   chunking: KnowledgeChunkingPreferences;
   retrieval: KnowledgeRetrievalPreferences;
   answering: KnowledgeAnsweringPreferences;
@@ -486,21 +477,15 @@ export interface KnowledgeRetrievalPreferences {
 /**
  * Cross-encoder reranker over retrieved candidates (precision step).
  *
- * Prefs-only, default off. ``model_id`` is a catalog ``provider:model`` (cloud: Voyage /
- * Cohere) OR a local-registry id (FlashRank / FastEmbed / sentence-transformers). It is
- * resolved by ``resolve_reranker`` to a LangChain ``BaseDocumentCompressor`` — the same way
- * ``default_embedding_model`` is resolved by the embedder. Rerankers are dimensionless, so a
- * swap is a hot config change (no re-ingest). ``device`` / ``batch_size`` apply to the local
- * torch lane only and are ignored by cloud models. ``model_id`` null = fall back to the
- * workspace default reranker (``llm.default_reranker``); if that is empty too, no reranker
- * (retrieval order used as-is) even when ``enabled`` is true.
+ * Prefs-only, default off. ``profile`` names a reranker profile (``rerank.profiles``: a catalog
+ * model or a local one, with its device and batch size), resolved by ``resolve_reranker`` to a
+ * LangChain ``BaseDocumentCompressor``. Rerankers are dimensionless, so a swap is a hot config
+ * change (no re-ingest). Null = no reranker (retrieval order used as-is) even when ``enabled``.
  */
 export interface KnowledgeRerankerPreferences {
   enabled: EnableReranking;
-  model_id: RerankerModel;
+  profile: RerankerProfile;
   top_n: RerankResultsTopN;
-  device: Device;
-  batch_size: BatchSize;
 }
 export interface KnowledgeAnsweringPreferences {
   profile: KnowledgeAnswering;
@@ -525,7 +510,7 @@ export interface GraphPreferences {
   backend: GraphBackend;
   extraction_profile: GraphExtraction;
   small_profile: GraphSmallSteps;
-  embedder_model: EmbedderModel;
+  embedder_profile: EmbeddingProfile1;
   temporal_default: TemporalLensDefault;
   k_hop: ExpansionHopsK;
   search_recipe: SearchRecipe;
@@ -543,17 +528,14 @@ export interface GraphPreferences {
  * Cross-encoder reranker for the graph fact-search leg.
  *
  * Only takes effect when ``GraphPreferences.search_recipe == 'cross_encoder'``
- * (the admin UI greys this whole group out otherwise). Every field is resolved by the
- * SAME ``resolve_reranker`` the flat Qdrant path uses, so cloud (Cohere/Voyage) and
- * local (FlashRank/FastEmbed/sentence-transformers) models are both available — and a
- * local model that was never downloaded fails fast, degrading the fact search to RRF
- * (no silent fetch). ``model_id`` null = fall back to the workspace default reranker
- * (``llm.default_reranker``) — one model to manage for both legs.
+ * (the admin UI greys this whole group out otherwise). ``profile`` names a reranker profile
+ * (``rerank.profiles``: the model, and where a local one runs), resolved by the SAME
+ * ``resolve_reranker`` the flat Qdrant path uses — a local model that was never downloaded
+ * fails fast, degrading the fact search to RRF (no silent fetch). Null = no reranker (RRF).
  */
 export interface KnowledgeGraphRerankerPreferences {
-  model_id: RerankerModel1;
+  profile: RerankerProfile1;
   min_relevance: MinRelevance;
-  device: DeviceLocalOnly;
 }
 /**
  * Eval-only answering knobs, surfaced under the shared Graphiti engine settings.
@@ -725,5 +707,46 @@ export interface VoiceProfile {
   speed: Speed;
 }
 export interface Uses1 {
+  [k: string]: string | null;
+}
+/**
+ * ``prefs.embedding``: the embedding profiles and which profile each extension's embedding use asks with.
+ */
+export interface EmbeddingPreferences {
+  profiles: Profiles2;
+  uses: Uses2;
+}
+export interface Profiles2 {
+  [k: string]: EmbeddingProfile2;
+}
+/**
+ * One embedding profile (module notes).
+ */
+export interface EmbeddingProfile2 {
+  label: Name1;
+  model: Model3;
+}
+export interface Uses2 {
+  [k: string]: string | null;
+}
+/**
+ * ``prefs.rerank``: the reranker profiles and which profile each extension's reranking use asks with.
+ */
+export interface RerankPreferences {
+  profiles: Profiles3;
+  uses: Uses3;
+}
+export interface Profiles3 {
+  [k: string]: RerankProfile;
+}
+/**
+ * One reranker profile (module notes).
+ */
+export interface RerankProfile {
+  label: Name2;
+  model: Model4;
+  device: Device;
+}
+export interface Uses3 {
   [k: string]: string | null;
 }

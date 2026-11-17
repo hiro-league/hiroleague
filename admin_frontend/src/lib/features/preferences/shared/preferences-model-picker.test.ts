@@ -9,8 +9,6 @@ function makeDraft(): WorkspacePreferences {
       chat_profile: null,
       vision_profile: null,
       default_stt: null,
-      default_reranker: null,
-      default_embedder: null,
       http_keepalive_s: 300,
       request_timeout_s: 180,
       max_retries: 2,
@@ -57,7 +55,7 @@ function makeDraft(): WorkspacePreferences {
     },
     knowledge: {
       ...DEFAULT_KNOWLEDGE,
-      default_embedding_model_locked: false
+      embedder_profile_locked: false
     },
     graph: { ...DEFAULT_GRAPH },
     chat: {
@@ -70,25 +68,17 @@ function makeDraft(): WorkspacePreferences {
     image_profiles: {},
     // Phase 7a: AI profiles + uses (edited by the Catalog's AI tabs, never by the Preferences page).
     ai: { profiles: {}, uses: {}, local_servers: {}, folders: {} },
-    voice: { profiles: {}, uses: {}, hiro_profile: null, clip_cache_mb: 200 }
+    voice: { profiles: {}, uses: {}, hiro_profile: null, clip_cache_mb: 200 },
+    embedding: { profiles: {}, uses: {} },
+    rerank: { profiles: {}, uses: {} }
   };
 }
 
 describe('applyModelIdToDraft', () => {
-  it('writes llm and graph paths', () => {
+  // Embedders and rerankers are profiles now (searchProfile fields): speech-to-text is the one model field.
+  it('writes the speech-to-text model', () => {
     const draft = makeDraft();
     expect(applyModelIdToDraft(draft, 'llm.default_stt', 'openai:whisper-1')).toBe(true);
     expect(draft.llm.default_stt).toBe('openai:whisper-1');
-    expect(applyModelIdToDraft(draft, 'graph.reranker.model_id', 'local:bge-reranker')).toBe(true);
-    expect(draft.graph.reranker.model_id).toBe('local:bge-reranker');
-  });
-
-  it('blocks embedding writes while locked', () => {
-    const draft = makeDraft();
-    draft.knowledge.default_embedding_model_locked = true;
-    expect(applyModelIdToDraft(draft, 'knowledge.default_embedding_model', 'local:embed')).toBe(
-      false
-    );
-    expect(draft.knowledge.default_embedding_model).toBeNull();
   });
 });

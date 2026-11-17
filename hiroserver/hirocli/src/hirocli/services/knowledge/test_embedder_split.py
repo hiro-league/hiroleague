@@ -26,7 +26,7 @@ def test_no_forced_default_returns_unconfigured(tmp_path: Path) -> None:
     embedder = resolve_knowledge_embedder(tmp_path, None)
     assert isinstance(embedder, UnconfiguredEmbedder)
     # Using it fails fast (indexing blocked) rather than silently picking a model.
-    with pytest.raises(RuntimeError, match="No embedder configured"):
+    with pytest.raises(RuntimeError, match="No embedding profile picked"):
         _ = embedder.dimension
 
 
@@ -85,43 +85,54 @@ def test_sync_marker_clears_stale_marker_when_no_data(tmp_path: Path) -> None:
     assert not is_graph_indexed(tmp_path)
 
 
+def _with_profiles(**picks: str | None) -> WorkspacePreferences:
+    return WorkspacePreferences.model_validate({
+        "embedding": {"profiles": {
+            "small": {"label": "Small", "model": "openai:text-embedding-3-small"},
+            "mini": {"label": "Mini", "model": "sentence-transformers/all-MiniLM-L6-v2"},
+            "small-too": {"label": "Small too", "model": "openai:text-embedding-3-small"},
+        }},
+        "graph": {"embedder_profile": picks.get("graph")},
+        "knowledge": {"embedder_profile": picks.get("knowledge")},
+    })
+
+
 def test_graph_embedder_change_blocked_when_indexed(tmp_path: Path) -> None:
     from hirocli.runtime.preferences_runtime import (
         PreferencePathError,
         _validate_knowledge_embedding_transition,
     )
 
-    previous = WorkspacePreferences()
-    updated = WorkspacePreferences()
-    updated.graph.embedder_model = "openai:text-embedding-3-small"
-    edits = {"graph.embedder_model": "openai:text-embedding-3-small"}
+    previous = _with_profiles(graph="small")
+    updated = _with_profiles(graph="mini")
+    edits = {"graph.embedder_profile": "mini"}
 
     # Not indexed → allowed.
     _validate_knowledge_embedding_transition(tmp_path, previous, updated, edits)
 
     # Indexed → blocked.
     mark_graph_indexed(tmp_path)
-    with pytest.raises(PreferencePathError, match="graph.embedder_model cannot be changed"):
+    with pytest.raises(PreferencePathError, match="memory graph's embedder can't change"):
         _validate_knowledge_embedding_transition(tmp_path, previous, updated, edits)
 
+    # Another profile with the same model is fine: the vectors stay valid.
+    _validate_knowledge_embedding_transition(tmp_path, previous, _with_profiles(graph="small-too"), {})
 
-def test_default_embedder_change_blocked_when_graph_inherits_and_indexed(tmp_path: Path) -> None:
+
+def test_editing_the_picked_profiles_model_is_blocked_when_indexed(tmp_path: Path) -> None:
     from hirocli.runtime.preferences_runtime import (
         PreferencePathError,
         _validate_knowledge_embedding_transition,
     )
 
-    previous = WorkspacePreferences()
-    updated = WorkspacePreferences()
-    updated.llm.default_embedder = "sentence-transformers/all-MiniLM-L6-v2"
-    edits = {"llm.default_embedder": updated.llm.default_embedder}
-
-    # Graph indexed AND graph override empty (inherits default) → changing the default is blocked.
+    previous = _with_profiles(graph="small")
+    updated = previous.model_copy(deep=True)
+    updated.embedding.profiles["small"].model = "google:gemini-embedding-001"
     mark_graph_indexed(tmp_path)
-    with pytest.raises(PreferencePathError, match="llm.default_embedder cannot be changed"):
-        _validate_knowledge_embedding_transition(tmp_path, previous, updated, edits)
+    with pytest.raises(PreferencePathError, match="from openai:text-embedding-3-small to google:gemini-embedding-001"):
+        _validate_knowledge_embedding_transition(tmp_path, previous, updated, {})
 
-    # With a graph override set, the graph no longer inherits → default is free to change.
-    previous.graph.embedder_model = "openai:text-embedding-3-small"
-    updated.graph.embedder_model = "openai:text-embedding-3-small"
-    _validate_knowledge_embedding_transition(tmp_path, previous, updated, edits)
+    # A profile the graph doesn't use is free to change.
+    other = previous.model_copy(deep=True)
+    other.embedding.profiles["mini"].model = "google:gemini-embedding-001"
+    _validate_knowledge_embedding_transition(tmp_path, previous, other, {})

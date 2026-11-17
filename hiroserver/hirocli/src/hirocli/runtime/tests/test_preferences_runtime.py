@@ -127,4 +127,4 @@ def test_runtime_update_migrates_saved_version_to_current_schema(tmp_path) -> No
 
     runtime.update("chat.max_messages", 7)
 
-    assert load_preferences(tmp_path).version == 4
+    assert load_preferences(tmp_path).version == 5

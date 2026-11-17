@@ -63,22 +63,19 @@ class KnowledgeGraphRerankerPreferences(BaseModel):
     """Cross-encoder reranker for the graph fact-search leg.
 
     Only takes effect when ``GraphPreferences.search_recipe == 'cross_encoder'``
-    (the admin UI greys this whole group out otherwise). Every field is resolved by the
-    SAME ``resolve_reranker`` the flat Qdrant path uses, so cloud (Cohere/Voyage) and
-    local (FlashRank/FastEmbed/sentence-transformers) models are both available — and a
-    local model that was never downloaded fails fast, degrading the fact search to RRF
-    (no silent fetch). ``model_id`` null = fall back to the workspace default reranker
-    (``llm.default_reranker``) — one model to manage for both legs.
+    (the admin UI greys this whole group out otherwise). ``profile`` names a reranker profile
+    (``rerank.profiles``: the model, and where a local one runs), resolved by the SAME
+    ``resolve_reranker`` the flat Qdrant path uses — a local model that was never downloaded
+    fails fast, degrading the fact search to RRF (no silent fetch). Null = no reranker (RRF).
     """
 
-    # null → fall back to the workspace default reranker model id (llm.default_reranker).
-    model_id: str | None = pref_field(
-        model_kind="rerank",
+    profile: str | None = pref_field(
+        rerank_profile_ref=True,
         default=None,
-        title="Reranker model",
+        title="Reranker profile",
         description=(
-            "Cross-encoder used to rerank fact candidates. Empty = fall back to the default "
-            "reranker (General → Models). Local models must be downloaded first."
+            "The reranker profile that orders fact candidates. Empty = no reranker (the fact "
+            "search falls back to RRF). Local models must be downloaded first."
         ),
     )
     # Drop facts whose post-rerank relevance is below this (maps to Graphiti
@@ -91,16 +88,6 @@ class KnowledgeGraphRerankerPreferences(BaseModel):
         le=1.0,
         title="Min relevance",
         description="Drop facts whose cross-encoder relevance is below this (0–1). 0 = keep all. Ignored by RRF/MMR.",
-    )
-    # Local torch lane only (sentence-transformers); ignored by cloud + ONNX models.
-    device: str | None = pref_field(
-        advanced=True,
-        default=None,
-        title="Device (local only)",
-        description=(
-            "Torch device for local sentence-transformers rerankers (e.g. cpu, cuda). "
-            "Blank = auto. Ignored by cloud + ONNX models."
-        ),
     )
 
 
@@ -328,15 +315,15 @@ class GraphPreferences(BaseModel):
             "timestamps. Empty uses the graph extraction model."
         ),
     )
-    # ``None`` → shares the knowledge dense embedder (decision G8).
-    embedder_model: str | None = pref_field(
-        model_kind="embedding",
+    # An embedding profile (``embedding.profiles``). Locked once the graph holds vectors: they are
+    # bound to the model that made them (``io.check_embedder_transition``).
+    embedder_profile: str | None = pref_field(
+        embedding_profile_ref=True,
         default=None,
-        title="Embedder model",
+        title="Embedding profile",
         description=(
-            "Embeds entity names + facts into the graph. Null shares the knowledge embedding "
-            "model. Shared across memory + knowledge graph data — changing it re-indexes "
-            "everything."
+            "Embeds entity names and facts into the graph. Empty = the graph can't be built or "
+            "searched. Locked once the graph holds data: another model needs a new graph."
         ),
     )
     # Default temporal lens at retrieval: current facts only vs include historical.

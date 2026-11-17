@@ -106,8 +106,8 @@ export type ChatOverlayMode = 'full' | 'partial';
 // Merged the former 'active-providers' tab into 'providers' — one providers list shows both
 // catalog + configured state, so the separate active tab no longer exists.
 // Phase 7a mock-up: 'profiles' (AI profiles) and 'uses' (extension uses → profile).
-// Phase 7b mockup: 'profiles' | 'voices' | 'uses' are the three sub-tabs of the Profiles tab.
-export type CatalogTabPreference = 'providers' | 'models' | 'profiles' | 'voices' | 'uses';
+// 'profiles' | 'voices' | 'embedders' | 'rerankers' | 'uses' are the sub-tabs of the Profiles tab.
+export type CatalogTabPreference = 'providers' | 'models' | 'profiles' | 'voices' | 'embedders' | 'rerankers' | 'uses';
 export type CharactersTabPreference = 'browse' | 'detail';
 export type KnowledgeTabPreference = 'ingest' | 'browse' | 'ask';
 export type MemoriesTabPreference = 'memories' | 'graph';

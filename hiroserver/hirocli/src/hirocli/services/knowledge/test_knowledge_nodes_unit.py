@@ -240,11 +240,17 @@ async def test_rerank_node_disabled(tmp_path: Path) -> None:
     assert out == {}
 
 
+def _rerank_prefs(model: str) -> WorkspacePreferences:
+    """Reranking on, with a reranker profile for ``model``."""
+    return WorkspacePreferences.model_validate({
+        "rerank": {"profiles": {"r": {"label": "R", "model": model}}},
+        "knowledge": {"retrieval": {"reranker": {"enabled": True, "profile": "r"}}},
+    })
+
+
 @pytest.mark.asyncio
 async def test_rerank_node_no_candidates(tmp_path: Path) -> None:
-    prefs = WorkspacePreferences()
-    prefs.knowledge.retrieval.reranker.enabled = True
-    prefs.knowledge.retrieval.reranker.model_id = "local:ms-marco"
+    prefs = _rerank_prefs("local:ms-marco")
     nodes = _nodes(tmp_path, prefs=prefs)
     out = await nodes.rerank_node({"normalized_query": _normalized(), "hits": []})
     assert out == {}
@@ -252,9 +258,7 @@ async def test_rerank_node_no_candidates(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_rerank_node_success(tmp_path: Path) -> None:
-    prefs = WorkspacePreferences()
-    prefs.knowledge.retrieval.reranker.enabled = True
-    prefs.knowledge.retrieval.reranker.model_id = "local:ms-marco"
+    prefs = _rerank_prefs("local:ms-marco")
     nodes = _nodes(tmp_path, prefs=prefs)
     out = await nodes.rerank_node(
         {"normalized_query": _normalized(), "hits": [knowledge_hit()]}

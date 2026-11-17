@@ -42,7 +42,7 @@ from hirocli.domain.preferences import (
     ModelTuning,
     ResolvedModel,
     WorkspacePreferences,
-    resolve_graph_reranker_model,
+    resolve_graph_reranker_profile,
     resolve_graphiti_embedder_model,
     resolve_graphiti_extraction_model,
     resolve_graphiti_small_model,
@@ -1004,8 +1004,8 @@ class GraphitiMemoryService:
         embedder_model_id = resolve_graphiti_embedder_model(prefs)
         if not embedder_model_id:
             raise ValueError(
-                "No graph embedder configured. Set the Graph embedder, or a workspace default "
-                "embedder (Preferences → General → Default models), before building the graph."
+                "No embedding profile picked for conversation memory. Pick one in Providers/Models → "
+                "Profiles → Uses before building the graph."
             )
         backend = resolve_knowledge_embedder(
             workspace_path, embedder_model_id, credential_store=credential_store
@@ -1044,8 +1044,9 @@ class GraphitiMemoryService:
         cross_encoder: CrossEncoderClient | None = None
         reranker_min_score = 0.0
         if recipe == "cross_encoder":
-            # Graph override, else the workspace default reranker (llm.default_reranker).
-            reranker_model_id = resolve_graph_reranker_model(prefs)
+            # The graph's reranker profile (graph.reranker.profile): its model and device.
+            reranker_profile = resolve_graph_reranker_profile(prefs)
+            reranker_model_id = reranker_profile.model if reranker_profile is not None else None
             if reranker_model_id:
                 try:
                     from hirocli.services.knowledge.reranker import resolve_reranker
@@ -1055,7 +1056,7 @@ class GraphitiMemoryService:
                         workspace_path=workspace_path,
                         workspace_id=workspace_id,
                         top_n=_RERANK_CANDIDATE_CAP,  # rank ALL candidates; SearchConfig.limit cuts
-                        device=graph.reranker.device,
+                        device=reranker_profile.device if reranker_profile is not None else None,
                         credential_store=credential_store,
                     )
                     # Report rerank usage into the active recall accumulator so the ``rerank``
@@ -1078,8 +1079,8 @@ class GraphitiMemoryService:
                     recipe = "rrf"
             else:
                 log.info(
-                    "⬇️ graphiti — search_recipe=cross_encoder but no reranker model set "
-                    "(graph.reranker.model_id / llm.default_reranker) · using RRF"
+                    "⬇️ graphiti — search_recipe=cross_encoder but no reranker profile picked "
+                    "(graph.reranker.profile) · using RRF"
                 )
                 recipe = "rrf"
 

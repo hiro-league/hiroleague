@@ -59,6 +59,15 @@ from .models_knowledge import (
     KnowledgeRewritePreferences,
 )
 from .models_llm import LLMPreferences
+from .models_search import (
+    LOCAL_EMBEDDER_PREFIX,
+    RERANK_DEVICES,
+    SEARCH_PROFILE_ID,
+    EmbeddingPreferences,
+    EmbeddingProfile,
+    RerankPreferences,
+    RerankProfile,
+)
 from .models_voice import (
     VOICE_PROFILE_ID,
     VOICE_PROVIDERS,
@@ -81,6 +90,14 @@ from .models_memory import (
 )
 
 __all__ = [
+    # Embedding and reranker profiles
+    "EmbeddingPreferences",
+    "EmbeddingProfile",
+    "LOCAL_EMBEDDER_PREFIX",
+    "RERANK_DEVICES",
+    "RerankPreferences",
+    "RerankProfile",
+    "SEARCH_PROFILE_ID",
     # LLM
     "LLMPreferences",
     # Media
@@ -149,9 +166,9 @@ __all__ = [
 class WorkspacePreferences(BaseModel):
     """Root preferences object persisted as preferences.json."""
 
-    # 4 = Phase 7b step 5 (AI profiles for Hiro's jobs); older files are converted once on load
-    # (``convert_v4``, called from ``io.load_preferences``).
-    version: int = pref_field(read_only=True, default=4)
+    # 5 = embedding and reranker profiles (``models_search``); 4 = AI profiles for Hiro's jobs. Older
+    # files are converted once on load (``convert_v4``, then ``convert_v5``, from ``io.load_preferences``).
+    version: int = pref_field(read_only=True, default=5)
     llm: LLMPreferences = Field(default_factory=LLMPreferences)
     media: MediaPreferences = Field(default_factory=MediaPreferences)
     memory: MemoryPreferences = Field(default_factory=MemoryPreferences)
@@ -174,6 +191,10 @@ class WorkspacePreferences(BaseModel):
     # Phase 7b: voice profiles, which profile each extension speech use speaks with (the Catalog's
     # Profiles tab edits both), and the spoken-clip cache size (Preferences → General → Spoken clips).
     voice: VoicePreferences = Field(default_factory=VoicePreferences)
+    # Embedding and reranker profiles, and which profile each extension's searching use asks with (the
+    # Catalog's Profiles tab edits them). Hiro's own four searching uses are fields in graph and knowledge.
+    embedding: EmbeddingPreferences = Field(default_factory=EmbeddingPreferences)
+    rerank: RerankPreferences = Field(default_factory=RerankPreferences)
 
     @model_validator(mode="after")
     def _validate_job_profiles(self) -> "WorkspacePreferences":
@@ -196,6 +217,12 @@ class WorkspacePreferences(BaseModel):
         for path, profile_id in iter_profile_refs(self, "voice_profile_ref"):
             if profile_id is not None and profile_id not in self.voice.profiles:
                 raise ValueError(f"{path} points at an unknown voice profile {profile_id!r}")
+        for path, profile_id in iter_profile_refs(self, "embedding_profile_ref"):
+            if profile_id is not None and profile_id not in self.embedding.profiles:
+                raise ValueError(f"{path} points at an unknown embedding profile {profile_id!r}")
+        for path, profile_id in iter_profile_refs(self, "rerank_profile_ref"):
+            if profile_id is not None and profile_id not in self.rerank.profiles:
+                raise ValueError(f"{path} points at an unknown reranker profile {profile_id!r}")
         return self
 
     @model_validator(mode="after")

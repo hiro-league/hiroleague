@@ -195,24 +195,7 @@ def _validate_knowledge_embedding_transition(
 ) -> None:
     """PATCH-time embedder guard — delegates to the shared rule (``io.check_embedder_transition``),
     raising ``PreferencePathError``. A thin wrapper so the runtime layer doesn't import the
-    knowledge/graph services itself; the "changed" signal is "edited AND value actually differs"."""
-    transitions: dict[str, tuple[Any, Any]] = {
-        "knowledge.default_embedding_model": (
-            previous.knowledge.default_embedding_model,
-            updated.knowledge.default_embedding_model,
-        ),
-        "graph.embedder_model": (previous.graph.embedder_model, updated.graph.embedder_model),
-        "llm.default_embedder": (previous.llm.default_embedder, updated.llm.default_embedder),
-    }
-
-    def _changed(path: str) -> bool:
-        old, new = transitions[path]
-        return path in edits and old != new
-
-    check_embedder_transition(
-        workspace_path,
-        changed=_changed,
-        knowledge_inherits_default=not (updated.knowledge.default_embedding_model or "").strip(),
-        graph_inherits_default=not (updated.graph.embedder_model or "").strip(),
-        error=PreferencePathError,
-    )
+    knowledge/graph services itself. The rule compares the model each search embeds with before and
+    after, so any edit (a pick, a profile's model, a removed profile) is checked the same way."""
+    del edits
+    check_embedder_transition(workspace_path, previous, updated, error=PreferencePathError)

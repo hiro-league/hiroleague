@@ -31,7 +31,7 @@
     // uses) are `?tab=` values of their own, so the top strip marks Profiles for any of them.
     { id: 'profiles', label: 'Profiles', kind: 'pane' }
   ];
-  const PROFILES_SUBS: readonly CatalogTabPreference[] = ['profiles', 'voices', 'uses'];
+  const PROFILES_SUBS: readonly CatalogTabPreference[] = ['profiles', 'voices', 'embedders', 'rerankers', 'uses'];
   const inProfiles = $derived(PROFILES_SUBS.includes(ctrl.activeTab));
 
   // Local servers (LM Studio, Ollama) and, once read, plan tools (Claude Code, Codex) draw their own

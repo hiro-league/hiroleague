@@ -32,8 +32,6 @@ function makePrefs(overrides?: Partial<WorkspacePreferences>): WorkspacePreferen
       chat_profile: null,
       vision_profile: null,
       default_stt: null,
-      default_reranker: null,
-      default_embedder: null,
       http_keepalive_s: 300,
       request_timeout_s: 180,
       max_retries: 2,
@@ -97,7 +95,9 @@ function makePrefs(overrides?: Partial<WorkspacePreferences>): WorkspacePreferen
       local_servers: {},
       folders: {}
     },
-    voice: { profiles: {}, uses: {}, hiro_profile: null, clip_cache_mb: 200 }
+    voice: { profiles: {}, uses: {}, hiro_profile: null, clip_cache_mb: 200 },
+    embedding: { profiles: {}, uses: {} },
+    rerank: { profiles: {}, uses: {} }
   };
   return normalizeWorkspacePreferences({ ...base, ...overrides });
 }
@@ -149,12 +149,12 @@ describe('editsForSave', () => {
     expect(diffEdits(baseline, draft)).toEqual({ 'voice.hiro_profile': 'hiro-voice' });
   });
 
-  it('coerces cleared reranker device to null', () => {
+  it('coerces a cleared reranker profile pick to null', () => {
     const baseline = makePrefs();
-    baseline.graph.reranker.device = 'cpu';
+    baseline.graph.reranker.profile = 'voyage';
     const draft = cloneWorkspacePreferences(baseline);
-    draft.graph.reranker.device = '';
-    expect(diffEdits(baseline, draft)).toEqual({ 'graph.reranker.device': null });
+    draft.graph.reranker.profile = '';
+    expect(diffEdits(baseline, draft)).toEqual({ 'graph.reranker.profile': null });
   });
 
   it('sends graph.eval.answer_prompts as one whole-object path', () => {
@@ -220,7 +220,7 @@ describe('editsForSave', () => {
     const baseline = makePrefs();
     const draft = cloneWorkspacePreferences(baseline);
     draft.knowledge.answering.model_resolved = 'openai:gpt-4';
-    draft.knowledge.default_embedding_model_locked = true;
+    draft.knowledge.embedder_profile_locked = true;
     expect(diffEdits(baseline, draft)).toEqual({});
   });
 

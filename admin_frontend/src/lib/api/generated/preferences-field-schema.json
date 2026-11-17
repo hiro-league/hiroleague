@@ -3,7 +3,7 @@
     "path": "version",
     "nullable": false,
     "type": "integer",
-    "default": 4,
+    "default": 5,
     "title": "Version",
     "readOnly": true
   },
@@ -32,24 +32,6 @@
     "default": null,
     "title": "Default speech-to-text model",
     "model_kind": "stt"
-  },
-  "llm.default_reranker": {
-    "path": "llm.default_reranker",
-    "nullable": true,
-    "type": "string",
-    "default": null,
-    "title": "Default reranker model",
-    "description": "Default cross-encoder reranker. The knowledge and graph rerankers both fall back to this when their own model is empty. Empty = no default. Cloud models need a provider key; local models must be downloaded first.",
-    "model_kind": "rerank"
-  },
-  "llm.default_embedder": {
-    "path": "llm.default_embedder",
-    "nullable": true,
-    "type": "string",
-    "default": null,
-    "title": "Default embedder model",
-    "description": "Default embedder. The knowledge and graph embedders both fall back to this when their own model is empty. Empty = no default (indexing is blocked until one is chosen). Cloud models need a provider key; local models must be downloaded first.",
-    "model_kind": "embedding"
   },
   "llm.http_keepalive_s": {
     "path": "llm.http_keepalive_s",
@@ -382,14 +364,14 @@
     "min": 40,
     "max": 4000
   },
-  "knowledge.default_embedding_model": {
-    "path": "knowledge.default_embedding_model",
+  "knowledge.embedder_profile": {
+    "path": "knowledge.embedder_profile",
     "nullable": true,
     "type": "string",
     "default": null,
-    "title": "Knowledge embedder",
-    "description": "Knowledge embedder. Empty inherits the workspace default (General \u2192 Models).",
-    "model_kind": "embedding"
+    "title": "Embedding profile",
+    "description": "Embeds knowledge documents and questions. Empty = knowledge can't be indexed or searched. Locked once the collection holds documents.",
+    "embedding_profile_ref": true
   },
   "knowledge.chunking.chunk_size": {
     "path": "knowledge.chunking.chunk_size",
@@ -473,14 +455,14 @@
     "default": false,
     "title": "Enable reranking"
   },
-  "knowledge.retrieval.reranker.model_id": {
-    "path": "knowledge.retrieval.reranker.model_id",
+  "knowledge.retrieval.reranker.profile": {
+    "path": "knowledge.retrieval.reranker.profile",
     "nullable": true,
     "type": "string",
     "default": null,
-    "title": "Reranker model",
-    "description": "Cross-encoder used to reorder retrieved candidates. Empty = fall back to the default reranker (General \u2192 Models). Local models must be downloaded first.",
-    "model_kind": "rerank"
+    "title": "Reranker profile",
+    "description": "The reranker profile that reorders retrieved candidates. Empty = no reranker. Local models must be downloaded first.",
+    "rerank_profile_ref": true
   },
   "knowledge.retrieval.reranker.top_n": {
     "path": "knowledge.retrieval.reranker.top_n",
@@ -491,22 +473,6 @@
     "description": "Final returned results if using rerank (top N).",
     "min": 1,
     "max": 100
-  },
-  "knowledge.retrieval.reranker.device": {
-    "path": "knowledge.retrieval.reranker.device",
-    "nullable": true,
-    "type": "string",
-    "default": null,
-    "title": "Device"
-  },
-  "knowledge.retrieval.reranker.batch_size": {
-    "path": "knowledge.retrieval.reranker.batch_size",
-    "nullable": false,
-    "type": "integer",
-    "default": 32,
-    "title": "Batch Size",
-    "min": 1,
-    "max": 512
   },
   "knowledge.answering.profile": {
     "path": "knowledge.answering.profile",
@@ -596,14 +562,14 @@
     "description": "A cheaper AI profile for Graphiti's sub-steps \u2014 node dedupe, entity summaries, timestamps. Empty uses the graph extraction model.",
     "ai_profile_ref": true
   },
-  "graph.embedder_model": {
-    "path": "graph.embedder_model",
+  "graph.embedder_profile": {
+    "path": "graph.embedder_profile",
     "nullable": true,
     "type": "string",
     "default": null,
-    "title": "Embedder model",
-    "description": "Embeds entity names + facts into the graph. Null shares the knowledge embedding model. Shared across memory + knowledge graph data \u2014 changing it re-indexes everything.",
-    "model_kind": "embedding"
+    "title": "Embedding profile",
+    "description": "Embeds entity names and facts into the graph. Empty = the graph can't be built or searched. Locked once the graph holds data: another model needs a new graph.",
+    "embedding_profile_ref": true
   },
   "graph.temporal_default": {
     "path": "graph.temporal_default",
@@ -711,14 +677,14 @@
     "title": "Graph observability",
     "description": "How much the graph engine records to Graph Runs (ingest + retrieval). Off = nothing \u2014 no ledger rows, tracer, or usage sinks (spares CPU; graph cost is NOT tracked). Ledger = one priced roll-up row per episode (ingest) and per search (rerank), so token cost still folds into the run total \u2014 the production default. Trace = Ledger plus a deep per-stage sidecar (the \u2317 retrieval/ingest trace dialogs) for debugging. Replaces the old Rich/Compact detail and the trace env vars."
   },
-  "graph.reranker.model_id": {
-    "path": "graph.reranker.model_id",
+  "graph.reranker.profile": {
+    "path": "graph.reranker.profile",
     "nullable": true,
     "type": "string",
     "default": null,
-    "title": "Reranker model",
-    "description": "Cross-encoder used to rerank fact candidates. Empty = fall back to the default reranker (General \u2192 Models). Local models must be downloaded first.",
-    "model_kind": "rerank"
+    "title": "Reranker profile",
+    "description": "The reranker profile that orders fact candidates. Empty = no reranker (the fact search falls back to RRF). Local models must be downloaded first.",
+    "rerank_profile_ref": true
   },
   "graph.reranker.min_relevance": {
     "path": "graph.reranker.min_relevance",
@@ -730,15 +696,6 @@
     "description": "Drop facts whose cross-encoder relevance is below this (0\u20131). 0 = keep all. Ignored by RRF/MMR.",
     "min": 0.0,
     "max": 1.0
-  },
-  "graph.reranker.device": {
-    "path": "graph.reranker.device",
-    "nullable": true,
-    "type": "string",
-    "default": null,
-    "title": "Device (local only)",
-    "description": "Torch device for local sentence-transformers rerankers (e.g. cpu, cuda). Blank = auto. Ignored by cloud + ONNX models.",
-    "advanced": true
   },
   "graph.eval.answer_prompts": {
     "path": "graph.eval.answer_prompts",
@@ -1050,13 +1007,41 @@
     "min": 0,
     "max": 5000
   },
-  "knowledge.default_embedding_model_locked": {
-    "path": "knowledge.default_embedding_model_locked",
+  "embedding.profiles": {
+    "path": "embedding.profiles",
+    "nullable": false,
+    "type": "object",
+    "title": "Profiles",
+    "preferencesSaveSkip": true
+  },
+  "embedding.uses": {
+    "path": "embedding.uses",
+    "nullable": false,
+    "type": "object",
+    "title": "Uses",
+    "preferencesSaveSkip": true
+  },
+  "rerank.profiles": {
+    "path": "rerank.profiles",
+    "nullable": false,
+    "type": "object",
+    "title": "Profiles",
+    "preferencesSaveSkip": true
+  },
+  "rerank.uses": {
+    "path": "rerank.uses",
+    "nullable": false,
+    "type": "object",
+    "title": "Uses",
+    "preferencesSaveSkip": true
+  },
+  "knowledge.embedder_profile_locked": {
+    "path": "knowledge.embedder_profile_locked",
     "type": "boolean",
     "readOnly": true
   },
-  "graph.embedder_model_locked": {
-    "path": "graph.embedder_model_locked",
+  "graph.embedder_profile_locked": {
+    "path": "graph.embedder_profile_locked",
     "type": "boolean",
     "readOnly": true
   },

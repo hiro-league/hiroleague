@@ -31,7 +31,7 @@ from hirocli.domain.model_factory import create_chat_model, with_structured_outp
 from hirocli.domain.preferences import (
     DEFAULT_KNOWLEDGE_REWRITE_PROMPT,
     resolve_knowledge_embedder_model,
-    resolve_knowledge_reranker_model,
+    resolve_knowledge_reranker_profile,
 )
 from hirocli.runtime.agent_graph.events import GRAPH_LLM_USAGE
 from hirocli.runtime.agent_graph.graph_kit import (
@@ -523,9 +523,10 @@ class KnowledgeRetrievalNodes(NodeGroup):
         # Prefs-only, default off. Fails safe: any error logs and returns {} so the fused
         # retrieval order is kept — reranking never blocks an answer.
         reranker = self._prefs.knowledge.retrieval.reranker
-        # Resolve the effective model: the knowledge override, else the workspace default
-        # reranker (llm.default_reranker). None = nothing configured anywhere → skip.
-        model_id = resolve_knowledge_reranker_model(self._prefs)
+        # The knowledge's reranker profile (knowledge.retrieval.reranker.profile): its model and device.
+        # None = no profile picked → skip.
+        profile = resolve_knowledge_reranker_profile(self._prefs)
+        model_id = profile.model if profile is not None else None
         hits = state.get("hits") or []
         # Record WHY we skipped instead of writing a blank row — a node that ran should never be a
         # black box.
@@ -561,7 +562,7 @@ class KnowledgeRetrievalNodes(NodeGroup):
                 hits,
                 model_id=model_id,
                 top_n=reranker.top_n,
-                device=reranker.device,
+                device=profile.device if profile is not None else None,
                 workspace_id=self._workspace_id,
             )
         except Exception as exc:

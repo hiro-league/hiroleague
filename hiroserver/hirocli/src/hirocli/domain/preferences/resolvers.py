@@ -34,6 +34,7 @@ from .models import WorkspacePreferences
 from .models_ai import AI_PLAN_PROVIDERS, AiProfile, ai_fallback_chain
 
 if TYPE_CHECKING:
+    from .models_search import RerankProfile
     from .models_voice import VoiceProfile
 
 logger = logging.getLogger(__name__)
@@ -364,58 +365,55 @@ def resolve_chat_retrieval_agent_prompt(prefs: WorkspacePreferences) -> tuple[st
     return prefs.graph.eval.resolve_prompt_from_library(active, DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT)
 
 
-def _first_configured_id(*candidates: str | None) -> str | None:
-    """First non-blank id in the chain (each stripped), else ``None`` — the shared "override then
-    workspace default" fallback for the pure model-id preference reads below."""
-    for candidate in candidates:
-        stripped = (candidate or "").strip()
-        if stripped:
-            return stripped
-    return None
+def _embedding_profile_model(prefs: WorkspacePreferences, profile_id: str | None) -> str | None:
+    """The model of the embedding profile ``profile_id`` names, else ``None`` (not set, or gone)."""
+    profile = prefs.embedding.profiles.get((profile_id or "").strip())
+    return profile.model if profile is not None else None
+
+
+def _rerank_profile(prefs: WorkspacePreferences, profile_id: str | None) -> "RerankProfile | None":
+    return prefs.rerank.profiles.get((profile_id or "").strip())
 
 
 def resolve_knowledge_embedder_model(prefs: WorkspacePreferences) -> str | None:
-    """Knowledge embedder id — the knowledge override (``knowledge.default_embedding_model``)
-    when set, else the workspace default (``llm.default_embedder``).
+    """Knowledge embedder id: the model of the knowledge's embedding profile (``knowledge.embedder_profile``).
 
-    ``None`` = no embedder configured anywhere. Embedding is mandatory and dimension-bound, so
-    there is no silent fallback: callers must gate ingest/query on ``None`` rather than forcing a
-    model. Pure preference read — availability/download is checked by ``resolve_knowledge_embedder``
-    at use time."""
-    return _first_configured_id(
-        prefs.knowledge.default_embedding_model, prefs.llm.default_embedder
-    )
+    ``None`` = no profile picked. Embedding is mandatory and dimension-bound, so there is no silent
+    fallback: callers must gate ingest/query on ``None`` rather than forcing a model. Pure preference
+    read — availability/download is checked by ``resolve_knowledge_embedder`` at use time."""
+    return _embedding_profile_model(prefs, prefs.knowledge.embedder_profile)
 
 
 def resolve_graphiti_embedder_model(prefs: WorkspacePreferences) -> str | None:
-    """Graphiti embedder id for node/fact embeddings — the graph override
-    (``graph.embedder_model``) when set, else the workspace default (``llm.default_embedder``).
+    """Graphiti embedder id for node/fact embeddings: the model of the graph's embedding profile
+    (``graph.embedder_profile``). ``None`` = no profile picked; the graph build/ingest must gate on this
+    rather than forcing a model (decision: no silent default). Pure preference read."""
+    return _embedding_profile_model(prefs, prefs.graph.embedder_profile)
 
-    ``None`` = no embedder configured; the graph build/ingest must gate on this rather than
-    forcing a model (decision: no silent default). Pure preference read."""
-    return _first_configured_id(prefs.graph.embedder_model, prefs.llm.default_embedder)
+
+def resolve_knowledge_reranker_profile(prefs: WorkspacePreferences) -> "RerankProfile | None":
+    """The knowledge retrieval's reranker profile (``knowledge.retrieval.reranker.profile``): its model,
+    device and batch size. ``None`` = no reranker (retrieval order kept)."""
+    return _rerank_profile(prefs, prefs.knowledge.retrieval.reranker.profile)
 
 
 def resolve_knowledge_reranker_model(prefs: WorkspacePreferences) -> str | None:
-    """Knowledge retrieval reranker model id.
+    """Knowledge retrieval reranker model id (the profile's), ``None`` = no reranker. Pure preference read —
+    availability/download is checked by ``resolve_reranker`` at use time."""
+    profile = resolve_knowledge_reranker_profile(prefs)
+    return profile.model if profile is not None else None
 
-    The knowledge-specific override (``knowledge.retrieval.reranker.model_id``) when set,
-    else the workspace default reranker (``llm.default_reranker``). ``None`` = no reranker
-    (retrieval order kept). Pure preference read — availability/download is checked by
-    ``resolve_reranker`` at use time."""
-    return _first_configured_id(
-        prefs.knowledge.retrieval.reranker.model_id, prefs.llm.default_reranker
-    )
+
+def resolve_graph_reranker_profile(prefs: WorkspacePreferences) -> "RerankProfile | None":
+    """The graph fact search's reranker profile (``graph.reranker.profile``), ``None`` = none."""
+    return _rerank_profile(prefs, prefs.graph.reranker.profile)
 
 
 def resolve_graph_reranker_model(prefs: WorkspacePreferences) -> str | None:
-    """Graph fact-search reranker model id.
-
-    The graph-specific override (``graph.reranker.model_id``) when set, else the workspace
-    default reranker (``llm.default_reranker``). ``None`` = degrade the ``cross_encoder``
-    search recipe to RRF. Pure preference read — availability is checked by
-    ``resolve_reranker`` at use time."""
-    return _first_configured_id(prefs.graph.reranker.model_id, prefs.llm.default_reranker)
+    """Graph fact-search reranker model id (the profile's). ``None`` = degrade the ``cross_encoder``
+    search recipe to RRF. Pure preference read — availability is checked by ``resolve_reranker`` at use time."""
+    profile = resolve_graph_reranker_profile(prefs)
+    return profile.model if profile is not None else None
 
 
 def resolve_character_llm(
@@ -517,6 +515,8 @@ __all__ = [
     "resolve_knowledge_answering_llm",
     "resolve_knowledge_embedder_model",
     "resolve_knowledge_reranker_model",
+    "resolve_knowledge_reranker_profile",
+    "resolve_graph_reranker_profile",
     "resolve_knowledge_rewrite_llm",
     "resolve_memory_retrieval_llm",
     "resolve_profile_model",
