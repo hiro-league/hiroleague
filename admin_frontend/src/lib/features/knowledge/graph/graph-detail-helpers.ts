@@ -1,6 +1,6 @@
 /**
  * Pure helpers for the graph detail panel (no Svelte/DOM). Kept side-effect-free so they
- * unit-test trivially and keep the .svelte file thin (svelte-best-practice §2).
+ * unit-test trivially and keep the .svelte file thin (frontend guide §2).
  */
 import type { GraphEdgeDTO } from '$lib/api/knowledge';
 

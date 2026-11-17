@@ -915,7 +915,7 @@ already on disk after P5/P6 (extended `row_json.retrieval_loop` block + trace si
 makes it visible to a reviewer. Path the user already clicks: **Eval → Memory** (or
 **Knowledge**) **→ Questions/Answers → click a row to expand**.
 
-> Apply the **svelte-best-practice** skill before authoring. The new component is a Svelte 5
+> Follow the **frontend guide** (hiro-docs `standards/guides/frontend.md`) before authoring. The new component is a Svelte 5
 > `.svelte` file with runes; the trajectory state goes in a `.svelte.ts` controller; styling stays
 > Tailwind v4 utilities consistent with the existing sibling components.
 
@@ -1428,7 +1428,7 @@ hand-editing `preferences.json`. The backend prefs already land in P1 (and P9 re
 `max_searches` → `max_agent_turns`) under `graph.retrieval_agent.*`; this phase delivers the admin
 UI card on top of them.
 
-> Apply the **svelte-best-practice** skill. The card is a Svelte 5 `.svelte` file with runes, uses
+> Follow the **frontend guide** (hiro-docs `standards/guides/frontend.md`). The card is a Svelte 5 `.svelte` file with runes, uses
 > the existing Preferences-section primitives (dirty marking + `editsForSave` structural diff), and
 > follows the visual pattern of sibling cards like `GraphEngineSection`'s existing entries.
 
