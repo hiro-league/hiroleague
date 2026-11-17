@@ -17,65 +17,28 @@ from typing import TYPE_CHECKING, Any
 
 from hiro_commons.constants.storage import DB_DIR
 from hiro_commons.log import Logger
-from qdrant_client import models as qm
-
-from hirocli.domain.events import DomainEvent, get_domain_event_bus
-from hirocli.domain.preferences import load_preferences
-
-if TYPE_CHECKING:
-    from hirocli.domain.preferences import KnowledgeChunkingPreferences, WorkspacePreferences
-from hiro_memory.ledger import current_run
-from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
-from hirocli.runtime.agent_graph.services import AgentServices
-from hirocli.services.knowledge.agent import (
-    KnowledgeAgentGraph,
-    KnowledgeGraphConfig,
-    build_qdrant_filter,
-)
-from hirocli.services.knowledge.audit_log import (
-    build_answer_audit,
-    build_ingest_audit,
-    build_search_audit,
-    log_knowledge_answer,
-    log_knowledge_ingest,
-    log_knowledge_search,
-)
-from hirocli.services.knowledge.ledger_runner import (
-    finalize_standalone_run,
-    knowledge_answer_ledger,
-    ledger_identity_from_parent,
-)
-from hirocli.services.knowledge.catalog_store import CatalogStore
-from hirocli.services.knowledge.chunker import embed_text_for_chunk
-from hirocli.services.knowledge.constants import (
-    DB_FILENAME,
-    DEFAULT_FILE_CONCURRENCY,
-    KNOWLEDGE_DELETED,
-    KNOWLEDGE_DIR,
-    KNOWLEDGE_INGESTED,
-    KNOWLEDGE_JOB_COMPLETED,
-    KNOWLEDGE_JOB_FAILED,
-    KNOWLEDGE_JOB_PROGRESS,
-    KNOWLEDGE_JOB_STARTED,
-    MAX_FILE_SIZE_BYTES,
-    QDRANT_DIR,
-)
-from hirocli.services.knowledge.converters import (
+from hiro_memory.knowledge.agent import KnowledgeAgentGraph, build_qdrant_filter
+from hiro_memory.knowledge.catalog_store import CatalogStore
+from hiro_memory.knowledge.chunker import embed_text_for_chunk
+from hiro_memory.knowledge.converters import (
     bounded_file_concurrency,
     default_file_concurrency_for_embedder,
     document_from_row,
     job_from_row,
     utc_now_iso,
 )
-from hirocli.services.knowledge.embedding_backends import (
+from hiro_memory.knowledge.embedding_backends import (
     EmbeddingBackend,
     SparseEmbeddingBackend,
     SparseVectorData,
 )
-from hirocli.services.knowledge.live_registry import register_live_service, unregister_live_service
-from hirocli.services.knowledge.runtime_owner import current_owner_token
-from hirocli.services.knowledge.loaders import DEFAULT_LOADER_REGISTRY, LoaderRegistry
-from hirocli.services.knowledge.models import (
+from hiro_memory.knowledge.ledger_runner import (
+    finalize_standalone_run,
+    knowledge_answer_ledger,
+    ledger_identity_from_parent,
+)
+from hiro_memory.knowledge.loaders import DEFAULT_LOADER_REGISTRY, LoaderRegistry
+from hiro_memory.knowledge.models import (
     KnowledgeAnswerResult,
     KnowledgeDocumentDetailResult,
     KnowledgeDocumentRow,
@@ -86,9 +49,42 @@ from hirocli.services.knowledge.models import (
     KnowledgeSearchResult,
     ScanFolderResult,
 )
+from hiro_memory.knowledge.runtime_owner import current_owner_token
+from hiro_memory.knowledge.scanner import SourceScanner
+from hiro_memory.knowledge.vector_store import KnowledgeVectorStore
+from hiro_memory.ledger import current_run
+from hiro_memory.ledger.node_group import LedgerSinkRef
+from qdrant_client import models as qm
+
+from hirocli.domain.events import DomainEvent, get_domain_event_bus
+from hirocli.domain.preferences import load_preferences
+from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
+from hirocli.services.knowledge.audit_log import (
+    build_answer_audit,
+    build_ingest_audit,
+    build_search_audit,
+    log_knowledge_answer,
+    log_knowledge_ingest,
+    log_knowledge_search,
+)
+from hirocli.services.knowledge.constants import (
+    DB_FILENAME,
+    KNOWLEDGE_DELETED,
+    KNOWLEDGE_DIR,
+    KNOWLEDGE_INGESTED,
+    KNOWLEDGE_JOB_COMPLETED,
+    KNOWLEDGE_JOB_FAILED,
+    KNOWLEDGE_JOB_PROGRESS,
+    KNOWLEDGE_JOB_STARTED,
+    MAX_FILE_SIZE_BYTES,
+    QDRANT_DIR,
+)
+from hirocli.services.knowledge.graph_wiring import knowledge_graph_config
+from hirocli.services.knowledge.live_registry import register_live_service, unregister_live_service
 from hirocli.services.knowledge.preview import FilePreviewResult, read_file_preview
-from hirocli.services.knowledge.scanner import SourceScanner
-from hirocli.services.knowledge.vector_store import KnowledgeVectorStore
+
+if TYPE_CHECKING:
+    from hirocli.domain.preferences import KnowledgeChunkingPreferences, WorkspacePreferences
 
 log = Logger.get("SVC.KNOWLEDGE")
 
@@ -398,7 +394,8 @@ class KnowledgeService:
         """
         if not hits:
             return []
-        from hirocli.services.knowledge.reranker import rerank_hits as _rerank_hits
+        from hiro_memory.knowledge.rerank import rerank_hits as _rerank_hits
+
         from hirocli.services.knowledge.reranker import resolve_reranker
 
         key = (model_id, int(top_n), device or "")
@@ -746,13 +743,10 @@ class KnowledgeService:
         prefs = self.workspace_prefs()
         retrieval = prefs.knowledge.retrieval
         graph_builder = KnowledgeAgentGraph(
-            AgentServices(
-                workspace_path=self.workspace_path,
-                ledger_sink=workspace_ledger_sink(self.workspace_path),
-            )
+            LedgerSinkRef(ledger_sink=workspace_ledger_sink(self.workspace_path))
         )
         graph = graph_builder.build(
-            KnowledgeGraphConfig(service=self, prefs=prefs, workspace_id=workspace_id)
+            knowledge_graph_config(self, prefs, self.workspace_path, workspace_id=workspace_id)
         )
         # graph_mode == "graphiti" turns on the graph_expand node. Useful only when
         # rewrite=True too (rewrite extracts query entities for the graph); a graph
@@ -868,7 +862,7 @@ class KnowledgeService:
         step); the no-rewrite case is allowed but the graph leg becomes a no-op,
         making the comparison degenerate. A warning is logged when this happens.
         """
-        from hirocli.services.knowledge.models import KnowledgeAnswerComparison
+        from hiro_memory.knowledge.models import KnowledgeAnswerComparison
 
         if not rewrite:
             log.warning(

@@ -1,7 +1,7 @@
 """Guard against re-introducing duplicated graph helpers/constants (P2b).
 
-Scans the agent-side node packages where these helpers would naturally drift back in:
-``runtime/agent_graph/`` (chat side) AND ``services/knowledge/agent/`` (knowledge side).
+Scans the chat graph's node package, where these helpers would naturally drift back in:
+``runtime/agent_graph/``. (The knowledge graph is the memory library's and has none of them.)
 ``graph_kit.py`` is the single canonical owner; any definition elsewhere is the regression.
 """
 
@@ -11,10 +11,7 @@ import re
 from pathlib import Path
 
 _HIROCLI_SRC = Path(__file__).resolve().parents[2]
-_SCAN_ROOTS = (
-    _HIROCLI_SRC / "runtime" / "agent_graph",
-    _HIROCLI_SRC / "services" / "knowledge" / "agent",
-)
+_SCAN_ROOTS = (_HIROCLI_SRC / "runtime" / "agent_graph",)
 
 # Each symbol must appear as a definition at most once under the scanned roots —
 # ``graph_kit.py`` owns them. Both the public (post-P2b) names and the old private

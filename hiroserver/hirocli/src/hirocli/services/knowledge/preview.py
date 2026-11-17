@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from hirocli.services.knowledge.constants import PREVIEW_MAX_BYTES
-from hirocli.services.knowledge.loaders import LoaderRegistry
+from hiro_memory.knowledge.loaders import LoaderRegistry
 from hirocli.services.knowledge.preview_formats import resolve_preview_format
 
 

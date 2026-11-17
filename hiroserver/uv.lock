@@ -984,23 +984,33 @@ version = "0.2.0"
 source = { editable = "hiro-memory" }
 dependencies = [
     { name = "fastapi" },
+    { name = "fastembed" },
     { name = "graphiti-core" },
     { name = "hiro-commons" },
     { name = "kuzu" },
     { name = "langchain-core" },
+    { name = "langchain-text-splitters" },
+    { name = "langdetect" },
+    { name = "langgraph" },
     { name = "langsmith" },
     { name = "pydantic" },
+    { name = "qdrant-client" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "fastembed", specifier = ">=0.8.0" },
     { name = "graphiti-core", specifier = "==0.29.1" },
     { name = "hiro-commons", editable = "hiro-commons" },
     { name = "kuzu", specifier = "==0.11.3" },
     { name = "langchain-core", specifier = ">=1.0" },
+    { name = "langchain-text-splitters", specifier = ">=1.1.3" },
+    { name = "langdetect", specifier = ">=1.0.9" },
+    { name = "langgraph", specifier = ">=1.2" },
     { name = "langsmith", specifier = ">=0.14" },
     { name = "pydantic", specifier = ">=2" },
+    { name = "qdrant-client", specifier = ">=1.18.0" },
 ]
 
 [[package]]
@@ -1037,7 +1047,6 @@ dependencies = [
     { name = "langchain-openai" },
     { name = "langchain-qdrant" },
     { name = "langchain-voyageai" },
-    { name = "langdetect" },
     { name = "langgraph" },
     { name = "langgraph-checkpoint-sqlite" },
     { name = "langsmith" },
@@ -1095,7 +1104,6 @@ requires-dist = [
     { name = "langchain-openai", specifier = ">=1.7" },
     { name = "langchain-qdrant", specifier = ">=1.1.0" },
     { name = "langchain-voyageai", specifier = ">=0.3.3" },
-    { name = "langdetect", specifier = ">=1.0.9" },
     { name = "langgraph", specifier = ">=1.2" },
     { name = "langgraph-checkpoint-sqlite", specifier = ">=2.0" },
     { name = "langsmith", specifier = ">=0.14" },

@@ -8,8 +8,6 @@ from hirocli.domain import preferences as p
 from hirocli.domain.prompts import load_prompt
 
 _PROMPT_NAMES = (
-    "knowledge_rewrite",
-    "knowledge_answering",
     "memory_chat_retrieval_agent",
     "chat_instructions",
 )
@@ -30,8 +28,6 @@ def test_missing_prompt_fails_loudly() -> None:
 def test_constants_are_backed_by_bundled_files() -> None:
     # The module constants must equal their bundled markdown so a future edit can't silently
     # diverge code from the .md source of truth.
-    assert p.DEFAULT_KNOWLEDGE_REWRITE_PROMPT == load_prompt("knowledge_rewrite")
-    assert p.DEFAULT_KNOWLEDGE_ANSWERING_PROMPT == load_prompt("knowledge_answering")
     assert p.DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT == load_prompt(
         "memory_chat_retrieval_agent"
     )

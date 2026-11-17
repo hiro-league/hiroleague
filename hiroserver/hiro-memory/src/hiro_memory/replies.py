@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
+
+from langchain_core.messages import AIMessage
 
 
 def normalize_reply_content(content: Any) -> str:
@@ -54,6 +57,35 @@ def usage_from_metadata(raw: dict[str, Any]) -> dict[str, int]:
 
     return out
 
+
+def llm_usage_payload(
+    message: AIMessage,
+    *,
+    inbound_id: str,
+    chat_channel_id: int,
+    model_id: str,
+    estimated_input_tokens: int,
+) -> dict[str, Any]:
+    """The usage event payload for one model reply: its token counts, or an estimate when the provider gave none."""
+    usage = usage_from_metadata(message.usage_metadata or {})
+    payload: dict[str, Any] = {
+        "inbound_id": inbound_id,
+        "chat_channel_id": chat_channel_id,
+        "model_id": model_id,
+        "usage_available": bool(usage),
+    }
+    if usage:
+        payload.update(usage)
+    else:
+        payload["estimated_input_tokens"] = estimated_input_tokens
+    return payload
+
+
+def estimate_text_tokens(text: str) -> int:
+    stripped = str(text or "")
+    if not stripped:
+        return 0
+    return max(1, math.ceil(len(stripped) / 4))
 
 
 def _int_token(value: Any) -> int | None:

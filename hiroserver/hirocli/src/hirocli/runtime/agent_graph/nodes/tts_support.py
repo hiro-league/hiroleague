@@ -12,7 +12,8 @@ import base64
 from dataclasses import dataclass
 from typing import Any
 
-from ..graph_kit import estimate_text_tokens
+from hiro_memory.replies import estimate_text_tokens
+
 from ..state import ReplyAudio
 
 # The app gets MP3: iPhones can't play OGG/Opus (the WhatsApp plugin transcodes MP3 → OGG itself).

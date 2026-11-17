@@ -125,7 +125,7 @@ async def test_trim_history_uses_runtime_chat_max_messages(tmp_path) -> None:
 
 
 def test_llm_usage_payload_uses_langchain_usage_metadata_only() -> None:
-    from hirocli.runtime.agent_graph.graph_kit import llm_usage_payload
+    from hiro_memory.replies import llm_usage_payload
 
     msg = AIMessage(
         content="hi",

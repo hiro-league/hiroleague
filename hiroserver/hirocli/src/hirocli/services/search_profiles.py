@@ -153,7 +153,7 @@ def rerank(
     workspace_path: Path, pid: str, profile: RerankProfile, query: str, documents: list[str], top_n: int | None
 ) -> Reranked:
     """``documents`` in order of relevance to ``query`` with the profile's model (synchronous)."""
-    from .knowledge.reranker import _normalize
+    from hiro_memory.knowledge.rerank import _normalize
 
     started = time.monotonic()
     compressor, calibrated = _reranker(workspace_path, profile)

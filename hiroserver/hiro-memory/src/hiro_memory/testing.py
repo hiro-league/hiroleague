@@ -1,9 +1,9 @@
-"""Test doubles for code built on the memory engine: a ledger sink that records rows, and a scripted
-chat model that replays canned replies. Used by the library's tests and by its owners' tests."""
+"""Test doubles for code built on the memory engine: a ledger sink that records rows, a scripted chat model
+that replays canned replies, and a fake knowledge retrieval engine. Used by the library's tests and by its owners' tests."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
@@ -11,6 +11,9 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from pydantic import PrivateAttr
 
 from .ledger import LedgerSink
+
+if TYPE_CHECKING:
+    from .knowledge.models import KnowledgeSearchHit
 
 
 # ---------------------------------------------------------------------------
@@ -154,3 +157,61 @@ def ai_final(answer: str) -> AIMessage:
         content=answer,
         usage_metadata={"input_tokens": 8, "output_tokens": 4, "total_tokens": 12},
     )
+
+
+# ---------------------------------------------------------------------------
+# Knowledge fakes — the retrieval engine the knowledge graph drives
+# ---------------------------------------------------------------------------
+
+
+def knowledge_hit(
+    *,
+    point_id: str = "p1",
+    text: str = "Hiro is a local-first assistant.",
+    score: float = 0.9,
+    title: str = "Hiro Overview",
+) -> "KnowledgeSearchHit":
+    """Build a fully-populated ``KnowledgeSearchHit`` for the knowledge graph."""
+    from .knowledge.models import KnowledgeSearchHit
+
+    return KnowledgeSearchHit(
+        document_id="doc1",
+        point_id=point_id,
+        score=score,
+        ord=0,
+        text=text,
+        heading_path="Intro",
+        title=title,
+        source_uri="kb://doc1",
+        owner_kind="system",
+        owner_id="",
+        category_id=None,
+        subcategory_id=None,
+        tags=[],
+    )
+
+
+class FakeKnowledgeRetriever:
+    """Stub for the retrieval engine ``KnowledgeAgentGraph`` drives (``KnowledgeRetriever``).
+
+    Dense/sparse embed, vector search and the by-id fetch (graphiti leg); ``rerank_hits`` keeps the order (an
+    owner's reranker hand-in can call it).
+    """
+
+    def __init__(self, *, hits: "list[KnowledgeSearchHit] | None" = None) -> None:
+        self._hits = hits if hits is not None else [knowledge_hit()]
+
+    async def embed_query(self, text: str) -> list[float]:
+        return [0.1, 0.2, 0.3]
+
+    async def embed_query_sparse(self, text: str) -> Any:
+        return {"indices": [1], "values": [1.0]}
+
+    async def vector_search_by_vector(self, vector: Any, sparse: Any = None, **_: Any) -> "list[KnowledgeSearchHit]":
+        return list(self._hits)
+
+    async def rerank_hits(self, query: str, hits: list[Any], **_: Any) -> list[Any]:
+        return list(hits)
+
+    async def fetch_hits_by_point_ids(self, point_ids: list[str]) -> "list[KnowledgeSearchHit]":
+        return []

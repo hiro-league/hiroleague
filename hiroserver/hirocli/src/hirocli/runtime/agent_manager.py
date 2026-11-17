@@ -1120,24 +1120,25 @@ class AgentManager:
         service = getattr(manager, "service", None) if manager is not None else None
         if service is None:
             return None
+        from hiro_memory.knowledge.agent import KnowledgeAgentGraph
+        from hiro_memory.ledger.node_group import LedgerSinkRef
+
         from ..domain.workspace import workspace_id_for_path
-        from ..services.knowledge.agent import KnowledgeAgentGraph, KnowledgeGraphConfig
+        from ..services.knowledge.graph_wiring import knowledge_graph_config
         from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
-        from .agent_graph.services import AgentServices
 
         try:
-            # Subgraph carries its own minimal ``AgentServices`` — invoked inside the chat
-            # run, its ``knowledge/*`` ledger rows still inherit the active run_id via the
-            # LangGraph state, so cost folds into the chat turn (no separate ledger run).
-            sub_services = AgentServices(
-                workspace_path=self._ctx.workspace_path,
-                ledger_sink=workspace_ledger_sink(self._ctx.workspace_path),
+            # The subgraph carries its own ledger sink — invoked inside the chat run, its
+            # ``knowledge/*`` ledger rows still inherit the active run_id via the LangGraph
+            # state, so cost folds into the chat turn (no separate ledger run).
+            builder = KnowledgeAgentGraph(
+                LedgerSinkRef(ledger_sink=workspace_ledger_sink(self._ctx.workspace_path))
             )
-            builder = KnowledgeAgentGraph(sub_services)
             return builder.build_retrieval(
-                KnowledgeGraphConfig(
-                    service=service,
-                    prefs=self._current_preferences(),
+                knowledge_graph_config(
+                    service,
+                    self._current_preferences(),
+                    self._ctx.workspace_path,
                     workspace_id=workspace_id_for_path(self._ctx.workspace_path),
                 )
             )

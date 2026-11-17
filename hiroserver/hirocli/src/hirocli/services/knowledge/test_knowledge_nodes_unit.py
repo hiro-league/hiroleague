@@ -1,4 +1,5 @@
-"""Unit tests for ``KnowledgeRetrievalNodes`` branch coverage."""
+"""Unit tests for ``KnowledgeRetrievalNodes`` branch coverage, as the core wires the nodes (its resolvers, catalog,
+model factory)."""
 
 from __future__ import annotations
 
@@ -7,15 +8,16 @@ from typing import Any
 
 import pytest
 
+from hiro_memory.knowledge.agent.helpers import NormalizedQuery, QueryRewrite
+from hiro_memory.knowledge.agent.legs import RetrievalLeg
+from hiro_memory.knowledge.agent.retrieval_nodes import KnowledgeRetrievalNodes
+from hiro_memory.ledger.node_group import LedgerSinkRef
+from hiro_memory.testing import FakeKnowledgeRetriever, knowledge_hit
+
+import hirocli.services.knowledge.graph_wiring as graph_wiring_module
 from hirocli.domain.preferences import ResolvedModel, WorkspacePreferences
 from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
-from hirocli.runtime.agent_graph.services import AgentServices
-from hirocli.runtime.tests.graph_fakes import FakeKnowledgeService, knowledge_hit
-import hirocli.services.knowledge.agent.rewrite_support as rewrite_support_module
-from hirocli.services.knowledge.agent import KnowledgeGraphConfig
-from hirocli.services.knowledge.agent.helpers import NormalizedQuery, QueryRewrite
-from hirocli.services.knowledge.agent.legs import RetrievalLeg
-from hirocli.services.knowledge.agent.retrieval_nodes import KnowledgeRetrievalNodes
+from hirocli.services.knowledge.graph_wiring import knowledge_graph_config
 
 
 def _nodes(
@@ -24,15 +26,10 @@ def _nodes(
     service: Any | None = None,
     prefs: WorkspacePreferences | None = None,
 ) -> KnowledgeRetrievalNodes:
-    services = AgentServices(
-        workspace_path=tmp_path,
-        ledger_sink=workspace_ledger_sink(tmp_path),
-    )
     return KnowledgeRetrievalNodes(
-        services,
-        KnowledgeGraphConfig(
-            service=service or FakeKnowledgeService(),
-            prefs=prefs or WorkspacePreferences(),
+        LedgerSinkRef(workspace_ledger_sink(tmp_path)),
+        knowledge_graph_config(
+            service or FakeKnowledgeRetriever(), prefs or WorkspacePreferences(), tmp_path
         ),
     )
 
@@ -51,7 +48,7 @@ async def test_rewrite_query_node_off(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_rewrite_query_node_no_llm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        rewrite_support_module,
+        graph_wiring_module,
         "resolve_knowledge_rewrite_llm",
         lambda *_a, **_k: None,
     )
@@ -67,7 +64,7 @@ async def test_rewrite_query_node_parse_failure(tmp_path: Path, monkeypatch: pyt
             return {"parsed": None, "raw": None, "parsing_error": "bad json"}
 
     monkeypatch.setattr(
-        rewrite_support_module,
+        graph_wiring_module,
         "resolve_knowledge_rewrite_llm",
         lambda *_a, **_k: ResolvedModel(
             model_id="google:gemini-3-flash-preview",
@@ -76,16 +73,16 @@ async def test_rewrite_query_node_parse_failure(tmp_path: Path, monkeypatch: pyt
         ),
     )
     monkeypatch.setattr(
-        rewrite_support_module,
+        graph_wiring_module,
         "get_model_catalog",
         lambda: type("C", (), {"get_model": lambda _s, _m: type("S", (), {"features": ["structured_output"]})()})(),
     )
     monkeypatch.setattr(
-        "hirocli.services.knowledge.agent.retrieval_nodes.create_chat_model",
+        "hirocli.services.knowledge.graph_wiring.create_chat_model",
         lambda *_a, **_k: _FakeModel(),
     )
     monkeypatch.setattr(
-        "hirocli.services.knowledge.agent.retrieval_nodes.with_structured_output_compat",
+        "hirocli.services.knowledge.graph_wiring.with_structured_output_compat",
         lambda model, *_a, **_k: model,
     )
     nodes = _nodes(tmp_path)
@@ -105,7 +102,7 @@ async def test_rewrite_query_node_no_structured_output(
             return {}
 
     monkeypatch.setattr(
-        rewrite_support_module,
+        graph_wiring_module,
         "resolve_knowledge_rewrite_llm",
         lambda *_a, **_k: ResolvedModel(
             model_id="google:gemini-3-flash-preview",
@@ -114,12 +111,12 @@ async def test_rewrite_query_node_no_structured_output(
         ),
     )
     monkeypatch.setattr(
-        rewrite_support_module,
+        graph_wiring_module,
         "get_model_catalog",
         lambda: type("C", (), {"get_model": lambda _s, _m: type("S", (), {"features": []})()})(),
     )
     monkeypatch.setattr(
-        "hirocli.services.knowledge.agent.retrieval_nodes.create_chat_model",
+        "hirocli.services.knowledge.graph_wiring.create_chat_model",
         lambda *_a, **_k: _FakeModel(),
     )
     nodes = _nodes(tmp_path)
@@ -135,7 +132,7 @@ async def test_rewrite_query_node_call_failed(tmp_path: Path, monkeypatch: pytes
             raise RuntimeError("provider down")
 
     monkeypatch.setattr(
-        rewrite_support_module,
+        graph_wiring_module,
         "resolve_knowledge_rewrite_llm",
         lambda *_a, **_k: ResolvedModel(
             model_id="google:gemini-3-flash-preview",
@@ -144,16 +141,16 @@ async def test_rewrite_query_node_call_failed(tmp_path: Path, monkeypatch: pytes
         ),
     )
     monkeypatch.setattr(
-        rewrite_support_module,
+        graph_wiring_module,
         "get_model_catalog",
         lambda: type("C", (), {"get_model": lambda _s, _m: type("S", (), {"features": ["structured_output"]})()})(),
     )
     monkeypatch.setattr(
-        "hirocli.services.knowledge.agent.retrieval_nodes.create_chat_model",
+        "hirocli.services.knowledge.graph_wiring.create_chat_model",
         lambda *_a, **_k: _BoomModel(),
     )
     monkeypatch.setattr(
-        "hirocli.services.knowledge.agent.retrieval_nodes.with_structured_output_compat",
+        "hirocli.services.knowledge.graph_wiring.with_structured_output_compat",
         lambda model, *_a, **_k: model,
     )
     nodes = _nodes(tmp_path)
@@ -176,7 +173,7 @@ async def test_rewrite_query_node_success(tmp_path: Path, monkeypatch: pytest.Mo
             }
 
     monkeypatch.setattr(
-        rewrite_support_module,
+        graph_wiring_module,
         "resolve_knowledge_rewrite_llm",
         lambda *_a, **_k: ResolvedModel(
             model_id="google:gemini-3-flash-preview",
@@ -185,16 +182,16 @@ async def test_rewrite_query_node_success(tmp_path: Path, monkeypatch: pytest.Mo
         ),
     )
     monkeypatch.setattr(
-        rewrite_support_module,
+        graph_wiring_module,
         "get_model_catalog",
         lambda: type("C", (), {"get_model": lambda _s, _m: type("S", (), {"features": ["structured_output"]})()})(),
     )
     monkeypatch.setattr(
-        "hirocli.services.knowledge.agent.retrieval_nodes.create_chat_model",
+        "hirocli.services.knowledge.graph_wiring.create_chat_model",
         lambda *_a, **_k: _FakeModel(),
     )
     monkeypatch.setattr(
-        "hirocli.services.knowledge.agent.retrieval_nodes.with_structured_output_compat",
+        "hirocli.services.knowledge.graph_wiring.with_structured_output_compat",
         lambda model, *_a, **_k: model,
     )
     nodes = _nodes(tmp_path)

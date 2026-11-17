@@ -8,13 +8,13 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
-
-from .defaults import (
+from hiro_memory.knowledge.settings import (
     DEFAULT_KNOWLEDGE_ANSWERING_PROMPT,
     DEFAULT_KNOWLEDGE_REWRITE_PROMPT,
-    pref_field,
 )
+from pydantic import BaseModel, Field, model_validator
+
+from .defaults import pref_field
 
 DEFAULT_KNOWLEDGE_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
@@ -93,7 +93,7 @@ class KnowledgeRetrievalPreferences(BaseModel):
     # (flipping it needs no re-ingest). When enabled, ``min_score`` applies as the cosine
     # threshold on the dense branch; the BM25 branch is rank-fused (its scores are not 0-1).
     hybrid: bool = Field(default=True, title="Hybrid retrieval (dense + BM25, RRF fusion)")
-    # The BM25 sparse model is a fixed constant (services.knowledge.constants.DEFAULT_SPARSE_MODEL),
+    # The BM25 sparse model is a fixed constant (hiro_memory.knowledge.constants.DEFAULT_SPARSE_MODEL),
     # not a preference: the Qdrant collection is hardwired to BM25's IDF scoring and switching would
     # need a full re-ingest, so it was removed from the editable preference surface.
     # Candidates pulled per branch before fusion; should be >= top_k so RRF has overlap.

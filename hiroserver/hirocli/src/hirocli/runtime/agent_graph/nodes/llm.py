@@ -29,14 +29,13 @@ from ..graph_kit import (
     IDENTITY_PEER_KEYS,
     emit,
     emit_for,
-    llm_usage_payload,
     tool_args_one_line,
     tool_call_args,
     tool_call_id,
     tool_call_name,
     tool_result_bounded,
 )
-from hiro_memory.replies import normalize_reply_content
+from hiro_memory.replies import llm_usage_payload, normalize_reply_content
 from hiro_memory.ledger import graph_logged, observe, record_child
 from ..node_group import NodeGroup
 from ..state import GraphState

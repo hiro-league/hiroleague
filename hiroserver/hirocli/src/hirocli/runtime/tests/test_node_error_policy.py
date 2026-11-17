@@ -14,21 +14,21 @@ from __future__ import annotations
 
 import pytest
 
+from hiro_memory.knowledge.agent.answer_nodes import KnowledgeAnswerNodes
+from hiro_memory.knowledge.agent.retrieval_nodes import KnowledgeRetrievalNodes
 from hiro_memory.ledger import ON_ERROR_VALUES, graph_logged, graph_logged_spec
-from hirocli.runtime.agent_graph.node_group import NodeGroup
+from hiro_memory.ledger.node_group import LedgerNodeGroup
 from hirocli.runtime.agent_graph.nodes.context import ContextNodes
 from hirocli.runtime.agent_graph.nodes.knowledge import KnowledgeFanoutNodes
 from hirocli.runtime.agent_graph.nodes.llm import LLMNodes
 from hirocli.runtime.agent_graph.nodes.media import MediaNodes
 from hirocli.runtime.agent_graph.nodes.memory import MemoryNodes
 from hirocli.runtime.agent_graph.nodes.tts import TTSNodes
-from hirocli.services.knowledge.agent.answer_nodes import KnowledgeAnswerNodes
-from hirocli.services.knowledge.agent.retrieval_nodes import KnowledgeRetrievalNodes
 
 # Declared error policy per group, keyed by LangGraph node label. Only ``@graph_logged``
 # nodes appear — unlogged pure-transform nodes (``parse_query``, ``build_filters``,
 # ``trim_history``, ``context_build``, ``ingest``, ``gather``) carry no policy.
-EXPECTED_POLICY: dict[type[NodeGroup], dict[str, str]] = {
+EXPECTED_POLICY: dict[type[LedgerNodeGroup], dict[str, str]] = {
     MediaNodes: {"stt": "degrade", "vision": "degrade", "media_failed": "raise"},
     ContextNodes: {"compose_context": "raise"},
     MemoryNodes: {"memory_recall": "degrade", "memory_out": "raise", "memory_ingest": "degrade"},
@@ -48,7 +48,7 @@ EXPECTED_POLICY: dict[type[NodeGroup], dict[str, str]] = {
 }
 
 
-def _logged_policies(group_cls: type[NodeGroup]) -> dict[str, str]:
+def _logged_policies(group_cls: type[LedgerNodeGroup]) -> dict[str, str]:
     """Map node label → declared ``on_error`` for every ``@graph_logged`` method on the group."""
     out: dict[str, str] = {}
     for label, attr_name in group_cls.node_methods().items():
@@ -59,7 +59,7 @@ def _logged_policies(group_cls: type[NodeGroup]) -> dict[str, str]:
 
 
 @pytest.mark.parametrize("group_cls", list(EXPECTED_POLICY))
-def test_node_error_policy_matches_registry(group_cls: type[NodeGroup]) -> None:
+def test_node_error_policy_matches_registry(group_cls: type[LedgerNodeGroup]) -> None:
     assert _logged_policies(group_cls) == EXPECTED_POLICY[group_cls]
 
 

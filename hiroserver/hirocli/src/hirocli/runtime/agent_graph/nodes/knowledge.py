@@ -5,7 +5,7 @@ Split out of the old monolithic ``ConversationNodes`` (review §1.5).
 - ``knowledge_fanout`` (router) — fan trim_history out to memory_recall ∥ knowledge_retrieve
 - ``knowledge_retrieve`` — invoke the wired knowledge subgraph, map context/sources
 
-The knowledge subgraph itself lives at ``services.knowledge.agent.graph`` and is compiled
+The knowledge subgraph itself is the memory library's (``hiro_memory.knowledge.agent.graph``), compiled
 once per chat graph build; this group is the chat-side entry point.
 """
 
@@ -17,7 +17,7 @@ from hiro_commons.log import Logger
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 from langgraph.types import StreamWriter
 
-from ..graph_kit import KNOWLEDGE_PREVIEW_MAX, knowledge_results_rows
+from hiro_memory.knowledge.previews import KNOWLEDGE_PREVIEW_MAX, knowledge_results_rows
 from hiro_memory.replies import normalize_reply_content
 from hiro_memory.ledger import graph_logged, observe, substep_scope
 from ..node_group import NodeGroup

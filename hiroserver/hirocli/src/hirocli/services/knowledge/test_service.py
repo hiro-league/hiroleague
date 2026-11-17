@@ -10,17 +10,17 @@ from langchain_core.messages import AIMessage
 
 from hirocli.domain.preferences import WorkspacePreferences, save_preferences
 from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
-from hirocli.runtime.agent_graph.services import AgentServices
-import hirocli.services.knowledge.agent.answer_nodes as knowledge_answer_module
-import hirocli.services.knowledge.agent.retrieval_nodes as knowledge_retrieval_module
-from hirocli.services.knowledge.agent import KnowledgeAgentGraph, KnowledgeGraphConfig
-from hirocli.services.knowledge.agent.answer_nodes import KnowledgeAnswerNodes
-from hirocli.services.knowledge.agent.helpers import NormalizedQuery, QueryRewrite
-from hirocli.services.knowledge.agent.retrieval_nodes import KnowledgeRetrievalNodes
+from hiro_memory.knowledge.agent import KnowledgeAgentGraph
+from hiro_memory.knowledge.agent.answer_nodes import KnowledgeAnswerNodes
+from hiro_memory.knowledge.agent.helpers import NormalizedQuery, QueryRewrite
+from hiro_memory.knowledge.agent.retrieval_nodes import KnowledgeRetrievalNodes
+from hiro_memory.ledger.node_group import LedgerSinkRef
+import hirocli.services.knowledge.graph_wiring as graph_wiring_module
+from hirocli.services.knowledge.graph_wiring import knowledge_graph_config
 from hirocli.services.knowledge import service as knowledge_service_module
 from hirocli.services.knowledge.live_registry import maybe_recover_abandoned_work
-from hirocli.services.knowledge.runtime_owner import current_owner_token
-from hirocli.services.knowledge.constants import DEFAULT_FILE_CONCURRENCY
+from hiro_memory.knowledge.runtime_owner import current_owner_token
+from hiro_memory.knowledge.constants import DEFAULT_FILE_CONCURRENCY
 from hirocli.services.knowledge.service import KnowledgeService
 from hirocli.runtime.preferences_runtime import PreferencePathError, WorkspacePreferencesRuntime
 
@@ -604,12 +604,12 @@ async def test_answer_skips_call_model_when_no_results(
         llm_called.append(True)
         raise AssertionError("call_model should not run when retrieval returns no hits")
 
-    monkeypatch.setattr(knowledge_answer_module, "create_chat_model", fail_create_chat_model)
+    monkeypatch.setattr(graph_wiring_module, "create_chat_model", fail_create_chat_model)
     prefs = WorkspacePreferences()
     ws = tmp_path / "workspace"
-    graph = KnowledgeAgentGraph(
-        AgentServices(workspace_path=ws, ledger_sink=workspace_ledger_sink(ws))
-    ).build(KnowledgeGraphConfig(service=FakeEmbedService(), prefs=prefs))
+    graph = KnowledgeAgentGraph(LedgerSinkRef(workspace_ledger_sink(ws))).build(
+        knowledge_graph_config(FakeEmbedService(), prefs, ws)
+    )
     state = await graph.ainvoke(
         {
             "query": "anything",
@@ -641,9 +641,9 @@ async def test_answer_prompt_honors_citation_and_language_preferences(
 
     from hirocli.domain.preferences import ResolvedModel
 
-    monkeypatch.setattr(knowledge_answer_module, "create_chat_model", fake_create_chat_model)
+    monkeypatch.setattr(graph_wiring_module, "create_chat_model", fake_create_chat_model)
     monkeypatch.setattr(
-        knowledge_answer_module,
+        graph_wiring_module,
         "resolve_knowledge_answering_llm",
         lambda *_args, **_kwargs: ResolvedModel(
             model_id="fake:model",
@@ -656,8 +656,8 @@ async def test_answer_prompt_honors_citation_and_language_preferences(
     prefs.knowledge.answering.language_policy = "prefer_arabic"
     ws = tmp_path / "workspace"
     nodes = KnowledgeAnswerNodes(
-        AgentServices(workspace_path=ws, ledger_sink=workspace_ledger_sink(ws)),
-        KnowledgeGraphConfig(service=object(), prefs=prefs),
+        LedgerSinkRef(workspace_ledger_sink(ws)),
+        knowledge_graph_config(object(), prefs, ws),
     )
     state = {
         "normalized_query": NormalizedQuery(raw="hello", text="hello", language="en"),
@@ -679,12 +679,13 @@ def _rewrite_nodes(
     """Materialize a ``KnowledgeRetrievalNodes`` group for rewrite-node unit tests.
 
     These tests exercise individual node coroutines directly (no graph compile), so they
-    construct the node group with the same ``(services, config)`` pair the builder uses.
+    construct the node group with the same ``(sinks, config)`` pair the builder uses, the config
+    from the core's wiring.
     """
     ws = tmp_path / "workspace"
     return KnowledgeRetrievalNodes(
-        AgentServices(workspace_path=ws, ledger_sink=workspace_ledger_sink(ws)),
-        KnowledgeGraphConfig(service=object(), prefs=prefs or WorkspacePreferences()),
+        LedgerSinkRef(workspace_ledger_sink(ws)),
+        knowledge_graph_config(object(), prefs or WorkspacePreferences(), ws),
     )
 
 
@@ -708,10 +709,9 @@ def _patch_rewrite_llm(monkeypatch: pytest.MonkeyPatch, *, structured_output: bo
     ResolvedModel — never hardcoded in the node.
     """
     from hirocli.domain.preferences import ResolvedModel
-    import hirocli.services.knowledge.agent.rewrite_support as rewrite_support_module
 
     monkeypatch.setattr(
-        rewrite_support_module,
+        graph_wiring_module,
         "resolve_knowledge_rewrite_llm",
         lambda *_a, **_k: ResolvedModel(
             model_id="google:gemini-3-flash-preview",
@@ -721,7 +721,7 @@ def _patch_rewrite_llm(monkeypatch: pytest.MonkeyPatch, *, structured_output: bo
         ),
     )
     monkeypatch.setattr(
-        rewrite_support_module,
+        graph_wiring_module,
         "get_model_catalog",
         lambda: _FakeCatalog(["structured_output"] if structured_output else []),
     )
@@ -750,10 +750,9 @@ async def test_rewrite_query_skips_empty_query(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_rewrite_query_skips_when_no_llm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import hirocli.services.knowledge.agent.rewrite_support as rewrite_support_module
 
     monkeypatch.setattr(
-        rewrite_support_module, "resolve_knowledge_rewrite_llm", lambda *_a, **_k: None
+        graph_wiring_module, "resolve_knowledge_rewrite_llm", lambda *_a, **_k: None
     )
     graph = _rewrite_nodes(tmp_path)
     state = {
@@ -771,7 +770,7 @@ async def test_rewrite_query_skips_when_model_lacks_structured_output(
     called: list[bool] = []
     _patch_rewrite_llm(monkeypatch, structured_output=False)
     monkeypatch.setattr(
-        knowledge_retrieval_module, "create_chat_model", lambda *_a, **_k: called.append(True)
+        graph_wiring_module, "create_chat_model", lambda *_a, **_k: called.append(True)
     )
     graph = _rewrite_nodes(tmp_path)
     state = {
@@ -797,7 +796,7 @@ async def test_rewrite_query_applies_llm_rewrite(tmp_path: Path, monkeypatch: py
             return _FakeStructured()
 
     _patch_rewrite_llm(monkeypatch)
-    monkeypatch.setattr(knowledge_retrieval_module, "create_chat_model", lambda *_a, **_k: _FakeModel())
+    monkeypatch.setattr(graph_wiring_module, "create_chat_model", lambda *_a, **_k: _FakeModel())
     graph = _rewrite_nodes(tmp_path)
     state = {
         "rewrite": True,
@@ -825,7 +824,7 @@ async def test_rewrite_query_blank_output_falls_back_to_normalized(
             return _FakeStructured()
 
     _patch_rewrite_llm(monkeypatch)
-    monkeypatch.setattr(knowledge_retrieval_module, "create_chat_model", lambda *_a, **_k: _FakeModel())
+    monkeypatch.setattr(graph_wiring_module, "create_chat_model", lambda *_a, **_k: _FakeModel())
     graph = _rewrite_nodes(tmp_path)
     state = {
         "rewrite": True,
@@ -860,7 +859,7 @@ async def test_rewrite_query_falls_back_when_structured_output_unparsable(
             return _FakeStructured()
 
     _patch_rewrite_llm(monkeypatch)
-    monkeypatch.setattr(knowledge_retrieval_module, "create_chat_model", lambda *_a, **_k: _FakeModel())
+    monkeypatch.setattr(graph_wiring_module, "create_chat_model", lambda *_a, **_k: _FakeModel())
     graph = _rewrite_nodes(tmp_path)
     state = {
         "rewrite": True,
@@ -878,7 +877,7 @@ async def test_rewrite_query_falls_back_on_model_error(
         raise RuntimeError("provider down")
 
     _patch_rewrite_llm(monkeypatch)
-    monkeypatch.setattr(knowledge_retrieval_module, "create_chat_model", boom)
+    monkeypatch.setattr(graph_wiring_module, "create_chat_model", boom)
     graph = _rewrite_nodes(tmp_path)
     state = {
         "rewrite": True,

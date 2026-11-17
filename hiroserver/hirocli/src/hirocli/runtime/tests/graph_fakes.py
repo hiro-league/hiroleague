@@ -34,7 +34,6 @@ from pydantic import PrivateAttr
 from hiro_memory.conversation.results import MemoryAddResult
 from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
 from hiro_memory.ledger import LedgerSink
-from hirocli.services.knowledge.models import KnowledgeSearchHit
 from hirocli.services.stt.provider import TranscriptionResult
 from hirocli.services.voice.kit import Speech
 
@@ -132,7 +131,7 @@ class FakeMemory:
 
 
 # ---------------------------------------------------------------------------
-# Knowledge fakes — the nested chat subgraph + the service the full graph drives
+# Knowledge fakes — the nested chat subgraph (the engine's fakes are ``hiro_memory.testing``'s)
 # ---------------------------------------------------------------------------
 
 
@@ -158,58 +157,6 @@ class FakeKnowledgeSubgraph:
 
     async def ainvoke(self, sub_input: dict[str, Any]) -> dict[str, Any]:
         return {"context": self._context, "sources": list(self._sources)}
-
-
-def knowledge_hit(
-    *,
-    point_id: str = "p1",
-    text: str = "Hiro is a local-first assistant.",
-    score: float = 0.9,
-    title: str = "Hiro Overview",
-) -> KnowledgeSearchHit:
-    """Build a fully-populated ``KnowledgeSearchHit`` for the full knowledge graph."""
-    return KnowledgeSearchHit(
-        document_id="doc1",
-        point_id=point_id,
-        score=score,
-        ord=0,
-        text=text,
-        heading_path="Intro",
-        title=title,
-        source_uri="kb://doc1",
-        owner_kind="system",
-        owner_id="",
-        category_id=None,
-        subcategory_id=None,
-        tags=[],
-    )
-
-
-class FakeKnowledgeService:
-    """Stub for the knowledge service the full ``KnowledgeAgentGraph`` drives.
-
-    Covers only the methods the retrieval nodes call: dense/sparse embed, vector search, and the
-    by-id fetch (graphiti leg). Reranking is preference-gated (default off) so ``rerank_hits`` is
-    present but unused in the characterization scenarios.
-    """
-
-    def __init__(self, *, hits: list[KnowledgeSearchHit] | None = None) -> None:
-        self._hits = hits if hits is not None else [knowledge_hit()]
-
-    async def embed_query(self, text: str) -> list[float]:
-        return [0.1, 0.2, 0.3]
-
-    async def embed_query_sparse(self, text: str) -> Any:
-        return {"indices": [1], "values": [1.0]}
-
-    async def vector_search_by_vector(self, vector: Any, sparse: Any = None, **_: Any) -> list[KnowledgeSearchHit]:
-        return list(self._hits)
-
-    async def rerank_hits(self, query: str, hits: list[Any], **_: Any) -> list[Any]:
-        return list(hits)
-
-    async def fetch_hits_by_point_ids(self, point_ids: list[str]) -> list[KnowledgeSearchHit]:
-        return []
 
 
 # ---------------------------------------------------------------------------

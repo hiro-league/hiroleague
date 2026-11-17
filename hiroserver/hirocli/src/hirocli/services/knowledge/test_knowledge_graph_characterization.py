@@ -10,7 +10,8 @@ Placement: this lives in ``services/knowledge/`` (NOT ``services/knowledge/agent
 collected inside the agent package corrupts ``agent.graph`` for later monkeypatch tests
 (see ``reference_agent-package-test-placement`` memory).
 
-The answering LLM is monkeypatched to "not configured" so ``call_model`` takes its deterministic
+Built through the core's wiring (``graph_wiring.knowledge_graph_config``), so the preferences → engine hand-in is
+covered too. The answering LLM is monkeypatched to "not configured" so ``call_model`` takes its deterministic
 fallback path — these tests characterize graph wiring, not the answer model, and never hit a
 network.
 """
@@ -22,32 +23,30 @@ from typing import Any
 
 import pytest
 
-import hirocli.services.knowledge.agent.answer_nodes as knowledge_answer_module
+from hiro_memory.knowledge.agent import KnowledgeAgentGraph
+from hiro_memory.knowledge.agent.legs import RetrievalLeg
+from hiro_memory.ledger.node_group import LedgerSinkRef
+from hiro_memory.testing import FakeKnowledgeRetriever, RecordingLedgerSink
+
+import hirocli.services.knowledge.graph_wiring as graph_wiring_module
 from hirocli.domain.preferences import load_preferences
-from hirocli.runtime.tests.graph_fakes import FakeKnowledgeService, run_graph
-from hiro_memory.testing import RecordingLedgerSink
 from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
-from hirocli.runtime.agent_graph.services import AgentServices
-from hirocli.services.knowledge.agent import KnowledgeAgentGraph, KnowledgeGraphConfig
-from hirocli.services.knowledge.agent.legs import RetrievalLeg
+from hirocli.runtime.tests.graph_fakes import run_graph
+from hirocli.services.knowledge.graph_wiring import knowledge_graph_config
 
 
 @pytest.fixture(autouse=True)
 def _no_answering_llm(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force ``call_model`` down its no-LLM fallback so the answer is deterministic + offline."""
-    monkeypatch.setattr(knowledge_answer_module, "resolve_knowledge_answering_llm", lambda *a, **k: None)
+    monkeypatch.setattr(graph_wiring_module, "resolve_knowledge_answering_llm", lambda *a, **k: None)
 
 
 def _build(tmp_path: Path, *, service: Any = None, retrieval_only: bool = False):
     prefs = load_preferences(tmp_path)
-    graph = KnowledgeAgentGraph(
-        AgentServices(workspace_path=tmp_path, ledger_sink=workspace_ledger_sink(tmp_path))
-    )
+    graph = KnowledgeAgentGraph(LedgerSinkRef(workspace_ledger_sink(tmp_path)))
     sink = RecordingLedgerSink(tmp_path)
     graph._ledger_sink = sink  # capture flushed ledger rows
-    config = KnowledgeGraphConfig(
-        service=service or FakeKnowledgeService(), prefs=prefs, workspace_id=None
-    )
+    config = knowledge_graph_config(service or FakeKnowledgeRetriever(), prefs, tmp_path)
     compiled = graph.build_retrieval(config) if retrieval_only else graph.build(config)
     return compiled, sink
 

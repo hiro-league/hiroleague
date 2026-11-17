@@ -37,11 +37,12 @@ context for nothing — see ``media_failed_node`` for the canned-reply emission.
 
 from __future__ import annotations
 
+from hiro_memory.ledger.node_group import mount as _mount
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import RetryPolicy
 
 from .config import ChatGraphConfig
-from .node_group import NodeGroup, mount as _mount
+from .node_group import NodeGroup
 from .nodes.context import ContextNodes
 from .nodes.knowledge import KnowledgeFanoutNodes
 from .nodes.llm import LLMNodes

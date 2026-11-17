@@ -9,9 +9,10 @@ from qdrant_client import QdrantClient
 
 from hiro_commons.constants.storage import DB_DIR
 
-from hirocli.services.knowledge.catalog_store import CatalogStore
-from hirocli.services.knowledge.constants import COLLECTION_NAME, DB_FILENAME, QDRANT_DIR
-from hirocli.services.knowledge.runtime_owner import is_owner_token_alive
+from hiro_memory.knowledge.catalog_store import CatalogStore
+from hiro_memory.knowledge.constants import COLLECTION_NAME
+from hirocli.services.knowledge.constants import DB_FILENAME, QDRANT_DIR
+from hiro_memory.knowledge.runtime_owner import is_owner_token_alive
 
 if TYPE_CHECKING:
     from hirocli.services.knowledge.service import KnowledgeService

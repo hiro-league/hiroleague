@@ -12,8 +12,8 @@ import pytest
 from hirocli.domain.preferences import DEFAULT_KNOWLEDGE_EMBEDDING_MODEL, WorkspacePreferences
 from hirocli.services.knowledge import create_knowledge_service
 from hirocli.services.knowledge.embedder import CatalogEmbeddingsBackend, resolve_knowledge_embedder
-from hirocli.services.knowledge.constants import DEFAULT_EMBEDDING_MODEL, DEFAULT_VECTOR_SIZE
-from hirocli.services.knowledge.embedding_backends import FastEmbedBackend
+from hiro_memory.knowledge.constants import DEFAULT_EMBEDDING_MODEL, DEFAULT_VECTOR_SIZE
+from hiro_memory.knowledge.embedding_backends import FastEmbedBackend
 
 
 def test_resolve_knowledge_embedder_uses_fastembed_for_default(tmp_path: Path) -> None:

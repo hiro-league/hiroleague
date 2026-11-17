@@ -1,0 +1,151 @@
+"""P8 — retrieval leg helpers and routing contract."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from hiro_memory.knowledge.agent import KnowledgeAgentGraph, KnowledgeGraphConfig, KnowledgeGraphLeg
+from hiro_memory.knowledge.agent.retrieval_nodes import KnowledgeRetrievalNodes
+from hiro_memory.knowledge.agent.legs import (
+    RetrievalLeg,
+    effective_leg,
+    graphiti_facts_block,
+    intended_leg,
+)
+from hiro_memory.ledger.node_group import LedgerSinkRef
+from hiro_memory.testing import FakeKnowledgeRetriever, RecordingLedgerSink
+
+# ---------------------------------------------------------------------------
+# intended_leg
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("graph_mode", "expected"),
+    [
+        ("graphiti", RetrievalLeg.GRAPHITI),
+        ("off", RetrievalLeg.FLAT),
+        (None, RetrievalLeg.FLAT),
+        ("bogus", RetrievalLeg.FLAT),
+    ],
+)
+def test_intended_leg(graph_mode: str | None, expected: RetrievalLeg) -> None:
+    assert intended_leg(graph_mode) is expected
+
+
+# ---------------------------------------------------------------------------
+# effective_leg (soft-fallback)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("intended", "chunk_ids", "expected"),
+    [
+        (RetrievalLeg.GRAPHITI, ["c1"], RetrievalLeg.GRAPHITI),
+        (RetrievalLeg.GRAPHITI, [], RetrievalLeg.FLAT),
+        (RetrievalLeg.FLAT, ["c1"], RetrievalLeg.FLAT),
+        (RetrievalLeg.FLAT, [], RetrievalLeg.FLAT),
+    ],
+)
+def test_effective_leg(
+    intended: RetrievalLeg, chunk_ids: list[str], expected: RetrievalLeg
+) -> None:
+    assert effective_leg(intended, chunk_ids=chunk_ids) is expected
+
+
+# ---------------------------------------------------------------------------
+# graphiti_facts_block
+# ---------------------------------------------------------------------------
+
+
+def test_graphiti_facts_block_empty() -> None:
+    assert graphiti_facts_block([]) == ""
+    assert graphiti_facts_block(["", "  "]) == ""
+
+
+def test_graphiti_facts_block_bulleted() -> None:
+    block = graphiti_facts_block(["Adam lived in Eden", "Eve was created"])
+    assert block == (
+        "Known facts from the knowledge graph:\n"
+        "- Adam lived in Eden\n"
+        "- Eve was created"
+    )
+
+
+# ---------------------------------------------------------------------------
+# _route_after_expand reads effective_leg
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("effective", "expected_route"),
+    [
+        (RetrievalLeg.GRAPHITI.value, "graph_only"),
+        (RetrievalLeg.FLAT.value, "vector"),
+        (None, "vector"),
+    ],
+)
+def test_route_after_expand_reads_effective_leg(
+    effective: str | None, expected_route: str
+) -> None:
+    state: dict = {"effective_leg": effective} if effective is not None else {}
+    assert KnowledgeRetrievalNodes.route_after_expand(state) == expected_route
+
+
+# ---------------------------------------------------------------------------
+# Characterization extensions — effective_leg on end-to-end paths
+# ---------------------------------------------------------------------------
+
+
+def _no_session():
+    raise AssertionError("no graph is built, so graph_expand must not open a session")
+
+
+def _build(tmp_path: Path):
+    graph = KnowledgeAgentGraph(LedgerSinkRef(RecordingLedgerSink(tmp_path)))
+    return graph.build_retrieval(
+        KnowledgeGraphConfig(
+            engine=FakeKnowledgeRetriever(),
+            # A graph leg whose workspace has no graph DB yet: graphiti mode soft-falls back.
+            graph=KnowledgeGraphLeg(
+                workspace_path=tmp_path, open_session=_no_session, query_timeout_s=lambda: 60
+            ),
+        )
+    )
+
+
+def _query(**over):
+    state = {
+        "query": "what is hiro?",
+        "rewrite": False,
+        "top_k": 5,
+        "min_score": 0.0,
+        "filters": {},
+        "inbound_id": "k-1",
+        "chat_channel_id": 0,
+        "character_id": "hiro",
+        "user_id": "",
+    }
+    state.update(over)
+    return state
+
+
+@pytest.mark.asyncio
+async def test_flat_leg_sets_effective_leg_flat(tmp_path: Path) -> None:
+    compiled = _build(tmp_path)
+    final = await compiled.ainvoke(_query())
+
+    assert final.get("effective_leg") == RetrievalLeg.FLAT.value
+    assert len(final.get("sources") or []) == 1
+
+
+@pytest.mark.asyncio
+async def test_graphiti_soft_fallback_sets_effective_leg_flat(tmp_path: Path) -> None:
+    compiled = _build(tmp_path)
+    final = await compiled.ainvoke(_query(graph_mode="graphiti"))
+
+    # No graph DB → graph_expand skips → effective_leg=FLAT → vector path.
+    assert final.get("effective_leg") == RetrievalLeg.FLAT.value
+    assert len(final.get("sources") or []) == 1

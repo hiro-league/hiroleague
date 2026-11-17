@@ -10,7 +10,7 @@ from langgraph.graph.message import add_messages
 # Runtime import (NOT TYPE_CHECKING): LangGraph calls ``get_type_hints`` on this state
 # TypedDict to build its channels, which evaluates the annotation — so ``KnowledgeSource``
 # must resolve at runtime even though ``from __future__ import annotations`` is on.
-from hirocli.services.knowledge.models import KnowledgeSource
+from hiro_memory.knowledge.models import KnowledgeSource
 
 
 class AudioItem(TypedDict):

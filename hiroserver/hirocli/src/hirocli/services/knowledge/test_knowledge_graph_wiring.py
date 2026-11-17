@@ -6,11 +6,13 @@ from pathlib import Path
 
 from langgraph.graph.state import CompiledStateGraph
 
+from hiro_memory.knowledge.agent import KnowledgeAgentGraph
+from hiro_memory.ledger.node_group import LedgerSinkRef
+from hiro_memory.testing import FakeKnowledgeRetriever
+
 from hirocli.domain.preferences import load_preferences
 from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
-from hirocli.runtime.agent_graph.services import AgentServices
-from hirocli.runtime.tests.graph_fakes import FakeKnowledgeService
-from hirocli.services.knowledge.agent import KnowledgeAgentGraph, KnowledgeGraphConfig
+from hirocli.services.knowledge.graph_wiring import knowledge_graph_config
 
 _RETRIEVAL_NODES = {
     "parse_query",
@@ -44,10 +46,8 @@ def _edge_pairs(compiled: CompiledStateGraph) -> set[tuple[str, str]]:
 
 def _build(tmp_path: Path, *, retrieval_only: bool = False) -> CompiledStateGraph:
     prefs = load_preferences(tmp_path)
-    builder = KnowledgeAgentGraph(
-        AgentServices(workspace_path=tmp_path, ledger_sink=workspace_ledger_sink(tmp_path))
-    )
-    config = KnowledgeGraphConfig(service=FakeKnowledgeService(), prefs=prefs)
+    builder = KnowledgeAgentGraph(LedgerSinkRef(workspace_ledger_sink(tmp_path)))
+    config = knowledge_graph_config(FakeKnowledgeRetriever(), prefs, tmp_path)
     return builder.build_retrieval(config) if retrieval_only else builder.build(config)
 
 

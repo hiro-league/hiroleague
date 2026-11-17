@@ -19,7 +19,7 @@ tags each call with the Graphiti **response-model name** (the only handle on
   into the adapter (``on_usage`` / ``on_embed``). No-ops outside an episode context,
   so wiring them globally in ``from_preferences`` is safe for retrieval/memory paths.
 
-Mirrors the retrieval-side :mod:`services.knowledge.ledger_runner` pattern.
+Mirrors the retrieval-side :mod:`hiro_memory.knowledge.ledger_runner` pattern.
 Engine-agnostic: it imports the usage value object only, never ``graphiti_core``.
 
 See docs/knowledge-graphiti-pivot-design.md §6 (ingest) and §12 (observability).

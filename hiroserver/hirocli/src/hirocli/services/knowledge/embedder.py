@@ -11,11 +11,9 @@ from langchain_core.embeddings import Embeddings
 from hiro_commons.log import Logger
 
 from hirocli.domain.preferences import DEFAULT_KNOWLEDGE_EMBEDDING_MODEL
-from hirocli.services.knowledge.constants import (
-    DEFAULT_SPARSE_MODEL,
-    KNOWLEDGE_DIR,
-)
-from hirocli.services.knowledge.embedding_backends import (
+from hiro_memory.knowledge.constants import DEFAULT_SPARSE_MODEL
+from hirocli.services.knowledge.constants import KNOWLEDGE_DIR
+from hiro_memory.knowledge.embedding_backends import (
     EmbeddingBackend,
     FastEmbedBackend,
     SparseFastEmbedBackend,
@@ -156,9 +154,13 @@ def resolve_knowledge_embedder(
 
     # Local FastEmbed lane: sentence-transformers/* ids (the local-embedder registry uses these).
     if resolved.startswith("sentence-transformers/"):
+        from hirocli.services.knowledge.download_markers import write_marker
+
         return FastEmbedBackend(
             model_name=resolved,
             cache_dir=workspace_path / KNOWLEDGE_DIR / "fastembed_cache",
+            # A download marker after each successful load: availability tracked like the rerankers'.
+            on_loaded=write_marker,
         )
 
     raise ValueError(

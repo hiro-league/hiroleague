@@ -24,7 +24,7 @@ import time
 
 import pytest
 
-from hirocli.services.knowledge.models import (
+from hiro_memory.knowledge.models import (
     KnowledgeAnswerComparison,
     KnowledgeAnswerResult,
 )

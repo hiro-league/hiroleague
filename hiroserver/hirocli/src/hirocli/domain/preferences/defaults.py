@@ -10,6 +10,10 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any, Literal, TypeVar
 
+from hiro_memory.knowledge.settings import (
+    DEFAULT_KNOWLEDGE_ANSWERING_PROMPT,
+    DEFAULT_KNOWLEDGE_REWRITE_PROMPT,
+)
 from pydantic import BaseModel, Field
 
 from ..prompts import load_prompt
@@ -200,24 +204,8 @@ def default_image_profiles() -> dict[str, ImageProfile]:
     }
 
 
-# System prompt for the optional query-rewrite step. Editable in preferences; the rewrite node
-# falls back to this constant when the stored prompt is blank. Scope is normalization +
-# literal-keyword extraction; the conversation-history clause is a no-op for admin Ask (which
-# passes no history) and active in chat (where history is supplied for reference resolution).
-# Text lives in prompts/knowledge_rewrite.md (the output shape is spelled out in the prompt — not
-# left to the schema alone — because some providers, e.g. DeepSeek thinking mode, fall back to
-# JSON-mode structured output that never sees the pydantic field descriptions).
-DEFAULT_KNOWLEDGE_REWRITE_PROMPT = load_prompt("knowledge_rewrite")
-
-
-# System prompt for the answer-generation step. Editable in preferences; the answer node falls
-# back to this constant when the stored prompt is blank. Relaxed (vs. the old all-or-nothing
-# wording) so multi-part questions degrade gracefully: it keeps the facts-only-from-context guard
-# but explicitly allows PARTIAL answers and forbids a bare "I don't know" when any part is
-# supported. Safe because the empty-context case is gated upstream by ``no_results`` and never
-# reaches this prompt. Citation + language clauses are appended at runtime from the other answering
-# prefs, so they are intentionally not part of this text.
-DEFAULT_KNOWLEDGE_ANSWERING_PROMPT = load_prompt("knowledge_answering")
+# The knowledge base's default rewrite and answering prompts are the knowledge engine's
+# (``hiro_memory.knowledge.settings``, imported above): its nodes fall back to them when a stored prompt is blank.
 
 
 # System prompt for the chat's agentic memory-retrieval loop (agentic-memory-retrieval-design §5.3).
