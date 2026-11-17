@@ -19,6 +19,7 @@ a task in env1..env5 lands: its branches merge into dev/main and env0 is brought
     hiro-work real <task> [--reads] [--ai]   env1..5: which real systems the task's copy reads (data.py)
     hiro-work refresh-data [--apply STAMP] [--files]   live -> env0: a scrubbed live copy, then env0 (data.py)
     hiro-work train [repo ...] [--dry-run]   the deploy train: push and deploy, when Michel says (train.py)
+    hiro-work audit latest | RUN | list      the doc audit's runs, and start / report to record one (audit.py)
 
 State lives in C:\hiro\tasks (one JSON file per task) and every step is logged to C:\hiro\logs\events.jsonl (with
 its time) for CodeHiro's Work area, where ship.py sends it. Standard library only: it runs on the system Python.
@@ -1537,6 +1538,8 @@ def main(argv: list[str] | None = None) -> int:
     sys.modules.setdefault("hiro_work", sys.modules[__name__])
     import train
     train.add_parser(sub)
+    import audit
+    audit.add_parser(sub)
     a = p.parse_args(argv)
     if a.cmd in LONG_COMMANDS:
         ignore_console_interrupt()
