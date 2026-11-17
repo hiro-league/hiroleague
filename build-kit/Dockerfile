@@ -59,26 +59,28 @@ COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PROJECT_ENVIRONMENT=/app/.venv
 WORKDIR /app/backend
 COPY backend/pyproject.toml backend/uv.lock ./
-# The third-party packages first, so this layer is reused until uv.lock changes. HiroLeague's SDK, commons and
-# extension kit are left out here: they change with every core deploy, and copying them in before this step reinstalled
-# every package.
+# The third-party packages first, so this layer is reused until uv.lock changes. HiroLeague's SDK, commons, extension
+# kit and memory library are left out here: they change with every core deploy, and copying them in before this step
+# reinstalled every package. (An app without the memory library, all but EvalHiro, has no such package to leave out.)
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project \
       --no-install-package hiro-channel-sdk --no-install-package hiro-commons \
-      --no-install-package hiro-extension-kit
-# HiroLeague's SDK, commons and extension kit (the app connects to the core as its extension; the backend every app
-# shares): editable path dependencies at ../../hiroleague/... from here, so /hiroleague/... in the image, from the
-# HiroLeague checkout beside the app (the build context "hiroleague"); only these folders.
+      --no-install-package hiro-extension-kit --no-install-package hiro-memory
+# HiroLeague's SDK, commons, extension kit and memory library (the app connects to the core as its extension; the
+# backend every app shares; EvalHiro's graph engine): editable path dependencies at ../../hiroleague/... from here, so
+# /hiroleague/... in the image, from the HiroLeague checkout beside the app (the build context "hiroleague"); only
+# these folders.
 COPY --from=hiroleague hiroserver/hiro-channel-sdk /hiroleague/hiroserver/hiro-channel-sdk
 COPY --from=hiroleague hiroserver/hiro-commons /hiroleague/hiroserver/hiro-commons
 COPY --from=hiroleague hiroserver/hiro-extension-kit /hiroleague/hiroserver/hiro-extension-kit
+COPY --from=hiroleague hiroserver/hiro-memory /hiroleague/hiroserver/hiro-memory
 COPY backend/ ./
-# --refresh-package: never take the SDK, commons or the kit from uv's cache. They keep version 0.2.0 while their code
-# changes, and uv reuses a cached build of a same-version local package (the stale-SDK trap of 2026-11-06). They are
-# editable installs, so the app reads the source copied just above.
+# --refresh-package: never take the SDK, commons, the kit or the memory library from uv's cache. They keep their version
+# while their code changes, and uv reuses a cached build of a same-version local package (the stale-SDK trap of
+# 2026-11-06). They are editable installs, so the app reads the source copied just above.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --refresh-package hiro-channel-sdk --refresh-package hiro-commons \
-      --refresh-package hiro-extension-kit
+      --refresh-package hiro-extension-kit --refresh-package hiro-memory
 ENV STATIC_DIR=/app/static DATA_DIR=/app/data PATH="/app/.venv/bin:$PATH"
 
 # 6) The backend's check (the nightly full check): the checks the app's app.env lists (BACKEND_CHECKS: ruff, pyright,
