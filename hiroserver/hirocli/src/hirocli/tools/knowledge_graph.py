@@ -27,20 +27,17 @@ from ..domain.workspace import resolve_workspace
 from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
 from ..services.knowledge import KnowledgeService, create_knowledge_service
 from ..services.knowledge.graph_factory import build_graph_service, graph_query_timeout
-from hiro_memory.graph import (
-    GraphitiEpisodeInput,
-    GraphitiMemoryService,
-)
+from hiro_memory.graph import GraphitiMemoryService
 from hiro_memory.graph.graphiti_ingest import GraphEventSink
 from hiro_memory.graph.views import graph_snapshot_payload
+from hiro_memory.knowledge.graph_build import (
+    build_document_graph,
+    empty_graph_totals,
+    remove_document_episodes,
+)
 from .base import Tool, ToolParam
 
 log = Logger.get("SVC.KNOWLEDGE.GRAPH.TOOL")
-
-
-# Chunks per document we pull in one round-trip from Qdrant. Documents larger
-# than this are paged via scroll_offset. 200 covers a typical .md note.
-_CHUNK_PAGE_SIZE = 200
 
 
 def _resolve_path(workspace: str | None) -> Path:
@@ -79,56 +76,6 @@ def _resolve_service(
     return create_knowledge_service(workspace_path), workspace_path, True
 
 
-async def _gather_episodes(
-    service: KnowledgeService, document_id: str
-) -> tuple[list[GraphitiEpisodeInput], str | None]:
-    """Walk all pages of a document's chunks → episodes. Returns (episodes, title)."""
-    episodes: list[GraphitiEpisodeInput] = []
-    title: str | None = None
-    offset: str | None = None
-    while True:
-        detail = await service.get_document(
-            document_id, chunk_limit=_CHUNK_PAGE_SIZE, chunk_offset=offset
-        )
-        if detail.document is None:
-            raise KeyError(f"Unknown knowledge document: {document_id}")
-        title = detail.document.title or title
-        for raw in detail.chunks:
-            text = str(raw.get("text") or "").strip()
-            point_id = str(raw.get("point_id") or "")
-            if not text or not point_id:
-                continue
-            episodes.append(
-                GraphitiEpisodeInput(
-                    chunk_id=point_id,
-                    document_id=document_id,
-                    text=text,
-                    document_title=title or "",
-                )
-            )
-        offset = detail.chunk_next_offset
-        if not offset:
-            break
-    return episodes, title
-
-
-def _empty_totals() -> dict[str, int]:
-    return {
-        "episodes_processed": 0,
-        "episodes_rejected": 0,
-        "episodes_failed": 0,
-        "entities_total": 0,
-        "edges_total": 0,
-    }
-
-
-def _fold_into_totals(totals: dict[str, int], stats: dict[str, Any]) -> None:
-    for key in totals:
-        value = stats.get(key)
-        if isinstance(value, (int, float)):
-            totals[key] += int(value)
-
-
 async def _run_graph_ingest_for_documents(
     service: KnowledgeService,
     workspace_path: Path,
@@ -149,7 +96,7 @@ async def _run_graph_ingest_for_documents(
     (HTTP layer) makes ingest emit live progress events for the Graph tab.
     """
     if not document_ids:
-        return {"document_count": 0, "documents": [], "totals": _empty_totals()}
+        return {"document_count": 0, "documents": [], "totals": empty_graph_totals()}
 
     prefs = load_preferences(workspace_path)
     # require_backend=False: an explicit build-graph action ingests even when the
@@ -166,80 +113,18 @@ async def _run_graph_ingest_for_documents(
 
     # One ledger run per document (per ingest_chunks call) → each document's graph
     # build is drillable in Graph Runs with per-operation step detail.
-    ledger_sink = workspace_ledger_sink(workspace_path)
-    per_doc: list[dict[str, Any]] = []
-    totals = _empty_totals()
     try:
-        await svc.initialize()
-        for index, document_id in enumerate(document_ids):
-            entry: dict[str, Any] = {
-                "index": index,
-                "total": len(document_ids),
-                "document_id": document_id,
-                "document_title": "",
-                "ok": False,
-                "stats": None,
-                "error": "",
-            }
-            try:
-                episodes, title = await _gather_episodes(service, document_id)
-                entry["document_title"] = title or ""
-                log.info(
-                    "⬇️ graphiti.ingest — %d episode(s) from document · doc_id=%s title=%r",
-                    len(episodes),
-                    document_id,
-                    title or "",
-                )
-                stats = await svc.ingest_chunks(
-                    episodes,
-                    source_role=source_role,
-                    event_sink=event_sink,
-                    ledger_sink=ledger_sink,
-                    # Defer the per-document Kuzu FTS rebuild: N docs would otherwise force N
-                    # checkpoints, each able to stall against a concurrent graph read (the
-                    # memory-eval freeze, same class). ONE rebuild after the loop instead.
-                    rebuild_fts=False,
-                )
-                stats_dict = stats.as_dict()
-                entry["ok"] = True
-                entry["stats"] = stats_dict
-                _fold_into_totals(totals, stats_dict)
-            except Exception as exc:
-                # Per-doc failure isolation. Log + record + continue.
-                log.warning(
-                    "⚠️ graphiti.ingest — document failed · doc_id=%s · %s",
-                    document_id,
-                    str(exc)[:200],
-                    exc_info=True,
-                )
-                entry["error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
-            per_doc.append(entry)
-            if on_progress is not None:
-                try:
-                    on_progress(dict(entry))
-                except Exception:
-                    log.exception("⚠️ graphiti.ingest — on_progress callback failed")
-        # One FTS rebuild for the whole batch (per-doc rebuilds deferred above). NON-FATAL:
-        # the docs' episodes are already committed — a failed rebuild only leaves the keyword
-        # index stale until the next graph open (initialize() rebuilds it). Aborting here would
-        # mark a fully-built (paid-for) batch failed.
-        if any(e["ok"] for e in per_doc):
-            try:
-                await svc.rebuild_search_index()
-            except Exception:
-                log.warning(
-                    "⚠️ graphiti.ingest — batch FTS rebuild failed; episodes are committed, "
-                    "keyword index refreshes on next graph open",
-                    exc_info=True,
-                )
+        return await build_document_graph(
+            svc,
+            service,
+            document_ids,
+            source_role=source_role,
+            ledger_sink=workspace_ledger_sink(workspace_path),
+            on_progress=on_progress,
+            event_sink=event_sink,
+        )
     finally:
         await svc.close()
-
-    return {
-        "document_count": len(document_ids),
-        "documents": per_doc,
-        "totals": totals,
-    }
 
 
 def _open_graph_service_for_teardown(workspace_path: Path) -> GraphitiMemoryService:
@@ -291,12 +176,7 @@ async def remove_document_from_graph(workspace_path: Path, document_id: str) -> 
         return 0
     svc = _open_graph_service_for_teardown(workspace_path)
     try:
-        await svc.initialize()
-        removed = await svc.remove_episodes_by_document(did)
-        log.info(
-            "🧹 knowledge graph — document removed · doc_id=%s episodes=%d", did, removed
-        )
-        return removed
+        return await remove_document_episodes(svc, did)
     finally:
         await svc.close()
 
@@ -366,7 +246,7 @@ class KnowledgeGraphIngestTool(Tool):
                 "document_id": document_id,
                 "document_title": doc.get("document_title", ""),
                 "source_role": source_role,
-                "stats": doc.get("stats") or _empty_totals(),
+                "stats": doc.get("stats") or empty_graph_totals(),
                 "ok": doc.get("ok", False),
                 "error": doc.get("error", ""),
             }

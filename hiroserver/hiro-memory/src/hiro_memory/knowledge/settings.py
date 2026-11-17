@@ -1,4 +1,4 @@
-"""The knowledge settings the retrieval graph reads. Their values live with the owner (the core's preferences,
+"""The knowledge settings the engine reads: how ingest chunks a file, and what the retrieval graph reads. Their values live with the owner (the core's preferences,
 EvalHiro's run snapshot); the classes live here so both hand the engine the same shape.
 
 The models, the embedders and the reranker are not settings: the owner picks them and hands them in
@@ -10,8 +10,9 @@ from __future__ import annotations
 from importlib import resources
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
+from hiro_memory.knowledge.constants import DEFAULT_CHUNK_OVERLAP, DEFAULT_CHUNK_SIZE
 from hiro_memory.settings import KnowledgeGraphTemporalDefault
 
 
@@ -32,6 +33,26 @@ DEFAULT_KNOWLEDGE_REWRITE_PROMPT = _load_prompt("knowledge_rewrite")
 # PARTIAL answers and forbids a bare "I don't know" when any part is supported (the empty-context case never reaches
 # it: ``no_results`` skips the model). The citation and language clauses are appended at run time.
 DEFAULT_KNOWLEDGE_ANSWERING_PROMPT = _load_prompt("knowledge_answering")
+
+
+class KnowledgeChunkingMarkdownSettings(BaseModel):
+    respect_headings: bool = True
+
+
+class KnowledgeChunkingSettings(BaseModel):
+    """How a file is cut into chunks at ingest (``index.KnowledgeIndex.ingest_file``)."""
+
+    chunk_size: int = Field(default=DEFAULT_CHUNK_SIZE, ge=200, le=8000)
+    chunk_overlap: int = Field(default=DEFAULT_CHUNK_OVERLAP, ge=0, le=2000)
+    # Prefix each chunk's embedded text with its document title and heading path.
+    embed_structural_context: bool = True
+    markdown: KnowledgeChunkingMarkdownSettings = Field(default_factory=KnowledgeChunkingMarkdownSettings)
+
+    @model_validator(mode="after")
+    def _overlap_less_than_size(self) -> "KnowledgeChunkingSettings":
+        if self.chunk_overlap >= self.chunk_size:
+            raise ValueError("chunk_overlap must be smaller than chunk_size")
+        return self
 
 
 class KnowledgeRerankSettings(BaseModel):
