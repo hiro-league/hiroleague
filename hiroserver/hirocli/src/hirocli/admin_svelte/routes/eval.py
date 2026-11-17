@@ -830,7 +830,7 @@ async def eval_corpuses(
 ) -> Any:
     """List the corpuses in ``folder`` for ``track`` (the corpus-picker source).
 
-    ``folder`` defaults to the sibling ``eval-corpus`` repo (``DEFAULT_EVAL_FOLDER``;
+    ``folder`` defaults to EvalHiro's ``eval-corpus`` (``DEFAULT_EVAL_FOLDER``;
     override with ``$HIRO_EVAL_CORPUS_DIR``). Each corpus pairs with its
     ``<id>.questions.yaml`` bank by the stem convention (docs §12). The corpus files
     are workspace-independent, but each entry's ``has_graph`` flag (whether a graph was
