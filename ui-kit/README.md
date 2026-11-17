@@ -52,5 +52,11 @@ need no backend).
   Paste the designer's output there, commit and deploy that app.
 - `npm install` once, then `npm run dev` for the gallery and `npm run check` for svelte-check, ESLint and the tests.
 - The repo's `./scripts/check.sh` runs `npm run check` here as its "ui-kit: check" part.
-- shadcn's components are added here with its CLI (`npx shadcn-svelte@1.7.0 add <name> --yes`; `components.json`
-  points it at `$kit`), one at a time; check the diff, since `--overwrite` also overwrites shared components.
+- shadcn's components are added and updated here with its CLI (`npx shadcn-svelte@1.8.1 add <name> --yes`,
+  `update <name>`; `components.json` points it at `$kit`). Every shadcn component an app uses lives here, never in an
+  app. Both commands overwrite files, so read the diff and put back the kit's own additions:
+  - `badge` (the `success` and `warning` variants), `button` (the `inline` size), `card` (`overflow-clip`, so a
+    sticky table head pins to the page);
+  - `dialog-content`, `alert-dialog-content`, `sheet-content` (`overlayClass`);
+  - `slider` (`aria-label` on the thumb), `switch` (`tone`), `table` (`compact`, `scroll`);
+  - `utils.ts` (`cn` from `clsx` and `tailwind-merge`; the CLI swaps it for the `cn` package).
