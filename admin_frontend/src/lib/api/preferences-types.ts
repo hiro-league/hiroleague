@@ -3,7 +3,7 @@
  * Never edit `generated/*` — run `npm run gen:prefs-types` after backend model changes.
  */
 import type {
-  AnswerPromptProfile,
+  PromptProfile,
   ChatPreferences,
   GraphPreferences as GeneratedGraphPreferences,
   ImageProfile,
@@ -17,7 +17,7 @@ import type {
 } from './generated/preferences.generated';
 
 export type {
-  AnswerPromptProfile,
+  PromptProfile,
   ChatPreferences,
   ImageProfile,
   ImageProfile as ImageProfilePreference,

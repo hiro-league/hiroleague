@@ -103,7 +103,7 @@ async def handle_memory_settings(params: dict[str, Any], ctx: RequestContext) ->
     del params
     await _caller_name(ctx)
     prefs = ctx.server_ctx.preferences.current
-    graph = prefs.graph.model_dump(mode="json", exclude={"eval"})
+    graph = prefs.graph.model_dump(mode="json")
     reranker = resolve_graph_reranker_profile(prefs)
     return {
         "memory": prefs.memory.model_dump(mode="json"),

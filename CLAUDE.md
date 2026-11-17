@@ -21,18 +21,16 @@ persists on Save.
 
 ## Inspecting a workspace (DBs, ledger, traces)
 
-- **All databases live under `<workspace>/db/`:** `workspace.db`, `data.db`, `knowledge.db`, `eval_results.db`,
-  `graphiti_kuzu.db`, and the `qdrant/` vector store. Content blobs (`data/media`, `data/channel_photos`) and
+- **All databases live under `<workspace>/db/`:** `workspace.db`, `data.db`, `knowledge.db`, `graphiti_kuzu.db`,
+  and the `qdrant/` vector store. Content blobs (`data/media`, `data/channel_photos`) and
   `knowledge/fastembed_cache` stay outside `db/`.
 - **The Kuzu graph DB** (`<workspace>/db/graphiti_kuzu.db`) is exclusively locked while the server runs: it can't be
   opened or even copied. To query it: `hiro stop`, inspect, then `hiro start` (admin flag).
-- **Readable while the server runs** (no lock): eval results `<workspace>/db/eval_results.db` (SQLite; per-question
-  `row_json` has recalled facts, answer and judge), the Graph Runs ledger `<workspace>/logs/graph.log` (CSV), and
+- **Readable while the server runs** (no lock): the Graph Runs ledger `<workspace>/logs/graph.log` (CSV), and
   per-stage retrieval and ingest traces `<workspace>/logs/retrieval_trace/*.jsonl`. Live settings are in
   `<workspace>/preferences.json`.
-- **Memory eval corpora** live in EvalHiro's repo (`../evalhiro/eval-corpus`; override with
-  `$HIRO_EVAL_CORPUS_DIR`); `benchmarks.yaml` groups them into benchmarks (LoCoMo, BEAM-128k). The **knowledge**
-  corpus (`l3_synthetic`) is in this repo's `eval/`.
+- **The memory eval** (its corpora, runs and results) is EvalHiro's (`../evalhiro`). The core serves it `ai.embed`,
+  `ai.rerank` and `memory.settings`, and shares the memory library (`hiroserver/hiro-memory`) with it.
 
 ## Architecture
 

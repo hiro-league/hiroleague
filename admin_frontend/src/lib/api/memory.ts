@@ -13,7 +13,7 @@ export type MemoryClearData = {
 /**
  * List workspace memories. Without `groupId`: all of the default user's conversation-memory
  * groups (the page default). With `groupId`: that one partition's facts — backs the Memories
- * group selector, which can target any graph group (memory / knowledge / eval), like the Graph tab.
+ * group selector, which can target any graph group (memory / knowledge), like the Graph tab.
  */
 export async function listWorkspaceMemories(groupId?: string): Promise<MemoryListData> {
   const gid = (groupId ?? '').trim();

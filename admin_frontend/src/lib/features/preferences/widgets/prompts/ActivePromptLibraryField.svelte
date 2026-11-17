@@ -1,7 +1,7 @@
 <script lang="ts">
   /**
    * Single merged control for a versioned prompt library that ALSO has a persisted "active version"
-   * pointer (graph.eval.retrieval_agent_prompts + active_retrieval_agent_prompt_id). One dropdown
+   * pointer (memory.retrieval.prompts + memory.retrieval.active_prompt_id). One dropdown
    * SELECTS the active profile (saved with the page, via markDirty). Inline icon buttons —
    * New / Edit / Duplicate — all open the shared PromptEditorDialog, which keeps its full
    * management (edit text, New / Duplicate / Delete / Rename, immediate PATCH on its own Save).
@@ -24,14 +24,14 @@
     preferenceTitle,
     type PreferencePath
   } from '$lib/features/preferences/shared/preferences-schema';
-  import type { AnswerPromptProfile } from '$lib/api/preferences';
+  import type { PromptProfile } from '$lib/api/preferences';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import PromptEditorDialog from './PromptEditorDialog.svelte';
   import type { PromptDialogModel, PromptSavePayload } from './prompt-editor';
 
   type Props = {
     ctrl: PreferencesController;
-    /** Dotted path to the dict, e.g. "graph.eval.retrieval_agent_prompts". */
+    /** Dotted path to the dict, e.g. "memory.retrieval.prompts". */
     dictPath: string;
     /** Dotted path to the persisted "active version" pointer (the dropdown binds + saves here). */
     activeIdPath: string;
@@ -64,7 +64,7 @@
   let pendingAction = $state<'create' | 'duplicate' | undefined>(undefined);
 
   const dict = $derived(
-    (getPreferenceByPath(ctrl.draft, dictPath) ?? {}) as Record<string, AnswerPromptProfile>
+    (getPreferenceByPath(ctrl.draft, dictPath) ?? {}) as Record<string, PromptProfile>
   );
   const entries = $derived(
     Object.entries(dict).sort(([ka, a], [kb, b]) =>

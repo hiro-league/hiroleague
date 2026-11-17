@@ -10,19 +10,15 @@ import yaml
 from hirocli.domain.credential_store import CredentialStore
 from hirocli.domain.model_catalog import ModelCatalog, clear_model_catalog_cache
 from hirocli.domain.preferences import (
-    DEFAULT_ANSWER_PROMPT_ID,
     DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID,
     DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT,
-    DEFAULT_MEMORY_EVAL_ANSWER_PROMPT,
-    DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT,
-    DEFAULT_RETRIEVAL_AGENT_PROMPT_ID,
     AiProfile,
-    AnswerPromptProfile,
     MediaPreferences,
     MemoryPreferences,
     ModalityFlags,
     PREFERENCE_SECTIONS,
     PROMPT_DEFAULTS,
+    PromptProfile,
     WorkspacePreferences,
     job_model_source,
     load_preferences,
@@ -30,7 +26,6 @@ from hirocli.domain.preferences import (
     resolve_chat_retrieval_agent_prompt,
     resolve_job_model,
     resolve_knowledge_answering_llm,
-    resolve_retrieval_agent_prompt,
     resolved_from_profile,
     save_preferences,
 )
@@ -199,70 +194,13 @@ def test_save_preferences_prunes_default_prompts(tmp_path: Path) -> None:
     save_preferences(ws, WorkspacePreferences())
     raw = _json.loads(preferences_file(ws).read_text(encoding="utf-8"))
     assert "prompt" not in raw["knowledge"]["answering"]
-    assert "judge_prompt" not in raw["graph"]["eval"]
-    # The mem-eval answer prompt is now a named library (dict), always materialized like
-    # image_profiles — so it stays present, and its locked default profile reloads with the
-    # built-in default text via resolve_answer_prompt.
+    # The retrieval-agent prompt library is a dict, always materialized like image_profiles: its
+    # locked chat profile reloads with the built-in text.
     reloaded = load_preferences(ws)
-    _, default_text = reloaded.graph.eval.resolve_answer_prompt(None)
-    assert default_text == DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
-
-
-def test_answer_prompt_library_roundtrips(tmp_path: Path) -> None:
-    # The answer-prompt library persists in full (a dict, like image_profiles); an added profile
-    # round-trips and resolve_answer_prompt returns its text by id, with an unknown id falling
-    # back to the locked default profile's text.
-    import json as _json
-
-    ws = tmp_path / "ws"
-    prefs = WorkspacePreferences()
-    prefs.graph.eval.answer_prompts["strict"] = AnswerPromptProfile(
-        label="Strict", prompt="Answer only from context."
+    assert resolve_chat_retrieval_agent_prompt(reloaded) == (
+        DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID,
+        DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT,
     )
-    save_preferences(ws, prefs)
-    raw = _json.loads(preferences_file(ws).read_text(encoding="utf-8"))
-    assert raw["graph"]["eval"]["answer_prompts"]["strict"]["prompt"] == "Answer only from context."
-    reloaded = load_preferences(ws)
-    assert reloaded.graph.eval.resolve_answer_prompt("strict") == (
-        "Strict",
-        "Answer only from context.",
-    )
-    _, default_text = reloaded.graph.eval.resolve_answer_prompt("nope")
-    assert default_text == DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
-
-
-def test_resolve_active_answer_prompt_uses_active_id() -> None:
-    # The answer step now reads the persisted active_answer_prompt_id (mirrors the retrieval agent),
-    # returning (id, label, text). A blank profile body falls back to the built-in default text.
-    prefs = WorkspacePreferences()
-    prefs.graph.eval.answer_prompts["variant"] = AnswerPromptProfile(
-        label="Variant", prompt="Answer tersely."
-    )
-    prefs.graph.eval.active_answer_prompt_id = "variant"
-    pid, label, text = prefs.graph.eval.resolve_active_answer_prompt()
-    assert (pid, label, text) == ("variant", "Variant", "Answer tersely.")
-
-    prefs.graph.eval.answer_prompts["blank"] = AnswerPromptProfile(label="Blank", prompt="")
-    prefs.graph.eval.active_answer_prompt_id = "blank"
-    pid, _label, text = prefs.graph.eval.resolve_active_answer_prompt()
-    assert pid == "blank"
-    assert text == DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
-
-
-def test_resolve_active_answer_prompt_defaults_to_locked_default() -> None:
-    pid, _label, text = WorkspacePreferences().graph.eval.resolve_active_answer_prompt()
-    assert pid == DEFAULT_ANSWER_PROMPT_ID
-    assert text == DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
-
-
-def test_retrieval_agent_defaults() -> None:
-    limits = WorkspacePreferences().graph.eval.retrieval_agent
-    assert limits.max_agent_turns == 4
-    assert limits.max_parallel_searches == 3
-    assert limits.limit_default == 20
-    assert limits.limit_min == 10
-    assert limits.limit_max == 40
-    assert limits.hops_max == 3
 
 
 def test_retrieval_agent_limit_coherence_validator() -> None:
@@ -275,69 +213,40 @@ def test_retrieval_agent_caps_clamped_to_pydantic_bounds() -> None:
         RetrievalAgentLimits(max_parallel_searches=99)
 
 
-def test_resolve_retrieval_agent_prompt_blank_falls_back_to_default() -> None:
+def test_chat_retrieval_prompt_library_roundtrips_and_resolves(tmp_path: Path) -> None:
+    # An added profile persists in full and resolves by the active id; blank text falls back to the
+    # built-in prompt; an unknown id falls back to the locked chat profile.
+    import json as _json
+
+    ws = tmp_path / "ws"
     prefs = WorkspacePreferences()
-    prefs.graph.eval.retrieval_agent_prompts["custom"] = AnswerPromptProfile(
-        label="Custom", prompt=""
+    prefs.memory.retrieval.prompts["variant"] = PromptProfile(label="Variant", prompt="Search carefully.")
+    prefs.memory.retrieval.active_prompt_id = "variant"
+    save_preferences(ws, prefs)
+    raw = _json.loads(preferences_file(ws).read_text(encoding="utf-8"))
+    assert raw["memory"]["retrieval"]["prompts"]["variant"]["prompt"] == "Search carefully."
+    reloaded = load_preferences(ws)
+    assert resolve_chat_retrieval_agent_prompt(reloaded) == ("variant", "Search carefully.")
+
+    reloaded.memory.retrieval.prompts["blank"] = PromptProfile(label="Blank", prompt="")
+    reloaded.memory.retrieval.active_prompt_id = "blank"
+    assert resolve_chat_retrieval_agent_prompt(reloaded) == ("blank", DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT)
+
+    reloaded.memory.retrieval.active_prompt_id = "gone"
+    assert resolve_chat_retrieval_agent_prompt(reloaded) == (
+        DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID,
+        DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT,
     )
-    prefs.graph.eval.active_retrieval_agent_prompt_id = "custom"
-    pid, text = resolve_retrieval_agent_prompt(prefs)
-    assert pid == "custom"
-    assert text == DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT
 
 
-def test_resolve_retrieval_agent_prompt_uses_active_id() -> None:
-    prefs = WorkspacePreferences()
-    prefs.graph.eval.retrieval_agent_prompts["variant"] = AnswerPromptProfile(
-        label="Variant", prompt="Search carefully."
-    )
-    prefs.graph.eval.active_retrieval_agent_prompt_id = "variant"
-    pid, text = resolve_retrieval_agent_prompt(prefs)
-    assert pid == "variant"
-    assert text == "Search carefully."
-
-
-def test_retrieval_agent_prompt_default_in_builtin_defaults() -> None:
-    default_profile = WorkspacePreferences().graph.eval.retrieval_agent_prompts[
-        DEFAULT_RETRIEVAL_AGENT_PROMPT_ID
-    ]
-    assert default_profile.prompt == DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT
-    pid, text = resolve_retrieval_agent_prompt(WorkspacePreferences())
-    assert pid == DEFAULT_RETRIEVAL_AGENT_PROMPT_ID
-    assert text == DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT
-
-
-def test_chat_retrieval_agent_prompt_is_locked_default_and_resolves() -> None:
-    """Phase 1: the SHARED library hosts a locked ``chat`` profile; the chat resolver selects it via
-    ``memory.retrieval.active_prompt_id`` (chat's own pointer), independent of the eval active id."""
-    chat_profile = WorkspacePreferences().graph.eval.retrieval_agent_prompts[
-        DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID
-    ]
+def test_chat_retrieval_agent_prompt_is_locked_default() -> None:
+    chat_profile = WorkspacePreferences().memory.retrieval.prompts[DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID]
     assert chat_profile.locked is True
     assert chat_profile.prompt == DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT
 
-    # Default memory pointer → the chat profile.
-    pid, text = resolve_chat_retrieval_agent_prompt(WorkspacePreferences())
-    assert pid == DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID
-    assert text == DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT
-
-    # The two surfaces read INDEPENDENT pointers against the one shared library: pointing chat at the
-    # eval default resolves eval text, while eval's own pointer is untouched.
-    prefs = WorkspacePreferences()
-    prefs.memory.retrieval.active_prompt_id = DEFAULT_RETRIEVAL_AGENT_PROMPT_ID
-    assert resolve_chat_retrieval_agent_prompt(prefs) == (
-        DEFAULT_RETRIEVAL_AGENT_PROMPT_ID,
-        DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT,
-    )
-    # Eval active id does NOT affect chat.
-    prefs.graph.eval.active_retrieval_agent_prompt_id = DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID
-    assert resolve_chat_retrieval_agent_prompt(prefs)[0] == DEFAULT_RETRIEVAL_AGENT_PROMPT_ID
-    assert resolve_retrieval_agent_prompt(prefs)[0] == DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID
-
 
 def test_memory_retrieval_defaults() -> None:
-    """The chat retrieval caps default leaner than eval (max_agent_turns=3, num-results 5/10/25),
-    tuned independently via their own factory."""
+    """The chat retrieval caps default lean (max_agent_turns=3, num-results 5/10/25)."""
     retrieval = WorkspacePreferences().memory.retrieval
     assert retrieval.limits.max_agent_turns == 3
     assert retrieval.limits.limit_default == 10
@@ -348,36 +257,80 @@ def test_memory_retrieval_defaults() -> None:
 
 
 def test_locked_default_prompts_reseed_from_code_on_load(tmp_path: Path) -> None:
-    """Stale-locked-default fix: a workspace whose persisted LOCKED ``default`` profile holds OLD
-    text (a code-default edit landed after the workspace was created) gets that text overwritten
-    from the code constant on load, while a user's CUSTOM (non-locked) profile is preserved."""
+    """A workspace whose persisted LOCKED ``chat`` profile holds old text gets it overwritten from the
+    code constant on load, while the owner's own (non-locked) profile is kept."""
     import json as _json
 
     ws = tmp_path / "ws"
     save_preferences(ws, WorkspacePreferences())
     raw = _json.loads(preferences_file(ws).read_text(encoding="utf-8"))
-    # Simulate an older workspace: stale text baked into the locked defaults + a user custom profile.
-    raw.setdefault("graph", {}).setdefault("eval", {})
-    raw["graph"]["eval"]["retrieval_agent_prompts"] = {
-        "default": {"label": "Default", "locked": True, "prompt": "OLD STALE RETRIEVAL PROMPT"},
+    raw["memory"]["retrieval"]["prompts"] = {
+        "chat": {"label": "Chat", "locked": True, "prompt": "OLD STALE RETRIEVAL PROMPT"},
         "mine": {"label": "Mine", "locked": False, "prompt": "my custom retrieval prompt"},
-    }
-    raw["graph"]["eval"]["answer_prompts"] = {
-        "default": {"label": "Default (grounded)", "locked": True, "prompt": "OLD STALE ANSWER PROMPT"},
     }
     preferences_file(ws).write_text(_json.dumps(raw), encoding="utf-8")
 
     reloaded = load_preferences(ws)
-    # Locked defaults are re-seeded from the live code constants…
-    assert (
-        reloaded.graph.eval.retrieval_agent_prompts["default"].prompt
-        == DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT
-    )
-    assert (
-        reloaded.graph.eval.answer_prompts["default"].prompt == DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
-    )
-    # …while the user's custom (non-locked) profile is left untouched.
-    assert reloaded.graph.eval.retrieval_agent_prompts["mine"].prompt == "my custom retrieval prompt"
+    assert reloaded.memory.retrieval.prompts["chat"].prompt == DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT
+    assert reloaded.memory.retrieval.prompts["mine"].prompt == "my custom retrieval prompt"
+
+
+def _file_with_eval_settings(ws: Path) -> None:
+    """A v5 preferences.json as the live core and env0 hold it: ``graph.eval`` (eval's own settings and
+    the retrieval-prompt library chat picks from), AI profiles made for the eval jobs
+    (``preset: eval_answer``…), and EvalHiro's uses pointing at them."""
+    import json as _json
+
+    save_preferences(ws, WorkspacePreferences())
+    raw = _json.loads(preferences_file(ws).read_text(encoding="utf-8"))
+    raw["memory"]["retrieval"].pop("prompts", None)
+    raw["memory"]["retrieval"]["active_prompt_id"] = "mine"
+    raw["graph"]["eval"] = {
+        "answer_prompts": {"default": {"label": "Default (grounded)", "locked": True, "prompt": "answer"}},
+        "active_answer_prompt_id": "default",
+        "judge_prompt": "judge",
+        "answer_profile": "hiro-eval-answer",
+        "judge_profile": "hiro-eval-judge",
+        "retrieval_profile": "hiro-eval-retrieval",
+        "show_event_time": True,
+        "max_elements_per_kind": 30,
+        "retrieval_agent": {"max_agent_turns": 4, "limit_default": 20, "limit_min": 10, "limit_max": 40},
+        "retrieval_agent_prompts": {
+            "default": {"label": "Default (eval)", "locked": True, "prompt": "eval retrieval"},
+            "chat": {"label": "Chat", "locked": True, "prompt": "old chat text"},
+            "mine": {"label": "Mine", "locked": False, "prompt": "my chat retrieval prompt"},
+        },
+        "active_retrieval_agent_prompt_id": "default",
+    }
+    for job in ("eval_answer", "eval_judge", "eval_retrieval"):
+        pid = "hiro-" + job.replace("_", "-")
+        raw["ai"]["profiles"][pid] = {"label": job, "model": "claude_code:sonnet", "preset": job}
+        raw["ai"]["uses"]["eval:" + job.split("_")[1]] = pid
+    preferences_file(ws).write_text(_json.dumps(raw), encoding="utf-8")
+
+
+def test_a_file_with_eval_settings_still_loads_and_keeps_chat_prompts(tmp_path: Path) -> None:
+    """Family data: a preferences.json holding the eval settings loads. ``graph.eval`` is ignored, the
+    owner's chat retrieval prompts move to ``memory.retrieval.prompts`` (the active one still resolves),
+    and the eval jobs' profiles stay as the owner's own (no preset), with EvalHiro's uses intact."""
+    ws = tmp_path / "ws"
+    _file_with_eval_settings(ws)
+
+    prefs = load_preferences(ws)
+    assert "eval" not in prefs.graph.model_dump()
+    assert sorted(prefs.memory.retrieval.prompts) == ["chat", "mine"]
+    assert prefs.memory.retrieval.prompts["chat"].prompt == DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT
+    assert resolve_chat_retrieval_agent_prompt(prefs) == ("mine", "my chat retrieval prompt")
+    for pid in ("hiro-eval-answer", "hiro-eval-judge", "hiro-eval-retrieval"):
+        assert prefs.ai.profiles[pid].preset is None
+    assert prefs.ai.uses["eval:answer"] == "hiro-eval-answer"
+
+    # Saved once, the file carries the prompts in their place and no eval section.
+    save_preferences(ws, prefs)
+    again = load_preferences(ws)
+    assert resolve_chat_retrieval_agent_prompt(again) == ("mine", "my chat retrieval prompt")
+    raw = preferences_file(ws).read_text(encoding="utf-8")
+    assert '"eval":' not in raw and "my chat retrieval prompt" in raw
 
 
 WID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
@@ -501,14 +454,11 @@ def test_resolve_job_model_null_field_borrows_with_its_own_preset(
         llm__chat_profile="chat",
         knowledge__answering__profile="kb",
         graph__extraction_profile="ex",
-        graph__eval__answer_profile="ans",
     )
     assert resolve_job_model(prefs, tmp_path, "rewrite").model_id == "openai:gpt-other"
     assert job_model_source(prefs, "rewrite") == "knowledge.answering.profile"
     small = resolve_job_model(prefs, tmp_path, "graph_small")
     assert (small.model_id, small.profile_id, small.max_tokens) == ("openai:gpt-other", "ex", 2048)
-    assert resolve_job_model(prefs, tmp_path, "eval_retrieval").profile_id == "ans"
-    assert resolve_job_model(prefs, tmp_path, "eval_judge").profile_id == "chat"
 
 
 def test_job_field_refuses_unknown_or_plan_profiles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

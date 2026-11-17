@@ -24,8 +24,7 @@ import {
   GRAPH_RUN_HEADER_FIELDS,
   GRAPH_RUN_HEADER_TAB_FIELDS,
   GRAPH_RUN_NODE_TABLE_FIELDS,
-  type GraphLedgerRow,
-  type GraphRunRetrievalLoopResponse
+  type GraphLedgerRow
 } from '$lib/api/graph-runs';
 import { createPoller } from '$lib/state/create-poller.svelte';
 import {
@@ -49,9 +48,7 @@ import {
 import { graphRunsFetchInitialLedger, graphRunsLoadMoreLedger, graphRunsPollLedgerTail } from './graph-runs-ledger-service';
 import { createGraphRunTraceModel } from './graph-runs-trace-model.svelte';
 import { createRetrievalTraceDialogController } from './retrieval-trace-dialog.svelte';
-import { getEvalRowByRunId } from '$lib/api/eval';
-import { rowFromPayload, type EvalRow } from '$lib/features/eval/shared/eval-row';
-import type { EvalQuestionLeg } from '$lib/features/eval/shared/eval-events';
+import { chatRecallFromLoop, hasRecallDetail, type ChatRecall } from '../recall/chat-recall';
 import type { ToastKind } from '$kit/ui/toast.svelte';
 
 const NOOP_NOTIFY = (_kind: ToastKind, _message: string): void => {};
@@ -70,105 +67,22 @@ export function createGraphRunsPageController(
   // reactive against the active pane so its derivations recompute on run switch.
   const traces = createGraphRunTraceModel({ getActivePane: () => activePane });
 
-  // --- Eval-detail bridge: open the rich eval row dialog from a `memory_recall` node ----------
-  // The node carries the per-question run_id; we resolve it to the saved eval row and reuse the
-  // Eval panel's detail dialog in place. `rowTraces` drives the (stacked) per-search trace dialog
-  // its Trajectory tab opens — the same controller the Eval panel uses.
+  // --- Chat recall detail: open the recall dialog from a `memory_recall` node -------------------
+  // A chat `memory_recall` node's run_id names its agent sidecars; we read them live and open the
+  // recall detail dialog (Overview / Trajectory / recalled tables). `rowTraces` drives the (stacked)
+  // per-search trace dialog its Trajectory tab and trace button open.
   const rowTraces = createRetrievalTraceDialogController(notify);
-  let activeEvalRow = $state<EvalRow | null>(null);
-  let evalRowLoadingRunId = $state<string | null>(null);
-  const evalRowLegColumns = $derived(activeEvalRow ? Object.keys(activeEvalRow.legs) : []);
-
-  async function openEvalRowForNode(row: GraphLedgerRow) {
-    const runId = String(row.run_id ?? '').trim();
-    if (!runId) return;
-    evalRowLoadingRunId = runId;
-    try {
-      const res = await getEvalRowByRunId(runId);
-      if (res.row) {
-        activeEvalRow = rowFromPayload(res.row);
-      } else {
-        notify(
-          'error',
-          'No saved eval row found for this recall node (results may have been cleared).'
-        );
-      }
-    } catch (err) {
-      notify('error', errorMessage(err));
-    } finally {
-      evalRowLoadingRunId = null;
-    }
-  }
-
-  function closeEvalRow() {
-    activeEvalRow = null;
-    rowTraces.closeTrace();
-  }
-
-  // --- Chat retrieval-loop bridge (P5 part 2): the chat-safe analog of the eval-detail bridge -------
-  // A CHAT `memory_recall` node isn't in eval_results.db, so it can't resolve a saved eval row. We read
-  // its agent-transcript sidecar live and wrap the loop as a MINIMAL `EvalRow` (a single `recall` leg
-  // carrying `retrieval_loop` + the node's run_id), then open the SAME full `EvalRowDetailDialog` the
-  // eval bridge uses — so chat gets the real Trajectory tab with per-sub-query pipeline traces reachable
-  // from within (via `rowTraces.openTraceForSubQuery`), not a stripped-down one-off dialog. Chat has no
-  // gold/judge/recalled-set, so those tabs simply don't render (tabsForLeg gates on presence).
+  let activeRecall = $state<ChatRecall | null>(null);
   let retrievalLoopLoadingRunId = $state<string | null>(null);
-
-  function chatEvalRowFromLoop(
-    runId: string,
-    data: GraphRunRetrievalLoopResponse,
-    row: GraphLedgerRow
-  ): EvalRow {
-    const query = String(row.input_preview ?? '')
-      .replace(/^q:\s*/i, '')
-      .trim();
-    const answer = data.answer ?? '';
-    const leg: EvalQuestionLeg = {
-      mode: 'recall',
-      mark: '',
-      answer_preview: answer.slice(0, 200),
-      answer,
-      recalled: data.recalled ?? [],
-      retrieval_loop: data.loop ?? undefined,
-      render: data.render ?? undefined,
-      run_id: runId,
-      elapsed_ms: Number(row.elapsed_ms) || 0,
-      cost_usd: Number(row.cost_usd) || 0
-    };
-    return {
-      index: 0,
-      total: 0,
-      id: runId,
-      category: 'chat recall',
-      subcategory: '',
-      difficulty: '',
-      question: query || '(chat memory recall)',
-      requires_graph: false,
-      track: 'memory',
-      legs: { recall: leg },
-      delta: '0',
-      gold: '',
-      cost_usd: leg.cost_usd ?? 0,
-      is_negative_control: false,
-      answered_at: '',
-      evidence_recall: null,
-      rubric: [],
-      // Chat recall row — flags the detail dialog to show a chat-only Overview (question + draft
-      // answer), not the eval judge pane (no gold/verdict/grounded for a live chat loop).
-      is_chat: true
-    };
-  }
 
   async function openRetrievalLoopForNode(row: GraphLedgerRow) {
     const runId = String(row.run_id ?? '').trim();
     if (!runId) return;
     retrievalLoopLoadingRunId = runId;
     try {
-      const res = await getGraphRunRetrievalLoop(runId);
-      const data = res;
-      if (data.loop || (data.recalled?.length ?? 0) > 0 || data.answer) {
-        // Reuse the eval detail dialog in place (same activeEvalRow + rowTraces seam).
-        activeEvalRow = chatEvalRowFromLoop(runId, data, row);
+      const data = await getGraphRunRetrievalLoop(runId);
+      if (hasRecallDetail(data)) {
+        activeRecall = chatRecallFromLoop(runId, data, row);
       } else {
         notify(
           'info',
@@ -180,6 +94,11 @@ export function createGraphRunsPageController(
     } finally {
       retrievalLoopLoadingRunId = null;
     }
+  }
+
+  function closeRecall() {
+    activeRecall = null;
+    rowTraces.closeTrace();
   }
 
   let timelineByRun = $state<Record<string, GraphLedgerRow[]>>({});
@@ -489,7 +408,7 @@ export function createGraphRunsPageController(
     selectedNodeRowId = null;
     nodeDetailRowId = null;
     traces.resetOpen();
-    closeEvalRow();
+    closeRecall();
     if (!alreadyOpen) {
       await loadRunDetail(runId);
     }
@@ -510,7 +429,7 @@ export function createGraphRunsPageController(
     selectedNodeRowId = null;
     nodeDetailRowId = null;
     traces.resetOpen();
-    closeEvalRow();
+    closeRecall();
   }
 
   function showRunsOnly() {
@@ -518,7 +437,7 @@ export function createGraphRunsPageController(
     selectedNodeRowId = null;
     nodeDetailRowId = null;
     traces.resetOpen();
-    closeEvalRow();
+    closeRecall();
   }
 
   function refreshMain() {
@@ -582,13 +501,13 @@ export function createGraphRunsPageController(
     const focus = ev.target instanceof HTMLElement ? ev.target : null;
     if (focus?.closest('input, textarea, select, [contenteditable="true"]')) return;
     ev.preventDefault();
-    // Eval-detail bridge dialogs close first (the stacked per-search trace, then the row dialog).
+    // The recall dialogs close first (the stacked per-search trace, then the recall dialog).
     if (rowTraces.activeTrace !== null) {
       rowTraces.closeTrace();
       return;
     }
-    if (activeEvalRow !== null) {
-      closeEvalRow();
+    if (activeRecall !== null) {
+      closeRecall();
       return;
     }
     if (traces.ingestTraceStep !== null) {
@@ -746,28 +665,19 @@ export function createGraphRunsPageController(
     get traces() {
       return traces;
     },
-    /** Eval-detail bridge surface — the resolved row, its leg columns, the (stacked) trace dialog
+    /** Chat recall detail — the open recall (null when closed), the (stacked) trace dialog
      * controller, and the open/close actions the `memory_recall` marker drives. */
-    get activeEvalRow() {
-      return activeEvalRow;
+    get activeRecall() {
+      return activeRecall;
     },
-    get evalRowLoadingRunId() {
-      return evalRowLoadingRunId;
-    },
-    get evalRowLegColumns() {
-      return evalRowLegColumns;
-    },
-    get evalRowTraces() {
+    get recallTraces() {
       return rowTraces;
     },
-    openEvalRowForNode,
-    closeEvalRow,
-    /** Chat retrieval-loop bridge (P5 part 2) — opens the same eval detail dialog (via `activeEvalRow`)
-     * from a CHAT `memory_recall` node's live agent-transcript sidecar; close via `closeEvalRow`. */
     get retrievalLoopLoadingRunId() {
       return retrievalLoopLoadingRunId;
     },
     openRetrievalLoopForNode,
+    closeRecall,
     RUNS_TAB,
     mount,
     showRunsOnly,

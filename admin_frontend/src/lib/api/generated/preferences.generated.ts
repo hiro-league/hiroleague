@@ -50,11 +50,14 @@ export type NewSessionGapMinutes = number;
  */
 export type IdleFlushHours = number;
 /**
- * Guidance appended to the graph fact-extractor when ingesting chat memory (a two-speaker window). Default: attribute facts to the user only, treating the assistant's lines as context. Use {user} / {character} placeholders — they are filled with the actual speaker names at ingest. Applies to conversation memory only — not knowledge or eval.
+ * Guidance appended to the graph fact-extractor when ingesting chat memory (a two-speaker window). Default: attribute facts to the user only, treating the assistant's lines as context. Use {user} / {character} placeholders — they are filled with the actual speaker names at ingest. Applies to conversation memory only — not knowledge.
  */
 export type MemoryExtractionInstructions = string;
+export type Label = string;
+export type Locked = boolean;
+export type Prompt = string;
 /**
- * Which shared retrieval-agent prompt profile the CHAT recall loop uses.
+ * Which retrieval-agent prompt profile the chat recall loop uses.
  */
 export type ActivePromptProfile = string;
 /**
@@ -219,49 +222,6 @@ export type RerankerProfile1 = string | null;
  * Drop facts whose cross-encoder relevance is below this (0–1). 0 = keep all. Ignored by RRF/MMR.
  */
 export type MinRelevance = number;
-export type Label = string;
-export type Locked = boolean;
-export type Prompt = string;
-/**
- * Which mem-eval answer prompt the answer step uses.
- */
-export type ActivePromptProfile1 = string;
-export type EvalJudgePrompt = string;
-/**
- * The AI profile the memory-eval answer step uses to answer from recalled context. Empty uses Hiro's chat model. (Knowledge-track answers always use the knowledge answering job.)
- */
-export type EvalAnswer = string | null;
-/**
- * The AI profile the LLM judge uses to grade answers against the ideal (both tracks). Empty uses Hiro's chat model. Lower temperature = more repeatable grading.
- */
-export type EvalJudge = string | null;
-/**
- * The AI profile the agentic retrieval loop (memory track) uses to plan searches and call the search_memory tool. Empty uses the eval answer model.
- */
-export type EvalRetrieval = string | null;
-export type ShowEventTimeValidDate1 = boolean;
-export type ShowExpiredAtInvalidDate1 = boolean;
-export type ShowSUPERSEDEDFlag1 = boolean;
-/**
- * Top-N facts / entities / messages (by retrieval score) kept for the answer + judge prompts, so the answer-relevant ones aren't buried under a long dump.
- */
-export type MaxElementsKind1 = number;
-/**
- * Each recalled fact → one sanitized line capped here.
- */
-export type MaxFactChars1 = number;
-/**
- * Per-episode/message text cap (one sanitized line).
- */
-export type MaxMessageChars1 = number;
-/**
- * Per-entity summary cap (one sanitized line) — entity summaries are the longest/noisiest.
- */
-export type MaxEntitySummaryChars1 = number;
-/**
- * Which retrieval-agent system prompt the loop uses.
- */
-export type ActivePromptProfile2 = string;
 /**
  * In the Graph tab's per-type node filter, a type with more instances than this shows a 'many instances' performance heads-up in its dropdown. The dropdown still lists and searches every instance — this only flags very large types. Display-only.
  */
@@ -411,18 +371,27 @@ export interface MemoryExtractionPreferences {
   instructions: MemoryExtractionInstructions;
 }
 /**
- * Chat-side agentic memory-retrieval loop config (memory-eval-vs-chat-parity, Phase 1).
- *
- * The prompt LIBRARY is shared with eval (``graph.eval.retrieval_agent_prompts``); this section
- * holds chat's own SELECTION (``active_prompt_id``), caps, and model, so chat tunes independently of
- * eval (the deferred ``memory.retrieval.*`` split, brought forward). Consumed when the loop is wired
- * into the recall node (Phase 2) — fields only today.
+ * The chat's agentic memory-retrieval loop: its prompt library and the active prompt, its caps,
+ * its AI profile and how recalled memory is rendered (read by the recall node).
  */
 export interface MemoryRetrievalPreferences {
+  prompts: RetrievalAgentPrompt;
   active_prompt_id: ActivePromptProfile;
   limits: RetrievalAgentLimits;
   profile: MemoryRetrieval;
   render: MemoryRetrievalRenderPreferences;
+}
+export interface RetrievalAgentPrompt {
+  [k: string]: PromptProfile;
+}
+/**
+ * One named prompt in a prompt library (``memory.retrieval.prompts``). A ``locked`` profile is
+ * code-owned (re-seeded from its constant on every load); the owner adds their own beside it.
+ */
+export interface PromptProfile {
+  label: Label;
+  locked: Locked;
+  prompt: Prompt;
 }
 /**
  * Caps and clamp bounds for the agentic memory-retrieval loop (eval + chat parity).
@@ -437,10 +406,8 @@ export interface RetrievalAgentLimits {
 }
 /**
  * How recalled memory is rendered into the CHAT persona prompt (memory-eval-vs-chat-parity,
- * Phase 3). Chat's own copy of eval's ``RecallRenderOptions`` — which temporal annotations show +
- * per-kind caps — so chat drops the flat ``memory_block`` for the rich `format_recall_context`
- * layout. Mirrors the eval "Answer context" caps (``graph.eval.max_*``) + temporal toggles
- * (``graph.eval.show_*``); the runtime builds a ``RecallRenderOptions`` from these.
+ * Phase 3): which temporal annotations show + per-kind caps, for the rich `format_recall_context`
+ * layout. The runtime builds the memory library's ``RecallRenderOptions`` from these.
  */
 export interface MemoryRetrievalRenderPreferences {
   show_event_time: ShowEventTimeValidDate;
@@ -521,7 +488,6 @@ export interface GraphPreferences {
   query_timeout_s: QueryTimeoutSeconds;
   observability: GraphObservability;
   reranker: KnowledgeGraphRerankerPreferences;
-  eval: GraphEvalPreferences;
   view: GraphViewPreferences;
 }
 /**
@@ -536,64 +502,6 @@ export interface GraphPreferences {
 export interface KnowledgeGraphRerankerPreferences {
   profile: RerankerProfile1;
   min_relevance: MinRelevance;
-}
-/**
- * Eval-only answering knobs, surfaced under the shared Graphiti engine settings.
- *
- * ``answer_prompts`` is a named LIBRARY of answering INSTRUCTION blocks for the memory-eval
- * recall leg (``eval_judge.answer_from_context`` places the active one in the user message ahead
- * of the question and the recalled elements; the system prompt there is a hardcoded two-line
- * role). The active profile is the persisted ``active_answer_prompt_id`` (mirrors the retrieval
- * agent's ``active_retrieval_agent_prompt_id``) — see ``resolve_active_answer_prompt``.
- * The knowledge-eval legs intentionally have no answer-prompt library:
- * they run the real ``KnowledgeAgentGraph`` and so are graded against the PRODUCTION
- * ``knowledge.answering.prompt`` (forking it would make the knowledge eval stop measuring real
- * behavior). The admin UI surfaces that production prompt alongside this one for convenience.
- *
- * ``judge_prompt`` is the grading system prompt for the LLM judge (``eval_judge.judge_answer``),
- * shared by both tracks. Editable/visible for reference; blank falls back to the relaxed default.
- */
-export interface GraphEvalPreferences {
-  answer_prompts: MemEvalAnswerPrompts;
-  active_answer_prompt_id: ActivePromptProfile1;
-  judge_prompt: EvalJudgePrompt;
-  answer_profile: EvalAnswer;
-  judge_profile: EvalJudge;
-  retrieval_profile: EvalRetrieval;
-  show_event_time: ShowEventTimeValidDate1;
-  show_expired_at: ShowExpiredAtInvalidDate1;
-  show_superseded: ShowSUPERSEDEDFlag1;
-  max_elements_per_kind: MaxElementsKind1;
-  max_fact_chars: MaxFactChars1;
-  max_episode_chars: MaxMessageChars1;
-  max_summary_chars: MaxEntitySummaryChars1;
-  retrieval_agent: RetrievalAgentLimits;
-  retrieval_agent_prompts: RetrievalAgentPrompt;
-  active_retrieval_agent_prompt_id: ActivePromptProfile2;
-}
-export interface MemEvalAnswerPrompts {
-  [k: string]: AnswerPromptProfile;
-}
-/**
- * A named mem-eval answer-prompt recipe — the answer analog of ``ImageProfile`` / tuning
- * profiles. A run picks which profile's instruction block the memory-eval recall leg uses
- * (``eval_judge.answer_from_context`` places it in the user message ahead of the question +
- * recalled elements). Memory-track only — the knowledge track answers with the production
- * pipeline, so it has no answer-prompt library.
- *
- * No structured-output contract applies (unlike the judge): the answer step is plain free-text
- * generation. The one soft convention — the decline phrase "No information available." — stays
- * EMBEDDED in each profile body (the abstain label detector + the judge key on it); an author
- * editing a duplicated profile is responsible for keeping it. Blank ``prompt`` ⇒ the runtime
- * falls back to ``DEFAULT_MEMORY_EVAL_ANSWER_PROMPT`` (see ``resolve_answer_prompt``).
- */
-export interface AnswerPromptProfile {
-  label: Label;
-  locked: Locked;
-  prompt: Prompt;
-}
-export interface RetrievalAgentPrompt {
-  [k: string]: AnswerPromptProfile;
 }
 /**
  * Admin graph-VIZ display knobs for the shared Knowledge/Memories Graph tab.

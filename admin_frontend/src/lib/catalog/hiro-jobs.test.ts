@@ -37,8 +37,7 @@ function prefs(fields: Record<string, string | null> = {}) {
     knowledge: { answering: { profile: null as string | null, rewrite_profile: null as string | null } },
     graph: {
       extraction_profile: 'extract' as string | null,
-      small_profile: null as string | null,
-      eval: { answer_profile: null, judge_profile: null, retrieval_profile: null } as Record<string, string | null>
+      small_profile: null as string | null
     },
     ai: {
       profiles: {
@@ -122,8 +121,8 @@ describe("Hiro's jobs (Phase 7b step 5)", () => {
   });
 
   it('lists the jobs pointing straight at a profile', () => {
-    const p = prefs({ 'graph.eval.judge_profile': 'chat' });
-    expect(jobsUsingProfile(p, 'chat').map((j) => j.label)).toEqual(["Hiro's chat", 'Eval: judge']);
+    const p = prefs({ 'memory.retrieval.profile': 'chat' });
+    expect(jobsUsingProfile(p, 'chat').map((j) => j.label)).toEqual(["Hiro's chat", 'Memory retrieval']);
     expect(jobsUsingProfile(p, 'extract').map((j) => j.id)).toEqual(['graph_extraction']);
   });
 

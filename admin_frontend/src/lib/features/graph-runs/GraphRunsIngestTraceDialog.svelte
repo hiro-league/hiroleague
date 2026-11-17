@@ -28,14 +28,9 @@
     onPrev,
     onNext,
     // Position of the current trace within the run's episode list (1-based) — shown between the
-    // arrows. The per-trace episode_index/total is 1/1 for the eval's single-episode ingests, so
-    // the caller supplies the real run position here; falls back to episode_index/total when unset.
+    // arrows, when the caller knows it; falls back to the trace's episode_index/total when unset.
     navIndex = 0,
-    navTotal = 0,
-    // Optional extra tab (eval: the searchable source corpus) — decoupled via a snippet so this
-    // Graph-Runs component stays generic. Both props must be set for the tab to appear.
-    extraTabLabel = '',
-    extraTab
+    navTotal = 0
   }: {
     trace: IngestTraceRecord | null;
     onClose: () => void;
@@ -45,18 +40,13 @@
     onNext?: () => void;
     navIndex?: number;
     navTotal?: number;
-    extraTabLabel?: string;
-    extraTab?: import('svelte').Snippet;
   } = $props();
-
-  const hasExtraTab = $derived(!!extraTab && !!extraTabLabel);
 
   // ── Tabs ────────────────────────────────────────────────────────────────────────────────
   // One flat tab row: a tab per pipeline phase (Entities / Attributes / Facts / Other) — the
-  // per-stage journey — then Result (what landed in the graph: persisted nodes + edges), then
-  // the caller's optional Corpus tab. Sentinels keep the last two distinct from phase keys.
+  // per-stage journey — then Result (what landed in the graph: persisted nodes + edges). The
+  // sentinel keeps Result distinct from phase keys.
   const RESULT_TAB = '__result__';
-  const EXTRA_TAB = '__extra__';
   let activeTab = $state<string>('');
 
   // Per-stage collapse, keyed by the stage's index in `trace.stages`. Separate disclosures for
@@ -110,8 +100,7 @@
 
   const tabKeys = $derived<string[]>([
     ...phases.map((p) => p.phase),
-    RESULT_TAB,
-    ...(hasExtraTab ? [EXTRA_TAB] : [])
+    RESULT_TAB
   ]);
 
   $effect(() => {
@@ -128,8 +117,7 @@
 
   const ingestTabs = $derived.by<TraceTab[]>(() => [
     ...phases.map((p) => ({ key: p.phase, label: p.title, count: String(p.idxs.length) })),
-    { key: RESULT_TAB, label: 'Result', count: String(nodes.length + edges.length) },
-    ...(hasExtraTab ? [{ key: EXTRA_TAB, label: extraTabLabel, count: null }] : [])
+    { key: RESULT_TAB, label: 'Result', count: String(nodes.length + edges.length) }
   ]);
 
   const expandActive = (): void => {
@@ -252,10 +240,6 @@
           />
         {:else if activeTab === RESULT_TAB}
           <IngestResultTab {nodes} {edges} />
-        {:else if activeTab === EXTRA_TAB && extraTab}
-          <section class="result-section">
-            {@render extraTab()}
-          </section>
         {/if}
       </div>
     {/if}
@@ -322,11 +306,5 @@
   .trace-ingested__label {
     font-weight: 600;
     color: var(--muted-foreground);
-  }
-
-  .result-section {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
   }
 </style>

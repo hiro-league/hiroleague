@@ -13,10 +13,9 @@ import signal
 
 from hiro_commons.log import Logger
 
-# Force LangSmith tracing OFF for the whole test session. The eval runners wrap their
-# work in ``traced_run`` spans (``knowledge_eval`` / ``memory_eval_<set>_ingestion`` /
-# ``recall``), which is a no-op only when tracing is disabled. Tests drive the runners
-# with fakes (no real LLM calls), so with tracing inherited from the dev shell each test
+# Force LangSmith tracing OFF for the whole test session. The graphs and the memory library
+# trace their runs (``hiro_memory.tracing``), a no-op only when tracing is disabled. Tests drive
+# them with fakes (no real LLM calls), so with tracing inherited from the dev shell each test
 # posts a hollow, empty trace to LangSmith. Clearing the switches here (vs. only when
 # unset) guarantees no test ever writes to LangSmith regardless of the developer's env;
 # non-test runs are untouched since this only mutates the pytest process environment.

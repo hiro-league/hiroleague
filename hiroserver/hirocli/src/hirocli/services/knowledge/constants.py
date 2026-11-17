@@ -29,7 +29,4 @@ KNOWLEDGE_JOB_COMPLETED = "knowledge.job.completed"
 KNOWLEDGE_JOB_FAILED = "knowledge.job.failed"
 KNOWLEDGE_INGESTED = "knowledge.ingested"
 KNOWLEDGE_DELETED = "knowledge.deleted"
-# Eval event types moved to ``hirocli.services.eval.constants`` (the eval feature is a peer
-# of knowledge/memory, not a knowledge sub-concern). They still ride the shared
-# ``/knowledge/events`` SSE transport.
 # The graph's live-update event names live in ``hiro_memory.graph.constants``.

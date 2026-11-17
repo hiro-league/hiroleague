@@ -17,7 +17,7 @@ describe('preferences-edits-policy', () => {
 
   it('detects whole-object writes', () => {
     expect(
-      shouldWriteWholePreferencePath({ path: 'graph.eval.answer_prompts', writeWhole: true })
+      shouldWriteWholePreferencePath({ path: 'memory.retrieval.prompts', writeWhole: true })
     ).toBe(true);
     expect(shouldWriteWholePreferencePath({ path: 'memory.user_name', type: 'string' })).toBe(
       false

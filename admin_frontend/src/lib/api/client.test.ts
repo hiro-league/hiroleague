@@ -32,7 +32,7 @@ describe('apiRequest', () => {
     await expect(apiRequest('/people')).resolves.toEqual({ people: [], roles: [] });
 
     fetchMock.mockResolvedValue(answer(200, null));
-    await expect(apiRequest('/eval/state')).resolves.toBeNull();
+    await expect(apiRequest('/characters')).resolves.toBeNull();
   });
 
   it("throws a failure's detail", async () => {

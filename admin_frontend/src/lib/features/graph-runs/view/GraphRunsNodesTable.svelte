@@ -13,7 +13,6 @@
     onOpenNodeDetails,
     onOpenRetrievalTrace,
     onOpenIngestTrace,
-    onOpenEvalRow,
     onOpenRetrievalLoop
   }: {
     timeline: GraphLedgerRow[];
@@ -27,12 +26,9 @@
     onOpenNodeDetails: (row: GraphLedgerRow) => void;
     onOpenRetrievalTrace?: (row: GraphLedgerRow) => void;
     onOpenIngestTrace?: (row: GraphLedgerRow) => void;
-    /** Open the rich eval-detail dialog for a `memory_recall` node (resolves its run_id → eval
-     *  row). Takes precedence over the bare retrieval-trace marker for that node. */
-    onOpenEvalRow?: (row: GraphLedgerRow) => void;
-    /** Open the FULL eval detail dialog for a CHAT `memory_recall` node — reads the agent-transcript
-     *  sidecar live and wraps the loop as a minimal `EvalRow` (Trajectory tab + per-search traces).
-     *  Chat's answer to the eval-only detail marker. */
+    /** Open the recall detail dialog for a chat `memory_recall` node — reads its agent sidecars
+     *  live (Trajectory tab + per-search traces). Takes precedence over the bare retrieval-trace
+     *  marker for that node. */
     onOpenRetrievalLoop?: (row: GraphLedgerRow) => void;
   } = $props();
 
@@ -68,26 +64,9 @@
     return Number.isFinite(step) && ingestTraceStepIds.has(step);
   }
 
-  /** An EVAL `memory_recall` parent row gets the rich eval-detail marker instead of the bare
-   *  retrieval-trace one — its run_id resolves to the full eval row (overview / gold + our answer /
-   *  trajectory / counted facts-entities-episodes), with sub-query traces reachable from within.
-   *
-   *  Gated to eval runs (run_id `memory_eval*`): a CHAT recall run (P2+) also flushes a `memory_recall`
-   *  node, but it isn't in `eval_results.db`, so the eval bridge would dead-end on "no saved eval row".
-   *  Chat rows therefore fall through to the bare retrieval-trace marker (their per-search pipeline is
-   *  written under observability=`trace`). */
-  function rowHasEvalDetail(row: GraphLedgerRow): boolean {
-    return (
-      !!onOpenEvalRow &&
-      isParentStep(row) &&
-      String(row.node ?? '') === 'memory_recall' &&
-      String(row.run_id ?? '').startsWith('memory_eval')
-    );
-  }
-
-  /** A CHAT `memory_recall` row (non-eval run) gets the SAME single ⓘ detail marker eval rows get —
-   *  it opens the full detail dialog (overview · facts/entities/episodes · trajectory), with the
-   *  per-search pipeline reachable from inside the Trajectory tab. Gated on a recorded retrieval trace
+  /** A chat `memory_recall` row gets the ⓘ detail marker — it opens the recall detail dialog
+   *  (overview · facts/entities/episodes · trajectory), with the per-search pipeline reachable from
+   *  inside the Trajectory tab. Gated on a recorded retrieval trace
    *  (a proxy for observability=`trace` — the recalled-rows companion is written together), so the
    *  dialog always has data. */
   function rowHasRetrievalLoop(row: GraphLedgerRow): boolean {
@@ -95,7 +74,6 @@
       !!onOpenRetrievalLoop &&
       isParentStep(row) &&
       String(row.node ?? '') === 'memory_recall' &&
-      !String(row.run_id ?? '').startsWith('memory_eval') &&
       rowHasTrace(row)
     );
   }
@@ -131,23 +109,7 @@
               class="font-mono"
               class:substep-node-cell={field === 'node' && isGraphNodeSubstep(row.node)}
             >
-              {#if field === 'node' && rowHasEvalDetail(row)}
-                <span class="node-cell">
-                  <span>{formatLedgerField(field, row)}</span>
-                  <button
-                    type="button"
-                    class="trace-marker"
-                    title="Open eval detail (overview · gold + our answer · trajectory · facts/entities/episodes)"
-                    aria-label="Open eval detail dialog"
-                    onclick={(ev) => {
-                      ev.stopPropagation();
-                      onOpenEvalRow?.(row);
-                    }}
-                  >
-                    {'ⓘ'}
-                  </button>
-                </span>
-              {:else if field === 'node' && rowHasRetrievalLoop(row)}
+              {#if field === 'node' && rowHasRetrievalLoop(row)}
                 <span class="node-cell">
                   <span>{formatLedgerField(field, row)}</span>
                   <button

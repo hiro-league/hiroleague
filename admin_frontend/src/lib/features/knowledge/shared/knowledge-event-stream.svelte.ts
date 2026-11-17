@@ -1,8 +1,8 @@
 /**
  * Shared, per-tab SSE multiplexer for `/api/knowledge/events`.
  *
- * WHY: the admin used to open a SEPARATE `EventSource` per feature (jobs, eval, graph) —
- * 3 long-lived connections to one origin, on top of the app-wide status stream. Browsers
+ * WHY: the admin used to open a SEPARATE `EventSource` per feature (jobs, graph) —
+ * several long-lived connections to one origin, on top of the app-wide status stream. Browsers
  * cap HTTP/1.1 at ~6 connections per host, so a few open admin tabs + ordinary fetches
  * (e.g. opening logs) would starve the connection pool and unrelated requests would stall
  * until their client timeout fired ("signal is aborted without reason"). Random freezing
@@ -12,7 +12,7 @@
  * module owns the single connection and fans each SSE frame out to the registered
  * handlers by `event.type`. The backend already forwards every knowledge event type on
  * this one stream, so nothing server-side changes. Net: a Knowledge tab now consumes one
- * knowledge connection, not three.
+ * knowledge connection, not one per feature.
  *
  * The connection opens on the first subscriber and closes when the last one leaves
  * (ref-counted), and reopens if the selected workspace changes. `degraded` flips true when

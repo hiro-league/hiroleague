@@ -50,14 +50,6 @@ _FEATURES: tuple[FeatureSpec, ...] = (
         note="Device pairing + the mandatory gateway-backed devices channel.",
     ),
     FeatureSpec(
-        id="eval",
-        label="Eval",
-        # Evaluation harness (LoCoMo/BEAM answer+judge runs) — output still noisy
-        # and the workflow is immature; hidden until it stabilizes.
-        active=False,
-        note="Memory/knowledge evaluation harness.",
-    ),
-    FeatureSpec(
         id="gateway",
         label="Gateway",
         # Hiro Gate relay (remote/off-LAN device connectivity) — the Server-page

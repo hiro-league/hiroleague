@@ -3,7 +3,7 @@ import { DEFAULT_WORKSPACE_PREFERENCES } from './generated/workspace-preferences
 import type { WorkspacePreferences } from './preferences-types';
 
 export type {
-  AnswerPromptProfile,
+  PromptProfile,
   ChatPreferences,
   GraphPreferences,
   ImageProfile,
@@ -70,18 +70,6 @@ export function normalizeWorkspacePreferences(prefs: WorkspacePreferences): Work
       reranker: {
         ...defaults.graph.reranker,
         ...prefs.graph?.reranker
-      },
-      eval: {
-        ...defaults.graph.eval,
-        ...prefs.graph?.eval,
-        retrieval_agent: {
-          ...defaults.graph.eval.retrieval_agent,
-          ...prefs.graph?.eval?.retrieval_agent
-        },
-        retrieval_agent_prompts: {
-          ...defaults.graph.eval.retrieval_agent_prompts,
-          ...prefs.graph?.eval?.retrieval_agent_prompts
-        }
       },
       view: {
         ...defaults.graph.view,

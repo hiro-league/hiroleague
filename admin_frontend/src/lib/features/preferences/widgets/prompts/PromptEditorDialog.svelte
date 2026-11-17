@@ -14,7 +14,7 @@
   import MarkdownEditorPreview from '$lib/components/ui/markdown/MarkdownEditorPreview.svelte';
   import MarkdownPreview from '$lib/components/ui/markdown/MarkdownPreview.svelte';
   import { Input } from '$kit/components/ui/input/index.js';
-  import type { AnswerPromptProfile } from '$lib/api/preferences';
+  import type { PromptProfile } from '$lib/api/preferences';
   import PromptLibraryVersionBar from './PromptLibraryVersionBar.svelte';
   import {
     slugifyPromptLabel,
@@ -52,7 +52,7 @@
   // --- local working state (seeded once per open; never written back to the page draft) ---
   // One draft for both kinds: `single` is the prompt text, `dict` the library; the other stays empty.
   // The dialog asks "Discard unsaved changes?" itself, so the draft does not also guard the page.
-  const draft = new Draft<{ single: string; dict: Record<string, AnswerPromptProfile> }>(
+  const draft = new Draft<{ single: string; dict: Record<string, PromptProfile> }>(
     { single: '', dict: {} },
     { guard: false }
   );

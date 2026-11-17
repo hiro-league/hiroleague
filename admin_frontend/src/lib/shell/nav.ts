@@ -35,7 +35,6 @@ export const navItems: NavItem[] = [
   { group: 'Operations', label: 'Knowledge', path: '/knowledge', icon: 'database', feature: 'knowledge', right: 'open_settings' },
   { group: 'Operations', label: 'Memories', path: '/memories', icon: 'brain', right: 'open_settings' },
   { group: 'Operations', label: 'Image Lab', path: '/image-lab', icon: 'image', feature: 'image_lab', right: 'open_settings' },
-  { group: 'Operations', label: 'Eval', path: '/eval', icon: 'flask', feature: 'eval', right: 'open_settings' },
   // Configuration moved to the end of the sidebar; Logs moved to the end of this group.
   { group: 'Configuration', label: 'Providers/Models', path: '/catalog', icon: 'book', right: 'open_settings' },
   { group: 'Configuration', label: 'Settings', path: '/preferences', icon: 'settings', right: 'open_settings' },

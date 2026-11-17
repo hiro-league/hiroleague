@@ -1,13 +1,13 @@
 """Hiro's own AI calls, counted from the graph ledger (Phase 7b).
 
-Every priced call of the core's graphs (chat, memory, knowledge, the knowledge graph, eval, speech
+Every priced call of the core's graphs (chat, memory, knowledge, the knowledge graph, speech
 and transcription in a chat turn) passes the ledger's ``LedgerSink.write_rows``; it hands each
 node row here and the call is counted in AI usage under the source ``hiro``.
 
 Which rows count: node rows only (a run row sums its nodes), not the memory agent's per-turn
 children (``_no_fold``: their parent row already holds the total), and only rows with a model
 (decision-only rows have none). The use comes from the node label (``knowledge/…``,
-``memory_recall``, ``graphiti_ingest/…``, ``eval_…``) or, for the chat's own nodes, from the run.
+``memory_recall``, ``graphiti_ingest/…``) or, for the chat's own nodes, from the run.
 A node's time is the node's whole wall time (a memory recall includes its searches).
 
 The knowledge graph's own LLM calls that never become a ledger row (observability ``off``, or outside
@@ -69,8 +69,6 @@ def _kind_and_use(node: str, run_id: str) -> tuple[str, str]:
         return ("rerank" if "rerank" in node else "question"), "memory"
     if node.startswith(("graphiti_ingest", "memory_ingest")):
         return "question", "graph"
-    if node.startswith("eval_") or run_id.startswith(("memory_eval", "knowledge_eval")):
-        return "question", "eval"
     if node == "vision":
         return "question", "vision"
     if run_id.startswith("knowledge-"):
@@ -151,7 +149,7 @@ def count_ledger_row(workspace_path: Path, row: dict[str, Any]) -> None:
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
-        record(workspace_path, call)  # a worker thread (eval, CLI): write here
+        record(workspace_path, call)  # a worker thread (CLI): write here
         return
     # A graph node runs on the event loop: the SQLite write goes to a thread (record never raises).
     loop.run_in_executor(None, record, workspace_path, call)

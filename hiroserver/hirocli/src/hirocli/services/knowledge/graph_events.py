@@ -1,7 +1,7 @@
 """Bridge graph-viz deltas onto the process-wide ``DomainEventBus``.
 
 A single home for "publish a ``knowledge.graph.*`` event for this workspace" so both the
-admin knowledge routes (document/eval graph ingest) and the conversation-memory facade
+admin knowledge routes (document graph ingest) and the conversation-memory facade
 (runtime ``memory_out``) emit live node/edge deltas the same way. The admin Graph tab's SSE
 endpoint subscribes to these event types and filters by ``workspace_path`` — so any producer
 in the process can light up the live viz just by publishing here.

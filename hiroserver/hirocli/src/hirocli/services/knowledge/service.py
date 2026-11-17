@@ -214,41 +214,6 @@ class KnowledgeService:
     async def preview_file(self, path: str) -> FilePreviewResult:
         return await asyncio.to_thread(read_file_preview, Path(path), loader_registry=self.loader_registry)
 
-    async def ingest_text_chunk(
-        self,
-        *,
-        point_id: str,
-        text: str,
-        document_id: str,
-        title: str = "",
-        tags: Sequence[str] = (),
-        ord: int = 1,
-    ) -> None:
-        """Embed + upsert ONE text chunk to Qdrant with a caller-chosen ``point_id``.
-
-        Used by the episode-corpus double-write (eval / series-ingest): each episode
-        becomes one Qdrant point whose id is the shared uuid that also keys its
-        Graphiti episode, so graph facts (``EntityEdge.episodes``) join straight back
-        to the passage. Computes both the dense and BM25 sparse vectors with the same
-        embedders document ingest uses."""
-        import datetime as _dt
-
-        dense = (await asyncio.to_thread(self.embedder.embed_texts, [text]))[0]
-        sparse = (await asyncio.to_thread(self.sparse_embedder.embed_documents, [text]))[0]
-        now = _dt.datetime.now(_dt.UTC).isoformat()
-        await asyncio.to_thread(
-            self.vector_store.upsert_point,
-            point_id=point_id,
-            text=text,
-            dense_vector=dense,
-            sparse_vector=sparse,
-            document_id=document_id,
-            title=title,
-            tags=tuple(tags),
-            now=now,
-            ord=ord,
-        )
-
     def _resolve_file_concurrency(self, file_concurrency: int | None) -> int:
         fallback = default_file_concurrency_for_embedder(self.embedder)
         if file_concurrency is None:
@@ -896,7 +861,7 @@ class KnowledgeService:
         return a side-by-side comparison.
 
         Same query, same filters, same tuning — only ``use_graph`` differs. Used by
-        the Ask tab's compare mode (5d) and by the L3 eval batch (5e). Wall-clock is
+        the Ask tab's compare mode (5d). Wall-clock is
         ~max(leg1, leg2), not sum, because both legs run via ``asyncio.gather``.
 
         ``rewrite=True`` is recommended (graph_expand needs entities from the rewrite
@@ -945,59 +910,10 @@ class KnowledgeService:
             elapsed_ms=int((time.perf_counter() - t0) * 1000),
         )
 
-    # Eval leg name → agent graph_mode. "flat" is the no-graph baseline (graph_mode
-    # "off"); "graphiti" maps straight through. Keeps the eval's user-facing leg
-    # vocabulary (flat/graphiti) decoupled from the graph's internal mode.
-    _LEG_TO_GRAPH_MODE = {"flat": "off", "graphiti": "graphiti"}
-
-    async def answer_legs(
-        self,
-        query: str,
-        *,
-        modes: list[str],
-        top_k: int | None = None,
-        min_score: float | None = None,
-        filters: dict[str, Any] | None = None,
-        workspace_id: str | None = None,
-        explain: bool = False,
-        rewrite: bool = False,
-        graph_temporal: str | None = None,
-    ) -> dict[str, KnowledgeAnswerResult]:
-        """Run :meth:`answer` once per selected leg, concurrently, keyed by leg name.
-
-        Generalizes :meth:`compare` to an arbitrary subset of {flat, graphiti}
-        (one leg is fine). Same query/filters/tuning across legs — only ``graph_mode``
-        differs. Used by the eval batch so the per-question table can show any chosen
-        set of legs side by side. Wall-clock ≈ slowest leg (``asyncio.gather``).
-
-        Unknown leg names are dropped (defensive); an empty/invalid ``modes`` falls
-        back to the flat baseline so a misconfigured caller still gets a result.
-        """
-        legs = [m for m in modes if m in self._LEG_TO_GRAPH_MODE]
-        if not legs:
-            legs = ["flat"]
-        results = await asyncio.gather(
-            *(
-                self.answer(
-                    query,
-                    top_k=top_k,
-                    min_score=min_score,
-                    filters=filters,
-                    workspace_id=workspace_id,
-                    explain=explain,
-                    rewrite=rewrite,
-                    graph_mode=self._LEG_TO_GRAPH_MODE[m],
-                    graph_temporal=graph_temporal,
-                )
-                for m in legs
-            )
-        )
-        return dict(zip(legs, results, strict=True))
-
     async def fetch_hits_by_point_ids(self, point_ids: list[str]) -> list[KnowledgeSearchHit]:
         """Fetch chunk hits for explicit Qdrant point_ids, in caller order.
 
-        Used by the "graphiti" eval leg: the graph picks the fact-supporting
+        Used by the graph retrieval leg: the graph picks the fact-supporting
         chunk_ids and we retrieve those verbatim passages by id (no query hybrid /
         no min_score drop). Points with empty text (a chunk_id not in Qdrant) are
         skipped. Scores descend with rank so build_context's ordinal normalization
@@ -1098,8 +1014,8 @@ class KnowledgeService:
         ids = [str(p) for p in (point_ids or []) if p]
         if not ids:
             return []
-        # One Kuzu read covers BOTH legs: text+group_id+valid_at for Kuzu-only (memory /
-        # eval-memory) chunks, group_id+valid_at for knowledge chunks (their text still
+        # One Kuzu read covers BOTH legs: text+group_id+valid_at for Kuzu-only (memory)
+        # chunks, group_id+valid_at for knowledge chunks (their text still
         # comes from Qdrant).
         episode_by_id = await read_episode_chunks(
             graphiti_db_path(self.workspace_path),

@@ -90,10 +90,6 @@ export function createKnowledgePageController(
     get error() {
       return error;
     },
-    // L3 (Phase 5e) — exposed so the embedded Eval Batch component can route
-    // its own transport / setup errors through the page-level error banner
-    // (same surface the other sub-controllers already share via setError).
-    setError,
     get options() {
       return options;
     },

@@ -132,7 +132,7 @@ export const GRAPH_ENGINE_MANIFEST: PrefTabManifest = {
       id: 'graphEngine',
       title: 'Graph search & indexing',
       description:
-        'The retrieval/ranking knobs the graph search uses, the observability tier, and the eval recalled-context format. These apply to both Agent Memory and Knowledge.',
+        'The retrieval/ranking knobs the graph search uses and the observability tier. These apply to both Agent Memory and Knowledge.',
       bodyId: PREFERENCES_SECTION_BODY_IDS.graphEngine,
       collapsible: true,
       body: [
@@ -147,11 +147,6 @@ export const GRAPH_ENGINE_MANIFEST: PrefTabManifest = {
             { kind: 'number', path: 'graph.query_timeout_s' },
             { kind: 'select', path: 'graph.observability', options: GRAPH_OBSERVABILITY_LABELS }
           ]
-        },
-        {
-          kind: 'custom',
-          component: 'graphEvalContextToggles',
-          paths: ['graph.eval.show_event_time', 'graph.eval.show_expired_at', 'graph.eval.show_superseded']
         }
       ]
     },
@@ -187,7 +182,7 @@ export const GRAPH_ENGINE_MANIFEST: PrefTabManifest = {
       id: 'memoryRetrievalModels',
       title: 'Chat Retrieval Agent Model & Prompt',
       description:
-        'AI profile and system prompt for the CHAT agentic memory-retrieval loop (the Chat Retrieval Agent caps below feed its placeholders). Chat-only; the eval copy lives on the Eval tab.',
+        'AI profile and system prompt for the chat agentic memory-retrieval loop (the Chat Retrieval Agent caps below feed its placeholders).',
       bodyId: PREFERENCES_SECTION_BODY_IDS.memoryRetrievalModels,
       collapsible: true,
       body: [
@@ -197,11 +192,11 @@ export const GRAPH_ENGINE_MANIFEST: PrefTabManifest = {
             // Phase 7b step 5: one AI profile (was a model + a tuning profile); unset borrows Hiro's chat.
             { kind: 'aiProfile', path: 'memory.retrieval.profile' },
             {
-              kind: 'promptLibrarySelect',
-              dictPath: 'graph.eval.retrieval_agent_prompts',
+              kind: 'promptLibrary',
+              dictPath: 'memory.retrieval.prompts',
               activeIdPath: 'memory.retrieval.active_prompt_id',
               defaultId: 'chat',
-              hint: 'The retrieval-agent prompt the chat recall loop uses. Chosen from the shared prompt library (also edited on the Eval tab’s Retrieval Agent card); the “Chat” profile is history-aware and may abstain when a message needs no memory. Placeholders {MAX_AGENT_TURNS}, {MAX_PARALLEL_SEARCHES}, {MAX_LIMIT} are filled from the Retrieval Agent caps card at runtime.',
+              hint: 'The retrieval-agent prompt the chat recall loop uses; the built-in “Chat” profile is history-aware and may abstain when a message needs no memory. Placeholders {MAX_AGENT_TURNS}, {MAX_PARALLEL_SEARCHES}, {MAX_LIMIT} are filled from the Chat Retrieval Agent caps card at runtime.',
               ariaLabel: 'Chat retrieval agent prompt (markdown)',
               editorLabel: 'Retrieval agent prompt editor'
             }
@@ -214,7 +209,7 @@ export const GRAPH_ENGINE_MANIFEST: PrefTabManifest = {
       id: 'memoryRetrievalCaps',
       title: 'Chat Retrieval Agent',
       description:
-        'Loop-bound caps for the CHAT agentic memory-retrieval path (its own copy — the eval path has a separate one on the Eval tab, so each tunes independently).',
+        'Loop-bound caps for the chat agentic memory-retrieval path, and how recalled memory is written into the reply prompt.',
       bodyId: PREFERENCES_SECTION_BODY_IDS.memoryRetrievalCaps,
       collapsible: true,
       validate: (d) => validateRetrievalAgentLimits(d.memory.retrieval.limits),

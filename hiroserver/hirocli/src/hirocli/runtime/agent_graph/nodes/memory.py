@@ -201,9 +201,8 @@ class MemoryNodes(NodeGroup):
         n = len(rows)
 
         # G3: persist the loop transcript sidecar (turns/sub-queries) AND the recalled rows + draft
-        # answer companion — trace tier only, best-effort. The companion mirrors what eval stores in
-        # row_json so the Graph-Runs detail dialog renders the SAME Overview + Facts/Entities/Episodes
-        # tables (with counts) a memory-eval row shows (a chat recall has no eval_results.db row).
+        # answer companion — trace tier only, best-effort. The companion feeds Graph Runs' recall
+        # detail dialog: its Overview + Facts/Entities/Episodes tables (with counts).
         if trace_on:
             entry = current_entry.get()
             if entry is not None:

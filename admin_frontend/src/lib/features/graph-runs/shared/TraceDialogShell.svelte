@@ -29,7 +29,7 @@
 
 <Dialog.Root {open} onOpenChange={(next) => { if (!next) onClose(); }}>
   <!-- z-[60] (above the default z-50): the trace dialog is always a drill-in, so it must stack
-       above any dialog it was opened from (e.g. the eval row-detail dialog). -->
+       above any dialog it was opened from (e.g. the recall detail dialog). -->
   <Dialog.Content
     overlayClass="z-[60]"
     class="{contentClass} sm:max-w-[min(96vw,1200px)] flex flex-col h-[90vh] z-[60]"

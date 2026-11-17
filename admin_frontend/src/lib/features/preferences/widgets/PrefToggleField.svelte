@@ -14,7 +14,7 @@
     class?: string;
     /** Optional override of the schema description (rare card-local copy). */
     hint?: string;
-    /** Custom details body (e.g. eval toggles with inline code). */
+    /** Custom details body (e.g. toggles with inline code). */
     details?: Snippet;
   };
 

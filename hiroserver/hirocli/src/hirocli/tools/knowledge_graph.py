@@ -379,7 +379,7 @@ class KnowledgeGraphIngestBatchTool(Tool):
     """Batch variant of ``knowledge_graph_ingest`` — pays the model/graph setup
     cost ONCE for N documents instead of N times.
 
-    Used by the Ingest tab's "Also build graph" checkbox and the Eval Batch setup.
+    Used by the Ingest tab's "Also build graph" checkbox.
     Per-document failures are isolated; idempotent re-run (Graphiti dedupes by uuid).
     """
 

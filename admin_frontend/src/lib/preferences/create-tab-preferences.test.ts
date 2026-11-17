@@ -5,7 +5,7 @@ vi.mock('$app/environment', () => ({ browser: false }));
 
 // Mutable URL + a goto stub that applies the navigation (mirrors SvelteKit replacing the URL).
 const nav = vi.hoisted(() => ({
-  url: new URL('http://localhost/eval'),
+  url: new URL('http://localhost/p'),
   goto: vi.fn(async (href: string) => {
     nav.url = new URL(href, 'http://localhost');
   })
@@ -20,7 +20,7 @@ vi.mock('$app/state', () => ({
 import { createTabPreferences } from './create-tab-preferences.svelte';
 
 beforeEach(() => {
-  nav.url = new URL('http://localhost/eval');
+  nav.url = new URL('http://localhost/p');
   vi.clearAllMocks();
 });
 

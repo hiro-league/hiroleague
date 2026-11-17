@@ -1,6 +1,4 @@
 import { apiRequest } from './client';
-import type { RetrievalLoop } from '$lib/features/eval/shared/retrieval-loop';
-import type { RecalledFact, EvalRecallRender } from '$lib/features/eval/shared/eval-events';
 
 export type GraphLedgerRow = {
   id: string;
@@ -180,7 +178,6 @@ export async function getGraphRunLangsmithUrl(
 // Full per-stage data (candidate legs / hop / rank / temporal) recorded by the
 // re-hosted search pipeline when tracing is enabled, read from the JSONL sidecar.
 
-/** One fact edge as it flows through a stage (the eval-relevant metadata). */
 /**
  * One item flowing out of a stage. The populated fields depend on the stage `lane`:
  *   - `edge` (facts): `fact`, `name` (relation), `episodes`, `valid_at`/`invalid_at`/`expired_at`.
@@ -252,20 +249,82 @@ export async function getGraphRunRetrievalTrace(
   );
 }
 
+// ── Chat memory recall (the retrieval agent's loop + what it recalled) ──────
+
+/** One sub-query inside a turn's single `search_memory` call. `sid` is a globally-monotonic id
+ *  (the Facts-tab highlight keys on it). */
+export type RetrievalLoopSubQuery = {
+  sid: number;
+  goal: string;
+  query: string;
+  temporal: 'current' | 'all';
+  limit: number;
+  hops: 1 | 2 | 3;
+  show_expiry: boolean;
+  returned: number;
+  new: number;
+  accumulated_total: number;
+};
+
+export type RetrievalLoopTurn = {
+  turn: number;
+  sub_queries: RetrievalLoopSubQuery[];
+};
+
+/** The retrieval agent's loop: its turns and their sub-queries. */
+export type RetrievalLoop = {
+  turns: RetrievalLoopTurn[];
+  /** Total LLM invocations across the loop, including the final-answer turn. */
+  agent_turns: number;
+  max_agent_turns: number;
+  stopped_reason: 'model_answered' | 'max_agent_turns';
+};
+
+/** One recalled item (fact, entity or episode) as the recall handed it to the reply. */
+export type RecalledFact = {
+  memory: string; // display text (dated fact / entity summary / episode body)
+  kind?: 'fact' | 'entity' | 'episode';
+  fact?: string; // raw fact text (without the appended date)
+  valid_at?: string; // ISO date the fact became true
+  invalid_at?: string; // ISO date the fact was invalidated (superseded)
+  superseded?: boolean; // dropped by the 'current' temporal lens
+  chunk_id?: string; // supporting episode/chunk id
+  name?: string; // fact: relationship / edge type (e.g. WORKS_AT); entity: the entity name
+  source_uuid?: string; // subject entity uuid
+  target_uuid?: string; // object entity uuid
+  uuid?: string; // fact edge / entity / episode uuid
+  score?: number | null; // relevance score when the backend exposes it
+  // Which search of the retrieval loop produced this item.
+  search_id?: number;
+  goal?: string;
+  // Entity-only (kind === 'entity'): the ontology type (Person/Org/…) and the raw attribute summary.
+  entity_type?: string;
+  summary?: string;
+};
+
+/** The render caps the recall used (chat `memory.retrieval.render.*`): only the top
+ *  `max_elements_per_kind` items per kind (by score) reach the reply, each trimmed to one line. */
+export type RecallRender = {
+  max_elements_per_kind: number;
+  max_fact_chars: number;
+  max_episode_chars: number;
+  max_summary_chars: number;
+};
+
 export type GraphRunRetrievalLoopResponse = {
   /** Loop trajectory (turns / sub-queries); null when no transcript sidecar. */
   loop: RetrievalLoop | null;
-  /** Recalled facts/entities/episodes (eval `RecalledFact` shape) — the detail dialog's tables. */
+  /** Recalled facts/entities/episodes — the detail dialog's tables. */
   recalled: RecalledFact[];
   /** The retrieval agent's draft answer (Overview tab). */
   answer: string;
   /** Render caps the recall used (chat `memory.retrieval.render.*`); null falls back to defaults. */
-  render: EvalRecallRender | null;
+  render: RecallRender | null;
 };
 
 /** Full retrieval-recall detail for a chat recall run — the loop trajectory PLUS recalled
- *  facts/entities/episodes, the draft answer, and render caps (the same shape the eval detail dialog
- *  renders). All null/empty when tracing wasn't enabled. Sourced live from the agent sidecars. */
+ *  facts/entities/episodes, the draft answer, and render caps. All null/empty when tracing wasn't
+ *  enabled. Sourced live from the agent sidecars. */
 export async function getGraphRunRetrievalLoop(
   runId: string
 ): Promise<GraphRunRetrievalLoopResponse> {

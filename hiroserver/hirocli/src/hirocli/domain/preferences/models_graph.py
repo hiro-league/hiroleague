@@ -8,21 +8,10 @@ from __future__ import annotations
 
 from typing import Literal
 
-from hiro_memory.settings import KnowledgeGraphTemporalDefault, RetrievalAgentLimits
+from hiro_memory.settings import KnowledgeGraphTemporalDefault
 from pydantic import BaseModel, Field, model_validator
 
-from .defaults import (
-    DEFAULT_ANSWER_PROMPT_ID,
-    DEFAULT_MEMORY_EVAL_ANSWER_PROMPT,
-    DEFAULT_MEMORY_EVAL_JUDGE_PROMPT,
-    DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT,
-    DEFAULT_RETRIEVAL_AGENT_PROMPT_ID,
-    AnswerPromptProfile,
-    default_answer_prompts,
-    default_retrieval_agent_prompts,
-    pref_field,
-    reseed_locked_profiles,
-)
+from .defaults import pref_field
 
 KnowledgeGraphBackend = Literal["off", "graphiti"]
 KnowledgeGraphSearchRecipe = Literal["rrf", "mmr", "cross_encoder"]
@@ -103,157 +92,6 @@ class GraphViewPreferences(BaseModel):
     # heads-up inside its per-type filter dropdown (the dropdown still lists + searches
     # every instance — this only flags very large types so the user reaches for search).
     large_type_threshold: int = pref_field(advanced=True, default=200, ge=10, le=10000, title="Large node-type warning threshold", description="In the Graph tab's per-type node filter, a type with more instances than this shows a 'many instances' performance heads-up in its dropdown. The dropdown still lists and searches every instance — this only flags very large types. Display-only.")
-
-
-class GraphEvalPreferences(BaseModel):
-    """Eval-only answering knobs, surfaced under the shared Graphiti engine settings.
-
-    ``answer_prompts`` is a named LIBRARY of answering INSTRUCTION blocks for the memory-eval
-    recall leg (``eval_judge.answer_from_context`` places the active one in the user message ahead
-    of the question and the recalled elements; the system prompt there is a hardcoded two-line
-    role). The active profile is the persisted ``active_answer_prompt_id`` (mirrors the retrieval
-    agent's ``active_retrieval_agent_prompt_id``) — see ``resolve_active_answer_prompt``.
-    The knowledge-eval legs intentionally have no answer-prompt library:
-    they run the real ``KnowledgeAgentGraph`` and so are graded against the PRODUCTION
-    ``knowledge.answering.prompt`` (forking it would make the knowledge eval stop measuring real
-    behavior). The admin UI surfaces that production prompt alongside this one for convenience.
-
-    ``judge_prompt`` is the grading system prompt for the LLM judge (``eval_judge.judge_answer``),
-    shared by both tracks. Editable/visible for reference; blank falls back to the relaxed default.
-    """
-
-    # Named library of mem-eval answer-prompt recipes (replaces the former single
-    # ``memory_answer_prompt`` scalar — no-backward-compat, no migration). The answer step uses the
-    # ``active_answer_prompt_id`` profile (a persisted preference, mirroring the retrieval agent —
-    # the former per-run eval-panel picker is gone); ``resolve_answer_prompt`` maps id → instruction
-    # text with a default fallback. The ``default`` profile is locked and carries the built-in text.
-    answer_prompts: dict[str, AnswerPromptProfile] = pref_field(
-        write_whole=True,
-        default_factory=default_answer_prompts,
-        title="Mem Eval Answer Prompts",
-    )
-    active_answer_prompt_id: str = Field(default=DEFAULT_ANSWER_PROMPT_ID, title="Active prompt profile", description="Which mem-eval answer prompt the answer step uses.")
-    judge_prompt: str = Field(default=DEFAULT_MEMORY_EVAL_JUDGE_PROMPT, title="Eval judge prompt")
-    # Phase 7b step 5: each eval step's model + tuning profile pair became one AI profile
-    # (``jobs`` "eval_answer" / "eval_judge" / "eval_retrieval"). The memory-eval answer step uses
-    # ``answer_profile``; the LLM judge (both tracks) ``judge_profile``; the agentic retrieval loop
-    # (memory track) ``retrieval_profile``, which borrows the answer step's model when empty.
-    answer_profile: str | None = pref_field(
-        ai_profile_ref=True,
-        default=None,
-        title="Eval: answer",
-        description=(
-            "The AI profile the memory-eval answer step uses to answer from recalled context. Empty "
-            "uses Hiro's chat model. (Knowledge-track answers always use the knowledge answering job.)"
-        ),
-    )
-    judge_profile: str | None = pref_field(
-        ai_profile_ref=True,
-        default=None,
-        title="Eval: judge",
-        description=(
-            "The AI profile the LLM judge uses to grade answers against the ideal (both tracks). "
-            "Empty uses Hiro's chat model. Lower temperature = more repeatable grading."
-        ),
-    )
-    retrieval_profile: str | None = pref_field(
-        ai_profile_ref=True,
-        default=None,
-        title="Eval: retrieval",
-        description=(
-            "The AI profile the agentic retrieval loop (memory track) uses to plan searches and call "
-            "the search_memory tool. Empty uses the eval answer model."
-        ),
-    )
-    # Recalled-context render toggles (eval only): which temporal annotations each recalled FACT
-    # line carries, and whether episodes keep their [date] prefix. ``show_event_time`` (valid_at,
-    # labeled "event_time") also governs the episode [date]; ``show_expired_at`` (invalid_at) and
-    # ``show_superseded`` annotate supersession. Defaults = a single timestamp per fact (Zep-style):
-    # event_time on, the rest off. Applied identically to the answer, judge, and evidence-check
-    # renders of a question (see eval_judge.RecallRenderOptions).
-    # Advanced: eval-only recalled-context annotations hidden behind the "show advanced" toggle.
-    show_event_time: bool = pref_field(advanced=True, default=True, title="Show event_time (valid date)")
-    show_expired_at: bool = pref_field(advanced=True, default=False, title="Show expired_at (invalid date)")
-    show_superseded: bool = pref_field(advanced=True, default=False, title="Show SUPERSEDED flag")
-    # Answer-context render caps (eval answerer + judge + evidence-check). The recall leg can surface
-    # a large, noisy element set (100s of facts/entities/episodes) that buries the answer-relevant
-    # ones; these bound what reaches the prompt. Each kind is score-ranked desc, the top
-    # ``max_elements_per_kind`` kept, and every element sanitized to ONE line capped at the per-kind
-    # char limit. One global set — applies identically to the answer, judge, and evidence renders.
-    max_elements_per_kind: int = pref_field(advanced=True, default=30, ge=1, le=200, title="Max elements / kind", description="Top-N facts / entities / messages (by retrieval score) kept for the answer + judge prompts, so the answer-relevant ones aren't buried under a long dump.")
-    max_fact_chars: int = pref_field(advanced=True, default=240, ge=40, le=2000, title="Max fact chars", description="Each recalled fact → one sanitized line capped here.")
-    max_episode_chars: int = pref_field(advanced=True, default=300, ge=40, le=2000, title="Max message chars", description="Per-episode/message text cap (one sanitized line).")
-    max_summary_chars: int = pref_field(advanced=True, default=400, ge=40, le=4000, title="Max entity summary chars", description="Per-entity summary cap (one sanitized line) — entity summaries are the longest/noisiest.")
-    # Agentic retrieval loop caps/clamps (agentic-memory-retrieval-design §5.2). One global
-    # value for eval and chat — do not split per surface.
-    retrieval_agent: RetrievalAgentLimits = Field(default_factory=RetrievalAgentLimits)
-    # Named library of retrieval-agent system prompts (mirrors answer_prompts).
-    retrieval_agent_prompts: dict[str, AnswerPromptProfile] = pref_field(
-        write_whole=True,
-        default_factory=default_retrieval_agent_prompts,
-        title="Retrieval Agent Prompt",
-    )
-    active_retrieval_agent_prompt_id: str = Field(default=DEFAULT_RETRIEVAL_AGENT_PROMPT_ID, title="Active prompt profile", description="Which retrieval-agent system prompt the loop uses.")
-
-    @model_validator(mode="after")
-    def _reseed_locked_prompt_profiles(self) -> "GraphEvalPreferences":
-        """Locked default prompt profiles are code-owned: re-seed them from the constants on every
-        load so edits to the built-in defaults reach EXISTING workspaces (not just fresh ones),
-        while user-created profiles are preserved. Without this, the persisted ``default`` profile in
-        preferences.json drifts from the code constant after a default-text edit — the engine + admin
-        UI would keep serving the stale text until a manual re-seed (the stale-locked-default defect)."""
-        self.answer_prompts = reseed_locked_profiles(self.answer_prompts, default_answer_prompts())
-        self.retrieval_agent_prompts = reseed_locked_profiles(
-            self.retrieval_agent_prompts, default_retrieval_agent_prompts()
-        )
-        return self
-
-    def resolve_answer_prompt(self, profile_id: str | None) -> tuple[str, str]:
-        """Resolve a mem-eval answer-prompt profile id → ``(label, instruction_text)``.
-
-        Falls back to the locked ``default`` profile when the id is unknown/blank, then to the
-        built-in constant when even that is missing or its text is blank. The runner reaches this
-        via ``resolve_active_answer_prompt`` (the active id) for the instruction block + label."""
-        pid = (profile_id or "").strip()
-        profile = self.answer_prompts.get(pid) or self.answer_prompts.get(DEFAULT_ANSWER_PROMPT_ID)
-        if profile is None:
-            return (DEFAULT_ANSWER_PROMPT_ID, DEFAULT_MEMORY_EVAL_ANSWER_PROMPT)
-        text = (profile.prompt or "").strip() or DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
-        return (profile.label or pid or DEFAULT_ANSWER_PROMPT_ID, text)
-
-    def resolve_active_answer_prompt(self) -> tuple[str, str, str]:
-        """Resolve the active mem-eval answer prompt → ``(id, label, instruction_text)``.
-
-        Mirrors ``resolve_retrieval_agent_prompt`` (the answer step now uses the persisted
-        ``active_answer_prompt_id`` instead of a per-run eval-panel pick). Blank/unknown id falls
-        back to the locked ``default`` profile, then to the built-in constant."""
-        active = (self.active_answer_prompt_id or "").strip() or DEFAULT_ANSWER_PROMPT_ID
-        label, text = self.resolve_answer_prompt(active)
-        return (active, label, text)
-
-    def resolve_prompt_from_library(self, requested_id: str, fallback_text: str) -> tuple[str, str]:
-        """Resolve one retrieval-agent profile id → ``(id, text)`` from the shared library.
-
-        Shared by the eval and chat resolvers (the library lives here; chat's active id lives under
-        ``memory.retrieval`` and is passed in by the free ``resolve_chat_retrieval_agent_prompt``):
-        a blank/unknown id falls back to the locked ``default`` profile, and blank profile text falls
-        back to ``fallback_text``."""
-        active = (requested_id or "").strip() or DEFAULT_RETRIEVAL_AGENT_PROMPT_ID
-        profile = self.retrieval_agent_prompts.get(active) or self.retrieval_agent_prompts.get(
-            DEFAULT_RETRIEVAL_AGENT_PROMPT_ID
-        )
-        if profile is None:
-            return (DEFAULT_RETRIEVAL_AGENT_PROMPT_ID, fallback_text)
-        text = (profile.prompt or "").strip() or fallback_text
-        return (active, text)
-
-    def resolve_retrieval_agent_prompt(self) -> tuple[str, str]:
-        """Resolve the active (eval) retrieval-agent prompt profile → ``(id, text)``.
-
-        Blank profile text falls back to ``DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT``."""
-        return self.resolve_prompt_from_library(
-            self.active_retrieval_agent_prompt_id, DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT
-        )
 
 
 class GraphPreferences(BaseModel):
@@ -449,9 +287,6 @@ class GraphPreferences(BaseModel):
     reranker: KnowledgeGraphRerankerPreferences = Field(
         default_factory=KnowledgeGraphRerankerPreferences
     )
-    # Eval-only answering knobs (memory-eval answer prompt). Lives here so the admin UI can show an
-    # "Eval" subsection under the shared Graphiti engine settings.
-    eval: GraphEvalPreferences = Field(default_factory=GraphEvalPreferences)
     # Admin graph-viz DISPLAY knobs (the shared Knowledge/Memories Graph tab's per-type node
     # filter). Frontend-only — kept here because ``prefs.graph`` is the shared graph namespace.
     view: GraphViewPreferences = Field(default_factory=GraphViewPreferences)

@@ -330,7 +330,7 @@ export function createAiController(notify: Notify, catalog: AiCatalogSource) {
     return findModel(providers, profile.model);
   }
 
-  /** Hiro's jobs whose own field points at this profile, by name ("Hiro's chat, Eval: judge"). */
+  /** Hiro's jobs whose own field points at this profile, by name ("Hiro's chat, Memory retrieval"). */
   function jobsUsing(id: string): string[] {
     return jobs.filter((j) => j.profileId === id).map((j) => j.label);
   }

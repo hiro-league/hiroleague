@@ -48,6 +48,7 @@ function makePrefs(overrides?: Partial<WorkspacePreferences>): WorkspacePreferen
       search: { ...DEFAULT_MEMORY_SEARCH },
       extraction: { ...DEFAULT_MEMORY_EXTRACTION },
       retrieval: {
+        prompts: { chat: { label: 'Chat', locked: true, prompt: '' } },
         active_prompt_id: 'chat',
         limits: {
           max_agent_turns: 4,
@@ -130,10 +131,10 @@ describe('editsForSave', () => {
     const baseline = makePrefs();
     const draft = cloneWorkspacePreferences(baseline);
     draft.llm.chat_profile = 'hiro-chat';
-    draft.graph.eval.judge_profile = 'hiro-chat';
+    draft.memory.retrieval.profile = 'hiro-chat';
     expect(diffEdits(baseline, draft)).toEqual({
       'llm.chat_profile': 'hiro-chat',
-      'graph.eval.judge_profile': 'hiro-chat'
+      'memory.retrieval.profile': 'hiro-chat'
     });
     const cleared = cloneWorkspacePreferences(draft);
     cleared.llm.chat_profile = null;
@@ -157,48 +158,23 @@ describe('editsForSave', () => {
     expect(diffEdits(baseline, draft)).toEqual({ 'graph.reranker.profile': null });
   });
 
-  it('sends graph.eval.answer_prompts as one whole-object path', () => {
+  it('sends memory.retrieval.prompts as one whole-object path', () => {
     const baseline = makePrefs();
     const draft = cloneWorkspacePreferences(baseline);
-    draft.graph.eval.answer_prompts.custom = {
-      label: 'Custom',
-      locked: false,
-      prompt: 'Answer from context only.'
-    };
-    const payload = diffEdits(baseline, draft);
-    expect(Object.keys(payload)).toEqual(['graph.eval.answer_prompts']);
-    expect(payload['graph.eval.answer_prompts']).toEqual(draft.graph.eval.answer_prompts);
-  });
-
-  it('sends graph.eval.retrieval_agent_prompts as one whole-object path', () => {
-    const baseline = makePrefs();
-    const draft = cloneWorkspacePreferences(baseline);
-    draft.graph.eval.retrieval_agent_prompts.custom = {
+    draft.memory.retrieval.prompts.custom = {
       label: 'Custom',
       locked: false,
       prompt: 'Search in parallel when plural.'
     };
     const payload = diffEdits(baseline, draft);
-    expect(Object.keys(payload)).toEqual(['graph.eval.retrieval_agent_prompts']);
-    expect(payload['graph.eval.retrieval_agent_prompts']).toEqual(
-      draft.graph.eval.retrieval_agent_prompts
-    );
+    expect(Object.keys(payload)).toEqual(['memory.retrieval.prompts']);
+    expect(payload['memory.retrieval.prompts']).toEqual(draft.memory.retrieval.prompts);
   });
 
-  it('picks up retrieval_agent scalar edits', () => {
+  it('picks up retrieval limits edits', () => {
     const baseline = makePrefs();
     const draft = cloneWorkspacePreferences(baseline);
-    draft.graph.eval.retrieval_agent.max_agent_turns = 6;
-    draft.graph.eval.active_retrieval_agent_prompt_id = 'default';
-    expect(diffEdits(baseline, draft)).toEqual({
-      'graph.eval.retrieval_agent.max_agent_turns': 6
-    });
-  });
-
-  it('picks_up_new_caps_paths_in_diff', () => {
-    const baseline = makePrefs();
-    const draft = cloneWorkspacePreferences(baseline);
-    draft.graph.eval.retrieval_agent = {
+    draft.memory.retrieval.limits = {
       max_agent_turns: 6,
       max_parallel_searches: 4,
       limit_default: 25,
@@ -206,13 +182,14 @@ describe('editsForSave', () => {
       limit_max: 45,
       hops_max: 2
     };
+    draft.memory.retrieval.active_prompt_id = 'chat';
     expect(diffEdits(baseline, draft)).toEqual({
-      'graph.eval.retrieval_agent.max_agent_turns': 6,
-      'graph.eval.retrieval_agent.max_parallel_searches': 4,
-      'graph.eval.retrieval_agent.limit_default': 25,
-      'graph.eval.retrieval_agent.limit_min': 12,
-      'graph.eval.retrieval_agent.limit_max': 45,
-      'graph.eval.retrieval_agent.hops_max': 2
+      'memory.retrieval.limits.max_agent_turns': 6,
+      'memory.retrieval.limits.max_parallel_searches': 4,
+      'memory.retrieval.limits.limit_default': 25,
+      'memory.retrieval.limits.limit_min': 12,
+      'memory.retrieval.limits.limit_max': 45,
+      'memory.retrieval.limits.hops_max': 2
     });
   });
 

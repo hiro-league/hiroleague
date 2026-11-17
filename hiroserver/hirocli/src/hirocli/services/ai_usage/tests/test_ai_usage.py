@@ -74,7 +74,6 @@ def _ledger_row(**kw: object) -> dict[str, object]:
         ("knowledge/call_model", "chat-m1", "question", "knowledge"),
         ("tts", "chat-m1", "speech", "voice_replies"),
         ("stt", "chat-m1", "transcription", "voice_notes"),
-        ("eval_judge", "memory_eval-1", "question", "eval"),
         ("call_model", "knowledge-k1", "question", "knowledge"),
     ],
 )

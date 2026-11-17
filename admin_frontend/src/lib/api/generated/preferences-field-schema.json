@@ -219,8 +219,15 @@
     "type": "string",
     "default": "This text is a chat transcript. In it, \"{user}\" is the human user and \"{character}\" is the AI assistant/character; each line is prefixed with its speaker and timestamp. Extract facts ONLY about {user}, and only as {user} stated or explicitly confirmed them. Treat {character}'s lines purely as context for resolving what {user} refers to \u2014 never record a fact asserted by {character} that {user} did not state or confirm.",
     "title": "Memory extraction instructions",
-    "description": "Guidance appended to the graph fact-extractor when ingesting chat memory (a two-speaker window). Default: attribute facts to the user only, treating the assistant's lines as context. Use {user} / {character} placeholders \u2014 they are filled with the actual speaker names at ingest. Applies to conversation memory only \u2014 not knowledge or eval.",
+    "description": "Guidance appended to the graph fact-extractor when ingesting chat memory (a two-speaker window). Default: attribute facts to the user only, treating the assistant's lines as context. Use {user} / {character} placeholders \u2014 they are filled with the actual speaker names at ingest. Applies to conversation memory only \u2014 not knowledge.",
     "advanced": true
+  },
+  "memory.retrieval.prompts": {
+    "path": "memory.retrieval.prompts",
+    "nullable": false,
+    "type": "object",
+    "title": "Retrieval Agent Prompt",
+    "writeWhole": true
   },
   "memory.retrieval.active_prompt_id": {
     "path": "memory.retrieval.active_prompt_id",
@@ -228,7 +235,7 @@
     "type": "string",
     "default": "chat",
     "title": "Active prompt profile",
-    "description": "Which shared retrieval-agent prompt profile the CHAT recall loop uses."
+    "description": "Which retrieval-agent prompt profile the chat recall loop uses."
   },
   "memory.retrieval.limits.max_agent_turns": {
     "path": "memory.retrieval.limits.max_agent_turns",
@@ -696,198 +703,6 @@
     "description": "Drop facts whose cross-encoder relevance is below this (0\u20131). 0 = keep all. Ignored by RRF/MMR.",
     "min": 0.0,
     "max": 1.0
-  },
-  "graph.eval.answer_prompts": {
-    "path": "graph.eval.answer_prompts",
-    "nullable": false,
-    "type": "object",
-    "title": "Mem Eval Answer Prompts",
-    "writeWhole": true
-  },
-  "graph.eval.active_answer_prompt_id": {
-    "path": "graph.eval.active_answer_prompt_id",
-    "nullable": false,
-    "type": "string",
-    "default": "default",
-    "title": "Active prompt profile",
-    "description": "Which mem-eval answer prompt the answer step uses."
-  },
-  "graph.eval.judge_prompt": {
-    "path": "graph.eval.judge_prompt",
-    "nullable": false,
-    "type": "string",
-    "default": "## Objective\nGrade a model's Answer to a question about past conversations against the Ideal Answer, and\nreport the result as a single JSON object (see Output Fields). When a Rubric is shown, use it as\nGUIDANCE on what a complete answer covers \u2014 not a checklist to fail on. Grade ONLY against the\nIdeal Answer and Rubric \u2014 never your own knowledge.\n\n## Verdicts\n- pass: the Answer conveys the same fact(s) as the Ideal. Judge meaning, not wording \u2014\n  paraphrases, extra detail, and answers MORE specific than the Ideal all pass. When a Rubric is\n  shown, an Answer that covers its MAIN elements passes \u2014 a missing minor element does NOT block\n  a pass.\n- partial: at least one correct item of a multi-part Ideal, or the right fact at lower precision\n  than the Ideal. When a Rubric is shown, partial = the Answer captures some core elements but\n  misses a substantial part of what was asked.\n- fail: contradicts the Ideal or answers something else. When a Rubric is shown, fail = no element\n  satisfied, the Answer misses the point, or it contradicts a rubric element.\n- abstain: the Answer declines \u2014 \"No information available.\" or any other refusal to answer.\n\n## Core Instructions\n- Rubric: when a Rubric section is shown, its lines describe what a complete answer would cover.\n  Treat them as a GUIDE, not a pass/fail checklist \u2014 the Ideal Answer and the Rubric describe the\n  same correct answer, so weigh whether the Answer captures the SUBSTANCE, not whether it states\n  every line. Don't downgrade an otherwise-correct Answer for omitting a minor element.\n- Dates: matching the Ideal's month and year passes; a correctly resolved relative date (\"next\n  month\" stated in an August conversation = September) passes; within ~2 weeks passes.\n- Negative Control = YES means declining is the correct outcome: an abstaining Answer is the\n  right result, and a confident Answer is fail.\n- The Recalled Memory Elements are what the answerer saw. They must NEVER change the verdict \u2014\n  use them only to fill evidence, recall_sufficient, and grounded.\n\n## Output Fields\nReply with one JSON object containing exactly these fields, in this order:\n- \"evidence\" (string): the exact line(s) copied VERBATIM from the Recalled Memory Elements that\n  contain the information needed to answer; \"\" if no such line exists.\n- \"recall_sufficient\" (boolean): true only if evidence quotes a real line that supplies the\n  answer; false otherwise.\n- \"grounded\" (boolean): whether the Answer is supported by the Recalled Memory Elements.\n- \"reason\" (string): one short sentence justifying the verdict.\n- \"verdict\" (string): one of \"pass\", \"partial\", \"fail\", \"abstain\".\n\n## Validation\n- evidence is checked by exact substring match against the shown elements \u2014 an inexact or\n  invented quote counts as no evidence and forces recall_sufficient to false.\n- If no Recalled Memory Elements section was shown, set evidence \"\" and recall_sufficient true.\n- The verdict depends only on Answer vs Ideal (and Rubric, when shown).",
-    "title": "Eval judge prompt"
-  },
-  "graph.eval.answer_profile": {
-    "path": "graph.eval.answer_profile",
-    "nullable": true,
-    "type": "string",
-    "default": null,
-    "title": "Eval: answer",
-    "description": "The AI profile the memory-eval answer step uses to answer from recalled context. Empty uses Hiro's chat model. (Knowledge-track answers always use the knowledge answering job.)",
-    "ai_profile_ref": true
-  },
-  "graph.eval.judge_profile": {
-    "path": "graph.eval.judge_profile",
-    "nullable": true,
-    "type": "string",
-    "default": null,
-    "title": "Eval: judge",
-    "description": "The AI profile the LLM judge uses to grade answers against the ideal (both tracks). Empty uses Hiro's chat model. Lower temperature = more repeatable grading.",
-    "ai_profile_ref": true
-  },
-  "graph.eval.retrieval_profile": {
-    "path": "graph.eval.retrieval_profile",
-    "nullable": true,
-    "type": "string",
-    "default": null,
-    "title": "Eval: retrieval",
-    "description": "The AI profile the agentic retrieval loop (memory track) uses to plan searches and call the search_memory tool. Empty uses the eval answer model.",
-    "ai_profile_ref": true
-  },
-  "graph.eval.show_event_time": {
-    "path": "graph.eval.show_event_time",
-    "nullable": false,
-    "type": "boolean",
-    "default": true,
-    "title": "Show event_time (valid date)",
-    "advanced": true
-  },
-  "graph.eval.show_expired_at": {
-    "path": "graph.eval.show_expired_at",
-    "nullable": false,
-    "type": "boolean",
-    "default": false,
-    "title": "Show expired_at (invalid date)",
-    "advanced": true
-  },
-  "graph.eval.show_superseded": {
-    "path": "graph.eval.show_superseded",
-    "nullable": false,
-    "type": "boolean",
-    "default": false,
-    "title": "Show SUPERSEDED flag",
-    "advanced": true
-  },
-  "graph.eval.max_elements_per_kind": {
-    "path": "graph.eval.max_elements_per_kind",
-    "nullable": false,
-    "type": "integer",
-    "default": 30,
-    "title": "Max elements / kind",
-    "description": "Top-N facts / entities / messages (by retrieval score) kept for the answer + judge prompts, so the answer-relevant ones aren't buried under a long dump.",
-    "advanced": true,
-    "min": 1,
-    "max": 200
-  },
-  "graph.eval.max_fact_chars": {
-    "path": "graph.eval.max_fact_chars",
-    "nullable": false,
-    "type": "integer",
-    "default": 240,
-    "title": "Max fact chars",
-    "description": "Each recalled fact \u2192 one sanitized line capped here.",
-    "advanced": true,
-    "min": 40,
-    "max": 2000
-  },
-  "graph.eval.max_episode_chars": {
-    "path": "graph.eval.max_episode_chars",
-    "nullable": false,
-    "type": "integer",
-    "default": 300,
-    "title": "Max message chars",
-    "description": "Per-episode/message text cap (one sanitized line).",
-    "advanced": true,
-    "min": 40,
-    "max": 2000
-  },
-  "graph.eval.max_summary_chars": {
-    "path": "graph.eval.max_summary_chars",
-    "nullable": false,
-    "type": "integer",
-    "default": 400,
-    "title": "Max entity summary chars",
-    "description": "Per-entity summary cap (one sanitized line) \u2014 entity summaries are the longest/noisiest.",
-    "advanced": true,
-    "min": 40,
-    "max": 4000
-  },
-  "graph.eval.retrieval_agent.max_agent_turns": {
-    "path": "graph.eval.retrieval_agent.max_agent_turns",
-    "nullable": false,
-    "type": "integer",
-    "default": 4,
-    "title": "Max agent turns",
-    "description": "Tool-bound turns the agent gets to search (one search_memory call per turn, each up to max-parallel-searches sub-queries). The optional final compose turn isn't counted, so total LLM calls are at most this + 1.",
-    "min": 1,
-    "max": 10
-  },
-  "graph.eval.retrieval_agent.max_parallel_searches": {
-    "path": "graph.eval.retrieval_agent.max_parallel_searches",
-    "nullable": false,
-    "type": "integer",
-    "default": 3,
-    "title": "Max parallel searches",
-    "description": "Sub-queries per search_memory call \u2014 global for eval and chat.",
-    "min": 1,
-    "max": 5
-  },
-  "graph.eval.retrieval_agent.limit_default": {
-    "path": "graph.eval.retrieval_agent.limit_default",
-    "nullable": false,
-    "type": "integer",
-    "default": 20,
-    "title": "Num results default",
-    "description": "Memories one search fetches when the agent doesn't request a specific number \u2014 its starting point.",
-    "min": 1,
-    "max": 100
-  },
-  "graph.eval.retrieval_agent.limit_min": {
-    "path": "graph.eval.retrieval_agent.limit_min",
-    "nullable": false,
-    "type": "integer",
-    "default": 10,
-    "title": "Num results min",
-    "description": "Lower bound of the range the search tool clamps the agent's requested result count into.",
-    "min": 1,
-    "max": 100
-  },
-  "graph.eval.retrieval_agent.limit_max": {
-    "path": "graph.eval.retrieval_agent.limit_max",
-    "nullable": false,
-    "type": "integer",
-    "default": 40,
-    "title": "Num results max",
-    "description": "Upper bound of the range the search tool clamps the requested result count into \u2014 also the ceiling the loop tells the agent it may raise up to.",
-    "min": 1,
-    "max": 100
-  },
-  "graph.eval.retrieval_agent.hops_max": {
-    "path": "graph.eval.retrieval_agent.hops_max",
-    "nullable": false,
-    "type": "integer",
-    "default": 3,
-    "title": "Hops max",
-    "description": "Upper bound on graph expansion hops the tool accepts per search (1\u20133).",
-    "min": 1,
-    "max": 3
-  },
-  "graph.eval.retrieval_agent_prompts": {
-    "path": "graph.eval.retrieval_agent_prompts",
-    "nullable": false,
-    "type": "object",
-    "title": "Retrieval Agent Prompt",
-    "writeWhole": true
-  },
-  "graph.eval.active_retrieval_agent_prompt_id": {
-    "path": "graph.eval.active_retrieval_agent_prompt_id",
-    "nullable": false,
-    "type": "string",
-    "default": "default",
-    "title": "Active prompt profile",
-    "description": "Which retrieval-agent system prompt the loop uses."
   },
   "graph.view.large_type_threshold": {
     "path": "graph.view.large_type_threshold",

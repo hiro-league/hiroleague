@@ -148,13 +148,13 @@ class GraphLedgerService:
         workspace: str | None,
         run_id: str,
     ) -> Result[dict[str, Any] | None]:
-        """Return the FULL retrieval-recall detail for a CHAT recall run — the same shape the eval
+        """Return the FULL retrieval-recall detail for a CHAT recall run — what Graph Runs' recall
         detail dialog renders: the loop trajectory (turns / sub-queries) PLUS the recalled
         facts/entities/episodes, the draft answer, and the render caps.
 
         Reads the two agent sidecars the recall node writes under observability=``trace``: the
         transcript (→ ``build_retrieval_loop_payload``) and the recalled-rows/draft companion (→
-        ``read_agent_recall_result``, mirroring eval's ``row_json``). ``None`` when neither exists
+        ``read_agent_recall_result``). ``None`` when neither exists
         (tracing is opt-in). The per-sub-query pipeline detail stays reachable via the
         retrieval-trace endpoint (keyed by ``sid``)."""
         rid = (run_id or "").strip()

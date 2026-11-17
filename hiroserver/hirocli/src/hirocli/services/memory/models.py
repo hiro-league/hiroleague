@@ -1,7 +1,6 @@
 """Chat memory retrieval-agent model builder (memory-eval-vs-chat-parity, Phase 2).
 
-Mirrors ``services/eval/models.build_eval_retrieval_model`` but for the CHAT recall loop
-(``memory.retrieval.*``): resolve the memory job's AI profile (``memory.retrieval.profile``, else the
+For the CHAT recall loop (``memory.retrieval.*``): resolve the memory job's AI profile (``memory.retrieval.profile``, else the
 chat job's model with the memory preset tuning), then build a LangChain chat model.
 Returns ``(None, "")`` when unconfigured/unavailable so the recall node degrades gracefully (the
 turn simply proceeds without memory) instead of raising.

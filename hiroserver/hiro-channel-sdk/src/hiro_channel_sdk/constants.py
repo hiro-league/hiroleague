@@ -189,8 +189,8 @@ AI_ERROR_INVALID: str = "invalid"        # the ask itself is wrong (no prompt, b
 #                    model, profile_id, profile_name, ms}: the documents in order of relevance, best first, each by its
 #                    index in `documents`, with the model's score in [0, 1]; top_n keeps the best n (default: all).
 #   memory.settings  extension → core, {} → {memory, graph, embedder: {profile_id, model}, reranker: {profile_id,
-#                    model}}: chat's memory settings as the core runs them (preferences memory and graph, without
-#                    graph.eval), and the models its memory embeds and reranks with.
+#                    model}}: chat's memory settings as the core runs them (preferences memory and graph), and
+#                    the models its memory embeds and reranks with.
 #   Errors (the response's error code): no_profile, invalid, failed (AI_ERROR_*).
 METHOD_AI_EMBED: str = "ai.embed"
 METHOD_AI_RERANK: str = "ai.rerank"

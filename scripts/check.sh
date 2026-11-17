@@ -57,8 +57,7 @@ part "hiroserver: extension kit tests" "hiroserver/hiro-extension-kit hiroserver
 part "hiroserver: memory library tests" "hiroserver/hiro-memory hiroserver/hiro-commons ${ws}"     "${REPO_ROOT}/scripts/run-tests.sh" -q -n auto hiro-memory
 part "hiroserver: gateway and channels tests" "hiroserver/gateway hiroserver/channels hiroserver/hiro-channel-sdk hiroserver/hiro-commons ${ws}" \
     "${REPO_ROOT}/scripts/run-tests.sh" -q gateway channels
-# hirocli's tests also read the knowledge corpus in eval/
-part "hiroserver: hirocli tests" "hiroserver/hirocli hiroserver/hiroleague hiroserver/knowledge hiroserver/hiro-memory hiroserver/hiro-channel-sdk hiroserver/hiro-commons eval ${ws}" \
+part "hiroserver: hirocli tests" "hiroserver/hirocli hiroserver/hiroleague hiroserver/knowledge hiroserver/hiro-memory hiroserver/hiro-channel-sdk hiroserver/hiro-commons ${ws}" \
     "${REPO_ROOT}/scripts/run-tests.sh" -q -n auto hirocli
 
 # The core's tests run alone: onnxruntime's phantom Ctrl-C reaches every process in the console, and a Node check

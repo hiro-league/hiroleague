@@ -7,7 +7,7 @@ model comes from :func:`resolve_job_model`:
   (a catalog chat model whose provider has credentials, or a model on a configured local server);
   plan-tool models (claude_code:* / codex:*) can't be LangChain chat models and are skipped;
 - the field is null → the job it falls back to (chat-like jobs → chat; graph small → graph extraction;
-  eval retrieval → eval answer; rewrite → knowledge) gives the model, with THIS job's preset tuning
+  rewrite → knowledge) gives the model, with THIS job's preset tuning
   (as before, when only the model fell back and each job kept its own tuning);
 - chat and reading pictures fall back to nothing (no model → off).
 
@@ -24,11 +24,7 @@ from typing import TYPE_CHECKING
 
 from ..credential_store import CredentialStore
 
-from .defaults import (
-    DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID,
-    DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT,
-    ThinkingLevel,
-)
+from .defaults import ThinkingLevel
 from .jobs import job_preset, job_profile_ref
 from .models import WorkspacePreferences
 from .models_ai import AI_PLAN_PROVIDERS, AiProfile, ai_fallback_chain
@@ -238,9 +234,6 @@ resolve_knowledge_answering_llm = _JobResolver("knowledge")
 resolve_knowledge_rewrite_llm = _JobResolver("rewrite")
 resolve_graphiti_extraction_model = _JobResolver("graph_extraction")
 resolve_graphiti_small_model = _JobResolver("graph_small")
-resolve_eval_answer_llm = _JobResolver("eval_answer")
-resolve_eval_judge_llm = _JobResolver("eval_judge")
-resolve_eval_retrieval_llm = _JobResolver("eval_retrieval")
 
 
 def resolve_stt_model(
@@ -350,19 +343,11 @@ def compose_image_prompt(resolved: ResolvedImageGen, prompt: str) -> str:
     return ", ".join(p for p in parts if p)
 
 
-def resolve_retrieval_agent_prompt(prefs: WorkspacePreferences) -> tuple[str, str]:
-    """Return ``(profile_id, prompt_text)`` for the agentic retrieval loop (eval active profile)."""
-    return prefs.graph.eval.resolve_retrieval_agent_prompt()
-
-
 def resolve_chat_retrieval_agent_prompt(prefs: WorkspacePreferences) -> tuple[str, str]:
-    """Return ``(profile_id, prompt_text)`` for the CHAT retrieval loop.
-
-    Cross-namespace: the profile LIBRARY is shared (``graph.eval.retrieval_agent_prompts``) but chat's
-    selection lives under ``memory.retrieval.active_prompt_id`` (its own dropdown). Blank falls back to
-    the locked ``chat`` profile, then the built-in chat prompt constant."""
-    active = (prefs.memory.retrieval.active_prompt_id or "").strip() or DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID
-    return prefs.graph.eval.resolve_prompt_from_library(active, DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT)
+    """Return ``(profile_id, prompt_text)`` for the CHAT retrieval loop: the active profile of
+    ``memory.retrieval.prompts`` (a blank or unknown id falls back to the locked ``chat`` profile, then
+    to the built-in chat prompt)."""
+    return prefs.memory.retrieval.resolve_prompt()
 
 
 def _embedding_profile_model(prefs: WorkspacePreferences, profile_id: str | None) -> str | None:
@@ -503,9 +488,6 @@ __all__ = [
     "resolve_character_llm",
     "resolve_character_voice",
     "resolve_chat_retrieval_agent_prompt",
-    "resolve_eval_answer_llm",
-    "resolve_eval_judge_llm",
-    "resolve_eval_retrieval_llm",
     "resolve_graph_reranker_model",
     "resolve_graphiti_embedder_model",
     "resolve_graphiti_extraction_model",
@@ -520,7 +502,6 @@ __all__ = [
     "resolve_knowledge_rewrite_llm",
     "resolve_memory_retrieval_llm",
     "resolve_profile_model",
-    "resolve_retrieval_agent_prompt",
     "resolve_stt_model",
     "resolved_from_profile",
     "unknown_character_profiles",

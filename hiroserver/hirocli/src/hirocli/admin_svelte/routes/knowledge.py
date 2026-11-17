@@ -25,14 +25,6 @@ from hirocli.domain.events import DomainEvent, get_domain_event_bus
 from hirocli.services.knowledge.graph_events import publish_graph_event
 from hirocli.domain.workspace import resolve_workspace
 from hirocli.services.knowledge import KnowledgeService, create_knowledge_service
-from hirocli.services.eval.constants import (
-    EVAL_CANCELLED,
-    EVAL_COMPLETED,
-    EVAL_FAILED,
-    EVAL_QUESTION_COMPLETED,
-    EVAL_SETUP_PROGRESS,
-    EVAL_STARTED,
-)
 from hirocli.services.knowledge.constants import (
     KNOWLEDGE_DELETED,
     KNOWLEDGE_INGESTED,
@@ -56,7 +48,7 @@ log = Logger.get("ADMIN.KNOWLEDGE")
 # `knowledge_shared_router`, which is ALWAYS mounted (see admin_svelte/api.py); only the
 # Knowledge-admin-only endpoints stay on `knowledge_router`, which is gated behind the `knowledge`
 # feature. Shared = local embedder/reranker model management (Settings model pickers) and the
-# `/knowledge/events` SSE stream (shell multiplexer + graph live-updates + eval progress). The graph
+# `/knowledge/events` SSE stream (shell multiplexer + graph live-updates). The graph
 # viewer's endpoints are the memory library's router, mounted in routes/memory.py. Same module scope, so both
 # routers share the module-level helpers/services — the split only changes what gets gated.
 knowledge_router = APIRouter()
@@ -65,7 +57,7 @@ knowledge_shared_router = APIRouter()
 # Process-wide count of OPEN ``/knowledge/events`` SSE streams. After the frontend
 # multiplexer change each browser tab on the Knowledge page holds exactly ONE such stream
 # (not one per feature). Logged on connect/disconnect so a later run shows (a) how many
-# live streams are open during an ingest/eval — the "connection budget" the admin keeps
+# live streams are open during an ingest — the "connection budget" the admin keeps
 # hitting — and (b) whether a stream is even connected while a graph build emits deltas
 # (the live-updates question). Mutated only on the single server event loop → plain int.
 _active_sse_streams = 0
@@ -599,14 +591,6 @@ async def stream_knowledge_events(
         KNOWLEDGE_JOB_FAILED,
         KNOWLEDGE_INGESTED,
         KNOWLEDGE_DELETED,
-        # L3 eval batch (Phase 5c) — same SSE stream, separate event types
-        # so the UI subscriber can dispatch on event.type.
-        EVAL_STARTED,
-        EVAL_SETUP_PROGRESS,
-        EVAL_QUESTION_COMPLETED,
-        EVAL_COMPLETED,
-        EVAL_FAILED,
-        EVAL_CANCELLED,
         # L3 graph viz (MVP) — live node/edge updates for the admin Graph tab.
         KNOWLEDGE_GRAPH_NODE_UPSERTED,
         KNOWLEDGE_GRAPH_EDGE_UPSERTED,

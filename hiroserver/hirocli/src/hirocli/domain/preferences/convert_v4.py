@@ -79,13 +79,6 @@ OLD_JOB_SOURCES: dict[str, tuple[tuple[str, ...], str | None, str]] = {
     "graph_small": (
         ("graph.small_model", "graph.extraction_model", *_OLD_CHAIN), "graph.small_tuning_profile", "graphiti_small"
     ),
-    "eval_answer": (("graph.eval.answer_model", *_OLD_CHAIN), "graph.eval.answer_tuning_profile", "knowledge_answering"),
-    "eval_judge": (("graph.eval.judge_model", *_OLD_CHAIN), "graph.eval.judge_tuning_profile", "knowledge_answering"),
-    "eval_retrieval": (
-        ("graph.eval.retrieval_model", "graph.eval.answer_model", *_OLD_CHAIN),
-        "graph.eval.retrieval_tuning_profile",
-        "knowledge_answering",
-    ),
 }
 
 # Old leaves dropped from the raw JSON (pydantic would ignore them, but the saved v4 file stays clean).
@@ -102,12 +95,6 @@ OLD_PREFERENCE_PATHS = (
     "graph.extraction_tuning_profile",
     "graph.small_model",
     "graph.small_tuning_profile",
-    "graph.eval.answer_model",
-    "graph.eval.answer_tuning_profile",
-    "graph.eval.judge_model",
-    "graph.eval.judge_tuning_profile",
-    "graph.eval.retrieval_model",
-    "graph.eval.retrieval_tuning_profile",
     "tuning_profiles",
 )
 

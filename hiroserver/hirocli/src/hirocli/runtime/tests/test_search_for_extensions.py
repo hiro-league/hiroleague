@@ -171,12 +171,12 @@ def test_embed_rerank_and_memory_settings_answer_an_extension(tmp_path: Path, mo
         assert ranked["results"][0]["score"] == 1.0
         assert (ranked["profile_id"], ranked["model"]) == ("voyage", "voyage:rerank-3")
 
-        # memory.settings: chat's memory settings as the core runs them, without eval's own.
+        # memory.settings: chat's memory settings as the core runs them.
         settings = await client.request(METHOD_MEMORY_SETTINGS, {})
         assert settings["embedder"] == {"profile_id": "small", "model": "openai:text-embedding-3-small"}
         assert settings["reranker"] == {"profile_id": "voyage", "model": "voyage:rerank-3"}
         assert settings["graph"]["reranker"]["min_relevance"] == 0.25
-        assert "eval" not in settings["graph"] and "retrieval" in settings["memory"]
+        assert "retrieval" in settings["memory"]
 
         # Refusals: a use with no profile, no texts, a bad top_n.
         for method, params, code in (

@@ -72,12 +72,15 @@ class AiProfile(BaseModel):
     @field_validator("preset")
     @classmethod
     def _preset_is_a_job(cls, value: str | None) -> str | None:
+        # A profile made for a job the core does not have (the eval jobs: EvalHiro runs them) stays as an
+        # owner's profile: refusing it would stop preferences.json loading, and an app's use may still
+        # point at it (EvalHiro's ``eval:answer`` → ``hiro-eval-answer``).
         preset = (value or "").strip() or None
         if preset is not None:
             from .jobs import JOB_PRESETS
 
             if preset not in JOB_PRESETS:
-                raise ValueError(f"preset {preset!r} isn't one of Hiro's jobs ({', '.join(JOB_PRESETS)})")
+                return None
         return preset
 
     @property

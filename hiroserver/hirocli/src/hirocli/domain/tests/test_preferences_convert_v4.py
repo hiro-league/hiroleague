@@ -27,7 +27,6 @@ V3_PREFS = {
     "graph": {
         "extraction_model": "openai:gpt-6.1-sol",
         "small_tuning_profile": "graphiti_small",
-        "eval": {"judge_model": "bogus:nope"},
     },
     "tuning_profiles": {
         "balanced_chat": {"label": "Balanced", "temperature": 0.4, "max_tokens": 999, "thinking": "low"},
@@ -93,10 +92,6 @@ def test_v3_preferences_and_character_convert_to_profiles(tmp_path: Path) -> Non
     assert profiles[prefs.graph.extraction_profile].model == "openai:gpt-6.1-sol"
     small = profiles[prefs.graph.small_profile]
     assert (small.model, small.max_tokens, small.thinking) == ("openai:gpt-6.1-sol", 2048, "off")
-    # Eval: an unknown model is skipped (field null), the others resolve along the old chain.
-    assert prefs.graph.eval.judge_profile is None
-    assert profiles[prefs.graph.eval.answer_profile].model == "openai:gpt-6-luna"
-    assert profiles[prefs.graph.eval.retrieval_profile].model == "openai:gpt-6-luna"
     # Reading pictures: no IMAGE_VISION_MODEL, so it follows Hiro's chat model (with its own preset tuning).
     assert prefs.llm.vision_profile == "hiro-vision"
     assert profiles["hiro-vision"].model == chat.model and profiles["hiro-vision"].max_tokens == 4096

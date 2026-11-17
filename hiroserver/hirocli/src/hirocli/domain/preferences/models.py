@@ -35,7 +35,6 @@ from .models_ai import (
 )
 from .models_chat import DEFAULT_MAX_HISTORY_MESSAGES, ChatPreferences
 from .models_graph import (
-    GraphEvalPreferences,
     GraphObservability,
     GraphPreferences,
     GraphViewPreferences,
@@ -46,7 +45,6 @@ from .models_graph import (
     KnowledgeGraphSearchRecipe,
     KnowledgeGraphSearchScope,
     KnowledgeGraphTemporalDefault,
-    RetrievalAgentLimits,
 )
 from .models_knowledge import (
     DEFAULT_KNOWLEDGE_EMBEDDING_MODEL,
@@ -87,6 +85,7 @@ from .models_memory import (
     MemoryRetrievalPreferences,
     MemoryRetrievalRenderPreferences,
     MemorySearchPreferences,
+    RetrievalAgentLimits,
 )
 
 __all__ = [
@@ -131,7 +130,6 @@ __all__ = [
     "KnowledgeGraphRerankerPreferences",
     "RetrievalAgentLimits",
     "GraphViewPreferences",
-    "GraphEvalPreferences",
     "GraphPreferences",
     # AI asks (Phase 7a)
     "AI_LOCAL_SERVER_KINDS",
@@ -195,6 +193,31 @@ class WorkspacePreferences(BaseModel):
     # Catalog's Profiles tab edits them). Hiro's own four searching uses are fields in graph and knowledge.
     embedding: EmbeddingPreferences = Field(default_factory=EmbeddingPreferences)
     rerank: RerankPreferences = Field(default_factory=RerankPreferences)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _keep_chat_retrieval_prompts(cls, data: object) -> object:
+        """Keep the owner's chat retrieval-agent prompts from a file without ``memory.retrieval.prompts``.
+
+        Such a file holds them under ``graph.eval.retrieval_agent_prompts`` (a section the core does not
+        read, ignored like any unknown key). Their own profiles (not the locked built-ins, which the
+        library re-seeds) are carried into ``memory.retrieval.prompts`` so the chat recall keeps the
+        prompt ``memory.retrieval.active_prompt_id`` points at. Family data: never dropped on load."""
+        if not isinstance(data, dict):
+            return data
+        graph = data.get("graph")
+        old_eval = graph.get("eval") if isinstance(graph, dict) else None
+        old = old_eval.get("retrieval_agent_prompts") if isinstance(old_eval, dict) else None
+        if not isinstance(old, dict):
+            return data
+        memory = data.get("memory") if isinstance(data.get("memory"), dict) else {}
+        retrieval = memory.get("retrieval") if isinstance(memory.get("retrieval"), dict) else {}
+        if "prompts" in retrieval:
+            return data
+        own = {pid: p for pid, p in old.items() if isinstance(p, dict) and not p.get("locked")}
+        if not own:
+            return data
+        return {**data, "memory": {**memory, "retrieval": {**retrieval, "prompts": own}}}
 
     @model_validator(mode="after")
     def _validate_job_profiles(self) -> "WorkspacePreferences":

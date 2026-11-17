@@ -34,7 +34,7 @@ describe('preferences search index', () => {
     const byPath = new Map(index.map((e) => [e.path, e]));
     expect(byPath.get('llm.chat_profile')?.section).toBe('Default models');
     expect(byPath.get('voice.hiro_profile')?.section).toBe('Default models');
-    expect(byPath.get('graph.eval.judge_profile')?.section).toBe('Evaluation Models');
+    expect(byPath.get('memory.retrieval.prompts')?.section).toBe('Chat Retrieval Agent Model & Prompt');
     expect(byPath.get('knowledge.retrieval.top_k')?.section).toBe('Retrieval defaults');
     expect(byPath.get('graph.observability')?.section).toBe('Graph search & indexing');
     // every searchable field is assigned a section (so dropdown grouping + ordering are complete)
@@ -54,8 +54,8 @@ describe('preferences search index', () => {
     const index = buildPrefSearchIndex(PREFERENCES_FIELD_SCHEMA);
     const matches = filterPrefSearch(index, 'model');
     expect(matches.length).toBeGreaterThan(0);
-    // sorted by tab order: models(0) ≤ agent(1) ≤ graph-engine(2) ≤ knowledge(3) ≤ eval(4)
-    const order = ['models', 'agent', 'graph-engine', 'knowledge', 'eval'];
+    // sorted by tab order: models(0) ≤ agent(1) ≤ graph-engine(2) ≤ knowledge(3)
+    const order = ['models', 'agent', 'graph-engine', 'knowledge'];
     const idxs = matches.map((m) => order.indexOf(m.tabId));
     expect(idxs).toEqual([...idxs].sort((a, b) => a - b));
     const counts = countPrefMatchesByTab(matches);

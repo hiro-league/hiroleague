@@ -10,7 +10,7 @@ def test_serialized_field_names_documented_in_retrieval_prompt() -> None:
     """Parity guard (item 12): every metadata field the agent receives must be documented by exact
     name in the retrieval-agent prompt, so renaming one side without the other can't silently
     drift (the root-cause class of the fidelity bugs)."""
-    from hirocli.domain.preferences import DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT as PROMPT
+    from hirocli.domain.preferences import DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT as PROMPT
 
     edge = _serialize_item(
         AccumulatedItem(

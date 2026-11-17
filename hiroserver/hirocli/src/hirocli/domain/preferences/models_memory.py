@@ -6,26 +6,28 @@ with the extraction model / embedder / search coming from the top-level graph pr
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # DEFAULT_MEMORY_EXTRACTION_INSTRUCTIONS lives in ``defaults`` alongside PROMPT_DEFAULTS (mirroring
 # chat.instructions), so the admin prompt-editor "Restore default" restores it — a memory-scoped
 # extraction clause with {user}/{character} placeholders filled at ingest with the real speaker
-# names. NOT the shared ``graph.custom_extraction_instructions`` (knowledge + eval) nor
+# names. NOT the shared ``graph.custom_extraction_instructions`` (knowledge) nor
 # ``chat.instructions`` (answer-time persona guidance, a different pipeline stage).
 from .defaults import (
     DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID,
+    DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT,
     DEFAULT_MEMORY_EXTRACTION_INSTRUCTIONS,
+    PromptProfile,
+    default_chat_retrieval_prompts,
     pref_field,
+    reseed_locked_profiles,
 )
 from hiro_memory.settings import RetrievalAgentLimits
 
 
 def default_chat_retrieval_limits() -> RetrievalAgentLimits:
-    """Chat retrieval-loop defaults — intentionally leaner than the shared eval defaults
-    (fewer agent turns and smaller result counts) so chat recall stays fast and cheap. Kept as a
-    chat-only factory so ``graph.eval.retrieval_agent`` keeps the ``RetrievalAgentLimits`` class
-    defaults (they no longer share the same numbers)."""
+    """Chat retrieval-loop defaults — intentionally leaner than the ``RetrievalAgentLimits`` class
+    defaults (fewer agent turns and smaller result counts) so chat recall stays fast and cheap."""
     return RetrievalAgentLimits(
         max_agent_turns=3, limit_default=10, limit_min=5, limit_max=25
     )
@@ -111,7 +113,7 @@ class MemoryExtractionPreferences(BaseModel):
         ),
     )
     # Extraction-time guidance appended to the graph extractor for chat memory only (NOT knowledge
-    # documents or eval, and NOT the answer-time chat instructions). Governs WHICH facts enter the
+    # documents, and NOT the answer-time chat instructions). Governs WHICH facts enter the
     # graph from a two-speaker window — by default, only the user's.
     instructions: str = pref_field(
         # Advanced: fact-extraction guidance most users leave at the default.
@@ -123,20 +125,18 @@ class MemoryExtractionPreferences(BaseModel):
             "Guidance appended to the graph fact-extractor when ingesting chat memory (a two-speaker "
             "window). Default: attribute facts to the user only, treating the assistant's lines as "
             "context. Use {user} / {character} placeholders — they are filled with the actual "
-            "speaker names at ingest. Applies to conversation memory only — not knowledge or eval."
+            "speaker names at ingest. Applies to conversation memory only — not knowledge."
         ),
     )
 
 
 class MemoryRetrievalRenderPreferences(BaseModel):
     """How recalled memory is rendered into the CHAT persona prompt (memory-eval-vs-chat-parity,
-    Phase 3). Chat's own copy of eval's ``RecallRenderOptions`` — which temporal annotations show +
-    per-kind caps — so chat drops the flat ``memory_block`` for the rich `format_recall_context`
-    layout. Mirrors the eval "Answer context" caps (``graph.eval.max_*``) + temporal toggles
-    (``graph.eval.show_*``); the runtime builds a ``RecallRenderOptions`` from these."""
+    Phase 3): which temporal annotations show + per-kind caps, for the rich `format_recall_context`
+    layout. The runtime builds the memory library's ``RecallRenderOptions`` from these."""
 
     # Temporal annotations per recalled FACT line. Defaults = a single timestamp per fact (event_time
-    # on, the rest off), matching eval.
+    # on, the rest off).
     show_event_time: bool = Field(default=True, title="Show event_time (valid date)")
     show_expired_at: bool = Field(default=False, title="Show expired_at (invalid date)")
     show_superseded: bool = Field(default=False, title="Show SUPERSEDED flag")
@@ -149,23 +149,23 @@ class MemoryRetrievalRenderPreferences(BaseModel):
 
 
 class MemoryRetrievalPreferences(BaseModel):
-    """Chat-side agentic memory-retrieval loop config (memory-eval-vs-chat-parity, Phase 1).
+    """The chat's agentic memory-retrieval loop: its prompt library and the active prompt, its caps,
+    its AI profile and how recalled memory is rendered (read by the recall node)."""
 
-    The prompt LIBRARY is shared with eval (``graph.eval.retrieval_agent_prompts``); this section
-    holds chat's own SELECTION (``active_prompt_id``), caps, and model, so chat tunes independently of
-    eval (the deferred ``memory.retrieval.*`` split, brought forward). Consumed when the loop is wired
-    into the recall node (Phase 2) — fields only today."""
-
-    # Selects a profile from the SHARED library (graph.eval.retrieval_agent_prompts); defaults to the
-    # locked ``chat`` profile. The library dict is owned by the Graph-Engine card; the Agent-memory
-    # card only owns this pointer (via the active-id-only dropdown widget).
+    # Named library of retrieval-agent system prompts. The locked ``chat`` profile is code-owned
+    # (re-seeded on every load); the owner adds their own beside it.
+    prompts: dict[str, PromptProfile] = pref_field(
+        write_whole=True,
+        default_factory=default_chat_retrieval_prompts,
+        title="Retrieval Agent Prompt",
+    )
+    # Which profile of ``prompts`` the loop uses; unknown or blank falls back to the locked ``chat``.
     active_prompt_id: str = Field(
         default=DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID,
         title="Active prompt profile",
-        description="Which shared retrieval-agent prompt profile the CHAT recall loop uses.",
+        description="Which retrieval-agent prompt profile the chat recall loop uses.",
     )
-    # Chat's OWN loop caps — leaner than eval (max_agent_turns=3, num-results 5/10/25). Split from
-    # eval (its own factory) so chat is tuned independently; eval keeps the class defaults.
+    # The loop's caps (max_agent_turns=3, num-results 5/10/25 by default).
     limits: RetrievalAgentLimits = Field(default_factory=default_chat_retrieval_limits)
     # Phase 7b step 5: the model + tuning profile pair became one AI profile (``jobs`` "memory").
     profile: str | None = pref_field(
@@ -180,6 +180,24 @@ class MemoryRetrievalPreferences(BaseModel):
     render: MemoryRetrievalRenderPreferences = Field(
         default_factory=MemoryRetrievalRenderPreferences
     )
+
+    @model_validator(mode="after")
+    def _reseed_locked_prompts(self) -> "MemoryRetrievalPreferences":
+        """Locked prompt profiles are code-owned: re-seed them from the constants on every load so an
+        edit to the built-in prompt reaches existing workspaces, while the owner's profiles stay."""
+        self.prompts = reseed_locked_profiles(self.prompts, default_chat_retrieval_prompts())
+        return self
+
+    def resolve_prompt(self) -> tuple[str, str]:
+        """The active retrieval-agent prompt → ``(id, text)``. A blank or unknown id falls back to the
+        locked ``chat`` profile, and blank profile text to the built-in prompt."""
+        active = (self.active_prompt_id or "").strip() or DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID
+        profile = self.prompts.get(active)
+        if profile is None:
+            active = DEFAULT_CHAT_RETRIEVAL_AGENT_PROMPT_ID
+            profile = self.prompts.get(active)
+        text = ((profile.prompt if profile else "") or "").strip() or DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT
+        return (active, text)
 
 
 class MemoryPreferences(BaseModel):

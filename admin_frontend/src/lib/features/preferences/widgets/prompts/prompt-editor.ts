@@ -1,15 +1,15 @@
-import type { AnswerPromptProfile } from '$lib/api/preferences';
+import type { PromptProfile } from '$lib/api/preferences';
 
 /**
  * Shape the unified prompt-editor dialog edits. A `single` model edits one markdown string; a
- * `library` model edits a whole `dict[id → profile]` (answer / retrieval-agent prompt libraries),
+ * `library` model edits a whole `dict[id → profile]` (the retrieval-agent prompt library),
  * which round-trips to the backend as one writeWhole path.
  */
 export type PromptDialogModel =
   | { kind: 'single'; initialValue: string; defaultText: string }
   | {
       kind: 'library';
-      initialDict: Record<string, AnswerPromptProfile>;
+      initialDict: Record<string, PromptProfile>;
       /** Id of the locked built-in profile (its prompt is the "Restore default" source). */
       defaultId: string;
       /** Version selected on the page when the dialog opened. */
@@ -25,7 +25,7 @@ export type PromptDialogModel =
 /** What the dialog hands back to the parent on Save (parent maps it to a PATCH payload). */
 export type PromptSavePayload =
   | { kind: 'single'; value: string }
-  | { kind: 'library'; dict: Record<string, AnswerPromptProfile> };
+  | { kind: 'library'; dict: Record<string, PromptProfile> };
 
 export function slugifyPromptLabel(label: string): string {
   const base = label

@@ -86,7 +86,7 @@ async def get_graph_run_retrieval_loop(
 ) -> Any:
     """Full retrieval-recall detail for a chat recall run, read live from the agent sidecars: the loop
     trajectory (``loop``) plus the recalled facts/entities/episodes (``recalled``), draft ``answer``,
-    and ``render`` caps — the same shape the eval detail dialog renders. All null/empty when tracing
+    and ``render`` caps — what Graph Runs' recall detail dialog renders. All null/empty when tracing
     wasn't enabled for the run."""
     result = await run_in_threadpool(
         GraphLedgerService().retrieval_loop,

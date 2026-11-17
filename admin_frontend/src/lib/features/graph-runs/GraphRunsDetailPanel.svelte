@@ -18,8 +18,8 @@
   import GraphRunsNodeDetailPanel from './GraphRunsNodeDetailPanel.svelte';
   import GraphRunsRetrievalTraceDialog from './GraphRunsRetrievalTraceDialog.svelte';
   import GraphRunsIngestTraceDialog from './GraphRunsIngestTraceDialog.svelte';
-  import EvalRowDetailDialog from '$lib/features/eval/answers/EvalRowDetailDialog.svelte';
-  import type { EvalRow } from '$lib/features/eval/shared/eval-row';
+  import RecallDetailDialog from './recall/RecallDetailDialog.svelte';
+  import type { ChatRecall } from './recall/chat-recall';
   import type { RetrievalTraceDialogController } from './state/retrieval-trace-dialog.svelte';
   import { onMount } from 'svelte';
   import { PREF_KEYS } from '$lib/preferences/keys';
@@ -60,12 +60,10 @@
     ingestTraceNavTotal,
     onPrevIngestTrace,
     onNextIngestTrace,
-    activeEvalRow,
-    evalRowLegColumns,
-    evalRowTraces,
-    onOpenEvalRow,
-    onCloseEvalRow,
-    onOpenRetrievalLoop
+    activeRecall,
+    recallTraces,
+    onOpenRetrievalLoop,
+    onCloseRecall
   }: {
     activePane: ActivePane;
     runDetailCardsExpanded: boolean;
@@ -101,16 +99,12 @@
     ingestTraceNavTotal: number;
     onPrevIngestTrace: () => void;
     onNextIngestTrace: () => void;
-    /** Eval-detail bridge — the resolved row (null when closed), its leg columns, the stacked
-     *  per-search trace controller, and open/close handlers for the `memory_recall` marker. */
-    activeEvalRow: EvalRow | null;
-    evalRowLegColumns: string[];
-    evalRowTraces: RetrievalTraceDialogController;
-    onOpenEvalRow: (row: GraphLedgerRow) => void;
-    onCloseEvalRow: () => void;
-    /** Chat retrieval-loop bridge (P5 part 2) — opens the SAME eval detail dialog (`activeEvalRow`)
-     *  from a CHAT `memory_recall` node's trajectory marker; it closes via `onCloseEvalRow`. */
+    /** Chat recall detail — the open recall (null when closed), the stacked per-search trace
+     *  controller, and open/close handlers for a `memory_recall` node's ⓘ marker. */
+    activeRecall: ChatRecall | null;
+    recallTraces: RetrievalTraceDialogController;
     onOpenRetrievalLoop: (row: GraphLedgerRow) => void;
+    onCloseRecall: () => void;
   } = $props();
 
   const detailHidden = $derived(!isRunDetailPane(activePane));
@@ -229,7 +223,6 @@
         {onOpenNodeDetails}
         {onOpenRetrievalTrace}
         {onOpenIngestTrace}
-        {onOpenEvalRow}
         {onOpenRetrievalLoop}
       />
 
@@ -271,21 +264,13 @@
 
 <GraphRunsRetrievalTraceDialog trace={activeRetrievalTrace} onClose={onCloseRetrievalTrace} />
 
-<!-- Eval-detail bridge: the rich per-question dialog (reused from the Eval panel) opened from a
-     memory_recall node, plus the stacked per-search trace dialog its Trajectory tab opens. -->
-<EvalRowDetailDialog
-  row={activeEvalRow}
-  legColumns={evalRowLegColumns}
-  searchTerm=""
-  recalledTerm=""
-  traces={evalRowTraces}
-  onClose={onCloseEvalRow}
-/>
+<!-- Chat recall detail, opened from a memory_recall node, plus the stacked per-search trace dialog
+     its trace button and Trajectory tab open. -->
+<RecallDetailDialog recall={activeRecall} traces={recallTraces} onClose={onCloseRecall} />
 <GraphRunsRetrievalTraceDialog
-  trace={evalRowTraces.activeTrace}
-  idealAnswer={evalRowTraces.activeTraceIdeal}
-  llmAnswer={evalRowTraces.activeTraceAnswer}
-  onClose={evalRowTraces.closeTrace}
+  trace={recallTraces.activeTrace}
+  answer={recallTraces.activeTraceAnswer}
+  onClose={recallTraces.closeTrace}
 />
 
 <GraphRunsIngestTraceDialog

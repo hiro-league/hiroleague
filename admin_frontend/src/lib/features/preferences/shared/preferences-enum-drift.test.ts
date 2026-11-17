@@ -4,7 +4,6 @@ import { MODELS_MANIFEST } from '$lib/features/preferences/sections/models-manif
 import { AGENT_MANIFEST } from '$lib/features/preferences/sections/agent-manifest';
 import { GRAPH_ENGINE_MANIFEST } from '$lib/features/preferences/sections/graph-engine/graph-engine-manifest';
 import { KNOWLEDGE_MANIFEST } from '$lib/features/preferences/sections/knowledge/knowledge-manifest';
-import { EVAL_MANIFEST } from '$lib/features/preferences/sections/eval/eval-manifest';
 import type {
   PrefFieldSpec,
   PrefTabManifest
@@ -27,8 +26,7 @@ const MANIFESTS: Record<string, PrefTabManifest> = {
   models: MODELS_MANIFEST,
   agent: AGENT_MANIFEST,
   'graph-engine': GRAPH_ENGINE_MANIFEST,
-  knowledge: KNOWLEDGE_MANIFEST,
-  eval: EVAL_MANIFEST
+  knowledge: KNOWLEDGE_MANIFEST
 };
 
 // Only the static (non-function) option shapes — function-valued options are filtered out at collect

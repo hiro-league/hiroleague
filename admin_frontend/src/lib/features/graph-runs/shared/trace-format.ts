@@ -32,8 +32,8 @@ export function temporalTitle(x: TemporalBounds): string {
 }
 
 // ── Human-readable dates ──────────────────────────────────────────────────────────────────
-// graphiti stores microsecond ISO timestamps (`2213-11-30T08:00:00.000000Z`) and the eval
-// corpus uses far-future years, so we format by regex (not `Date`, which chokes on 6-digit
+// graphiti stores microsecond ISO timestamps (`2213-11-30T08:00:00.000000Z`), some with
+// far-future years, so we format by regex (not `Date`, which chokes on 6-digit
 // fractional seconds) into `30 Nov 2213, 08:00 UTC`. Raw ISO stays in the tooltip + Raw JSON.
 export const MONTHS = [
   'Jan',

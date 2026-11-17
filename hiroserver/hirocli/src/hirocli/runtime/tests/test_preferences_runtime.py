@@ -42,15 +42,14 @@ def test_runtime_update_many_is_atomic_for_valid_edits(tmp_path) -> None:
 
 
 def test_runtime_update_allows_whole_write_dict(tmp_path) -> None:
-    # (Was tuning_profiles, removed in Phase 7b step 5; answer_prompts is the remaining writeWhole dict.)
     runtime = WorkspacePreferencesRuntime(tmp_path)
-    prompts = runtime.current.graph.eval.answer_prompts
-    prompts["mine"] = prompts["default"].model_copy(update={"label": "Mine", "locked": False, "prompt": "x"})
+    prompts = runtime.current.memory.retrieval.prompts
+    prompts["mine"] = prompts["chat"].model_copy(update={"label": "Mine", "locked": False, "prompt": "x"})
 
-    updated = runtime.update("graph.eval.answer_prompts", prompts)
+    updated = runtime.update("memory.retrieval.prompts", prompts)
 
-    assert updated.graph.eval.answer_prompts["mine"].prompt == "x"
-    assert load_preferences(tmp_path).graph.eval.answer_prompts["mine"].prompt == "x"
+    assert updated.memory.retrieval.prompts["mine"].prompt == "x"
+    assert load_preferences(tmp_path).memory.retrieval.prompts["mine"].prompt == "x"
 
 
 def test_runtime_rejects_subfield_write_into_write_whole_dict(tmp_path) -> None:
@@ -60,9 +59,9 @@ def test_runtime_rejects_subfield_write_into_write_whole_dict(tmp_path) -> None:
     runtime = WorkspacePreferencesRuntime(tmp_path)
 
     with pytest.raises(PreferencePathError):
-        runtime.update("graph.eval.answer_prompts.default.prompt", "nope")
+        runtime.update("memory.retrieval.prompts.chat.prompt", "nope")
 
-    assert runtime.current.graph.eval.answer_prompts["default"].prompt != "nope"
+    assert runtime.current.memory.retrieval.prompts["chat"].prompt != "nope"
 
 
 def test_runtime_job_profile_round_trip(tmp_path) -> None:

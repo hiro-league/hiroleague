@@ -12,7 +12,7 @@ chain, so tuning profiles are gone: what used to be "a model setting + a tuning 
   one-time v3 → v4 conversion, onboarding); such a profile carries ``preset=<job id>`` so the admin
   shows "Default", hides Delete and offers Restore default;
 - ``falls_back_to`` — the job whose model is used when this job's field is null (chat-like jobs → chat;
-  graph small steps → graph extraction; eval retrieval → eval answer; rewrite → knowledge; chat and
+  graph small steps → graph extraction; rewrite → knowledge; chat and
   reading pictures → nothing, i.e. off);
 - ``temperature`` / ``max_tokens`` / ``thinking`` — the preset tuning (the old tuning presets' values),
   used for a default profile, for Restore default, and when the job borrows another job's model.
@@ -38,9 +38,6 @@ JobId = Literal[
     "rewrite",
     "graph_extraction",
     "graph_small",
-    "eval_answer",
-    "eval_judge",
-    "eval_retrieval",
     "vision",
 ]
 
@@ -60,7 +57,7 @@ class JobPreset:
 
 
 # The old tuning presets' values, kept per job (balanced_chat, memory_extraction, knowledge_answering,
-# knowledge_rewrite, graphiti_extraction, graphiti_small; the eval jobs used knowledge_answering).
+# knowledge_rewrite, graphiti_extraction, graphiti_small).
 # Vision used a hard-coded 0.7 / 4096 in services/vision_service.py.
 JOB_PRESETS: dict[str, JobPreset] = {
     p.id: p
@@ -89,12 +86,6 @@ JOB_PRESETS: dict[str, JobPreset] = {
         JobPreset(
             "graph_small", "graph.small_profile", "hiro-graph-small", "Graph small steps", "graph_extraction", 0.0,
             2048, "off",
-        ),
-        JobPreset("eval_answer", "graph.eval.answer_profile", "hiro-eval-answer", "Eval: answer", "chat", 0.2, 1600, None),
-        JobPreset("eval_judge", "graph.eval.judge_profile", "hiro-eval-judge", "Eval: judge", "chat", 0.2, 1600, None),
-        JobPreset(
-            "eval_retrieval", "graph.eval.retrieval_profile", "hiro-eval-retrieval", "Eval: retrieval", "eval_answer",
-            0.2, 1600, None,
         ),
         JobPreset("vision", "llm.vision_profile", "hiro-vision", "Reading pictures", None, 0.7, 4096, None),
     )

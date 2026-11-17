@@ -1,6 +1,6 @@
-import { DEFAULT_GRAPH, type GraphPreferences } from '$lib/api/preferences';
+import type { WorkspacePreferences } from '$lib/api/preferences';
 
-export type RetrievalAgentLimits = GraphPreferences['eval']['retrieval_agent'];
+export type RetrievalAgentLimits = WorkspacePreferences['memory']['retrieval']['limits'];
 
 export const RETRIEVAL_AGENT_LIMIT_BOUNDS = {
   max_agent_turns: { min: 1, max: 10 },
@@ -20,10 +20,6 @@ export function validateRetrievalAgentLimits(limits: RetrievalAgentLimits): stri
     return RETRIEVAL_AGENT_LIMITS_VALIDATION_MESSAGE;
   }
   return null;
-}
-
-export function defaultRetrievalAgentLimits(): RetrievalAgentLimits {
-  return { ...DEFAULT_GRAPH.eval.retrieval_agent };
 }
 
 /** Clamp a single cap field to its widget bounds (mirrors pydantic ge/le). */

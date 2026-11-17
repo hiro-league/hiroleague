@@ -75,11 +75,11 @@ def test_schema_payload_includes_version_and_fields() -> None:
 def test_field_map_tags_for_save_policy() -> None:
     fields = workspace_preferences_field_map()
     assert fields["version"]["readOnly"] is True
-    assert fields["graph.eval.answer_prompts"]["writeWhole"] is True
+    assert fields["memory.retrieval.prompts"]["writeWhole"] is True
     # Phase 7b step 5: job fields carry the AI-profile marker (the admin renders a profile picker).
     assert fields["llm.chat_profile"]["ai_profile_ref"] is True
     assert fields["llm.chat_profile"]["nullable"] is True
-    assert fields["graph.eval.retrieval_profile"]["ai_profile_ref"] is True
+    assert fields["memory.retrieval.profile"]["ai_profile_ref"] is True
     assert fields["voice.hiro_profile"]["voice_profile_ref"] is True
     assert "tuning_profiles" not in fields and "llm.default_chat" not in fields
     assert fields["image_profiles"]["preferencesSaveSkip"] is True

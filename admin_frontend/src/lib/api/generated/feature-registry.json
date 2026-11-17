@@ -4,11 +4,6 @@
     "active": false,
     "note": "Device pairing + the mandatory gateway-backed devices channel."
   },
-  "eval": {
-    "label": "Eval",
-    "active": false,
-    "note": "Memory/knowledge evaluation harness."
-  },
   "gateway": {
     "label": "Gateway",
     "active": false,

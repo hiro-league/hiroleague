@@ -37,7 +37,7 @@ export type PrefOptionsSource =
   | ((draft: WorkspacePreferences) => PrefSelectOption[]);
 
 /** Bespoke FIELD blocks rendered inside a data-driven card (resolved by the field-renderer registry). */
-export type CustomFieldKey = 'graphEvalContextToggles' | 'spokenClipsStats'; // spokenClipsStats: Phase 7b clip cache
+export type CustomFieldKey = 'spokenClipsStats'; // spokenClipsStats: Phase 7b clip cache
 
 export type PrefFieldSpec =
   | { kind: 'number'; path: PreferencePath; disabledWhen?: (d: WorkspacePreferences) => boolean }
@@ -104,20 +104,6 @@ export type PrefFieldSpec =
       ariaLabel: string;
       editorLabel: string;
     }
-  /** Active-profile SELECT over a library OWNED ELSEWHERE (a different tab/card). Renders the same
-   *  dropdown + New/Edit/Duplicate against the shared ``dictPath`` but owns ONLY ``activeIdPath`` —
-   *  so the dict isn't double-claimed across tabs (e.g. chat selecting from the eval-owned library). */
-  | {
-      kind: 'promptLibrarySelect';
-      dictPath: PreferencePath;
-      activeIdPath: PreferencePath;
-      defaultId?: string;
-      heading?: string;
-      headingHelp?: string;
-      hint: string;
-      ariaLabel: string;
-      editorLabel: string;
-    }
   /** Bespoke block; `paths` are its editable fields (in render order) for search/order derivation. */
   | { kind: 'custom'; component: CustomFieldKey; paths: PreferencePath[] };
 
@@ -163,9 +149,6 @@ export function fieldSpecPaths(spec: PrefFieldSpec): string[] {
       return [spec.path];
     case 'promptLibrary':
       return [spec.activeIdPath, spec.dictPath];
-    case 'promptLibrarySelect':
-      // Owns ONLY the active-id pointer — the dict is owned by its canonical card on another tab.
-      return [spec.activeIdPath];
     case 'grid':
     case 'column':
     case 'panel':

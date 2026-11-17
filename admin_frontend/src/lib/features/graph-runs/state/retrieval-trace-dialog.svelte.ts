@@ -1,11 +1,8 @@
 /**
- * Shared retrieval-pipeline-trace dialog controller.
+ * Retrieval-pipeline-trace dialog controller for the chat recall detail dialog.
  *
- * Owns the "open the per-search trace dialog with the question's ideal + model answer in the
- * header" flow that both the Eval panel (answer rows / trajectory sub-queries) and the Graph-Runs
- * → eval-detail bridge use. Extracted out of `eval-traces` so the Graph-Runs page can drive the
- * exact same dialog without depending on the whole `EvalModel` (DRY — one copy of the
- * sid/query-matching logic, per the common-utility rule).
+ * Owns the "open the per-search trace dialog with the recall's draft answer on its Overview" flow:
+ * the run's trace from the recall's trace button, one sub-query's trace from the Trajectory tab.
  *
  * Follows getters for `$derived`/`$state` consumers (avoid returning shorthand — stale capture).
  */
@@ -20,8 +17,7 @@ export function createRetrievalTraceDialogController(
   notify: (kind: ToastKind, message: string) => void
 ) {
   let activeTrace = $state<RetrievalTraceRecord | null>(null);
-  // Ideal + model answer for the trace's question, surfaced in the dialog header.
-  let activeTraceIdeal = $state('');
+  // The recall's draft answer, shown on the trace dialog's Overview tab.
   let activeTraceAnswer = $state('');
   let traceLoadingRunId = $state<string | null>(null);
   // Per-sub-query loading (agentic recall): the trajectory's per-search Trace buttons share one
@@ -32,7 +28,7 @@ export function createRetrievalTraceDialogController(
   // Agentic recall writes one trace PER concurrent sub-query, so a run can hold several; prefer
   // the trace whose query is the original question, else the lowest-sid search (deterministic —
   // concurrent sub-queries are written in nondeterministic order, so "last" was a coin flip).
-  async function openTrace(runId: string, ideal = '', answer = '', question = '') {
+  async function openTrace(runId: string, answer = '', question = '') {
     traceLoadingRunId = runId;
     try {
       const res = await getGraphRunRetrievalTrace(runId);
@@ -42,7 +38,6 @@ export function createRetrievalTraceDialogController(
         const matched = q ? traces.find((t) => (t.query ?? '').trim() === q) : undefined;
         const lowestSid = [...traces].sort((a, b) => (a.sid ?? 0) - (b.sid ?? 0))[0];
         activeTrace = matched ?? lowestSid;
-        activeTraceIdeal = ideal;
         activeTraceAnswer = answer;
       } else {
         notify(
@@ -60,7 +55,7 @@ export function createRetrievalTraceDialogController(
   // Open the pipeline trace for ONE agentic sub-query (the trajectory tab's per-search button).
   // Matches on the stamped `sid` — the reliable key now that the backend tags each sub-query's
   // trace (concurrent writes mean list order ≠ sid order, so we can't index positionally).
-  async function openTraceForSubQuery(runId: string, sid: number, ideal = '', answer = '') {
+  async function openTraceForSubQuery(runId: string, sid: number, answer = '') {
     traceLoadingSid = sid;
     try {
       const res = await getGraphRunRetrievalTrace(runId);
@@ -68,7 +63,6 @@ export function createRetrievalTraceDialogController(
       const matched = traces.find((t) => t.sid === sid);
       if (matched) {
         activeTrace = matched;
-        activeTraceIdeal = ideal;
         activeTraceAnswer = answer;
       } else {
         notify(
@@ -90,9 +84,6 @@ export function createRetrievalTraceDialogController(
   return {
     get activeTrace() {
       return activeTrace;
-    },
-    get activeTraceIdeal() {
-      return activeTraceIdeal;
     },
     get activeTraceAnswer() {
       return activeTraceAnswer;

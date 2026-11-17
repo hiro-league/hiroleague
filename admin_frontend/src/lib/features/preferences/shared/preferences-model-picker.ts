@@ -7,7 +7,7 @@ import { setPreferenceByPath } from '$lib/features/preferences/state/preferences
 export type PrefModelKind = 'chat' | 'stt' | 'tts' | 'embedding' | 'rerank';
 
 // Phase 7b step 5: the chat-model fields of Hiro's jobs (default chat, knowledge answering, graph
-// extraction / small, eval answer / judge / retrieval, memory retrieval) and the default TTS model
+// extraction / small, memory retrieval) and the default TTS model
 // became AI- / voice-profile fields (`aiProfile` / `voiceProfile` manifest kinds), so they're gone here.
 // The embedders and rerankers are profiles too (Catalog → Profiles: `embedding_profile_ref` /
 // `rerank_profile_ref` fields), so speech-to-text is the one bare model field left.

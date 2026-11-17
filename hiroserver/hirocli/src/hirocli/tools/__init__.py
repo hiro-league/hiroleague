@@ -158,8 +158,6 @@ _LAZY_EXPORTS: dict[str, str] = {
     "KnowledgeGraphExportTool": ".knowledge_graph",
     "KnowledgeGraphIngestBatchTool": ".knowledge_graph",
     "KnowledgeGraphIngestTool": ".knowledge_graph",
-    # eval
-    "EvalRunTool": ".eval",
     # server
     "RestartTool": ".server",
     "SetupTool": ".server",
@@ -316,7 +314,6 @@ def all_tools() -> list[Tool]:
         KnowledgeSearchTool,
         KnowledgeUpdateDocumentMetadataTool,
     )
-    from .eval import EvalRunTool
     from .knowledge_graph import (
         KnowledgeGraphExportTool,
         KnowledgeGraphIngestBatchTool,
@@ -476,7 +473,6 @@ def all_tools() -> list[Tool]:
         KnowledgeGraphIngestTool(),
         KnowledgeGraphIngestBatchTool(),
         KnowledgeGraphExportTool(),
-        EvalRunTool(),
         LogSearchTool(),
         LogTailTool(),
         LlmCatalogListProvidersTool(),
@@ -575,7 +571,6 @@ if TYPE_CHECKING:  # pragma: no cover
         KnowledgeUpdateDocumentMetadataTool,
     )
     from .image_gen import GenerateImageTool  # noqa: F401
-    from .eval import EvalRunTool  # noqa: F401
     from .knowledge_graph import (  # noqa: F401
         KnowledgeGraphExportTool,
         KnowledgeGraphIngestBatchTool,

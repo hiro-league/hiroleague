@@ -7,7 +7,7 @@ import {
 import { PREF_KEYS, type PreferencesTabPreference } from './keys';
 import { createTabPreferences } from './create-tab-preferences.svelte';
 
-// Only visible tabs are selectable — a hidden feature's tab id (e.g. `?tab=eval` when Eval is off)
+// Only visible tabs are selectable — a hidden feature's tab id (e.g. `?tab=knowledge` when Knowledge is off)
 // fails validation in `normalise` and falls back to the default tab.
 const ALLOWED: readonly PreferencesTabPreference[] = VISIBLE_PREFERENCE_TABS.map(
   (tab) => tab.id

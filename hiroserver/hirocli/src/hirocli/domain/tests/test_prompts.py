@@ -10,9 +10,7 @@ from hirocli.domain.prompts import load_prompt
 _PROMPT_NAMES = (
     "knowledge_rewrite",
     "knowledge_answering",
-    "memory_eval_answer",
-    "memory_eval_judge",
-    "memory_eval_retrieval_agent",
+    "memory_chat_retrieval_agent",
     "chat_instructions",
 )
 
@@ -34,11 +32,6 @@ def test_constants_are_backed_by_bundled_files() -> None:
     # diverge code from the .md source of truth.
     assert p.DEFAULT_KNOWLEDGE_REWRITE_PROMPT == load_prompt("knowledge_rewrite")
     assert p.DEFAULT_KNOWLEDGE_ANSWERING_PROMPT == load_prompt("knowledge_answering")
-    assert p.DEFAULT_MEMORY_EVAL_ANSWER_PROMPT == load_prompt("memory_eval_answer")
-    assert p.DEFAULT_MEMORY_EVAL_JUDGE_PROMPT == load_prompt("memory_eval_judge")
-    assert p.DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT == load_prompt(
-        "memory_eval_retrieval_agent"
-    )
     assert p.DEFAULT_MEMORY_CHAT_RETRIEVAL_AGENT_PROMPT == load_prompt(
         "memory_chat_retrieval_agent"
     )

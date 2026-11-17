@@ -32,6 +32,7 @@ function makeDraft(): WorkspacePreferences {
         instructions: ''
       },
       retrieval: {
+        prompts: { chat: { label: 'Chat', locked: true, prompt: '' } },
         active_prompt_id: 'chat',
         limits: {
           max_agent_turns: 4,

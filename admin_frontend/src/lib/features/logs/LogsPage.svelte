@@ -27,7 +27,7 @@
   const tabPrefs = createLogsTabPreferences();
 
   const notify = toast.show;
-  // Graph runs (second tab) — runs-only controller. `notify` drives the eval-detail bridge's
+  // Graph runs (second tab) — runs-only controller. `notify` drives the recall detail's
   // load/trace toasts.
   const runsCtrl = createGraphRunsPageController(notify);
 
@@ -182,12 +182,10 @@
       ingestTraceNavTotal={runsCtrl.traces.ingestTraceNavTotal}
       onPrevIngestTrace={runsCtrl.traces.prevIngestTrace}
       onNextIngestTrace={runsCtrl.traces.nextIngestTrace}
-      activeEvalRow={runsCtrl.activeEvalRow}
-      evalRowLegColumns={runsCtrl.evalRowLegColumns}
-      evalRowTraces={runsCtrl.evalRowTraces}
-      onOpenEvalRow={(row) => void runsCtrl.openEvalRowForNode(row)}
-      onCloseEvalRow={runsCtrl.closeEvalRow}
+      activeRecall={runsCtrl.activeRecall}
+      recallTraces={runsCtrl.recallTraces}
       onOpenRetrievalLoop={(row) => void runsCtrl.openRetrievalLoopForNode(row)}
+      onCloseRecall={runsCtrl.closeRecall}
     />
   {:else if isUsageTab}
     <AiUsagePanel />

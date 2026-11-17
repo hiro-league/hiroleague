@@ -28,14 +28,12 @@
   import ActivePromptLibraryField from '$lib/features/preferences/widgets/prompts/ActivePromptLibraryField.svelte';
   import HelpTip from '$kit/ui/help-tip.svelte';
   import PrefFieldRenderer from './PrefFieldRenderer.svelte';
-  import GraphEvalContextToggles from '$lib/features/preferences/sections/graph-engine/GraphEvalContextToggles.svelte';
   import SpokenClipsStats from '$lib/features/preferences/sections/SpokenClipsStats.svelte';
 
   let { ctrl, spec }: { ctrl: PreferencesController; spec: PrefFieldSpec } = $props();
 
   // String key → bespoke field component. The typed record makes a missing/typo key a compile error.
   const CUSTOM_FIELDS: Record<CustomFieldKey, Component<{ ctrl: PreferencesController }>> = {
-    graphEvalContextToggles: GraphEvalContextToggles,
     spokenClipsStats: SpokenClipsStats // Phase 7b: what the spoken-clip cache holds and saved
   };
 
@@ -145,7 +143,7 @@
       editorLabel={spec.editorLabel}
     />
   </div>
-{:else if spec.kind === 'promptLibrary' || spec.kind === 'promptLibrarySelect'}
+{:else if spec.kind === 'promptLibrary'}
   <div class="grid gap-2">
     {#if spec.heading}
       <h4 class={HEADING_CLASS}>

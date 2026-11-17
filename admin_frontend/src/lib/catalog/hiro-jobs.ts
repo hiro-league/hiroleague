@@ -5,7 +5,7 @@
  * extraction; …; chat and reading pictures fall back to nothing, i.e. off).
  *
  * Mirrors the backend's `domain/preferences/jobs.JOB_PRESETS` (id, field, label, falls_back_to) so
- * pages that only hold preferences (Settings, the Eval strip) can say what a job uses on the DRAFT.
+ * pages that only hold preferences (Settings) can say what a job uses on the DRAFT.
  * `GET /api/ai/profiles` returns the same table as `jobs` (plus the model each runs with now); the
  * `hiro-jobs` test asserts the paths here are exactly the schema's `ai_profile_ref` fields. Pure.
  */
@@ -19,9 +19,6 @@ export type HiroJobId =
   | 'rewrite'
   | 'graph_extraction'
   | 'graph_small'
-  | 'eval_answer'
-  | 'eval_judge'
-  | 'eval_retrieval'
   | 'vision';
 
 export type HiroJob = {
@@ -45,9 +42,6 @@ export const HIRO_JOBS: readonly HiroJob[] = [
   },
   { id: 'graph_extraction', path: 'graph.extraction_profile', label: 'Graph extraction', fallsBackTo: 'chat' },
   { id: 'graph_small', path: 'graph.small_profile', label: 'Graph small steps', fallsBackTo: 'graph_extraction' },
-  { id: 'eval_answer', path: 'graph.eval.answer_profile', label: 'Eval: answer', fallsBackTo: 'chat' },
-  { id: 'eval_judge', path: 'graph.eval.judge_profile', label: 'Eval: judge', fallsBackTo: 'chat' },
-  { id: 'eval_retrieval', path: 'graph.eval.retrieval_profile', label: 'Eval: retrieval', fallsBackTo: 'eval_answer' },
   { id: 'vision', path: 'llm.vision_profile', label: 'Reading pictures', fallsBackTo: null }
 ];
 
@@ -110,7 +104,7 @@ export function resolveJobProfile(prefs: PrefsWithProfiles, id: HiroJobId): Reso
   return null;
 }
 
-/** Jobs whose own field points straight at the profile ("Chat, Eval: judge"). */
+/** Jobs whose own field points straight at the profile ("Hiro's chat, Memory retrieval"). */
 export function jobsUsingProfile(prefs: unknown, profileId: string): HiroJob[] {
   return HIRO_JOBS.filter((j) => jobProfileRef(prefs, j.id) === profileId);
 }

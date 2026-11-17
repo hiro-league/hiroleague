@@ -21,22 +21,15 @@
   let {
     trace,
     onClose,
-    idealAnswer = '',
-    llmAnswer = '',
-    extraTabLabel = '',
-    extraTab
+    answer = ''
   }: {
     trace: RetrievalTraceRecord | null;
     onClose: () => void;
-    idealAnswer?: string;
-    llmAnswer?: string;
-    extraTabLabel?: string;
-    extraTab?: import('svelte').Snippet<[string]>;
+    /** The recall's draft answer, shown on the Overview tab. */
+    answer?: string;
   } = $props();
 
   const OVERVIEW_TAB = '__overview__';
-  const EXTRA_TAB = '__extra__';
-  const hasExtraTab = $derived(!!extraTab && !!extraTabLabel);
 
   // Disclosure + sort state are owned here (reset on a new trace; `collapsed` also driven
   // by the header expand/collapse buttons) and passed down to RetrievalLaneStages.
@@ -65,7 +58,6 @@
 
   $effect(() => {
     const keys = [OVERVIEW_TAB, ...lanes.map((l) => l.lane)];
-    if (hasExtraTab) keys.push(EXTRA_TAB);
     if (!keys.includes(activeTab)) activeTab = OVERVIEW_TAB;
   });
 
@@ -79,11 +71,10 @@
       key: l.lane,
       label: l.title,
       count: searching ? `(${laneMatchCounts.get(l.lane) ?? 0})` : null
-    })),
-    ...(hasExtraTab ? [{ key: EXTRA_TAB, label: extraTabLabel, count: null }] : [])
+    }))
   ]);
 
-  const onLaneTab = $derived(activeTab !== OVERVIEW_TAB && activeTab !== EXTRA_TAB);
+  const onLaneTab = $derived(activeTab !== OVERVIEW_TAB);
 
   const expandActive = (): void => {
     if (activeLane) collapsed.remove(activeLane.stages.map((s) => s.idx));
@@ -178,12 +169,8 @@
       {#if activeTab === OVERVIEW_TAB}
         <div class="trace-lanes">
           <div class="p-4">
-            <TraceOverviewAnswers {idealAnswer} {llmAnswer} />
+            <TraceOverviewAnswers {answer} />
           </div>
-        </div>
-      {:else if hasExtraTab && activeTab === EXTRA_TAB}
-        <div class="trace-lanes">
-          <div class="p-4">{@render extraTab?.(search)}</div>
         </div>
       {:else if activeLane}
         <div class="trace-lanes">

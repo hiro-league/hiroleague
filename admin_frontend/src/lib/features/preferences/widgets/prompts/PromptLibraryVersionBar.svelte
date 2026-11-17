@@ -4,16 +4,16 @@
    * `PromptEditorDialog` so the dialog keeps the editor/preview + seed/dirty logic. The dialog owns the
    * working dict and the mutation handlers; this bar binds the active id and fires the actions.
    */
-  import type { AnswerPromptProfile } from '$lib/api/preferences';
+  import type { PromptProfile } from '$lib/api/preferences';
   import { Button } from '$kit/components/ui/button/index.js';
   import Field from '$kit/ui/field.svelte';
   import PickSelect from '$kit/ui/pick-select.svelte';
 
   type Props = {
     /** `[id, profile]` pairs in display order (default first). */
-    entries: [string, AnswerPromptProfile][];
+    entries: [string, PromptProfile][];
     /** The currently-selected profile (non-null; the dialog renders this bar only when it exists). */
-    selected: AnswerPromptProfile;
+    selected: PromptProfile;
     selectedId: string;
     onCreate: () => void;
     onDuplicate: () => void;

@@ -56,8 +56,8 @@ describe('profile mapping', () => {
   // Phase 7b step 5: a job's default profile keeps its preset through an edit (else Save would turn it
   // into an ordinary profile and lose Restore default), and the jobs using it come across.
   it("keeps a default profile's preset and the jobs using it", () => {
-    const profile = profileFromRow({ ...row, id: 'hiro-chat', preset: 'chat', jobs: ['chat', 'eval_judge'] });
-    expect(profile).toMatchObject({ preset: 'chat', jobs: ['chat', 'eval_judge'] });
+    const profile = profileFromRow({ ...row, id: 'hiro-chat', preset: 'chat', jobs: ['chat', 'memory'] });
+    expect(profile).toMatchObject({ preset: 'chat', jobs: ['chat', 'memory'] });
     expect(profileToPrefs(profile).preset).toBe('chat');
   });
 

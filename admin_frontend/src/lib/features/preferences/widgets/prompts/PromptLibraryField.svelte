@@ -1,10 +1,9 @@
 <script lang="ts">
   /**
-   * Inline control for a versioned prompt LIBRARY (graph.eval.answer_prompts /
-   * retrieval_agent_prompts). The page only SELECTS which version to open; all management — edit
+   * Inline control for a versioned prompt LIBRARY (e.g. memory.retrieval.prompts). The page only SELECTS which version to open; all management — edit
    * text, New / Duplicate / Delete / Rename — happens in the editor dialog, which saves the whole
    * dict to the backend on Save (or discards on Cancel). The "active/used" version stays owned
-   * elsewhere (eval panel / active_*_id selector); this is edit-only.
+   * elsewhere (an active_*_id selector); this is edit-only.
    */
   import { Button } from '$kit/components/ui/button/index.js';
   import Field from '$kit/ui/field.svelte';
@@ -15,7 +14,7 @@
     preferenceTitle,
     type PreferencePath
   } from '$lib/features/preferences/shared/preferences-schema';
-  import type { AnswerPromptProfile } from '$lib/api/preferences';
+  import type { PromptProfile } from '$lib/api/preferences';
   import type { PreferencesController } from '$lib/features/preferences/state/preferences-controller.svelte';
   import PromptEditorDialog from './PromptEditorDialog.svelte';
   import type { PromptDialogModel, PromptSavePayload } from './prompt-editor';
@@ -24,7 +23,7 @@
 
   type Props = {
     ctrl: PreferencesController;
-    /** Dotted path to the dict, e.g. "graph.eval.answer_prompts". */
+    /** Dotted path to the dict, e.g. "memory.retrieval.prompts". */
     dictPath: string;
     /** Optional label override; omit to use the dict field's backend `title`. */
     label?: string;
@@ -59,7 +58,7 @@
   let selectedId = $state('');
 
   const dict = $derived(
-    (getPreferenceByPath(ctrl.draft, dictPath) ?? {}) as Record<string, AnswerPromptProfile>
+    (getPreferenceByPath(ctrl.draft, dictPath) ?? {}) as Record<string, PromptProfile>
   );
   const entries = $derived(
     Object.entries(dict).sort(([ka, a], [kb, b]) =>

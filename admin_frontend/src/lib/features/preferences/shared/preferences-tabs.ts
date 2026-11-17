@@ -1,5 +1,4 @@
 import { GRAPH_ENGINE_MANIFEST } from '$lib/features/preferences/sections/graph-engine/graph-engine-manifest';
-import { EVAL_MANIFEST } from '$lib/features/preferences/sections/eval/eval-manifest';
 import { AGENT_MANIFEST } from '$lib/features/preferences/sections/agent-manifest';
 import { KNOWLEDGE_MANIFEST } from '$lib/features/preferences/sections/knowledge/knowledge-manifest';
 import { MODELS_MANIFEST } from '$lib/features/preferences/sections/models-manifest';
@@ -12,7 +11,7 @@ import {
 import { isFeatureActive, type FeatureId } from '$lib/shell/features';
 
 /** Page-level preference tabs (`?tab=` on `/preferences`). */
-export type PreferenceTabId = 'models' | 'knowledge' | 'graph-engine' | 'eval' | 'agent';
+export type PreferenceTabId = 'models' | 'knowledge' | 'graph-engine' | 'agent';
 
 export const DEFAULT_PREFERENCE_TAB: PreferenceTabId = 'models';
 
@@ -87,18 +86,6 @@ export const PREFERENCE_TAB_REGISTRY: readonly PrefTabDescriptor[] = [
     headerAction: 'knowledgeBrowse',
     feature: 'knowledge'
   },
-  {
-    id: 'eval',
-    label: 'Eval',
-    manifest: EVAL_MANIFEST,
-    feature: 'eval',
-    intro: {
-      text:
-        'Settings for the evaluation harness — the answer and judge models the eval runs use, and ' +
-        "the memory-eval answer/judge prompt libraries. Eval-only; these don't affect production " +
-        'chat, knowledge, or memory.'
-    }
-  }
 ];
 
 // The html/panel ids follow a fixed convention (`preferences-tab-<id>` / `preferences-panel-<id>`),
@@ -158,25 +145,6 @@ const PREFERENCE_TAB_PATH_RULES: { prefix: string; tab: PreferenceTabId }[] = [
   { prefix: 'knowledge', tab: 'knowledge' },
   // Graph master switch is surfaced on the Knowledge tab, not the shared graph-engine tab.
   { prefix: 'graph.backend', tab: 'knowledge' },
-  // `graph.eval.*` is split: the answer + judge models/prompts live on the Eval tab; everything
-  // else under it (the agentic retrieval loop, render caps, temporal flags) renders under the
-  // shared graph engine on the Memory tab — caught by the broader `graph` rule below.
-  // Phase 7b step 5: each eval job's AI profile (was a model + a tuning profile).
-  { prefix: 'graph.eval.answer_profile', tab: 'eval' },
-  { prefix: 'graph.eval.answer_prompts', tab: 'eval' },
-  { prefix: 'graph.eval.active_answer_prompt_id', tab: 'eval' },
-  { prefix: 'graph.eval.judge_profile', tab: 'eval' },
-  { prefix: 'graph.eval.judge_prompt', tab: 'eval' },
-  // The retrieval-agent section (AI profile, prompt library, loop caps) and the answerer/judge
-  // render caps are eval-only — moved to the Eval tab (were on the shared graph-engine tab).
-  { prefix: 'graph.eval.retrieval_profile', tab: 'eval' },
-  { prefix: 'graph.eval.retrieval_agent', tab: 'eval' },
-  { prefix: 'graph.eval.retrieval_agent_prompts', tab: 'eval' },
-  { prefix: 'graph.eval.active_retrieval_agent_prompt_id', tab: 'eval' },
-  { prefix: 'graph.eval.max_elements_per_kind', tab: 'eval' },
-  { prefix: 'graph.eval.max_fact_chars', tab: 'eval' },
-  { prefix: 'graph.eval.max_episode_chars', tab: 'eval' },
-  { prefix: 'graph.eval.max_summary_chars', tab: 'eval' },
   { prefix: 'graph', tab: 'graph-engine' }
 ];
 
