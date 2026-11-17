@@ -22,6 +22,9 @@
 # kit). Then a change there starts exactly the app parts that read it; their "same as pushed" also needs the core's
 # files to be the same as on the core's origin/dev.
 #
+# A part can leave a folder out of what it reads: "-<path>" (or "-@hiroleague:<path>") after the path it sits under, e.g.
+# "@hiroleague:ui-kit/src/lib -@hiroleague:ui-kit/src/lib/memory" (an app's frontend, when no page imports memory/).
+#
 # A repo can name lanes that must run alone (CHECK_SOLO_LANES, set before check_done): the core's tests, whose
 # onnxruntime sends a phantom Ctrl-C to the whole console that kills a Node check running beside them.
 #
@@ -89,11 +92,22 @@ core_trees() {
     core_base="$(git -C "${HIROLEAGUE}" merge-base HEAD origin/dev 2>/dev/null || true)"
 }
 
-# One id for what PATHS hold in TREE (a tree or a commit) of the repo in DIR.
+# One id for what PATHS hold in TREE (a tree or a commit) of the repo in DIR, leaving out the folders in EXCLUDED
+# (space-separated; "-<path>" in a part's list). A path with an excluded folder under it is the hash of its files'
+# ids and names minus that folder's; a path with none is its tree id, as before.
 fingerprint() {
-    local dir="$1" tree="$2" p; shift 2
+    local dir="$1" tree="$2" excluded="$3" p e; shift 3
     for p in "$@"; do
-        git -C "$dir" rev-parse -q --verify "${tree}:${p}" 2>/dev/null || echo "none:${p}"
+        local under=""
+        for e in $excluded; do [[ "$e" == "$p"/* ]] && under+="${under:+ }$e"; done
+        if [[ -z "$under" ]]; then
+            git -C "$dir" rev-parse -q --verify "${tree}:${p}" 2>/dev/null || echo "none:${p}"
+        else
+            git -C "$dir" ls-tree -r "$tree" -- "$p" 2>/dev/null \
+                | awk -F'\t' -v under="$under" 'BEGIN { n = split(under, u, " ") }
+                    { for (i = 1; i <= n; i++) if (index($2, u[i] "/") == 1) next; print }' \
+                | git hash-object --stdin
+        fi
     done | git hash-object --stdin
 }
 
@@ -108,25 +122,31 @@ q_ids=()
 part() {
     local name="$1" inputs="$2"; shift 2
     local -a paths own=() core=()
+    local own_out="" core_out=""
     read -ra paths <<< "$inputs"
     local p
     for p in "${paths[@]}"; do
-        if [[ "$p" == @hiroleague:* ]]; then
+        # "-<path>" (or "-@hiroleague:<path>"): a folder under a listed path that the part does not read
+        if [[ "$p" == -@hiroleague:* ]]; then
+            core_out+=" ${p#-@hiroleague:}"
+        elif [[ "$p" == -* ]]; then
+            own_out+=" ${p#-}"
+        elif [[ "$p" == @hiroleague:* ]]; then
             if [[ "${REPO_ROOT}" == "${HIROLEAGUE}" ]]; then own+=("${p#@hiroleague:}"); else core+=("${p#@hiroleague:}"); fi
         else
             own+=("$p")
         fi
     done
     local now same_as_pushed=false
-    now="$(fingerprint "${REPO_ROOT}" "$now_tree" "${own[@]}")"
-    if [[ -n "$base" && "$now" == "$(fingerprint "${REPO_ROOT}" "$base" "${own[@]}")" ]]; then
+    now="$(fingerprint "${REPO_ROOT}" "$now_tree" "$own_out" "${own[@]}")"
+    if [[ -n "$base" && "$now" == "$(fingerprint "${REPO_ROOT}" "$base" "$own_out" "${own[@]}")" ]]; then
         same_as_pushed=true
     fi
     if [[ ${#core[@]} -gt 0 ]]; then
         core_trees
         local core_fp
-        core_fp="$(fingerprint "${HIROLEAGUE}" "$core_now" "${core[@]}")"
-        if [[ -z "$core_base" || "$core_fp" != "$(fingerprint "${HIROLEAGUE}" "$core_base" "${core[@]}")" ]]; then
+        core_fp="$(fingerprint "${HIROLEAGUE}" "$core_now" "$core_out" "${core[@]}")"
+        if [[ -z "$core_base" || "$core_fp" != "$(fingerprint "${HIROLEAGUE}" "$core_base" "$core_out" "${core[@]}")" ]]; then
             same_as_pushed=false
         fi
         now="$(printf '%s\n%s\n' "$now" "$core_fp" | git hash-object --stdin)"
