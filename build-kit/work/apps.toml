@@ -99,3 +99,19 @@ settings_db = "reports.db"
 site_key = "reports_url"
 live_port = 8120
 copy_data = true
+
+[[app]]
+repo = "evalhiro"
+name = "eval"
+title = "EvalHiro"
+api_port = 15
+ui_port = 16
+backend = "backend"
+api = "uv run uvicorn evalhiro.main:app --reload --reload-dir src --port {port} --timeout-graceful-shutdown 3"
+frontend = "frontend"
+ui_api_env = "EVALHIRO_API"
+data = "env"
+settings_db = "evalhiro.db"
+site_key = "evalhiro_url"
+live_port = 8150
+copy_data = true
