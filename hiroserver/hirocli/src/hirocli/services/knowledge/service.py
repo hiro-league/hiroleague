@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import sqlite3
 import subprocess
@@ -18,29 +17,22 @@ from typing import TYPE_CHECKING, Any
 from hiro_commons.constants.storage import DB_DIR
 from hiro_commons.log import Logger
 from hiro_memory.knowledge.agent import KnowledgeAgentGraph, build_qdrant_filter
+from hiro_memory.knowledge.answer import answer_result, answer_state, run_answer
 from hiro_memory.knowledge.catalog_store import CatalogStore
-from hiro_memory.knowledge.chunker import embed_text_for_chunk
 from hiro_memory.knowledge.converters import (
     bounded_file_concurrency,
     default_file_concurrency_for_embedder,
     document_from_row,
     job_from_row,
-    utc_now_iso,
 )
 from hiro_memory.knowledge.embedding_backends import (
     EmbeddingBackend,
     SparseEmbeddingBackend,
-    SparseVectorData,
 )
-from hiro_memory.knowledge.ledger_runner import (
-    finalize_standalone_run,
-    knowledge_answer_ledger,
-    ledger_identity_from_parent,
-)
+from hiro_memory.knowledge.index import KnowledgeIndex
 from hiro_memory.knowledge.loaders import DEFAULT_LOADER_REGISTRY, LoaderRegistry
 from hiro_memory.knowledge.models import (
     KnowledgeAnswerResult,
-    KnowledgeDocumentDetailResult,
     KnowledgeDocumentRow,
     KnowledgeJobResult,
     KnowledgeListDocumentsResult,
@@ -51,10 +43,9 @@ from hiro_memory.knowledge.models import (
 )
 from hiro_memory.knowledge.runtime_owner import current_owner_token
 from hiro_memory.knowledge.scanner import SourceScanner
+from hiro_memory.knowledge.settings import KnowledgeChunkingSettings
 from hiro_memory.knowledge.vector_store import KnowledgeVectorStore
-from hiro_memory.ledger import current_run
 from hiro_memory.ledger.node_group import LedgerSinkRef
-from qdrant_client import models as qm
 
 from hirocli.domain.events import DomainEvent, get_domain_event_bus
 from hirocli.domain.preferences import load_preferences
@@ -84,7 +75,7 @@ from hirocli.services.knowledge.live_registry import register_live_service, unre
 from hirocli.services.knowledge.preview import FilePreviewResult, read_file_preview
 
 if TYPE_CHECKING:
-    from hirocli.domain.preferences import KnowledgeChunkingPreferences, WorkspacePreferences
+    from hirocli.domain.preferences import WorkspacePreferences
 
 log = Logger.get("SVC.KNOWLEDGE")
 
@@ -101,8 +92,10 @@ class _DownloadJob:
     cancelled: bool = False
 
 
-class KnowledgeService:
-    """Phase 1 knowledge service: scan, ingest markdown, search, browse chunks."""
+class KnowledgeService(KnowledgeIndex):
+    """The workspace's knowledge base: the memory library's ``KnowledgeIndex`` (ingest a file, retrieve, read a
+    document) with the core's own on top: its files' places, preferences, ingest jobs, events, local model
+    downloads, and the graph's upkeep."""
 
     def __init__(
         self,
@@ -121,15 +114,17 @@ class KnowledgeService:
         db_root = self.workspace_path / DB_DIR
         self.db_path = db_root / DB_FILENAME
         self.qdrant_path = db_root / QDRANT_DIR
-        self.embedder = embedder or self._default_embedder_for_workspace()
-        # BM25 sparse backend for hybrid retrieval — local and independent of the dense model.
-        self.sparse_embedder = sparse_embedder or self._default_sparse_embedder_for_workspace()
-        self.loader_registry = loader_registry or DEFAULT_LOADER_REGISTRY
-        self.catalog = CatalogStore(self.db_path)
-        self.vector_store = KnowledgeVectorStore(self.qdrant_path, self.embedder)
+        dense = embedder or self._default_embedder_for_workspace()
+        super().__init__(
+            catalog=CatalogStore(self.db_path),
+            vector_store=KnowledgeVectorStore(self.qdrant_path, dense),
+            embedder=dense,
+            # BM25 sparse backend for hybrid retrieval — local and independent of the dense model.
+            sparse_embedder=sparse_embedder or self._default_sparse_embedder_for_workspace(),
+            loader_registry=loader_registry or DEFAULT_LOADER_REGISTRY,
+        )
         self.scanner = SourceScanner(self.loader_registry, self.catalog)
         self._tasks: dict[str, asyncio.Task[None]] = {}
-        self._uri_locks: dict[str, asyncio.Lock] = {}
         # Cached reranker compressor (model load is expensive — keyed by model/top_n/device).
         self._reranker_key: tuple[str, int, str] | None = None
         self._reranker_compressor: Any | None = None
@@ -343,38 +338,6 @@ class KnowledgeService:
             ),
         )
         return KnowledgeSearchResult(query=query, hits=hits)
-
-    async def embed_query(self, query: str) -> list[float]:
-        vectors = await asyncio.to_thread(self.embedder.embed_texts, [query])
-        return list(vectors[0]) if vectors else []
-
-    async def embed_query_sparse(self, query: str) -> SparseVectorData:
-        """BM25 sparse vector for the query (query-side weighting differs from documents)."""
-        return await asyncio.to_thread(self.sparse_embedder.embed_query, query)
-
-    async def vector_search_by_vector(
-        self,
-        vector: list[float],
-        sparse_vector: SparseVectorData | None = None,
-        *,
-        top_k: int,
-        min_score: float,
-        prefetch_limit: int = 40,
-        hybrid: bool = True,
-        explain: bool = False,
-        qdrant_filter: qm.Filter | None = None,
-    ) -> list[KnowledgeSearchHit]:
-        return await asyncio.to_thread(
-            self.vector_store.search_hybrid,
-            vector,
-            sparse_vector,
-            top_k=top_k,
-            min_score=min_score,
-            prefetch_limit=prefetch_limit,
-            hybrid=hybrid,
-            explain=explain,
-            qdrant_filter=qdrant_filter,
-        )
 
     async def rerank_hits(
         self,
@@ -757,71 +720,18 @@ class KnowledgeService:
                 "graph_expand needs entities from rewrite_query · effectively off",
                 graph_mode,
             )
-        initial_state: dict[str, Any] = {
-            "query": query,
-            "filters": filters or {},
-            "top_k": top_k if top_k is not None else retrieval.top_k,
-            "min_score": min_score if min_score is not None else retrieval.min_score,
-            "explain": explain,
-            "rewrite": rewrite,
-            "graph_mode": graph_mode,
-            # Per-query temporal override (G9/§7): "current" | "all". Empty/None →
-            # graph_expand falls back to the admin pref ``temporal_default``.
-            "graph_temporal": graph_temporal or "",
-        }
-        parent = current_run.get()
-        if parent is not None:
-            initial_state.update(ledger_identity_from_parent(parent))
-
-        terminal_status = "completed"
-        terminal_error = ""
-        state: dict[str, Any] = {}
-        ledger_run_id: str | None = None
-        async with knowledge_answer_ledger(
-            sink=graph_builder._ledger_sink,
-            query=query,
-        ) as ledger_run:
-            ledger_run_id = ledger_run.run_id
-            try:
-                state = await graph.ainvoke(
-                    initial_state,
-                    config=ledger_run.runnable_config,
-                )
-            except asyncio.CancelledError:
-                terminal_status = "cancelled"
-                terminal_error = "cancelled"
-                raise
-            except Exception as exc:
-                terminal_status = "failed"
-                terminal_error = str(exc)[:80]
-                log.error(
-                    "❌ knowledge answer graph failed",
-                    error=str(exc),
-                    exc_info=True,
-                )
-                raise
-            finally:
-                if ledger_run.accumulator is not None:
-                    finalize_standalone_run(
-                        ledger_run.accumulator,
-                        query=query,
-                        answer=str(state.get("answer") or ""),
-                        no_results=bool(state.get("no_results")),
-                        status=terminal_status,
-                        error_code=terminal_error,
-                    )
-        result = KnowledgeAnswerResult(
-            query=query,
-            answer=str(state.get("answer") or ""),
-            sources=list(state.get("sources") or []),
-            elapsed_ms=int(state.get("elapsed_ms") or 0),
-            model_id=state.get("model_id"),
-            usage=dict(state.get("usage") or {}),
-            no_results=bool(state.get("no_results")),
-            run_id=ledger_run_id,
-            rewritten_query=state.get("rewritten_query"),
-            keywords=list(state.get("rewrite_keywords") or []),
+        initial_state = answer_state(
+            query,
+            top_k=top_k if top_k is not None else retrieval.top_k,
+            min_score=min_score if min_score is not None else retrieval.min_score,
+            filters=filters,
+            explain=explain,
+            rewrite=rewrite,
+            graph_mode=graph_mode,
+            graph_temporal=graph_temporal,
         )
+        run = await run_answer(graph, sink=graph_builder._ledger_sink, query=query, initial_state=initial_state)
+        result = answer_result(query, run)
         log_knowledge_answer(
             log,
             build_answer_audit(
@@ -904,28 +814,6 @@ class KnowledgeService:
             elapsed_ms=int((time.perf_counter() - t0) * 1000),
         )
 
-    async def fetch_hits_by_point_ids(self, point_ids: list[str]) -> list[KnowledgeSearchHit]:
-        """Fetch chunk hits for explicit Qdrant point_ids, in caller order.
-
-        Used by the graph retrieval leg: the graph picks the fact-supporting
-        chunk_ids and we retrieve those verbatim passages by id (no query hybrid /
-        no min_score drop). Points with empty text (a chunk_id not in Qdrant) are
-        skipped. Scores descend with rank so build_context's ordinal normalization
-        preserves the graph's ranking."""
-        if not point_ids:
-            return []
-
-        def _fetch() -> list[KnowledgeSearchHit]:
-            out: list[KnowledgeSearchHit] = []
-            count = len(point_ids)
-            for rank, pid in enumerate(point_ids):
-                hit = self.vector_store.hit_from_point_id(pid, score=float(count - rank))
-                if (hit.text or "").strip():
-                    out.append(hit)
-            return out
-
-        return await asyncio.to_thread(_fetch)
-
     async def list_documents(
         self,
         *,
@@ -952,31 +840,6 @@ class KnowledgeService:
             title,
             limit,
             offset,
-        )
-
-    async def get_document(
-        self,
-        document_id: str,
-        *,
-        chunk_limit: int = 100,
-        chunk_offset: str | None = None,
-    ) -> KnowledgeDocumentDetailResult:
-        row = await asyncio.to_thread(self.catalog.document_row_by_id, document_id)
-        if row is None:
-            return KnowledgeDocumentDetailResult(document=None, chunks=[])
-        tags = await asyncio.to_thread(self.catalog.tags_for_document, document_id)
-        document = document_from_row(row, tags=tags)
-        offset = json.loads(chunk_offset) if chunk_offset else None
-        chunks, next_offset = await asyncio.to_thread(
-            self.vector_store.scroll_document_chunks,
-            document_id,
-            chunk_limit,
-            offset,
-        )
-        return KnowledgeDocumentDetailResult(
-            document=document,
-            chunks=chunks,
-            chunk_next_offset=json.dumps(next_offset) if next_offset is not None else None,
         )
 
     async def get_chunk_details(self, point_ids: list[str]) -> list[dict[str, Any]]:
@@ -1106,7 +969,7 @@ class KnowledgeService:
         return await asyncio.to_thread(self.catalog.create_tag, name)
 
     async def delete_document(self, document_id: str) -> dict[str, Any]:
-        deleted = await asyncio.to_thread(self._delete_document_sync, document_id)
+        deleted = await asyncio.to_thread(self.remove_document, document_id)
         if deleted:
             # A document delete must also purge its Graphiti episodes — the catalog row
             # + Qdrant chunks alone leave orphaned entities/facts in the knowledge graph.
@@ -1179,7 +1042,7 @@ class KnowledgeService:
         totals = {"requested": len(paths), "skipped": 0, "ingested": 0, "failed": 0, "chunks": 0}
         errors: dict[str, str] = {}
         in_flight: set[str] = set()
-        chunking = self.workspace_prefs().knowledge.chunking
+        chunking = KnowledgeChunkingSettings.model_validate(self.workspace_prefs().knowledge.chunking.model_dump())
         state_lock = asyncio.Lock()
         job_t0 = time.perf_counter()
         semaphore = asyncio.Semaphore(
@@ -1291,136 +1154,17 @@ class KnowledgeService:
         raw_path: str,
         params: dict[str, Any],
         *,
-        chunking: KnowledgeChunkingPreferences,
+        chunking: KnowledgeChunkingSettings,
     ) -> int | None:
-        path = Path(raw_path).expanduser().resolve()
-        loader = self.loader_registry.resolve(path.suffix.lower())
-        if loader is None:
-            raise ValueError(f"Unsupported file extension: {path.suffix}")
-        lock = self._uri_locks.setdefault(str(path), asyncio.Lock())
-        async with lock:
-            size_bytes = await asyncio.to_thread(lambda: path.stat().st_size)
-            if size_bytes > MAX_FILE_SIZE_BYTES:
-                raise ValueError(
-                    f"File exceeds maximum knowledge ingest size "
-                    f"({size_bytes} bytes > {MAX_FILE_SIZE_BYTES} bytes): {path}"
-                )
-            data = await asyncio.to_thread(path.read_bytes)
-            content_hash = hashlib.sha256(data).hexdigest()
-            existing = await asyncio.to_thread(self.catalog.document_row_by_source, str(path))
-            if existing and existing["content_hash"] == content_hash and existing["status"] == "ready":
-                if params.get("force_reingest"):
-                    document_id = str(existing["id"])
-                    now = utc_now_iso()
-                    await asyncio.to_thread(self.catalog.touch_document_ingested, document_id, now)
-                    await asyncio.to_thread(
-                        self.vector_store.touch_document_ingested_at,
-                        document_id,
-                        now,
-                    )
-                    self._publish(KNOWLEDGE_INGESTED, {"document_id": document_id, "source_uri": str(path)})
-                    return 0
-                return None
-            document_id = existing["id"] if existing else str(uuid.uuid4())
-            await asyncio.to_thread(
-                self.catalog.mark_document_progress, document_id, path, "parsing", size_bytes, params
-            )
-            try:
-                loaded = loader.load(
-                    path,
-                    data,
-                    chunk_size=chunking.chunk_size,
-                    chunk_overlap=chunking.chunk_overlap,
-                    respect_headings=chunking.markdown.respect_headings,
-                )
-                chunks = loaded.chunks
-                if not chunks:
-                    raise ValueError(f"No text chunks produced from {path}.")
-                await asyncio.to_thread(self.catalog.update_document_status, document_id, "embedding", None)
-                # Embed the structural breadcrumb (title / heading path) + body when enabled, so
-                # every chunk — including heading-less continuation pieces — carries its document
-                # and section context in what actually gets indexed. The stored payload text stays
-                # the raw chunk body (the UI and LLM context add title/heading separately).
-                if chunking.embed_structural_context:
-                    embed_texts = [embed_text_for_chunk(loaded.title, chunk) for chunk in chunks]
-                else:
-                    embed_texts = [chunk["text"] for chunk in chunks]
-                vectors = await asyncio.to_thread(self.embedder.embed_texts, embed_texts)
-                if len(vectors) != len(chunks):
-                    raise RuntimeError("Embedding backend returned the wrong number of vectors.")
-                # Always store BM25 sparse alongside dense so hybrid is a query-time toggle.
-                sparse_vectors = await asyncio.to_thread(
-                    self.sparse_embedder.embed_documents, embed_texts
-                )
-                if len(sparse_vectors) != len(chunks):
-                    raise RuntimeError("Sparse embedding backend returned the wrong number of vectors.")
-                now = utc_now_iso()
-                await asyncio.to_thread(
-                    self._upsert_document_and_vectors,
-                    document_id,
-                    path,
-                    loaded.title,
-                    loaded.mime,
-                    content_hash,
-                    size_bytes,
-                    chunks,
-                    vectors,
-                    sparse_vectors,
-                    params,
-                    now,
-                )
-            except Exception as exc:
-                await asyncio.to_thread(self.catalog.update_document_status, document_id, "failed", str(exc))
-                raise
-            self._publish(KNOWLEDGE_INGESTED, {"document_id": document_id, "source_uri": str(path)})
-            return len(chunks)
-
-    def _upsert_document_and_vectors(
-        self,
-        document_id: str,
-        path: Path,
-        title: str,
-        mime: str,
-        content_hash: str,
-        size_bytes: int,
-        chunks: list[dict[str, str | None]],
-        vectors: list[list[float]],
-        sparse_vectors: list[SparseVectorData],
-        params: dict[str, Any],
-        now: str,
-    ) -> None:
-        self.catalog.validate_category_assignment(params.get("category_id"), params.get("subcategory_id"))
-        tags = self.catalog.ensure_tags(params.get("tags") or [])
-        self.vector_store.upsert_document_vectors(
-            document_id,
-            path,
-            title,
-            mime,
-            chunks,
-            vectors,
-            sparse_vectors,
+        return await self.ingest_file(
+            raw_path,
             params,
-            tags,
-            now,
+            chunking=chunking,
+            max_file_size_bytes=MAX_FILE_SIZE_BYTES,
+            on_ingested=lambda document_id, source_uri: self._publish(
+                KNOWLEDGE_INGESTED, {"document_id": document_id, "source_uri": source_uri}
+            ),
         )
-        self.catalog.upsert_document_row(
-            document_id,
-            path,
-            title,
-            mime,
-            content_hash,
-            size_bytes,
-            len(chunks),
-            params,
-            now,
-            tags,
-        )
-
-    def _delete_document_sync(self, document_id: str) -> bool:
-        if not self.catalog.delete_document_row(document_id):
-            return False
-        self.vector_store.delete_document(document_id)
-        return True
 
     def _update_document_metadata_sync(
         self,
