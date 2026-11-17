@@ -30,7 +30,7 @@ persists on Save.
   `row_json` has recalled facts, answer and judge), the Graph Runs ledger `<workspace>/logs/graph.log` (CSV), and
   per-stage retrieval and ingest traces `<workspace>/logs/retrieval_trace/*.jsonl`. Live settings are in
   `<workspace>/preferences.json`.
-- **Memory eval corpora** live in the sibling `eval-corpus` repo (`../codehiro/eval-corpus`; override with
+- **Memory eval corpora** live in EvalHiro's repo (`../evalhiro/eval-corpus`; override with
   `$HIRO_EVAL_CORPUS_DIR`); `benchmarks.yaml` groups them into benchmarks (LoCoMo, BEAM-128k). The **knowledge**
   corpus (`l3_synthetic`) is in this repo's `eval/`.
 

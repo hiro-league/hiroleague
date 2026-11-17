@@ -12,8 +12,8 @@ from hiro_memory.graph.graphiti_corpus import (
     parse_episodes_jsonl,
 )
 
-# The memory corpus root (sibling eval-corpus repo) — adam_year.* lives there.
-# Requires the eval-corpus checkout (or $HIRO_EVAL_CORPUS_DIR).
+# The memory corpus root (EvalHiro's eval-corpus) — adam_year.* lives there.
+# Requires the evalhiro checkout beside this repo (or $HIRO_EVAL_CORPUS_DIR).
 _EVAL_DIR = ADAM_CORPUS_FILE.parent
 
 
@@ -99,12 +99,12 @@ def test_oversized_body_raises() -> None:
 
 # ---- integrity of the shipped Adam corpus + question bank ----
 
-# Skip, don't fail, when the sibling eval-corpus checkout isn't there: a git worktree (under
-# .claude/worktrees) or a machine without codehiro can't see ../codehiro, and
+# Skip, don't fail, when the sibling evalhiro checkout isn't there: a git worktree (under
+# .claude/worktrees) or a machine without evalhiro can't see ../evalhiro, and
 # that says nothing about this code. Set $HIRO_EVAL_CORPUS_DIR to run them anywhere.
 _needs_corpus = pytest.mark.skipif(
     not (_EVAL_DIR / "adam_year.episodes.jsonl").exists(),
-    reason="eval corpus not found (sibling ../codehiro, or set $HIRO_EVAL_CORPUS_DIR)",
+    reason="eval corpus not found (sibling ../evalhiro, or set $HIRO_EVAL_CORPUS_DIR)",
 )
 
 
