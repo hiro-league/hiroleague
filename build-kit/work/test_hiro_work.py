@@ -170,6 +170,9 @@ def test_a_land_records_the_commits_it_added(tmp_path, monkeypatch):
 
 def test_a_land_merges_env0_into_a_new_app_that_has_no_github_repo_yet(tmp_path, monkeypatch):
     _events(tmp_path, monkeypatch)
+    for who in ("AUTHOR", "COMMITTER"):  # the merge commit needs a name: the core's deploy has no git identity
+        monkeypatch.setenv(f"GIT_{who}_NAME", "t")
+        monkeypatch.setenv(f"GIT_{who}_EMAIL", "t@t")
     repo = tmp_path / "env1" / "evalhiro"
     repo.mkdir(parents=True)
     run = lambda *a: hw.git(repo, *a)  # noqa: E731
@@ -375,6 +378,10 @@ def test_other_commands_keep_ctrl_c(monkeypatch):
 
     seen = {}
     monkeypatch.setattr(hw, "cmd_status", lambda a: seen.setdefault("handler", signal.getsignal(signal.SIGINT)))
-    before = signal.getsignal(signal.SIGINT)
-    assert hw.main(["status"]) == 0
-    assert seen["handler"] == before != signal.SIG_IGN
+    # Ctrl-C as a terminal gives it: the core's deploy runs the tests with SIGINT already ignored
+    before = signal.signal(signal.SIGINT, signal.default_int_handler)
+    try:
+        assert hw.main(["status"]) == 0
+    finally:
+        signal.signal(signal.SIGINT, before)
+    assert seen["handler"] == signal.default_int_handler

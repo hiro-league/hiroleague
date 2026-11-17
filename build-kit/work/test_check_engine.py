@@ -2,6 +2,7 @@
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import hiro_work as hw
@@ -31,7 +32,8 @@ def write(path: Path, text: str) -> None:
 
 
 def check(app: Path) -> str:
-    out = sh(hw.bash(), "scripts/check.sh", cwd=app)
+    # hw.bash() is Git Bash's path on the PC; the core's deploy runs this test on Linux too
+    out = sh(hw.bash() if sys.platform == "win32" else "bash", "scripts/check.sh", cwd=app)
     assert out.returncode == 0, out.stdout + out.stderr
     return out.stdout
 
