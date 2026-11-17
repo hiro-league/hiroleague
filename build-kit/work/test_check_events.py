@@ -89,6 +89,16 @@ def test_tests_are_counted_from_what_the_runners_print():
     assert ce.count_tests("ruff: 0 errors\nbuilt in 3.1s") == 0
 
 
+def test_a_runner_s_own_total_is_the_count():
+    # unittest: its dots share lines with what the tests log; its total says it
+    assert ce.count_tests("..Signing in failed: expired\n.....\n------\nRan 237 tests in 20.3s\n\nOK") == 237
+    # vitest off a terminal prints only its total; on one, its file lines too, counted once
+    assert ce.count_tests(" Test Files  12 passed (12)\n      Tests  2 failed | 45 passed (47)") == 47
+    assert ce.count_tests(" ✓ src/a.test.ts (40 tests) 4ms\n      Tests  47 passed (47)") == 47
+    # colours (vitest's, through a deploy) don't hide it
+    assert ce.count_tests("\x1b[2m      Tests \x1b[22m \x1b[1m\x1b[32m416 passed\x1b[39m\x1b[90m (416)\x1b[39m") == 416
+
+
 def test_progress_sends_the_count_only_when_it_changed(hiro, tmp_path):
     folder, out = str(hiro / "env1" / "codehiro"), tmp_path / "part.log"
     out.write_text("collecting...\n", encoding="utf-8")

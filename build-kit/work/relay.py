@@ -17,7 +17,8 @@ refused and logged. One helper at a time (C:\hiro\run\relay.pid). Its log is C:\
 
 Every minute it also says which repos each environment has changed (hiro_work.changed_repos): a "changes" event for
 each environment whose list differs from the last one said (all of them when it starts), so the card can dim a claim
-nothing has changed yet.
+nothing has changed yet. The same event says what the environment holds that no task there owns
+(hiro_work.leftovers: uncommitted files, a stray branch, commits off or behind the trunk), shown at the card's foot.
 
     pythonw relay.py              run (what the Startup shortcut starts)
     python relay.py --install     a shortcut in this Windows user's Startup folder ("Hiro League work relay": starts it
@@ -118,16 +119,17 @@ def fetch(key: str) -> list[dict]:
         return list(json.loads(r.read().decode("utf-8")).get("asks") or [])
 
 
-def changes(said: dict[int, list[str]]) -> dict[int, list[str]]:
-    """Each made environment's changed repos, and a "changes" event for each that differs from what was said."""
+def changes(said: dict[int, dict]) -> dict[int, dict]:
+    """Each made environment's changed repos and its leftovers, and a "changes" event for each that differs from what
+    was said."""
     tasks = hw.load_tasks()
-    now: dict[int, list[str]] = {}
+    now: dict[int, dict] = {}
     for env in hw.ENVS:
         if env and not (hw.env_dir(env) / "hiroleague" / ".git").exists():
             continue  # not made yet: an event would make it look made
-        now[env] = hw.changed_repos(env, tasks)
+        now[env] = {"repos": hw.changed_repos(env, tasks), "leftovers": hw.leftovers(env, tasks)}
         if said.get(env) != now[env]:
-            hw.event(task=None, env=env, step="changes", phase="end", ok=True, repos=now[env])
+            hw.event(task=None, env=env, step="changes", phase="end", ok=True, **now[env])
     return now
 
 
@@ -142,7 +144,7 @@ def serve() -> int:
     PID.write_text(str(os.getpid()), encoding="utf-8")
     log(f"started (process {os.getpid()}), asking {URL}")
     down = False
-    said: dict[int, list[str]] = {}
+    said: dict[int, dict] = {}
     looked = 0.0
     while True:
         if time.monotonic() - looked >= CHANGES_EVERY_S:

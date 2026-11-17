@@ -439,6 +439,30 @@ def test_changed_repos_are_a_claims_new_work_or_any_uncommitted_files(tmp_path, 
     assert hw.changed_repos(1, []) == ["codehiro", "nethiro"]  # no task: any uncommitted files
 
 
+def test_leftovers_are_what_no_task_there_owns(tmp_path, monkeypatch):
+    monkeypatch.setattr(hw, "ROOT", tmp_path)
+    monkeypatch.setattr(hw, "REPOS", ["hiroleague", "codehiro", "nethiro", "homehiro"])
+    monkeypatch.setattr(hw, "MAIN", {})
+    for repo in ("hiroleague", "codehiro", "nethiro", "homehiro"):
+        d = _repo(tmp_path / "env1" / repo, "one", "two")
+        hw.git(d, "switch", "-q", "--detach", "main")  # as a free environment's repos are
+    commit = ("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m")
+    assert hw.leftovers(1, []) == []  # free, and every repo as it should be
+    (tmp_path / "env1" / "codehiro" / "stray.txt").write_text("someone's", encoding="utf-8")
+    hw.git(tmp_path / "env1" / "nethiro", "switch", "-q", "-c", "task/old")
+    hw.git(tmp_path / "env1" / "nethiro", *commit, "kept")
+    hw.git(tmp_path / "env1" / "homehiro", "switch", "-q", "--detach", "main~1")
+    assert hw.leftovers(1, []) == [
+        {"repo": "codehiro", "what": "1 uncommitted file"},
+        {"repo": "nethiro", "what": "on branch task/old, 1 commit not on main"},
+        {"repo": "homehiro", "what": "1 commit behind main"},
+    ]
+    # With a task there, its claims are its own and only another repo's uncommitted files are left over
+    t = task("t", 1, ["codehiro", "nethiro"])
+    (tmp_path / "env1" / "hiroleague" / "edit.txt").write_text("x", encoding="utf-8")
+    assert hw.leftovers(1, [t]) == [{"repo": "hiroleague", "what": "1 uncommitted file"}]
+
+
 def test_a_commit_needs_a_task_that_claims_its_repo(tmp_path, monkeypatch):
     monkeypatch.setattr(hw, "ROOT", tmp_path)
     monkeypatch.setattr(hw, "TASKS", tmp_path / "tasks")
