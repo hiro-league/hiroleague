@@ -959,20 +959,29 @@ def wait_for_env0(task: Task, minutes: int) -> None:
         raise Stop(f"env0 still holds {', '.join(held)} after {minutes} min: land again later.")
 
 
-def land_steps(task: Task, env: int) -> None:
-    """Merge the latest, check, then fast-forward env0 (cmd_land's own steps)."""
-    # 1. Bring each branch up to GitHub and to env0's dev/main
+def merge_latest(task: Task, env: int) -> None:
+    """Bring each of the task's branches up to GitHub and to env0's dev/main."""
     for repo in task.repos:
         d = repo_dir(env, repo)
         with step(task.id, env, "merge latest", repo):
             git(d, "fetch", "-q", "origin", check=False)
             for ref in (f"origin/{main_of(repo)}", main_of(repo)):
+                # A new app has no GitHub repo until its first train: a ref that doesn't exist is nothing to merge
+                # (merging it would fail and read as a conflict)
+                if not git(d, "rev-parse", "--verify", "-q", ref, check=False):
+                    continue
                 out = subprocess.run(["git", "-C", str(d), "merge", "--no-edit", "-q", ref], capture_output=True,
                                      text=True)
                 if out.returncode != 0:
                     git(d, "merge", "--abort", check=False)
                     raise Stop(f"{repo}: merging {ref} into {task.branch} conflicts. Resolve it in {d}, commit, "
                                "then land again.")
+
+
+def land_steps(task: Task, env: int) -> None:
+    """Merge the latest, check, then fast-forward env0 (cmd_land's own steps)."""
+    # 1. Bring each branch up to GitHub and to env0's dev/main
+    merge_latest(task, env)
     # 2. The checks, one repo at a time (each already uses every core)
     to_check = [r for r in task.repos if (repo_dir(env, r) / "scripts" / "check.sh").exists()]
     if kit_changed(env, task):

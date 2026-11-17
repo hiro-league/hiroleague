@@ -168,6 +168,24 @@ def test_a_land_records_the_commits_it_added(tmp_path, monkeypatch):
     assert e["commits"][0] == after
 
 
+def test_a_land_merges_env0_into_a_new_app_that_has_no_github_repo_yet(tmp_path, monkeypatch):
+    _events(tmp_path, monkeypatch)
+    repo = tmp_path / "env1" / "evalhiro"
+    repo.mkdir(parents=True)
+    run = lambda *a: hw.git(repo, *a)  # noqa: E731
+    commit = lambda m: run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", m)  # noqa: E731
+    run("init", "-q", "-b", "main")
+    commit("skeleton")
+    run("checkout", "-q", "-b", "task/t")
+    commit("pages")
+    run("checkout", "-q", "main")
+    commit("landed by another task")
+    run("checkout", "-q", "task/t")
+    monkeypatch.setattr(hw, "repo_dir", lambda env, r: tmp_path / f"env{env}" / r)
+    hw.merge_latest(hw.Task(id="t", title="t", env=1, repos=["evalhiro"]), 1)  # no origin: only main is merged
+    assert run("merge-base", "--is-ancestor", "main", "HEAD") == ""  # raised if main weren't in the branch
+
+
 def test_part_of_is_a_name_or_a_tasks_title(tmp_path, monkeypatch):
     monkeypatch.setattr(hw, "TASKS", tmp_path)
     hw.save(hw.Task(id="plan", title="Work-flow plan", env=0, repos=["hiro-docs"]))
