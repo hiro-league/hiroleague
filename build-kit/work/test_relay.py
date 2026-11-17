@@ -37,5 +37,21 @@ def test_a_refused_ask_runs_nothing_and_is_logged(tmp_path, monkeypatch):
     assert cmd[cmd.index("cmd") + 2:cmd.index("&")] == [str(relay.LAUNCHER), "up", "1", "core"]
 
 
+def test_changes_are_said_for_made_environments_only_when_they_differ(tmp_path, monkeypatch):
+    monkeypatch.setattr(relay.hw, "ROOT", tmp_path)
+    monkeypatch.setattr(relay.hw, "TASKS", tmp_path / "tasks")
+    (tmp_path / "env2" / "hiroleague" / ".git").mkdir(parents=True)  # env2 is made; env1, env3 to env5 aren't
+    found = {0: ["codehiro"], 2: []}
+    monkeypatch.setattr(relay.hw, "changed_repos", lambda env, tasks: found[env])
+    sent = []
+    monkeypatch.setattr(relay.hw, "event", lambda **e: sent.append((e["env"], e["step"], e["repos"])))
+    said = relay.changes({})
+    assert said == found and sent == [(0, "changes", ["codehiro"]), (2, "changes", [])]
+    sent.clear()
+    found[2] = ["homehiro"]
+    relay.changes(said)
+    assert sent == [(2, "changes", ["homehiro"])]  # env0 is as it was said
+
+
 def test_it_asks_codehiro_beside_the_events_it_sends():
     assert relay.URL.endswith("/api/work/asks/next")

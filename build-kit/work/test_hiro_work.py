@@ -296,6 +296,23 @@ def test_an_environments_other_repos_follow_env0_when_clean_and_behind(tmp_path,
     assert hw.bring_up_others(0, task("t", 0, ["codehiro"])) == []  # env0 is the source
 
 
+def test_changed_repos_are_a_claims_new_work_or_any_uncommitted_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(hw, "ROOT", tmp_path)
+    monkeypatch.setattr(hw, "REPOS", ["hiroleague", "codehiro", "nethiro", "homehiro"])
+    for repo in ("hiroleague", "codehiro", "nethiro"):
+        _repo(tmp_path / "env0" / repo, "one")
+    t = task("t", 0, ["hiroleague", "codehiro", "nethiro"])
+    t.base = {r: hw.git(tmp_path / "env0" / r, "rev-parse", "HEAD") for r in t.repos}
+    (tmp_path / "env0" / "nethiro" / "stray.txt").write_text("someone's", encoding="utf-8")
+    t.before = {"nethiro": hw.dirty(tmp_path / "env0" / "nethiro")}  # uncommitted before the task: not its own
+    assert hw.changed_repos(0, [t]) == []  # claimed, nothing new; homehiro isn't there
+    (tmp_path / "env0" / "codehiro" / "edit.txt").write_text("mine", encoding="utf-8")
+    hw.git(tmp_path / "env0" / "hiroleague", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q",
+           "--allow-empty", "-m", "two")
+    assert hw.changed_repos(0, [t]) == ["hiroleague", "codehiro"]  # a commit since the base, an edit
+    assert hw.changed_repos(0, []) == ["codehiro", "nethiro"]  # no task: any uncommitted files
+
+
 def test_a_commit_needs_a_task_that_claims_its_repo(tmp_path, monkeypatch):
     monkeypatch.setattr(hw, "ROOT", tmp_path)
     monkeypatch.setattr(hw, "TASKS", tmp_path / "tasks")
