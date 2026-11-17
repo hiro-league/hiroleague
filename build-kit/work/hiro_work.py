@@ -221,6 +221,27 @@ def dirty(repo_path: Path) -> list[str]:
     return [line for line in git(repo_path, "status", "--porcelain").splitlines() if line.strip()]
 
 
+def changed_repos(env: int, tasks: list[Task]) -> list[str]:
+    """The repos an environment has changed, for CodeHiro's environment card (relay.py posts it; the card dims a claim
+    that isn't here). A repo its task claims: uncommitted files, or commits since the task's base (in env0, the files
+    already uncommitted when the task started aren't its own). Any other repo: uncommitted files."""
+    task = next((t for t in tasks if t.env == env and t.state == "working"), None)
+    out = []
+    for repo in REPOS:
+        d = repo_dir(env, repo)
+        if not (d / ".git").exists():
+            continue
+        files = dirty(d)
+        if task and repo in task.repos:
+            files = [f for f in files if f not in task.before.get(repo, [])]
+            base = task.base.get(repo)
+            if files or (base and git(d, "rev-parse", "HEAD") != base):
+                out.append(repo)
+        elif files:
+            out.append(repo)
+    return out
+
+
 # ---------------------------------------------------------------------------------------------------------- state
 
 
