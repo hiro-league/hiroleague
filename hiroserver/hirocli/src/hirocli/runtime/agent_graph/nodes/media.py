@@ -24,7 +24,7 @@ from ..events import (
 )
 from ..graph_kit import emit, emit_for, IDENTITY_PEER_KEYS
 from ..outcomes import NodeOutcome, emit_outcome
-from ..ledger import graph_logged, observe
+from hiro_memory.ledger import graph_logged, observe
 from ..node_group import NodeGroup
 from ..state import (
     AudioItem,

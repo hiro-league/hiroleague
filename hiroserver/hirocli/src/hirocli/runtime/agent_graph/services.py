@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Checkpointer
 
-from .ledger import LedgerSink
+from hiro_memory.ledger import LedgerSink
 
 if TYPE_CHECKING:
     from ...domain.credential_store import CredentialStore

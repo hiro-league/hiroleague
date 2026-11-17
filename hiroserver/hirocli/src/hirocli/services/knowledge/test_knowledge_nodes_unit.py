@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from hirocli.domain.preferences import ResolvedModel, WorkspacePreferences
-from hirocli.runtime.agent_graph.ledger import LedgerSink
+from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
 from hirocli.runtime.agent_graph.services import AgentServices
 from hirocli.runtime.tests.graph_fakes import FakeKnowledgeService, knowledge_hit
 import hirocli.services.knowledge.agent.rewrite_support as rewrite_support_module
@@ -26,7 +26,7 @@ def _nodes(
 ) -> KnowledgeRetrievalNodes:
     services = AgentServices(
         workspace_path=tmp_path,
-        ledger_sink=LedgerSink(tmp_path),
+        ledger_sink=workspace_ledger_sink(tmp_path),
     )
     return KnowledgeRetrievalNodes(
         services,

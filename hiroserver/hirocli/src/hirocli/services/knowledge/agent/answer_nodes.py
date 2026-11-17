@@ -25,12 +25,9 @@ from langgraph.types import StreamWriter
 from hirocli.domain.model_factory import create_chat_model
 from hirocli.domain.preferences import resolve_knowledge_answering_llm
 from hirocli.runtime.agent_graph.events import GRAPH_LLM_USAGE
-from hirocli.runtime.agent_graph.graph_kit import (
-    emit,
-    llm_usage_payload,
-    normalize_reply_content,
-)
-from hirocli.runtime.agent_graph.ledger import graph_logged, observe
+from hirocli.runtime.agent_graph.graph_kit import emit, llm_usage_payload
+from hiro_memory.replies import normalize_reply_content
+from hiro_memory.ledger import graph_logged, observe
 from hirocli.runtime.agent_graph.node_group import NodeGroup
 from hirocli.runtime.agent_graph.nodes.call_model_support import prepend_system
 from hirocli.runtime.agent_graph.services import AgentServices

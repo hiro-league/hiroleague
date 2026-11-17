@@ -1,10 +1,10 @@
-"""Pin the public re-export surface of ``hirocli.runtime.agent_graph.ledger`` (P1b)."""
+"""Pin the public re-export surface of ``hiro_memory.ledger`` (P1b)."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import hirocli.runtime.agent_graph.ledger as ledger
+import hiro_memory.ledger as ledger
 
 _FIXTURE = Path(__file__).resolve().parent / "fixtures" / "ledger_public_api.txt"
 

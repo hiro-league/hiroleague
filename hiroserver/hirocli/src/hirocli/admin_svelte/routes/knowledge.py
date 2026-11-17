@@ -22,7 +22,7 @@ from hirocli.admin_svelte.workspace_ctx import _selected_workspace_id
 from hirocli.domain.character import list_characters_detailed
 from hirocli.domain.data_store import data_db_path, ensure_data_db
 from hirocli.domain.events import DomainEvent, get_domain_event_bus
-from hirocli.services.knowledge.graph.graph_events import publish_graph_event
+from hirocli.services.knowledge.graph_events import publish_graph_event
 from hirocli.domain.workspace import resolve_workspace
 from hirocli.services.knowledge import KnowledgeService, create_knowledge_service
 from hirocli.services.eval.constants import (
@@ -35,17 +35,19 @@ from hirocli.services.eval.constants import (
 )
 from hirocli.services.knowledge.constants import (
     KNOWLEDGE_DELETED,
-    KNOWLEDGE_GRAPH_EDGE_UPSERTED,
-    KNOWLEDGE_GRAPH_INGEST_COMPLETED,
-    KNOWLEDGE_GRAPH_INGEST_PROGRESS,
-    KNOWLEDGE_GRAPH_NODE_UPSERTED,
     KNOWLEDGE_INGESTED,
     KNOWLEDGE_JOB_COMPLETED,
     KNOWLEDGE_JOB_FAILED,
     KNOWLEDGE_JOB_PROGRESS,
     KNOWLEDGE_JOB_STARTED,
 )
-from hirocli.services.knowledge.graph.group_scope import KNOWLEDGE_GROUP_ID
+from hiro_memory.graph.constants import (
+    KNOWLEDGE_GRAPH_EDGE_UPSERTED,
+    KNOWLEDGE_GRAPH_INGEST_COMPLETED,
+    KNOWLEDGE_GRAPH_INGEST_PROGRESS,
+    KNOWLEDGE_GRAPH_NODE_UPSERTED,
+)
+from hiro_memory.graph.group_scope import KNOWLEDGE_GROUP_ID
 from hirocli.services.knowledge.live_registry import maybe_recover_abandoned_work
 
 log = Logger.get("ADMIN.KNOWLEDGE")
@@ -854,7 +856,7 @@ async def graph_export(
     all entity nodes + RELATES_TO facts from the Graphiti (Kuzu) graph. Empty graph
     when none built yet.
     """
-    from hirocli.services.knowledge.graph.group_scope import GroupPolicyError, validate_group_id
+    from hiro_memory.graph.group_scope import GroupPolicyError, validate_group_id
     from hirocli.tools.knowledge_graph import graph_snapshot_payload
 
     try:
@@ -885,7 +887,7 @@ async def graph_export(
         # With the shared driver, in-process opens no longer collide; a lock error here
         # means an EXTERNAL process holds the file (a 2nd hiro / stale handle). Return a
         # clean "busy" message instead of a raw stack (docs §4.5).
-        from hirocli.services.knowledge.graph.graphiti_service import is_kuzu_lock_error
+        from hiro_memory.graph.graphiti_service import is_kuzu_lock_error
 
         if is_kuzu_lock_error(exc):
             log.warning("⚠️ knowledge graph export — graph DB busy (external lock held)")
@@ -913,7 +915,7 @@ async def graph_groups(
         payload = await graph_groups_payload(workspace_path)
         return _success(payload)
     except Exception as exc:
-        from hirocli.services.knowledge.graph.graphiti_service import is_kuzu_lock_error
+        from hiro_memory.graph.graphiti_service import is_kuzu_lock_error
 
         if is_kuzu_lock_error(exc):
             log.warning("⚠️ knowledge graph groups — graph DB busy (external lock held)")
@@ -942,7 +944,7 @@ async def graph_episodes(
     an episode's entities/facts by matching node/edge ``chunk_ids``. Ordered by id (corpus
     episode order). Read-only; empty when the group has no episodes. Defaults to the
     knowledge group when none given."""
-    from hirocli.services.knowledge.graph.group_scope import (
+    from hiro_memory.graph.group_scope import (
         KNOWLEDGE_GROUP_ID,
         GroupPolicyError,
         validate_group_id,
@@ -962,7 +964,7 @@ async def graph_episodes(
         payload = await graph_episodes_payload(workspace_path, validated, limit=limit)
         return _success(payload)
     except Exception as exc:
-        from hirocli.services.knowledge.graph.graphiti_service import is_kuzu_lock_error
+        from hiro_memory.graph.graphiti_service import is_kuzu_lock_error
 
         if is_kuzu_lock_error(exc):
             log.warning("⚠️ knowledge graph episodes — graph DB busy (external lock held)")
@@ -998,7 +1000,7 @@ async def graph_clear(
         removed = await clear_knowledge_graph(workspace_path)
         return _success({"removed_episodes": removed})
     except Exception as exc:
-        from hirocli.services.knowledge.graph.graphiti_service import is_kuzu_lock_error
+        from hiro_memory.graph.graphiti_service import is_kuzu_lock_error
 
         if is_kuzu_lock_error(exc):
             log.warning("⚠️ knowledge graph clear — graph DB busy (external lock held)")
@@ -1028,7 +1030,7 @@ async def graph_remove_document(
         removed = await remove_document_from_graph(workspace_path, body.document_id)
         return _success({"document_id": body.document_id, "removed_episodes": removed})
     except Exception as exc:
-        from hirocli.services.knowledge.graph.graphiti_service import is_kuzu_lock_error
+        from hiro_memory.graph.graphiti_service import is_kuzu_lock_error
 
         if is_kuzu_lock_error(exc):
             log.warning(

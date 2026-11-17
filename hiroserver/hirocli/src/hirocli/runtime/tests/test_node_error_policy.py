@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from hirocli.runtime.agent_graph.ledger import ON_ERROR_VALUES, graph_logged, graph_logged_spec
+from hiro_memory.ledger import ON_ERROR_VALUES, graph_logged, graph_logged_spec
 from hirocli.runtime.agent_graph.node_group import NodeGroup
 from hirocli.runtime.agent_graph.nodes.context import ContextNodes
 from hirocli.runtime.agent_graph.nodes.knowledge import KnowledgeFanoutNodes

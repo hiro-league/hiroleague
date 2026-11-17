@@ -24,7 +24,7 @@
 > `Database` (§4.4, §8), so a Graph-tab load mid-build never queues behind the writer's
 > pool=1 connection.
 > **Status:** ✅ **implemented** (2026-06-04). New module
-> [`kuzu_registry.py`](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/kuzu_registry.py)
+> [`kuzu_registry.py`](../hiroserver/hiro-memory/src/hiro_memory/graph/kuzu_registry.py)
 > (refcounted shared driver + per-workspace write lock); `graphiti_service.py` opens/closes
 > via the registry and passes the write lock; `graphiti_ingest.py` wraps each `add_episode`
 > in the lock; `_release_kuzu` deleted (folded into the registry closer); Option-B "DB busy"
@@ -54,13 +54,13 @@ is a no-op). Kuzu allows only **one `Database` object per file** → second open
 | Eval ingest (writer) | [eval_runner.py:485](../hiroserver/hirocli/src/hirocli/services/knowledge/eval_runner.py:485) → close :522 | per run |
 | Graph ingest (writer) | [tools/knowledge_graph.py:192](../hiroserver/hirocli/src/hirocli/tools/knowledge_graph.py:192) → close :254 | per batch |
 | Retrieval / `graph_expand` (reader) | [agent/graph.py:523](../hiroserver/hirocli/src/hirocli/services/knowledge/agent/graph.py:523) → close :557 | **per query** |
-| Graph tab snapshot (reader) | [graphiti_service.py:453](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_service.py:453) → release :484 | per request |
+| Graph tab snapshot (reader) | [graphiti_service.py:453](../hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_service.py:453) → release :484 | per request |
 
 All funnel through **one open + one release pair** inside `graphiti_service.py`:
-- Open: `GraphitiMemoryService.__init__` → `KuzuDriver(str(self._db_path))` ([:184](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_service.py:184)); snapshot → `KuzuDriver(str(path))` ([:453](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_service.py:453)).
-- Release: `_release_kuzu` in `close()` ([:312](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_service.py:312)) and snapshot finally ([:484](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_service.py:484)).
+- Open: `GraphitiMemoryService.__init__` → `KuzuDriver(str(self._db_path))` ([:184](../hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_service.py:184)); snapshot → `KuzuDriver(str(path))` ([:453](../hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_service.py:453)).
+- Release: `_release_kuzu` in `close()` ([:312](../hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_service.py:312)) and snapshot finally ([:484](../hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_service.py:484)).
 
-**`_release_kuzu` is itself the anti-singleton workaround** — its docstring ([:101](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_service.py:101)) says it drops the file lock *between operations* so the **next** open can succeed. The bug is exactly the window where two opens overlap and that dance can't help. A shared `Database` deletes the workaround and the bug class together.
+**`_release_kuzu` is itself the anti-singleton workaround** — its docstring ([:101](../hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_service.py:101)) says it drops the file lock *between operations* so the **next** open can succeed. The bug is exactly the window where two opens overlap and that dance can't help. A shared `Database` deletes the workaround and the bug class together.
 
 ## 3. Kuzu + graphiti concurrency — grounded findings
 
@@ -99,7 +99,7 @@ land on different pool connections and **self-collide** with the single-writer r
 
 ### 4.1 The shared object — one per workspace, refcounted
 
-A new module **`services/knowledge/graph/kuzu_registry.py`** holds process-wide state:
+A new module **`hiro_memory/graph/kuzu_registry.py`** holds process-wide state:
 one live `kuzu.Database` **plus one `asyncio.Lock`** per resolved `db_path`,
 reference-counted. The registry is a **generic refcounted resource pool** — it imports
 no `graphiti`/`kuzu` internals; the caller supplies the open/close callables, so all
@@ -150,7 +150,7 @@ writing, so writes are serialized to one-at-a-time. Two distinct rules require t
    suffice — graphiti is what forces the wider scope.*
 2. **Across episodes → RELEASE between episodes**, not held for the whole batch. The lock
    wraps **each iteration** of the ingest loop, around the per-episode write unit
-   (`_preseed_episode_node` + `add_episode`, [graphiti_ingest.py:312-333](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_ingest.py:312)):
+   (`_preseed_episode_node` + `add_episode`, [graphiti_ingest.py:312-333](../hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_ingest.py:312)):
 
 ```python
 # graphiti_ingest.py — INSIDE the per-episode loop (NOT around the whole batch)
@@ -201,7 +201,7 @@ per file; we only add a second `Connection` on it. graphiti's Kuzu `get_by_group
 hits only `driver.execute_query` (→ the swapped client) + `driver.provider`, so a shallow
 copy suffices and the ORM is kept (no hand-maintained Cypher). The dedicated connection is
 closed in the read's `finally`, before the refcount is dropped, so it never outlives the
-shared `Database`. ([graphiti_service.py](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_service.py) `read_graph_snapshot`).
+shared `Database`. ([graphiti_service.py](../hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_service.py) `read_graph_snapshot`).
 
 ### 4.5 Option B — thin fail-fast fallback
 
@@ -213,12 +213,12 @@ Detection lives in the registry as `is_kuzu_lock_error(exc)` (one home for the m
 
 ### 4.6 Call-site changes (the only edits to existing code)
 
-- [graphiti_service.py:184](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_service.py:184) & [:453](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_service.py:453): `KuzuDriver(...)` → `kuzu_registry.acquire(key, lambda: KuzuDriver(str(path), max_concurrent_queries=1))`
-- [graphiti_service.py:312](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_service.py:312) & [:484](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_service.py:484): `_release_kuzu(driver)` → `kuzu_registry.release(key, _release_logic)`
+- [graphiti_service.py:184](../hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_service.py:184) & [:453](../hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_service.py:453): `KuzuDriver(...)` → `kuzu_registry.acquire(key, lambda: KuzuDriver(str(path), max_concurrent_queries=1))`
+- [graphiti_service.py:312](../hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_service.py:312) & [:484](../hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_service.py:484): `_release_kuzu(driver)` → `kuzu_registry.release(key, _release_logic)`
 - `_release_kuzu` (101) is **deleted** — its body moves into the registry's `release` closer (no wrapper kept).
 - Write paths (`ingest_chunks` and the eval/graph-ingest callers) wrap their graph
   mutation in `async with kuzu_registry.write_lock(key)`.
-- `driver._database = group_id` seed ([:220](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_service.py:220)) unchanged (see §8 hazard note).
+- `driver._database = group_id` seed ([:220](../hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_service.py:220)) unchanged (see §8 hazard note).
 
 ```
                          ONE shared kuzu.Database per workspace (registry, refcounted)

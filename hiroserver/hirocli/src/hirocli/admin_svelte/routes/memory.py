@@ -127,7 +127,7 @@ async def list_workspace_memories(
         gid = (group_id or "").strip()
         if gid:
             # Group filter: re-mint the untrusted client scope against the closed grammar.
-            from hirocli.services.knowledge.graph.group_scope import (
+            from hiro_memory.graph.group_scope import (
                 GroupPolicyError,
                 validate_group_id,
             )
@@ -182,7 +182,7 @@ async def clear_workspace_group(
         if not gid:
             return api_failure("'group_id' is required.")
         # Re-mint the untrusted client scope against the closed grammar before any write.
-        from hirocli.services.knowledge.graph.group_scope import (
+        from hiro_memory.graph.group_scope import (
             GroupPolicyError,
             validate_group_id,
         )

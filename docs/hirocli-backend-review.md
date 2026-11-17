@@ -34,11 +34,11 @@ The single biggest gap; it spans every subsystem that touches a model or DB.
 | Layer | Evidence | Failure mode |
 |---|---|---|
 | Embeddings | `services/knowledge/embedder.py:78`, `service.py:1268` | one 429 fails a whole ingest |
-| Graph ingest LLM | `services/knowledge/graph/graphiti_ingest.py:496` | hung extraction holds the **Kuzu write lock** indefinitely → wedges all writers |
+| Graph ingest LLM | `hiro_memory/graph/graphiti_ingest.py:496` | hung extraction holds the **Kuzu write lock** indefinitely → wedges all writers |
 | Agent retrieval | `services/knowledge/agent/retrieval_nodes.py:190` | stalls an entire chat turn |
 | STT / TTS | `services/stt/openai_provider.py:168` | no per-call timeout; tenacity retries latency-unbounded |
 | Vision | `services/vision_service.py:108` | no try/except, no timeout, no retry at all |
-| Memory recall | `services/memory/graphiti_conversation.py:172` | locked Kuzu / hung LLM stalls the turn |
+| Memory recall | `hiro_memory/conversation/graphiti_conversation.py:172` | locked Kuzu / hung LLM stalls the turn |
 
 **Direction:** one shared `hiro_commons` helper — `asyncio.wait_for` + bounded retry/backoff + a transient-vs-fatal classifier — with timeout/attempts sourced from tuning-profile preferences. Gemini providers currently retry on *any* exception (burning attempts on auth errors); OpenAI retries only on `(RateLimitError, APIError)`. One classifier fixes both. **Prioritize the ingest-LLM path** because it holds the Kuzu lock.
 
@@ -73,7 +73,7 @@ Upsert writes **vectors→catalog**; delete writes **catalog→vectors** (`servi
 | `except Exception: pass` on Qdrant index creation | `services/knowledge/vector_store.py:567` | filtered retrieval silently runs without indexes | High |
 | Silent corrupt-config swallow, no log | `domain/config.py:133`, `domain/workspace.py:106` | corrupted registry silently discarded; user loses workspaces with no signal | High |
 | `_row_to_dict` leaves `metadata` as raw string on JSON error | `domain/message_store.py:494` | deferred `AttributeError` downstream instead of logged at source | Medium |
-| Process-global dedup-floor monkeypatch is last-writer-wins | `services/knowledge/graph/graphiti_service.py:104` | workspace B's dedup floor overwrites workspace A's (multi-workspace-per-process) | Medium |
+| Process-global dedup-floor monkeypatch is last-writer-wins | `hiro_memory/graph/graphiti_service.py:104` | workspace B's dedup floor overwrites workspace A's (multi-workspace-per-process) | Medium |
 
 > The `credential_store` bug is **verified** and cheap: it uses stdlib `logging.getLogger(__name__)` but calls `logger.warning("…", provider_id=…, error=…)`. Stdlib `Logger.warning` rejects arbitrary kwargs → `TypeError` raised *inside* the keyring-fallback path whose whole purpose is to degrade gracefully. Swap to `hiro_commons.log.Logger` (used everywhere else) and the structured kwargs become valid.
 
@@ -101,7 +101,7 @@ None is tangled beyond repair; each has a clean extraction.
 |---|---|---|
 | `domain/preferences.py` | 2127 | `schema` / `prompts` (~491 LOC of prose → data files) / `io` / `resolution` (15 `resolve_*` fns) |
 | `services/knowledge/service.py` (KnowledgeService) | 1388 | `RerankerDownloadManager` (subprocess supervision), `IngestPipeline`, answer façade |
-| `services/knowledge/graph/graphiti_service.py` | 1379 | a 330-LOC snapshot/export subsystem + Kuzu-lifecycle + mapping |
+| `hiro_memory/graph/graphiti_service.py` | 1379 | a 330-LOC snapshot/export subsystem + Kuzu-lifecycle + mapping |
 | `admin_svelte/routes/knowledge.py` | 1139 | CRUD / graph routes / rerankers / SSE — and **remove the in-process Tkinter folder picker from the server** |
 | `admin_svelte/routes/eval.py` | 1007 | move `_runner` into `services/eval/runner.py` |
 | `services/eval/runner_memory.py` | 1087 | two 250-LOC mega-functions; also **wrap per-question failures** — `TaskGroup` lets one error kill the whole expensive run (`:1003`) |
@@ -118,7 +118,7 @@ None is tangled beyond repair; each has a clean extraction.
 - **Admin HTTP:** **no auth** (loopback-only — `admin/run.py:76`) + raw `str(exc)` returned to clients across handlers, leaking internal paths/DB messages.
 - **Hardcoded knobs to promote to prefs:** vector batch size, reranker `top_n`, prefetch limit, distance metric, fallback-snippet caps; plus graph defaults (`sim_min_score`, `query_timeout_s`, `num_results`) are **defined twice** and will drift.
 - **Eval reproducibility:** no LLM seed captured and no corpus/judge-prompt version hash, yet results accumulate across runs in `eval_results.db` — an edited corpus silently contaminates merged summaries.
-- **Memory agentic-recall parity:** the sophisticated `services/memory/agent/` retrieval loop benefits only the eval harness; live chat uses single-shot `GraphitiConversationMemory.search()`, yet prefs/docs imply parity. Either promote it to live chat or relabel it eval-only.
+- **Memory agentic-recall parity:** the sophisticated `hiro_memory/conversation/agent/` retrieval loop benefits only the eval harness; live chat uses single-shot `GraphitiConversationMemory.search()`, yet prefs/docs imply parity. Either promote it to live chat or relabel it eval-only.
 
 ---
 

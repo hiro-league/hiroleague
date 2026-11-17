@@ -272,7 +272,7 @@ def _titled(schema: dict[str, Any]) -> dict[str, Any]:
 
 def _usage(raw: Any) -> tuple[int, int, int]:
     """(tokens in, tokens out, cached tokens in) from the reply's usage metadata."""
-    from ...runtime.agent_graph.graph_kit import usage_from_metadata
+    from hiro_memory.replies import usage_from_metadata
 
     meta = getattr(raw, "usage_metadata", None) or {}
     usage = usage_from_metadata(dict(meta))

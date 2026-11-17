@@ -23,7 +23,6 @@ from hirocli.domain.preferences import (
     ModalityFlags,
     PREFERENCE_SECTIONS,
     PROMPT_DEFAULTS,
-    RetrievalAgentLimits,
     WorkspacePreferences,
     job_model_source,
     load_preferences,
@@ -35,6 +34,7 @@ from hirocli.domain.preferences import (
     resolved_from_profile,
     save_preferences,
 )
+from hiro_memory.settings import RetrievalAgentLimits
 from hirocli.domain.server_info import (
     build_channel_list_entries,
     build_policy_snapshot,

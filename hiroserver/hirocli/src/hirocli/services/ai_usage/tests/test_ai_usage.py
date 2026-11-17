@@ -199,7 +199,7 @@ def test_imported_asks_of_today_count_toward_the_profiles_limits(tmp_path: Path)
 def test_graph_llm_calls_are_counted_without_the_ledger(tmp_path: Path) -> None:
     """B1: with observability off (or outside an ingest episode) the graph's calls are counted directly."""
     from hirocli.services.ai_usage.from_ledger import count_graph_llm_usage
-    from hirocli.services.knowledge.graph.graphiti_adapters import GraphitiLLMUsage
+    from hiro_memory.graph.graphiti_adapters import GraphitiLLMUsage
 
     usage = GraphitiLLMUsage(
         model_id="google:gemini-3.8-flash", model_size="medium", input_tokens=1000, output_tokens=100,

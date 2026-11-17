@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from hirocli.runtime.agent_graph.ledger import RunAccumulator
-from hirocli.runtime.agent_graph.ledger.context import current_run
-from hirocli.runtime.agent_graph.ledger.identity import identity_from_state, resolve_ledger_identity
+from hiro_memory.ledger import RunAccumulator
+from hiro_memory.ledger.context import current_run
+from hiro_memory.ledger.identity import identity_from_state, resolve_ledger_identity
 
 
 def test_chat_state_identity_from_envelope() -> None:

@@ -15,13 +15,13 @@
 > so there is nothing to migrate.)
 >
 > **Status:** ✅ **implemented** (2026-06-11). New module
-> [`graphiti_bfs.py`](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_bfs.py)
+> [`graphiti_bfs.py`](../hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_bfs.py)
 > (`edge_bfs_search_shortest` / `node_bfs_search_shortest`);
-> [`graphiti_fact_search.py`](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_fact_search.py)
+> [`graphiti_fact_search.py`](../hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_fact_search.py)
 > imports them aliased over the vendored names (call sites and trace labels
 > unchanged); compat probes extended in
-> [`graphiti_compat.py`](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_compat.py).
-> Tests: [`test_graphiti_bfs.py`](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/test_graphiti_bfs.py)
+> [`graphiti_compat.py`](../hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_compat.py).
+> Tests: [`test_graphiti_bfs.py`](../hiroserver/hiro-memory/src/hiro_memory/graph/test_graphiti_bfs.py)
 > (parity vs vendored on real in-memory Kuzu, depths 1–3, duplicate origins,
 > group filtering, provider guard) — all green alongside the full graph suite.
 
@@ -133,10 +133,10 @@ The exploding fallback is only reached from **our re-hosted pipeline**:
 elsewhere (e.g. `add_episode` dedup) carry no BFS methods, so swapping our call
 sites covers every path to the bug:
 
-- [`graphiti_bfs.py`](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_bfs.py) —
+- [`graphiti_bfs.py`](../hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_bfs.py) —
   drop-in replacements (same signatures, same record parsers, same per-sub-query
   LIMIT behavior), Kuzu-only with a loud `ValueError` guard for other providers.
-- [`graphiti_fact_search.py`](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_fact_search.py)
+- [`graphiti_fact_search.py`](../hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_fact_search.py)
   imports them **aliased to the vendored names** so call sites and retrieval-trace
   labels stay identical.
 - **Rejected:** graphiti's `driver.search_interface` extension seam — five of its

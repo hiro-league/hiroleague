@@ -24,12 +24,9 @@ import pytest
 
 import hirocli.services.knowledge.agent.answer_nodes as knowledge_answer_module
 from hirocli.domain.preferences import load_preferences
-from hirocli.runtime.tests.graph_fakes import (
-    FakeKnowledgeService,
-    RecordingLedgerSink,
-    run_graph,
-)
-from hirocli.runtime.agent_graph.ledger import LedgerSink
+from hirocli.runtime.tests.graph_fakes import FakeKnowledgeService, run_graph
+from hiro_memory.testing import RecordingLedgerSink
+from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
 from hirocli.runtime.agent_graph.services import AgentServices
 from hirocli.services.knowledge.agent import KnowledgeAgentGraph, KnowledgeGraphConfig
 from hirocli.services.knowledge.agent.legs import RetrievalLeg
@@ -44,7 +41,7 @@ def _no_answering_llm(monkeypatch: pytest.MonkeyPatch) -> None:
 def _build(tmp_path: Path, *, service: Any = None, retrieval_only: bool = False):
     prefs = load_preferences(tmp_path)
     graph = KnowledgeAgentGraph(
-        AgentServices(workspace_path=tmp_path, ledger_sink=LedgerSink(tmp_path))
+        AgentServices(workspace_path=tmp_path, ledger_sink=workspace_ledger_sink(tmp_path))
     )
     sink = RecordingLedgerSink(tmp_path)
     graph._ledger_sink = sink  # capture flushed ledger rows

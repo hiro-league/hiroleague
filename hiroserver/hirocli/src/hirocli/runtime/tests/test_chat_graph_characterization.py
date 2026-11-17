@@ -31,15 +31,12 @@ from hirocli.runtime.tests.graph_fakes import (
     FakeKnowledgeSubgraph,
     FakeMemory,
     FakeSTT,
-    RecordingLedgerSink,
-    ScriptedChatModel,
-    ai_text,
-    ai_tool_call,
     echo_tool,
     make_agent_services,
     make_inbound_envelope,
     run_graph,
 )
+from hiro_memory.testing import RecordingLedgerSink, ScriptedChatModel, ai_text, ai_tool_call
 
 
 def _build_chat(

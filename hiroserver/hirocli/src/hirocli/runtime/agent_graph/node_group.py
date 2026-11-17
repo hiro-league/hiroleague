@@ -9,7 +9,7 @@ from langgraph.graph import StateGraph
 from langgraph.types import RetryPolicy
 
 from ...domain.preferences import DEFAULT_MAX_HISTORY_MESSAGES
-from .ledger import wrap_graph_node
+from hiro_memory.ledger import wrap_graph_node
 from .preferences_view import PreferencesView
 
 if TYPE_CHECKING:
@@ -98,7 +98,7 @@ class NodeGroup:
         self.services.ledger_sink = sink
 
     def _wrap_dynamic_node(self, node_name: str, fn):
-        from .ledger import wrap_graph_callable
+        from hiro_memory.ledger import wrap_graph_callable
 
         return wrap_graph_callable(self, node_name, fn)
 

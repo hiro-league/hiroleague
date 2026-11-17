@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from hirocli.domain.memory import MemoryAddResult
+from hiro_memory.conversation.results import MemoryAddResult
 from hirocli.services.eval.runner import (
     MEMORY_EVAL_USER_ID,
     _memory_question,
@@ -22,8 +22,8 @@ from hirocli.services.eval.runner import (
     run_memory_eval,
     summarize_memory_rows,
 )
-from hirocli.services.memory.agent.accumulator import Accumulator
-from hirocli.services.memory.agent.retrieval_agent import RetrievalResult
+from hiro_memory.conversation.agent.accumulator import Accumulator
+from hiro_memory.conversation.agent.retrieval_agent import RetrievalResult
 
 pytest_plugins = ["hirocli.services.eval.test_retrieval_shim"]
 
@@ -564,7 +564,7 @@ async def test_memory_question_row_shape(tmp_path) -> None:
 async def test_memory_recall_output_preview_summarizes_loop(tmp_path, monkeypatch) -> None:
     import csv
 
-    from hirocli.runtime.agent_graph.ledger import LedgerSink
+    from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
 
     async def _fake_run_retrieval(**kwargs):  # noqa: ANN003, ARG001
         acc = Accumulator()
@@ -593,11 +593,11 @@ async def test_memory_recall_output_preview_summarizes_loop(tmp_path, monkeypatc
         lambda _path: (_RetrievalModelStub(), "fake:model"),
     )
     monkeypatch.setattr(
-        "hirocli.services.memory.agent.retrieval_agent.run_retrieval",
+        "hiro_memory.conversation.agent.retrieval_agent.run_retrieval",
         _fake_run_retrieval,
     )
 
-    sink = LedgerSink(tmp_path)
+    sink = workspace_ledger_sink(tmp_path)
     mem = _FakeMemory({})
     await _memory_question(
         mem,
@@ -653,7 +653,7 @@ async def test_recall_leg_invokes_retrieval_agent(tmp_path, monkeypatch) -> None
         lambda _path: (_RetrievalModelStub(), "fake:model"),
     )
     monkeypatch.setattr(
-        "hirocli.services.memory.agent.retrieval_agent.run_retrieval",
+        "hiro_memory.conversation.agent.retrieval_agent.run_retrieval",
         _fake_run_retrieval,
     )
     mem = _FakeMemory({})
@@ -724,7 +724,7 @@ async def test_recall_leg_returns_full_time_sorted_set(tmp_path, monkeypatch) ->
         lambda _path: (_RetrievalModelStub(), "fake:model"),
     )
     monkeypatch.setattr(
-        "hirocli.services.memory.agent.retrieval_agent.run_retrieval",
+        "hiro_memory.conversation.agent.retrieval_agent.run_retrieval",
         _fake_run_retrieval,
     )
     mem = _FakeMemory({})

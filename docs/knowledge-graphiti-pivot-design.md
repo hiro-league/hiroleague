@@ -189,7 +189,7 @@ flowchart TD
 **Boundary:** Graphiti + Kuzu are reached **only** through `GraphitiMemoryService`
 (mirrors how mem0 sits behind `MemoryService`). The rest of the system never imports
 `graphiti_core` directly — keeps the brain swappable and the boundary rip-out-able
-(frontend `features/knowledge/graph/`, backend `services/knowledge/graph/`).
+(frontend `features/knowledge/graph/`, backend `hiro_memory/graph/`).
 
 ---
 

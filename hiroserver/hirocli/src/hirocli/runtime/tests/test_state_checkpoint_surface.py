@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from hiro_commons.log import Logger
 
-from hirocli.runtime.agent_graph.ledger import LedgerSink
+from hiro_memory.ledger import LedgerSink
 from hirocli.runtime.tests.graph_fakes import run_graph
 from hirocli.runtime.tests.state_contract_helpers import (
     assert_no_large_bytes,

@@ -24,16 +24,17 @@ from hiro_commons.log import Logger
 
 from ..domain.preferences import load_preferences
 from ..domain.workspace import resolve_workspace
-from ..runtime.agent_graph.ledger import LedgerSink
+from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
 from ..services.knowledge import KnowledgeService, create_knowledge_service
-from ..services.knowledge.graph import (
+from ..services.knowledge.graph_factory import build_graph_service, graph_query_timeout
+from hiro_memory.graph import (
     GraphitiEpisodeInput,
     GraphitiMemoryService,
     graphiti_db_path,
 )
-from ..services.knowledge.graph.graphiti_ingest import GraphEventSink
-from ..services.knowledge.graph.graphiti_serialize import build_graph_dtos
-from ..services.knowledge.graph.graphiti_service import (
+from hiro_memory.graph.graphiti_ingest import GraphEventSink
+from hiro_memory.graph.graphiti_serialize import build_graph_dtos
+from hiro_memory.graph.graphiti_service import (
     read_graph_episodes,
     read_graph_group_ids,
     read_graph_snapshot,
@@ -112,6 +113,7 @@ async def graph_snapshot_payload(
         node_limit=node_limit,
         edge_limit=edge_limit,
         group_ids=group_ids,
+        query_timeout_s=graph_query_timeout(workspace_path),
     )
     truncated = len(nodes) >= node_limit or len(edges) >= edge_limit
     dtos = build_graph_dtos(
@@ -130,7 +132,7 @@ def _label_graph_group(group_id: str) -> dict[str, str]:
     **kind** come from the firm group-ID policy (group_scope) so naming is defined in one place
     (docs/graph-group-policy-design.md §4) — knowledge/memory/eval render as logical names, not
     raw ids; legacy/unknown ids fall back to the raw id so they stay selectable/removable."""
-    from hirocli.services.knowledge.graph.group_scope import classify_group, group_label
+    from hiro_memory.graph.group_scope import classify_group, group_label
 
     return {"id": group_id, "label": group_label(group_id), "kind": classify_group(group_id)}
 
@@ -141,7 +143,9 @@ async def graph_groups_payload(workspace_path: Path) -> dict[str, Any]:
     Returns ``{"default_group_id", "groups": [{id, label, kind}]}`` — "Knowledge" first,
     then conversation-memory groups, then any others. Empty when no graph is built yet.
     """
-    group_ids, default_gid = await read_graph_group_ids(graphiti_db_path(workspace_path))
+    group_ids, default_gid = await read_graph_group_ids(
+        graphiti_db_path(workspace_path), query_timeout_s=graph_query_timeout(workspace_path)
+    )
     labeled = [_label_graph_group(g) for g in group_ids]
     # Stable, friendly order: knowledge first, then memory, then eval, then other — each
     # alphabetical.
@@ -161,7 +165,10 @@ async def graph_episodes_payload(
     / no graph built yet.
     """
     episodes = await read_graph_episodes(
-        graphiti_db_path(workspace_path), group_id, limit=limit
+        graphiti_db_path(workspace_path),
+        group_id,
+        limit=limit,
+        query_timeout_s=graph_query_timeout(workspace_path),
     )
     return {"episodes": episodes}
 
@@ -241,7 +248,7 @@ async def _run_graph_ingest_for_documents(
     prefs = load_preferences(workspace_path)
     # require_backend=False: an explicit build-graph action ingests even when the
     # retrieval backend toggle is off (build now, enable retrieval later).
-    svc = GraphitiMemoryService.from_preferences(
+    svc = build_graph_service(
         prefs, workspace_path, require_backend=False
     )
     if svc is None:
@@ -253,7 +260,7 @@ async def _run_graph_ingest_for_documents(
 
     # One ledger run per document (per ingest_chunks call) → each document's graph
     # build is drillable in Graph Runs with per-operation step detail.
-    ledger_sink = LedgerSink(workspace_path)
+    ledger_sink = workspace_ledger_sink(workspace_path)
     per_doc: list[dict[str, Any]] = []
     totals = _empty_totals()
     try:
@@ -337,7 +344,7 @@ def _open_graph_service_for_teardown(workspace_path: Path) -> GraphitiMemoryServ
     even when the retrieval toggle is off. Raises a clear error when no extraction model
     is configured (a graph can't exist without one having built it)."""
     prefs = load_preferences(workspace_path)
-    svc = GraphitiMemoryService.from_preferences(
+    svc = build_graph_service(
         prefs, workspace_path, require_backend=False
     )
     if svc is None:

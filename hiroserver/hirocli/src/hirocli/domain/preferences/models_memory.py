@@ -18,7 +18,7 @@ from .defaults import (
     DEFAULT_MEMORY_EXTRACTION_INSTRUCTIONS,
     pref_field,
 )
-from .models_graph import RetrievalAgentLimits
+from hiro_memory.settings import RetrievalAgentLimits
 
 
 def default_chat_retrieval_limits() -> RetrievalAgentLimits:

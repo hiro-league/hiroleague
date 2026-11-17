@@ -24,7 +24,8 @@ from hirocli.domain.preferences import load_preferences
 
 if TYPE_CHECKING:
     from hirocli.domain.preferences import KnowledgeChunkingPreferences, WorkspacePreferences
-from hirocli.runtime.agent_graph.ledger import LedgerSink, current_run
+from hiro_memory.ledger import current_run
+from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
 from hirocli.runtime.agent_graph.services import AgentServices
 from hirocli.services.knowledge.agent import (
     KnowledgeAgentGraph,
@@ -782,7 +783,7 @@ class KnowledgeService:
         graph_builder = KnowledgeAgentGraph(
             AgentServices(
                 workspace_path=self.workspace_path,
-                ledger_sink=LedgerSink(self.workspace_path),
+                ledger_sink=workspace_ledger_sink(self.workspace_path),
             )
         )
         graph = graph_builder.build(
@@ -1084,11 +1085,13 @@ class KnowledgeService:
         chunks → the Graph panel showed "Chunk text unavailable" even though the text
         was right there in ``EpisodicNode.content``.
         """
-        from hirocli.services.knowledge.graph.graphiti_service import (
+        from hiro_memory.graph.graphiti_service import (
             graphiti_db_path,
             read_episode_chunks,
         )
-        from hirocli.services.knowledge.graph.group_scope import (
+
+        from hirocli.services.knowledge.graph_factory import graph_query_timeout
+        from hiro_memory.graph.group_scope import (
             is_kuzu_only_chunk_group_id,
         )
 
@@ -1099,7 +1102,9 @@ class KnowledgeService:
         # eval-memory) chunks, group_id+valid_at for knowledge chunks (their text still
         # comes from Qdrant).
         episode_by_id = await read_episode_chunks(
-            graphiti_db_path(self.workspace_path), ids
+            graphiti_db_path(self.workspace_path),
+            ids,
+            query_timeout_s=graph_query_timeout(self.workspace_path),
         )
         knowledge_ids = [
             pid

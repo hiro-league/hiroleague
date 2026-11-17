@@ -12,7 +12,7 @@ import pytest
 from hiro_commons.log import Logger
 from hirocli.domain.data_store import ensure_data_db, get_default_user_id
 from hirocli.runtime.agent_graph import ChatAgentGraph, ChatGraphConfig
-from hirocli.runtime.agent_graph.ledger import LedgerSink
+from hiro_memory.ledger import LedgerSink
 from hirocli.runtime.preferences_runtime import WorkspacePreferencesRuntime
 from hirocli.runtime.tests.event_payload_helpers import (
     load_event_payload_fixture,
@@ -22,14 +22,12 @@ from hirocli.runtime.tests.graph_fakes import (
     FakeKnowledgeSubgraph,
     FakeMemory,
     FakeSTT,
-    ScriptedChatModel,
-    ai_text,
-    ai_tool_call,
     echo_tool,
     make_agent_services,
     make_inbound_envelope,
     run_graph,
 )
+from hiro_memory.testing import ScriptedChatModel, ai_text, ai_tool_call
 
 _SCENARIOS = (
     ("text_only", {"memory": FakeMemory()}, {"responses": [ai_text("final reply")]}, {"text": "hello there"}, None, ()),

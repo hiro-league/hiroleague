@@ -15,7 +15,7 @@ from hirocli.services.knowledge.embedder_registry import (
     is_local_embedder,
     list_local_embedders,
 )
-from hirocli.services.knowledge.graph.graph_index_marker import (
+from hiro_memory.graph.graph_index_marker import (
     clear_graph_indexed,
     is_graph_indexed,
     mark_graph_indexed,
@@ -66,7 +66,7 @@ def test_graph_index_marker_roundtrip(tmp_path: Path) -> None:
 def test_graph_has_data_false_without_db(tmp_path: Path) -> None:
     import asyncio
 
-    from hirocli.services.knowledge.graph.graph_index_marker import graph_has_data
+    from hiro_memory.graph.graph_index_marker import graph_has_data
 
     # No Kuzu DB file → definitively no data (cheap short-circuit, no graph open).
     assert asyncio.run(graph_has_data(tmp_path)) is False
@@ -75,7 +75,7 @@ def test_graph_has_data_false_without_db(tmp_path: Path) -> None:
 def test_sync_marker_clears_stale_marker_when_no_data(tmp_path: Path) -> None:
     import asyncio
 
-    from hirocli.services.knowledge.graph.graph_index_marker import sync_graph_indexed_marker
+    from hiro_memory.graph.graph_index_marker import sync_graph_indexed_marker
 
     # A stale marker with no underlying graph DB → reconcile clears it (unlock after a full wipe).
     mark_graph_indexed(tmp_path)

@@ -4,14 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from hirocli.runtime.agent_graph.ledger import (
+from hiro_memory.ledger import (
     current_entry,
     current_substep,
     observe,
     record_child,
     substep_scope,
 )
-from hirocli.runtime.tests.graph_fakes import RecordingLedgerSink
+from hiro_memory.testing import RecordingLedgerSink
 
 
 @pytest.fixture

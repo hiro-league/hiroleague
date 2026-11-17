@@ -205,7 +205,7 @@ def check_embedder_transition(
     The runtime PATCH guard and the save-time guard both call it with their own exception type — so the rule
     (and the messages) live in one place, and this module owns the service imports."""
     from hirocli.services.knowledge import count_knowledge_points
-    from hirocli.services.knowledge.graph.graph_index_marker import is_graph_indexed
+    from hiro_memory.graph.graph_index_marker import is_graph_indexed
 
     from .resolvers import resolve_graphiti_embedder_model, resolve_knowledge_embedder_model
 

@@ -29,7 +29,7 @@ def test_label_graph_group_classifies_by_namespace() -> None:
 
 @pytest.mark.asyncio
 async def test_graph_groups_payload_orders_knowledge_first(monkeypatch) -> None:
-    async def fake_read(_db_path):
+    async def fake_read(_db_path, **_kwargs):
         # read_graph_group_ids returns (distinct_groups, knowledge_default_group_id=kb_main).
         return ["mem_7_bob", "kb_main", "eval_adam", "mem_42_aria"], "kb_main"
 

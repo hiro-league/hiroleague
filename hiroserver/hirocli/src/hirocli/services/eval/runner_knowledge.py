@@ -16,7 +16,7 @@ from typing import Any
 from hiro_commons.log import Logger
 
 from hirocli.domain.events import get_domain_event_bus
-from hirocli.runtime.agent_graph.tracing import traced_run
+from hiro_memory.tracing import traced_run
 from hirocli.services.eval.constants import (
     EVAL_COMPLETED,
     EVAL_FAILED,
@@ -25,7 +25,7 @@ from hirocli.services.eval.constants import (
     EVAL_STARTED,
 )
 from hirocli.services.knowledge.converters import utc_now_iso
-from hirocli.services.knowledge.graph.group_scope import slug_group_part
+from hiro_memory.graph.group_scope import slug_group_part
 
 from hirocli.services.eval.corpus import (
     DEFAULT_CORPUS_DIR,
@@ -89,9 +89,9 @@ async def run_eval(
     model, model_id = (build_eval_judge_model(workspace_path) if judge else (None, ""))
     # Always create the sink — even judge-off — so per-leg cost can be read back from the
     # ledger (cost is NOT judge-dependent). Judge rows are only written when judging.
-    from hirocli.runtime.agent_graph.ledger import LedgerSink
+    from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
 
-    sink = LedgerSink(workspace_path)
+    sink = workspace_ledger_sink(workspace_path)
     judged = model is not None
     # Editable judge grading prompt (graph.eval.judge_prompt); blank → default in judge.
     from hirocli.domain.preferences import load_preferences
@@ -295,7 +295,7 @@ async def _run_one_question(
     judging = judge and model is not None and sink is not None
     run_token = None
     if judging:
-        from hirocli.runtime.agent_graph.ledger import RunAccumulator, current_run
+        from hiro_memory.ledger import RunAccumulator, current_run
 
         acc = RunAccumulator(
             sink=sink,
@@ -349,7 +349,7 @@ async def _run_one_question(
             )
     finally:
         if run_token is not None:
-            from hirocli.runtime.agent_graph.ledger import current_run as _cr
+            from hiro_memory.ledger import current_run as _cr
 
             sink.evict_run(acc.run_id)
             _cr.reset(run_token)

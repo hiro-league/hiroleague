@@ -10,7 +10,7 @@ from hirocli.admin.features.graph_runs.service import (
     GraphLedgerService,
     langsmith_url_for_run,
 )
-from hirocli.runtime.agent_graph.ledger import GRAPH_LEDGER_COLUMNS
+from hiro_memory.ledger import GRAPH_LEDGER_COLUMNS
 
 
 def test_tail_initial_filters_rows(tmp_path: Path) -> None:

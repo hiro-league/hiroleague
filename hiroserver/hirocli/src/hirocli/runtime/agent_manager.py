@@ -40,10 +40,10 @@ from .agent_graph import (
     ChatAgentGraph,
     ChatGraphConfig,
 )
-from .agent_graph.ledger import RunAccumulator, current_run
+from hiro_memory.ledger import RunAccumulator, current_run
 from ..domain.people import find_by_number
 from ..services.ai_usage.from_ledger import usage_person, usage_profile
-from .agent_graph.tracing import langsmith_run_id
+from hiro_memory.tracing import langsmith_run_id
 from .comm_log import (
     LOG_IN,
     comm_extras,
@@ -196,11 +196,11 @@ class AgentManager:
         async with AsyncSqliteSaver.from_conn_string(db) as checkpointer:
             self._checkpointer = checkpointer
             from ..services.memory.models import MemoryRetrievalModelCache
-            from .agent_graph.ledger import LedgerSink
+            from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
 
             services = AgentServices(
                 workspace_path=self._ctx.workspace_path,
-                ledger_sink=LedgerSink(self._ctx.workspace_path),
+                ledger_sink=workspace_ledger_sink(self._ctx.workspace_path),
                 stt=self._stt,
                 vision=self._vision,
                 memory=self._memory,
@@ -782,7 +782,7 @@ class AgentManager:
         )
         from ..domain.model_factory import create_chat_model
         from ..domain.preferences import resolve_character_llm
-        from .agent_graph.graph_kit import normalize_reply_content
+        from hiro_memory.replies import normalize_reply_content
 
         character_id = ""
         if chat_channel_id is not None:
@@ -1122,7 +1122,7 @@ class AgentManager:
             return None
         from ..domain.workspace import workspace_id_for_path
         from ..services.knowledge.agent import KnowledgeAgentGraph, KnowledgeGraphConfig
-        from .agent_graph.ledger import LedgerSink
+        from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
         from .agent_graph.services import AgentServices
 
         try:
@@ -1131,7 +1131,7 @@ class AgentManager:
             # LangGraph state, so cost folds into the chat turn (no separate ledger run).
             sub_services = AgentServices(
                 workspace_path=self._ctx.workspace_path,
-                ledger_sink=LedgerSink(self._ctx.workspace_path),
+                ledger_sink=workspace_ledger_sink(self._ctx.workspace_path),
             )
             builder = KnowledgeAgentGraph(sub_services)
             return builder.build_retrieval(

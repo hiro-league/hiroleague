@@ -7,8 +7,8 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, AsyncIterator
 
-from hirocli.runtime.agent_graph.ledger import RunAccumulator, current_run
-from hirocli.runtime.agent_graph.tracing import langsmith_run_id
+from hiro_memory.ledger import RunAccumulator, current_run
+from hiro_memory.tracing import langsmith_run_id
 
 KNOWLEDGE_RUN_ID_PREFIX = "knowledge-"
 

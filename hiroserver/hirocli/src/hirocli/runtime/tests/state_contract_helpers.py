@@ -13,14 +13,8 @@ from typing_extensions import Annotated
 from hirocli.domain.data_store import ensure_data_db, get_default_user_id
 from hirocli.runtime.agent_graph import ChatAgentGraph, ChatGraphConfig
 from hirocli.runtime.preferences_runtime import WorkspacePreferencesRuntime
-from hirocli.runtime.tests.graph_fakes import (
-    FakeSTT,
-    FakeVision,
-    ScriptedChatModel,
-    ai_text,
-    make_agent_services,
-    make_inbound_envelope,
-)
+from hirocli.runtime.tests.graph_fakes import FakeSTT, FakeVision, make_agent_services, make_inbound_envelope
+from hiro_memory.testing import ScriptedChatModel, ai_text
 
 _FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 _LARGE_STRING = 1024

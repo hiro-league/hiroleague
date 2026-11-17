@@ -7,7 +7,7 @@
 >
 > **Companion:** [`knowledge-graph-viz-design.md`](knowledge-graph-viz-design.md) is the
 > original *plan/tracker* (goals, phases, decisions). This doc is the "how it actually
-> works now" map. Backend serialization (`services/knowledge/graph/serialize.py`) and the
+> works now" map. Backend serialization (`hiro_memory/graph/serialize.py`) and the
 > `/knowledge/graph/*` endpoints are out of scope except where the wire contract matters.
 
 ---

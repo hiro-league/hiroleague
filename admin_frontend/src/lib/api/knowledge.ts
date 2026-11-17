@@ -536,7 +536,7 @@ export function updateKnowledgeDocumentMetadata(
 
 // ---------------------------------------------------------------------------
 // Graph viz (MVP) — whole-graph export + live event payload shapes.
-// Shapes mirror services/knowledge/graph/serialize.py. Edges use source/target
+// Shapes mirror hiro_memory/graph/serialize.py. Edges use source/target
 // (not source_id/target_id) so they drop straight into force-graph's link model.
 // ---------------------------------------------------------------------------
 

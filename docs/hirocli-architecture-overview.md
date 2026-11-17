@@ -261,11 +261,11 @@ flowchart TB
 | Piece | File | Role |
 |---|---|---|
 | `KnowledgeService` | `services/knowledge/service.py` | Façade: ingest orchestration, search, answer/compare, reranker-download subprocess lifecycle. |
-| `GraphitiMemoryService` | `services/knowledge/graph/graphiti_service.py` | Kuzu lifecycle, write/read CRUD, graph↔dict mapping, snapshot/export. |
+| `GraphitiMemoryService` | `hiro_memory/graph/graphiti_service.py` | Kuzu lifecycle, write/read CRUD, graph↔dict mapping, snapshot/export. |
 | Vector store | `services/knowledge/vector_store.py` | Qdrant point I/O + hybrid (vector + FTS) search with RRF. |
 | Catalog store | `services/knowledge/catalog_store.py` | SQLite jobs/documents/taxonomy + crash recovery. |
 | Agentic retrieval | `services/knowledge/agent/retrieval_nodes.py` | Multi-leg retrieval graph (flat vs graph-expand) with reranking. |
-| Ingest ledger / trace | `services/knowledge/graph/ingest_ledger.py`, `ingest_trace.py` | Observability of what was ingested (not a transaction boundary). |
+| Ingest ledger / trace | `hiro_memory/graph/ingest_ledger.py`, `ingest_trace.py` | Observability of what was ingested (not a transaction boundary). |
 
 > ⚠️ The **Kuzu graph DB is exclusively locked while the server runs** — to inspect it: `hiro stop` → inspect → `hiro start`. Vector store, catalog, ledger, and traces are readable live.
 

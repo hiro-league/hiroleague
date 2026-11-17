@@ -30,7 +30,7 @@ from typing import Any
 import pytest
 
 from hirocli.services.knowledge.embedder import CatalogEmbeddingsBackend
-from hirocli.services.knowledge.graph.graphiti_adapters import GraphitiEmbedderClient
+from hiro_memory.graph.graphiti_adapters import GraphitiEmbedderClient
 
 # Mirrors the production fan-out: MAX_QUESTION_CONCURRENCY parallel questions, each recall
 # embedding its query through the one shared backend.

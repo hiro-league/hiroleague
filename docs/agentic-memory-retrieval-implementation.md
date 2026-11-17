@@ -26,8 +26,8 @@
 | [`agentic-memory-retrieval-design.md`](agentic-memory-retrieval-design.md) | The design rationale, the rejected alternatives, the prompt + tool surface, the reduce library, the no-baking guardrails. **Required reading.** |
 | [`eval-evidence-recall-design.md`](eval-evidence-recall-design.md) | How we measure recall against gold evidence — the metric you are optimizing. |
 | [`memory-eval-vs-chat-parity.md`](memory-eval-vs-chat-parity.md) | Why the retrieval loop is identical across the eval recall leg and the chat `memory_search` node. The parallel cap and prompt are **one** global value — do not split them per surface. |
-| [`hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_search.py`](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_search.py) | `search_chunk_ids` — the low-level graphiti search. You'll add two per-call params here. |
-| [`hiroserver/hirocli/src/hirocli/services/memory/graphiti_conversation.py`](../hiroserver/hirocli/src/hirocli/services/memory/graphiti_conversation.py) | `GraphitiConversationMemory` — the eval-scoped recall surface the `search_memory` tool will wrap. |
+| [`hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_search.py`](../hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_search.py) | `search_chunk_ids` — the low-level graphiti search. You'll add two per-call params here. |
+| [`hiroserver/hiro-memory/src/hiro_memory/conversation/graphiti_conversation.py`](../hiroserver/hiro-memory/src/hiro_memory/conversation/graphiti_conversation.py) | `GraphitiConversationMemory` — the eval-scoped recall surface the `search_memory` tool will wrap. |
 | [`hiroserver/hirocli/src/hirocli/services/eval/runner_memory.py`](../hiroserver/hirocli/src/hirocli/services/eval/runner_memory.py) | The current single-shot recall leg you will replace with the agent loop. |
 | [`hiroserver/hirocli/src/hirocli/services/eval/judge.py`](../hiroserver/hirocli/src/hirocli/services/eval/judge.py) | Pattern for `resolve_*_prompt` (blank ⇒ default). Mirror it for the retrieval-agent prompt. |
 | [`hiroserver/hirocli/src/hirocli/domain/preferences.py`](../hiroserver/hirocli/src/hirocli/domain/preferences.py) | Where the new preferences + the default prompt constant live. |
@@ -213,10 +213,10 @@ make sure both default to admin-pref values when the caller omits them.
 
 ### Files touched
 
-- [`hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_search.py`](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_search.py) — add `show_expiry: bool = False` to `search_chunk_ids` signature; when true, attach `valid_at` / `invalid_at` / `superseded` to each edge row in the returned expansion.
-- [`hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_service.py`](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_service.py) — thread `show_expiry` through `GraphitiService.search_chunk_ids`.
-- [`hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_session.py`](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_session.py) — same thread-through on the session shim.
-- [`hiroserver/hirocli/src/hirocli/services/memory/graphiti_conversation.py`](../hiroserver/hirocli/src/hirocli/services/memory/graphiti_conversation.py) — expose `show_expiry` on `GraphitiConversationMemory.search`.
+- [`hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_search.py`](../hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_search.py) — add `show_expiry: bool = False` to `search_chunk_ids` signature; when true, attach `valid_at` / `invalid_at` / `superseded` to each edge row in the returned expansion.
+- [`hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_service.py`](../hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_service.py) — thread `show_expiry` through `GraphitiService.search_chunk_ids`.
+- [`hiroserver/hirocli/src/hirocli/services/knowledge/graphiti_session.py`](../hiroserver/hirocli/src/hirocli/services/knowledge/graphiti_session.py) — same thread-through on the session shim.
+- [`hiroserver/hiro-memory/src/hiro_memory/conversation/graphiti_conversation.py`](../hiroserver/hiro-memory/src/hiro_memory/conversation/graphiti_conversation.py) — expose `show_expiry` on `GraphitiConversationMemory.search`.
 
 ### Low-level
 
@@ -247,7 +247,7 @@ extend `RankedFact`). Pick the smallest change that doesn't disturb existing con
 
 ### Tests
 
-In [`test_graphiti_search.py`](../hiroserver/hirocli/src/hirocli/services/knowledge/graph/test_graphiti_search.py):
+In [`test_graphiti_search.py`](../hiroserver/hiro-memory/src/hiro_memory/graph/test_graphiti_search.py):
 
 - `test_search_chunk_ids_show_expiry_false_omits_validity` — assert `valid_at`/`invalid_at`/`superseded` are absent on returned edges.
 - `test_search_chunk_ids_show_expiry_true_emits_validity_on_edges` — assert edges carry those three fields (use a fake graphiti that returns an edge with a known invalidation date).
@@ -255,7 +255,7 @@ In [`test_graphiti_search.py`](../hiroserver/hirocli/src/hirocli/services/knowle
 
 ### Acceptance
 
-- `npm-equivalent` Python test suite passes: `pytest hiroserver/hirocli/src/hirocli/services/knowledge/graph/test_graphiti_search.py -v`.
+- `npm-equivalent` Python test suite passes: `pytest hiroserver/hiro-memory/src/hiro_memory/graph/test_graphiti_search.py -v`.
 - No existing callers break (they default to `show_expiry=False`).
 
 ---
@@ -374,9 +374,9 @@ with the four LLM-visible knobs from the design.
 
 ### Files added
 
-- `hiroserver/hirocli/src/hirocli/services/memory/agent/__init__.py` (new package — *consider hiro-commons if pattern recurs*, but for now memory-local).
-- `hiroserver/hirocli/src/hirocli/services/memory/agent/search_tool.py` — the Tool class.
-- `hiroserver/hirocli/src/hirocli/services/memory/agent/test_search_tool.py` — unit tests.
+- `hiroserver/hiro-memory/src/hiro_memory/conversation/agent/__init__.py` (new package — *consider hiro-commons if pattern recurs*, but for now memory-local).
+- `hiroserver/hiro-memory/src/hiro_memory/conversation/agent/search_tool.py` — the Tool class.
+- `hiroserver/hiro-memory/src/hiro_memory/conversation/agent/test_search_tool.py` — unit tests.
 
 **Use the Tools Architecture.** Notify the user up-front (rule: `consider-creating-tools-first.md`).
 The Tool wraps an operation; the same Tool can later expose as Agent Tool + (optionally) CLI + HTTP.
@@ -470,7 +470,7 @@ class SearchMemoryTool:
 
 ### Acceptance
 
-- `pytest hiroserver/hirocli/src/hirocli/services/memory/agent/test_search_tool.py -v` passes.
+- `pytest hiroserver/hiro-memory/src/hiro_memory/conversation/agent/test_search_tool.py -v` passes.
 
 ---
 
@@ -483,10 +483,10 @@ with the resolved prompt, enforce both caps, gather parallel calls concurrently.
 
 ### Files added
 
-- `hiroserver/hirocli/src/hirocli/services/memory/agent/accumulator.py` — kind-partitioned accumulator.
-- `hiroserver/hirocli/src/hirocli/services/memory/agent/retrieval_agent.py` — the node + the public entrypoint `run_retrieval(question, ...) -> RetrievalResult`.
-- `hiroserver/hirocli/src/hirocli/services/memory/agent/test_accumulator.py`
-- `hiroserver/hirocli/src/hirocli/services/memory/agent/test_retrieval_agent.py`
+- `hiroserver/hiro-memory/src/hiro_memory/conversation/agent/accumulator.py` — kind-partitioned accumulator.
+- `hiroserver/hiro-memory/src/hiro_memory/conversation/agent/retrieval_agent.py` — the node + the public entrypoint `run_retrieval(question, ...) -> RetrievalResult`.
+- `hiroserver/hiro-memory/src/hiro_memory/conversation/agent/test_accumulator.py`
+- `hiroserver/hiro-memory/src/hiro_memory/conversation/agent/test_retrieval_agent.py`
 
 ### Low-level — Accumulator
 
@@ -706,8 +706,8 @@ function before passing the result to the answerer.
 
 ### Files added
 
-- `hiroserver/hirocli/src/hirocli/services/memory/agent/reduce.py`
-- `hiroserver/hirocli/src/hirocli/services/memory/agent/test_reduce.py`
+- `hiroserver/hiro-memory/src/hiro_memory/conversation/agent/reduce.py`
+- `hiroserver/hiro-memory/src/hiro_memory/conversation/agent/test_reduce.py`
 
 ### Low-level — dispatch
 
@@ -787,8 +787,8 @@ hits = await memory.search(q["question"], user_id=user_id, character_id=characte
 facts = [...]
 
 # NEW:
-from hirocli.services.memory.agent.retrieval_agent import run_retrieval
-from hirocli.services.memory.agent.reduce import apply_reduce, ReduceOp
+from hiro_memory.conversation.agent.retrieval_agent import run_retrieval
+from hiro_memory.conversation.agent.reduce import apply_reduce, ReduceOp
 from hirocli.domain.preferences import resolve_retrieval_agent_prompt
 
 prompt_id, prompt_text = resolve_retrieval_agent_prompt(prefs)
@@ -836,7 +836,7 @@ shows tokens + per-search timings.
 
 ### Files touched
 
-- `hiroserver/hirocli/src/hirocli/services/memory/agent/retrieval_agent.py` — emit one trace row per agent step (think / tool-call / parallel-batch / final).
+- `hiroserver/hiro-memory/src/hiro_memory/conversation/agent/retrieval_agent.py` — emit one trace row per agent step (think / tool-call / parallel-batch / final).
 - [`hiroserver/hirocli/src/hirocli/services/eval/runner_memory.py`](../hiroserver/hirocli/src/hirocli/services/eval/runner_memory.py) — write the trace to `<workspace>/logs/retrieval_trace/agent/<run_id>__<q_id>.jsonl`.
 - Ledger entry: the existing `memory_recall` node already exists (line 263 in `runner_memory.py`). Extend its `output_preview` to include `searches=N · parallel_turns=M · reduce=<op>`.
 
@@ -1186,8 +1186,8 @@ Two changes ride together because they touch the same loop boundary:
 
 Backend:
 
-- [`hiroserver/hirocli/src/hirocli/services/memory/agent/search_tool.py`](../hiroserver/hirocli/src/hirocli/services/memory/agent/search_tool.py) — schema + `call()` rewrite (multi-arg, internal `asyncio.gather`).
-- [`hiroserver/hirocli/src/hirocli/services/memory/agent/retrieval_agent.py`](../hiroserver/hirocli/src/hirocli/services/memory/agent/retrieval_agent.py) — rename counter, remove trim/drop logic, simplify exhaustion check.
+- [`hiroserver/hiro-memory/src/hiro_memory/conversation/agent/search_tool.py`](../hiroserver/hiro-memory/src/hiro_memory/conversation/agent/search_tool.py) — schema + `call()` rewrite (multi-arg, internal `asyncio.gather`).
+- [`hiroserver/hiro-memory/src/hiro_memory/conversation/agent/retrieval_agent.py`](../hiroserver/hiro-memory/src/hiro_memory/conversation/agent/retrieval_agent.py) — rename counter, remove trim/drop logic, simplify exhaustion check.
 - [`hiroserver/hirocli/src/hirocli/domain/preferences.py`](../hiroserver/hirocli/src/hirocli/domain/preferences.py) — rename field on `RetrievalAgentLimits`; update `DEFAULT_MEMORY_EVAL_RETRIEVAL_AGENT_PROMPT` (`{MAX_SEARCHES}` interpolation token → `{MAX_AGENT_TURNS}`).
 - [`hiroserver/hirocli/src/hirocli/services/eval/runner_memory.py`](../hiroserver/hirocli/src/hirocli/services/eval/runner_memory.py) — no functional change; `prefs.graph.retrieval_agent.max_searches` reference becomes `…max_agent_turns`.
 - Trace sidecar emit code (currently in `retrieval_agent.py` per P6) — schema change: one `tool_call` event per turn carries a `sub_queries` array; drop the `tool_call_batch_drop` event entirely (no longer emitted).
@@ -1400,7 +1400,7 @@ Admin UI:
 
 ### Acceptance
 
-- All backend tests green: `pytest hiroserver/hirocli/src/hirocli/services/memory/agent/ hiroserver/hirocli/src/hirocli/domain/tests/test_preferences.py hiroserver/hirocli/src/hirocli/services/eval/ -v`.
+- All backend tests green: `pytest hiroserver/hiro-memory/src/hiro_memory/conversation/agent/ hiroserver/hirocli/src/hirocli/domain/tests/test_preferences.py hiroserver/hirocli/src/hirocli/services/eval/ -v`.
 - All admin tests green: `cd admin_frontend && npm run check && npm run test:unit`.
 - Manual end-to-end: re-run one memory-eval question. Expand row in **Eval → Memory → Questions/Answers → Trajectory** — each turn shows as one tool-call group with sub-queries; no "dropped N" chips appear; the Recall column reads `N turns · F facts · op`.
 - LangSmith: each `recall` span has one child `search_memory` span per turn (not N children).
@@ -1683,16 +1683,16 @@ graph LR
 
 | PR | Command | Expect |
 |---|---|---|
-| P0 | `pytest hiroserver/hirocli/src/hirocli/services/knowledge/graph/test_graphiti_search.py -v` | green; existing tests untouched |
+| P0 | `pytest hiroserver/hiro-memory/src/hiro_memory/graph/test_graphiti_search.py -v` | green; existing tests untouched |
 | P1 | `pytest hiroserver/hirocli/src/hirocli/domain/tests/test_preferences.py -v` + `cd admin_frontend && npm run test:unit -- preferences-edits` + `npm run check` | green; UI card editable + persists |
-| P2 | `pytest hiroserver/hirocli/src/hirocli/services/memory/agent/test_search_tool.py -v` | green; clamps logged at DEBUG |
-| P3 | `pytest hiroserver/hirocli/src/hirocli/services/memory/agent/test_accumulator.py test_retrieval_agent.py -v` | green; parallel test confirms `asyncio.gather` (timing assertion) |
-| P4 | `pytest hiroserver/hirocli/src/hirocli/services/memory/agent/test_reduce.py -v` | green; ≥90% coverage |
+| P2 | `pytest hiroserver/hiro-memory/src/hiro_memory/conversation/agent/test_search_tool.py -v` | green; clamps logged at DEBUG |
+| P3 | `pytest hiroserver/hiro-memory/src/hiro_memory/conversation/agent/test_accumulator.py test_retrieval_agent.py -v` | green; parallel test confirms `asyncio.gather` (timing assertion) |
+| P4 | `pytest hiroserver/hiro-memory/src/hiro_memory/conversation/agent/test_reduce.py -v` | green; ≥90% coverage |
 | P5 | `pytest hiroserver/hirocli/src/hirocli/services/eval/ -v` + run **one** memory-eval question manually | green; row shape unchanged |
 | P6 | manual: run a memory-eval question, inspect `<workspace>/logs/retrieval_trace/agent/*.jsonl` | trace events present; ledger preview shows summary |
 | P7 | full memory-eval run on BEAM-128k units 13/14 + evidence-recall metric | report committed |
 | P8 | `cd admin_frontend && npm run check && npm run test:unit -- EvalRetrievalTrajectory eval-trajectory-controller` + manual: expand a row in **Eval → Memory → Questions/Answers**, click the **Trajectory** tab | green; new tab renders; `Recall` column shows `N/M · F facts · op`; pane header shows histogram + decomposition rate; no regression in other tabs |
-| P9 | `pytest hiroserver/hirocli/src/hirocli/services/memory/agent/ hiroserver/hirocli/src/hirocli/domain/tests/test_preferences.py hiroserver/hirocli/src/hirocli/services/eval/ -v` + `cd admin_frontend && npm run check && npm run test:unit -- EvalRetrievalTrajectory` + manual: run one memory-eval question, inspect LangSmith — each `recall` span has **one** `search_memory` child per turn (not multiple); Trajectory tab shows sub-queries grouped under one tool-call header per turn; no `dropped N` chips appear | green; `preferences.json` re-saves without the old `max_searches` field; loop honors `max_agent_turns` per the new per-invocation counter |
+| P9 | `pytest hiroserver/hiro-memory/src/hiro_memory/conversation/agent/ hiroserver/hirocli/src/hirocli/domain/tests/test_preferences.py hiroserver/hirocli/src/hirocli/services/eval/ -v` + `cd admin_frontend && npm run check && npm run test:unit -- EvalRetrievalTrajectory` + manual: run one memory-eval question, inspect LangSmith — each `recall` span has **one** `search_memory` child per turn (not multiple); Trajectory tab shows sub-queries grouped under one tool-call header per turn; no `dropped N` chips appear | green; `preferences.json` re-saves without the old `max_searches` field; loop honors `max_agent_turns` per the new per-invocation counter |
 | P10 | `cd admin_frontend && npm run check && npm run test:unit -- GraphRetrievalAgentCard preferences-edits` + manual: open **Preferences → Graph Engine → Retrieval Agent**, change `max_agent_turns`, save | green; values persist in `preferences.json`; loop honors the new value after server restart; cross-field validator blocks invalid `limit_min/default/max` combos |
 
 ---
