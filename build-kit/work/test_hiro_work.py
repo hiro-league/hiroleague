@@ -455,8 +455,7 @@ def test_leftovers_are_what_no_task_there_owns(tmp_path, monkeypatch):
     assert hw.leftovers(1, []) == [
         {"repo": "codehiro", "what": "1 uncommitted file"},
         {"repo": "nethiro", "what": "on branch task/old, 1 commit not on main"},
-        {"repo": "homehiro", "what": "1 commit behind main"},
-    ]
+    ]  # homehiro is behind main: how a free environment sits until the next start, nothing left behind
     # With a task there, its claims are its own and only another repo's uncommitted files are left over
     t = task("t", 1, ["codehiro", "nethiro"])
     (tmp_path / "env1" / "hiroleague" / "edit.txt").write_text("x", encoding="utf-8")
