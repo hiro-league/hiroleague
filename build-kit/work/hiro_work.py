@@ -32,6 +32,7 @@ import hashlib
 import json
 import os
 import shutil
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -971,8 +972,11 @@ def land_steps(task: Task, env: int) -> None:
                                      text=True)
                 if out.returncode != 0:
                     git(d, "merge", "--abort", check=False)
-                    raise Stop(f"{repo}: merging {ref} into {task.branch} conflicts. Resolve it in {d}, commit, "
-                               "then land again.")
+                    # A fix: land merges origin/dev and then env0's dev. A resolve that merges only the first makes land
+                    # merge the second after the commit hook's check, so every part of the check runs twice
+                    raise Stop(f"{repo}: merging {ref} into {task.branch} conflicts. Resolve it in {d}: merge both "
+                               f"origin/{main_of(repo)} and {main_of(repo)} (land merges them in that order), then "
+                               "commit, then land again.")
     # 2. The checks, one repo at a time (each already uses every core)
     to_check = [r for r in task.repos if (repo_dir(env, r) / "scripts" / "check.sh").exists()]
     if kit_changed(env, task):
@@ -1371,6 +1375,17 @@ def cmd_review(a) -> None:
 
 # ---------------------------------------------------------------------------------------------------------- main
 
+# Commands that run checks or deploys for minutes in a console
+LONG_COMMANDS = ("land", "train")
+
+
+def ignore_console_interrupt() -> None:
+    """A fix: onnxruntime, loaded by the core's tests, sends a phantom Ctrl-C to every process on the console. It killed
+    a land inside ``subprocess.run(check.sh)`` (KeyboardInterrupt), though check-engine.sh and run-tests.sh already
+    ignore it. A land or a train is stopped with Ctrl-Break, ``hiro-work train --stop`` or by closing the tab, as
+    scripts/run-tests.sh says."""
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="hiro-work", description=__doc__.split("\n\n")[0])
@@ -1439,6 +1454,8 @@ def main(argv: list[str] | None = None) -> int:
     import train
     train.add_parser(sub)
     a = p.parse_args(argv)
+    if a.cmd in LONG_COMMANDS:
+        ignore_console_interrupt()
     try:
         if getattr(a, "func", None):
             return a.func(a) or 0

@@ -12,6 +12,12 @@ from hirocli.domain.preferences_schema import (
 )
 
 
+def write_lf(path, data) -> None:
+    """newline="\n": LF on Windows too, like the node generators and .gitattributes (CRLF here left the generated files
+    listed as modified with an empty diff, and hiro-work land stopped on them)."""
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8", newline="\n")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -39,15 +45,15 @@ def main() -> None:
     args.field_schema_out.parent.mkdir(parents=True, exist_ok=True)
 
     schema = workspace_preferences_json_schema()
-    args.schema_out.write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
+    write_lf(args.schema_out, schema)
 
     defaults = workspace_preferences_defaults()
-    args.defaults_out.write_text(json.dumps(defaults, indent=2) + "\n", encoding="utf-8")
+    write_lf(args.defaults_out, defaults)
 
     from hirocli.domain.preferences_schema import workspace_preferences_field_map
 
     field_map = workspace_preferences_field_map()
-    args.field_schema_out.write_text(json.dumps(field_map, indent=2) + "\n", encoding="utf-8")
+    write_lf(args.field_schema_out, field_map)
 
 
 if __name__ == "__main__":

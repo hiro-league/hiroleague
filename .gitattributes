@@ -3,3 +3,9 @@
 deploy/** text eol=lf
 # The git hooks run under Git's sh on every checkout: keep them LF.
 build-kit/git-hooks/** text eol=lf
+# The generated files (admin_frontend's codegen output and the schema it reads) are written with LF by the generators.
+# Checked out as CRLF (core.autocrlf=true), every `check:*` run left them listed as modified with an empty diff (the
+# bytes differ from the checked-out form), and hiro-work land stopped on them. LF in the working tree matches what
+# the generators write.
+admin_frontend/schemas/** text eol=lf
+admin_frontend/src/lib/api/generated/** text eol=lf

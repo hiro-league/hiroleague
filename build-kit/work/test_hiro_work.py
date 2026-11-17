@@ -317,3 +317,28 @@ def test_an_environment_no_task_holds_reads_as_a_default_task_does(tmp_path, mon
     assert hw.real_of(2) == [hw.data.READS]
     hw.save(hw.Task(id="t", title="t", env=2, repos=["homehiro"], real=[hw.data.READS, hw.data.AI]))
     assert hw.real_of(2) == [hw.data.READS, hw.data.AI]
+
+
+def test_land_and_train_ignore_the_console_ctrl_c(monkeypatch):
+    # onnxruntime's phantom Ctrl-C once killed a land inside subprocess.run(check.sh)
+    import signal
+
+    before = signal.getsignal(signal.SIGINT)
+    seen = {}
+    monkeypatch.setattr(hw, "cmd_land", lambda a: seen.setdefault("handler", signal.getsignal(signal.SIGINT)))
+    try:
+        assert hw.main(["land", "some-task"]) == 0
+        assert seen["handler"] == signal.SIG_IGN
+        signal.raise_signal(signal.SIGINT)  # dropped: no KeyboardInterrupt
+    finally:
+        signal.signal(signal.SIGINT, before)
+
+
+def test_other_commands_keep_ctrl_c(monkeypatch):
+    import signal
+
+    seen = {}
+    monkeypatch.setattr(hw, "cmd_status", lambda a: seen.setdefault("handler", signal.getsignal(signal.SIGINT)))
+    before = signal.getsignal(signal.SIGINT)
+    assert hw.main(["status"]) == 0
+    assert seen["handler"] == before != signal.SIG_IGN
