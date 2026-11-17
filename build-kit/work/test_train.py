@@ -91,6 +91,22 @@ def test_aicam_says_what_may_need_a_restart_by_top_folder():
                      "talker: docker compose up -d talker"]
 
 
+def test_a_new_apps_empty_github_repo_lacks_every_commit(tmp_path, monkeypatch):
+    repo, origin = tmp_path / "env0" / "evalhiro", tmp_path / "origin.git"
+    repo.mkdir(parents=True)
+    hw.git(tmp_path, "init", "-q", "--bare", "-b", "main", str(origin))
+    hw.git(repo, "init", "-q", "-b", "main")
+    for m in ("skeleton", "pages"):
+        hw.git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", m)
+    hw.git(repo, "remote", "add", "origin", str(origin))
+    monkeypatch.setattr(hw, "repo_dir", lambda env, r: tmp_path / f"env{env}" / r)
+    f = tr.read_facts("evalhiro", {"evalhiro": "none"})
+    assert (f.error, f.github, f.live) == ("", None, None)
+    assert [c.split(" ", 1)[1] for c in f.github_lacks] == ["pages", "skeleton"]
+    hw.git(repo, "remote", "set-url", "origin", str(tmp_path / "nowhere.git"))  # unreachable: still an error
+    assert tr.read_facts("evalhiro", {"evalhiro": "none"}).error.startswith("GitHub couldn't be read")
+
+
 def test_a_trains_task_is_named_by_its_time():
     assert tr.task_id(datetime(2026, 11, 16, 14, 5, 9)) == "train-20261116-140509"
 

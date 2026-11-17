@@ -265,13 +265,20 @@ def lacks(d: Path, since: str | None, head: str) -> list[str]:
     return [ln for ln in hw.git(d, "log", "--format=%h %s", rng).splitlines() if ln]
 
 
+def empty_github(d: Path) -> bool:
+    """True when GitHub answers and holds no branch yet: a new app's repo, made empty before its first train, which
+    then lacks every commit (its fetch of main fails, which is no reason to stop the train)."""
+    heads = subprocess.run(["git", "-C", str(d), "ls-remote", "--heads", "origin"], capture_output=True, text=True)
+    return heads.returncode == 0 and not heads.stdout.strip()
+
+
 def read_facts(repo: str, server: dict[str, str]) -> Facts:
     """A repo's facts: GitHub fetched again (the standard: fetch before deploying), the server as read."""
     d, main = hw.repo_dir(0, repo), hw.main_of(repo)
     head = hw.git(d, "rev-parse", main)
     f = Facts(repo=repo, head=head)
     fetched = subprocess.run(["git", "-C", str(d), "fetch", "-q", "origin", main], capture_output=True, text=True)
-    if fetched.returncode != 0:
+    if fetched.returncode != 0 and not empty_github(d):
         f.error = f"GitHub couldn't be read: {fetched.stderr.strip()[-200:]}"
         return f
     f.github = hw.git(d, "rev-parse", "-q", "--verify", f"refs/remotes/origin/{main}", check=False) or None
