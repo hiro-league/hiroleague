@@ -10,6 +10,10 @@ in a tab of the environment's own window (hiro-envN), so its output shows there;
 card. Only up and down, an environment 0 to 5 and the server names hiro-work knows pass; anything else is refused and
 logged. One helper at a time (C:\hiro\run\relay.pid). Its log is C:\hiro\logs\relay.log. Standard library only.
 
+Every minute it also says which repos each environment has changed (hiro_work.changed_repos): a "changes" event for
+each environment whose list differs from the last one said (all of them when it starts), so the card can dim a claim
+nothing has changed yet.
+
     pythonw relay.py              run (what the Startup shortcut starts)
     python relay.py --install     a shortcut in this Windows user's Startup folder ("Hiro League work relay": starts it
                                   at logon, no admin needed; Settings, Apps, Startup can switch it off), started now too
@@ -38,6 +42,7 @@ LOG = hw.LOGS / "relay.log"
 PID = hw.RUN / "relay.pid"
 URL = ship.URL.rsplit("/events", 1)[0] + "/asks/next"  # http://reports.local/api/work/asks/next
 EVERY_S = 3
+CHANGES_EVERY_S = 60  # how often each environment's changed repos are looked at
 NAME = "Hiro League work relay"
 SHORTCUT = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup" / (
     NAME + ".lnk")
@@ -91,6 +96,19 @@ def fetch(key: str) -> list[dict]:
         return list(json.loads(r.read().decode("utf-8")).get("asks") or [])
 
 
+def changes(said: dict[int, list[str]]) -> dict[int, list[str]]:
+    """Each made environment's changed repos, and a "changes" event for each that differs from what was said."""
+    tasks = hw.load_tasks()
+    now: dict[int, list[str]] = {}
+    for env in hw.ENVS:
+        if env and not (hw.env_dir(env) / "hiroleague" / ".git").exists():
+            continue  # not made yet: an event would make it look made
+        now[env] = hw.changed_repos(env, tasks)
+        if said.get(env) != now[env]:
+            hw.event(task=None, env=env, step="changes", phase="end", ok=True, repos=now[env])
+    return now
+
+
 def serve() -> int:
     import train  # the lock's process check (alive), shared with the deploy train
 
@@ -102,7 +120,15 @@ def serve() -> int:
     PID.write_text(str(os.getpid()), encoding="utf-8")
     log(f"started (process {os.getpid()}), asking {URL}")
     down = False
+    said: dict[int, list[str]] = {}
+    looked = 0.0
     while True:
+        if time.monotonic() - looked >= CHANGES_EVERY_S:
+            looked = time.monotonic()
+            try:
+                said = changes(said)
+            except (OSError, hw.Stop, ValueError) as exc:  # a repo git can't read now: said, and tried next minute
+                log(f"changed repos not read: {exc}")
         try:
             key = ship.KEY_FILE.read_text(encoding="utf-8").strip()
             for ask in fetch(key):
