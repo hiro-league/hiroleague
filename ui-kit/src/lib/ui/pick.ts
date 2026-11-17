@@ -6,15 +6,19 @@ export type PickOption = { value: string; label: string; disabled?: boolean; tit
 /** A list this long gets a search box: shorter ones are read at a glance. */
 export const SEARCH_FROM = 9;
 
-/** The choices a search leaves: every word typed is in the label (or the value), in any order, any case. */
-export function searched<T extends PickOption>(options: readonly T[], query: string): T[] {
+/** Whether `text` has every word of `query`, in any order, any case (an empty query matches everything). */
+export function matches(text: string, query: string): boolean {
 	const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-	if (!words.length) return [...options];
-	return options.filter((o) => {
-		const text = `${o.label} ${o.value}`.toLowerCase();
-		return words.every((w) => text.includes(w));
-	});
+	const lower = text.toLowerCase();
+	return words.every((w) => lower.includes(w));
 }
 
-/** The choice the arrow keys go to next from `at` (-1: none yet), staying inside the list. */
-export const stepped = (at: number, by: 1 | -1, count: number) => (count ? Math.min(Math.max(at + by, 0), count - 1) : -1);
+/** The choices a search leaves: every word typed is in the label (or the value), in any order, any case. */
+export function searched<T extends PickOption>(options: readonly T[], query: string): T[] {
+	return options.filter((o) => matches(`${o.label} ${o.value}`, query));
+}
+
+/** Command's filter for PickSelect's long list (UI kit, step 7c): the same rule as `searched`, over an item's value
+ *  and its keywords (the label). Command keeps the items scoring above 0. */
+export const commandFilter = (value: string, search: string, keywords: string[] = []) =>
+	matches(`${keywords.join(' ')} ${value}`, search) ? 1 : 0;

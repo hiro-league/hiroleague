@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { searched, stepped } from './pick';
+import { commandFilter, searched } from './pick';
 
 const STREAMS = [
 	{ value: 'state:front_door|cam3', label: 'cam3 Door state' },
@@ -20,10 +20,10 @@ describe('a dropdown search', () => {
 		expect(searched(STREAMS, 'front_door').map((o) => o.label)).toEqual(['cam3 Door state']);
 	});
 
-	it('moves through the list with the arrow keys and stops at its ends', () => {
-		expect(stepped(-1, 1, 3)).toBe(0);
-		expect(stepped(2, 1, 3)).toBe(2);
-		expect(stepped(0, -1, 3)).toBe(0);
-		expect(stepped(0, 1, 0)).toBe(-1);
+	it("gives Command's list the same rule, over the value and the label", () => {
+		expect(commandFilter('state:front_door|cam3', 'door STATE', ['cam3 Door state'])).toBe(1);
+		expect(commandFilter('room|mark|cam3', 'mark presence', ['Room Presence: Mark in Door Cam'])).toBe(1);
+		expect(commandFilter('room|mark|cam3', 'garage', ['Room Presence: Mark in Door Cam'])).toBe(0);
+		expect(commandFilter('anything', '')).toBe(1);
 	});
 });

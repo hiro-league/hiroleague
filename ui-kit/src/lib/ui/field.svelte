@@ -3,9 +3,10 @@
 	// behind a small "?" beside the label; `onreset` adds "back to the default", shown while the field is pointed at
 	// or focused; `error` is what is wrong with the value, under the control; `anchor` tags the field so a search
 	// can scroll to it (a settings page's "find a setting").
-	// UI kit, step 2: from the HiroLeague admin's FormField (hint, help tip, reset to default, search anchor).
+	// UI kit, step 7c: built on shadcn-svelte's Field (its label, description and error, and data-invalid while there
+	// is an error); the help tip and "back to the default" beside the label are the kit's.
 	import type { Snippet } from 'svelte';
-	import { Label } from '$kit/components/ui/label/index.js';
+	import * as Field from '$kit/components/ui/field/index.js';
 	import HelpTip from '$kit/ui/help-tip.svelte';
 	import ResetButton from '$kit/ui/reset-button.svelte';
 	import { cn } from '$kit/utils';
@@ -24,10 +25,12 @@
 	let { label = '', for: htmlFor, hint, help, error, onreset, anchor, class: className, children }: Props = $props();
 </script>
 
-<div class={cn('group/field grid gap-2', className)} data-field-anchor={anchor}>
+<!-- w-auto: shadcn's Field is w-full; the kit's sized to its content inside a row (a toolbar's filters) and fills a column
+     anyway (a block flex box fills its parent), as the grid it was before 7c did -->
+<Field.Field class={cn('w-auto', className)} data-field-anchor={anchor} data-invalid={error ? true : undefined}>
 	{#if label}
 		<div class="flex items-center gap-1.5">
-			<Label for={htmlFor}>{label}</Label>
+			<Field.Label for={htmlFor}>{label}</Field.Label>
 			{#if help}<HelpTip {label} text={help} />{/if}
 			{#if onreset}
 				<ResetButton
@@ -39,6 +42,6 @@
 		</div>
 	{/if}
 	{@render children()}
-	{#if error}<p class="text-xs text-destructive" role="alert">{error}</p>
-	{:else if hint}<p class="text-xs text-muted-foreground">{hint}</p>{/if}
-</div>
+	{#if error}<Field.Error class="text-xs">{error}</Field.Error>
+	{:else if hint}<Field.Description class="text-xs">{hint}</Field.Description>{/if}
+</Field.Field>
