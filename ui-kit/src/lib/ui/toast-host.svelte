@@ -1,29 +1,45 @@
 <script lang="ts">
 	// Where toasts show (toast.svelte.ts): the bottom of the window, in the middle, clear of the error bar's corner.
 	// Mounted once, in the shell.
-	import { CircleCheck, Info, TriangleAlert, X } from '@lucide/svelte';
+	// UI kit, step 7b: shadcn-svelte's Sonner draws them. The kit's toast store still decides what shows and for how
+	// long (the same words once, at most three, errors longer, the app's quiet rule), so Sonner is told to keep each
+	// toast until the store lets it go; closing one in Sonner lets it go in the store too.
+	import { toast as sonner } from 'svelte-sonner';
+	import { Toaster } from '$kit/components/ui/sonner/index.js';
 	import { toast } from './toast.svelte';
 
 	const TONE = {
-		success: 'border-success/40 [&_[data-icon]]:text-success',
-		error: 'border-destructive/50 [&_[data-icon]]:text-destructive',
-		warning: 'border-warning/50 [&_[data-icon]]:text-warning',
-		info: 'border-primary/40 [&_[data-icon]]:text-primary'
+		success: 'border-success/40! [&_[data-icon]]:text-success',
+		error: 'border-destructive/50! [&_[data-icon]]:text-destructive',
+		warning: 'border-warning/50! [&_[data-icon]]:text-warning',
+		info: 'border-primary/40! [&_[data-icon]]:text-primary'
 	} as const;
+
+	const shown = new Set<number>(); // the store's ids Sonner shows now (not state: only the effect reads it)
+
+	$effect(() => {
+		const now = new Set(toast.list.map((t) => t.id));
+		for (const id of shown) {
+			if (!now.has(id)) {
+				shown.delete(id);
+				sonner.dismiss(id);
+			}
+		}
+		for (const t of toast.list) {
+			if (shown.has(t.id)) continue;
+			shown.add(t.id);
+			sonner[t.kind](t.message, {
+				id: t.id,
+				duration: Number.POSITIVE_INFINITY,
+				closeButton: true,
+				onDismiss: () => toast.dismiss(t.id)
+			});
+		}
+	});
 </script>
 
-{#if toast.list.length}
-	<div class="pointer-events-none fixed bottom-4 left-1/2 z-[60] grid w-[min(26rem,calc(100vw-2rem))] -translate-x-1/2 gap-2">
-		{#each toast.list as t (t.id)}
-			{@const Icon = t.kind === 'success' ? CircleCheck : t.kind === 'info' ? Info : TriangleAlert}
-			<div
-				class={['pointer-events-auto flex items-start gap-2.5 rounded-lg border bg-popover p-3 text-sm text-popover-foreground shadow-lg', TONE[t.kind]]}
-				role={t.kind === 'error' ? 'alert' : 'status'}
-			>
-				<Icon data-icon class="mt-0.5 size-4 shrink-0" />
-				<div class="min-w-0 flex-1 break-words">{t.message}</div>
-				<button type="button" class="text-muted-foreground hover:text-foreground" aria-label="Dismiss" onclick={() => toast.dismiss(t.id)}><X class="size-4" /></button>
-			</div>
-		{/each}
-	</div>
-{/if}
+<Toaster
+	position="bottom-center"
+	visibleToasts={3}
+	toastOptions={{ classes: { success: TONE.success, error: TONE.error, warning: TONE.warning, info: TONE.info } }}
+/>
