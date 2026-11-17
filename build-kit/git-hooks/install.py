@@ -20,10 +20,13 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 ROOT = Path(os.environ.get("HIRO_ROOT", r"C:\hiro"))
-REPOS = ["hiroleague", "homehiro", "nethiro", "trainhiro", "studyhiro", "codehiro", "aicam", "hiro-docs"]
+# Every repo an environment holds, as hiro-work lists them: the core, the apps of build-kit/work/apps.toml, aicam, hiro-docs.
+_APPS = tomllib.loads((Path(__file__).resolve().parents[1] / "work" / "apps.toml").read_text(encoding="utf-8"))["app"]
+REPOS = ["hiroleague", *(a["repo"] for a in _APPS), "aicam", "hiro-docs"]
 HOOKS = (ROOT / "env0" / "hiroleague" / "build-kit" / "git-hooks").as_posix()
 
 

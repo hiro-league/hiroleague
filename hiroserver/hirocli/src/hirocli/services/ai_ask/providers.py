@@ -66,6 +66,10 @@ class ProviderCall:
     wait: bool = True
     workspace_path: Path = Path(".")  # Part B: plan tools keep their login under the workspace
     line: str = ""  # Part B: the plan tool's line ("" = waiting asks; else the app's own)
+    # ai.chat: the conversation ([{role, content, tool_calls?, tool_call_id?}]) and the tools the model may call;
+    # None = one prompt (an ai.ask).
+    messages: list[dict[str, Any]] | None = None
+    tools: list[dict[str, Any]] | None = None
 
 
 @dataclass
@@ -78,6 +82,8 @@ class ProviderResult:
     estimate: float | None = None  # plan tools: what it would cost on an API key
     # Part B: Codex reports only a total (in and out are 0); None = tokens_in + tokens_out.
     tokens_total: int | None = None
+    # ai.chat: the reply as a message, {content, tool_calls: [{id, name, args}]}
+    message: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +183,8 @@ class ChatModelProvider:
         if call.sound is not None and not target.sound:
             raise ProviderFailed(f"{target.model_id} can't listen to sound: pick a Gemini profile")
         model = self._build(call)
+        if call.messages is not None:
+            return await self._chat(call, model)
         method = structured_output_method(model)
         prompt = call.prompt
         if call.schema is not None and method == "json_mode":
@@ -203,6 +211,49 @@ class ChatModelProvider:
         text = _answer_text(raw, parsed, call.schema is not None, target)
         cost = self._cost(target, tokens_in, tokens_out, cached)
         return ProviderResult(text=text, tokens_in=tokens_in, tokens_out=tokens_out, cost=cost, model=target.model_name)
+
+    async def _chat(self, call: ProviderCall, model: Any) -> ProviderResult:
+        """ai.chat: the conversation as it was sent, the tools bound, the schema (if any) enforced."""
+        target = call.target
+        messages = _chat_messages(call.messages or [])
+        try:
+            if call.schema is not None:
+                method = structured_output_method(model)
+                if method == "json_mode":
+                    # JSON mode keeps the answer JSON but never sees the schema: say it in the last message.
+                    messages.append(_human(f"Answer with JSON only, matching this JSON schema:\n{json.dumps(call.schema)}"))
+                runnable = model.with_structured_output(
+                    _titled(call.schema), include_raw=True, **({"method": method} if method else {})
+                )
+                out = await runnable.ainvoke(messages)
+                raw, parsed = out.get("raw"), out.get("parsed")
+            else:
+                runnable = model.bind_tools([_openai_tool(t) for t in call.tools]) if call.tools else model
+                raw, parsed = await runnable.ainvoke(messages), None
+        except Exception as exc:  # the provider's own error (key, quota, 4xx/5xx, connection)
+            raise ProviderFailed(f"{target.provider_label}: {type(exc).__name__}: {str(exc)[:300]}") from exc
+        tokens_in, tokens_out, cached = _usage(raw)
+        tool_calls = [
+            {"id": str(c.get("id") or ""), "name": str(c.get("name") or ""), "args": dict(c.get("args") or {})}
+            for c in (getattr(raw, "tool_calls", None) or [])
+        ]
+        content = _message_text(raw)
+        if call.schema is not None:
+            # The structured answer, as an ai.ask's (a model whose JSON didn't parse is read from its text).
+            text = _answer_text(raw, _plain(parsed), True, target)
+        elif not content and not tool_calls:
+            raise ProviderFailed(f"{target.model_id} gave no answer")
+        else:
+            text = content
+        cost = self._cost(target, tokens_in, tokens_out, cached)
+        return ProviderResult(
+            text=text,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            cost=cost,
+            model=target.model_name,
+            message={"content": content if call.schema is None else text, "tool_calls": tool_calls},
+        )
 
     def _build(self, call: ProviderCall) -> Any:
         profile = call.profile
@@ -263,6 +314,45 @@ def _image_part(provider_id: str, b64: str, detail: str) -> dict[str, Any]:
     if provider_id == "openai":
         return {"type": "image_url", "image_url": {"url": url, "detail": OPENAI_DETAIL.get(detail, "low")}}
     return {"type": "image_url", "image_url": {"url": url}}
+
+
+def _human(text: str) -> Any:
+    from langchain_core.messages import HumanMessage
+
+    return HumanMessage(content=text)
+
+
+def _chat_messages(messages: list[dict[str, Any]]) -> list[Any]:
+    """ai.chat's messages (checked by params.py) as LangChain's."""
+    from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
+
+    out: list[Any] = []
+    for m in messages:
+        role, content = m["role"], m.get("content") or ""
+        if role == "system":
+            out.append(SystemMessage(content=content))
+        elif role == "user":
+            out.append(_human(content))
+        elif role == "assistant":
+            calls = [{"id": c["id"], "name": c["name"], "args": c.get("args") or {}} for c in m.get("tool_calls") or []]
+            out.append(AIMessage(content=content, tool_calls=calls))
+        else:  # "tool"
+            out.append(ToolMessage(content=content, tool_call_id=m["tool_call_id"]))
+    return out
+
+
+def _openai_tool(tool: dict[str, Any]) -> dict[str, Any]:
+    """An ai.chat tool ({name, description, parameters}) in the function-calling shape every provider binds."""
+    return {
+        "type": "function",
+        "function": {"name": tool["name"], "description": tool.get("description") or "", "parameters": tool["parameters"]},
+    }
+
+
+def _plain(parsed: Any) -> Any:
+    """A structured answer as JSON-ready data (a pydantic model when the provider built one)."""
+    dump = getattr(parsed, "model_dump", None)
+    return dump(mode="json") if callable(dump) else parsed
 
 
 def _titled(schema: dict[str, Any]) -> dict[str, Any]:

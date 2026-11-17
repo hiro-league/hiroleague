@@ -80,6 +80,10 @@ class AskRequest:
     # A folder for a plan tool to read (Claude Code: Read, Glob, Grep; Codex: read-only), already checked against
     # what the extension may name (ai_ask/folders.py). "" = none: the tool gets its own empty folder.
     folder: str = ""
+    # ai.chat: a conversation instead of one prompt ([{role, content, tool_calls?, tool_call_id?}], checked by
+    # params.py), and the tools the model may call ([{name, description, parameters}]). None = an ai.ask.
+    messages: list[dict[str, Any]] | None = None
+    tools: list[dict[str, Any]] | None = None
 
     @property
     def source(self) -> str:
@@ -107,9 +111,14 @@ class AskAnswer:
     estimate: float | None
     notes: list[str]
     tries: list[dict[str, Any]]
+    # ai.chat: the model's reply as a message, {content, tool_calls: [{id, name, args}]}; None for an ai.ask.
+    message: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        out = asdict(self)
+        if self.message is None:
+            del out["message"]
+        return out
 
 
 @dataclass
@@ -225,6 +234,10 @@ class AskRunner:
         if request.local_only and target.kind != "local":
             walk.skip(pid, target, "not a local model, and this ask allows local models only", label=label)
             return None
+        if request.messages is not None and target.kind == "plan":
+            # A plan tool takes one prompt: it can't hold a conversation or call the app's tools (ai.chat).
+            walk.skip(pid, target, "a plan tool can't take a conversation or tools", label=label)
+            return None
         if target.not_ready:
             walk.fail(pid, target, target.not_ready, 0, label=label)
             return None
@@ -240,7 +253,9 @@ class AskRunner:
                 walk.skip(pid, target, why, label=label)
                 return None
 
-        question = f"{request.prompt}\n\n{profile.instructions.strip()}" if profile.instructions.strip() else request.prompt
+        # ai.chat's messages hold the whole prompt: the profile gives its model and tuning, not its instructions.
+        has_instructions = bool(profile.instructions.strip()) and request.messages is None
+        question = f"{request.prompt}\n\n{profile.instructions.strip()}" if has_instructions else request.prompt
         default = FOLDER_TIMEOUT_S if request.folder and target.kind == "plan" else DEFAULT_TIMEOUT_S[target.kind]
         timeout = min(request.timeout or default, MAX_TIMEOUT_S)
         call = ProviderCall(
@@ -259,6 +274,8 @@ class AskRunner:
             workspace_path=self._workspace_path,
             # Part B: a plan tool's line — the waiting asks share one; an app (wait false) has its own.
             line="" if request.wait else (request.use or request.who or "app"),
+            messages=request.messages,
+            tools=request.tools,
         )
         started = time.monotonic()
         try:
@@ -328,6 +345,7 @@ class AskRunner:
             estimate=result.estimate,
             notes=walk.notes,
             tries=walk.tries,
+            message=result.message,
         )
 
     async def _answer(
@@ -399,7 +417,12 @@ def _usage_call(
 
 
 def _check_request(request: AskRequest) -> None:
-    if not request.prompt.strip():
+    if request.messages is not None:
+        if not request.messages:
+            raise AskError(AI_ERROR_INVALID, "The conversation has no messages.")
+        if request.pictures or request.sound is not None or request.folder:
+            raise AskError(AI_ERROR_INVALID, "A conversation can't carry pictures, sound or a folder.")
+    elif not request.prompt.strip():
         raise AskError(AI_ERROR_INVALID, "The ask has no prompt.")
     if request.detail not in DETAILS:
         raise AskError(AI_ERROR_INVALID, f"detail must be one of {', '.join(DETAILS)}.")

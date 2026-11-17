@@ -12,6 +12,9 @@ core takes the profile its Uses page gives the task's use (`<extension>:<use>`, 
   its budget (a copy waits, then asks again), `Busy` (409) for an app's question at a busy tool, `Unavailable` (503)
   when the app isn't connected to the core or no profile is set for the use, `LLMError` (502) when the core tried
   and every profile failed (its message says why) or didn't answer in time.
+
+`chat()` is `ask()` for a conversation (`ai.chat`): the messages, the tools the model may call, or a schema; it answers
+the next message (its words or its tool calls), kept in the same log and failing the same ways.
 """
 
 import base64
@@ -31,6 +34,7 @@ from . import Detail, LLMError, core_ai, recorder
 log = identity.logger("llm")
 
 AI_ASK = "ai.ask"  # the core's request (extensions only)
+AI_CHAT = "ai.chat"  # a conversation whose model may call the app's tools (extensions only)
 def _use_names() -> dict[str, str]:
     """The kinds of use that ask an AI, as declared to the core (Extension.uses): id → name."""
     return {u.id: u.name for u in ext().uses}
@@ -183,6 +187,71 @@ async def _ask(profile_id: str | None, use: str, prompt: str, pictures: list[byt
     a = asked(answer)
     _record(a, answer.get("tries"), prompt, pictures, schema, detail)
     return a
+
+
+@dataclass(frozen=True)
+class Chatted:
+    """A conversation's next message, and the answer's profile, tokens and cost. `content` is the model's words (the JSON
+    answer when a schema was given); `tool_calls` the tools it calls, [{id, name, args}], before it answers."""
+
+    asked: Asked
+    content: str
+    tool_calls: list[dict[str, Any]]
+
+
+async def chat(use: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
+               schema: dict | None = None, timeout: float | None = None, profile_id: str | None = None) -> Chatted:
+    """One turn of a conversation, answered by the HiroLeague core (`ai.chat`): `messages` [{role: system|user|assistant|
+    tool, content, tool_calls?, tool_call_id?}], the `tools` the model may call [{name, description, parameters}], or a
+    `schema` for a JSON answer (not both). The profile picked for `use` answers with its model and tuning; the messages
+    are the whole prompt. Errors as `ask()`'s."""
+    if not link.client.connected:  # checked first: nothing was asked, nothing to log
+        raise Unavailable(f"Not asked: {core_ai._no_core()}")
+    if recorder.active():
+        return await _chat(use, messages, tools, schema, timeout, profile_id)
+    async with recorder.recording("Other", "Asked without a label"):  # kept in Logs → LLM requests all the same
+        return await _chat(use, messages, tools, schema, timeout, profile_id)
+
+
+async def _chat(use: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None, schema: dict | None,
+                timeout: float | None, profile_id: str | None) -> Chatted:
+    params: dict[str, Any] = {
+        "use": use, "messages": messages,
+        **({"tools": tools} if tools else {}),
+        **({"schema": schema} if schema is not None else {}),
+        **({"profile": await core_ai.resolved(profile_id)} if profile_id else {}),
+        **({"timeout": timeout} if timeout else {}),
+        **({"label": label} if (label := recorder.usage_label()) else {}),
+    }
+    prompt = _conversation_text(messages)  # what Logs → LLM requests shows of it
+    wait = (timeout or ASK_TIMEOUT) + SLACK
+    started, clock = calls.start(), time.monotonic()
+    try:
+        answer = await link.client.request(AI_CHAT, params, timeout=wait)
+    except ExtensionRequestError as exc:
+        error = _refused(exc, use, wait)
+        if isinstance(error, LLMError):  # the core tried (or may have): kept in the requests log as a failed try
+            t = recorder.trying("HiroLeague", "", prompt, [], schema or {}, None, None, billing="api")
+            t.failed(error, int((time.monotonic() - clock) * 1000))
+        raise error from exc
+    calls.done(log, f"HiroLeague: {AI_CHAT} ({_use_names().get(use, use)})", started, timeout=wait, paid=True)
+    a = asked(answer)
+    message = answer.get("message") if isinstance(answer.get("message"), dict) else {}
+    calls_made = [c for c in message.get("tool_calls") or [] if isinstance(c, dict) and c.get("name")]
+    _record(a, answer.get("tries"), prompt, [], schema or {}, "medium")
+    return Chatted(asked=a, content=str(message.get("content") if "content" in message else a.text),
+                   tool_calls=[{"id": str(c.get("id") or ""), "name": str(c["name"]), "args": dict(c.get("args") or {})}
+                               for c in calls_made])
+
+
+def _conversation_text(messages: list[dict[str, Any]]) -> str:
+    """A conversation as the requests log keeps a prompt: one block per message, its role first (pure)."""
+    blocks = []
+    for m in messages:
+        calls_made = ", ".join(str(c.get("name")) for c in m.get("tool_calls") or [] if isinstance(c, dict))
+        head = f"[{m.get('role', '?')}]" + (f" calls {calls_made}" if calls_made else "")
+        blocks.append(f"{head}\n{m.get('content') or ''}".rstrip())
+    return "\n\n".join(blocks)
 
 
 def exists(profile_id: str) -> bool:

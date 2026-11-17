@@ -164,6 +164,14 @@ EVENT_PEOPLE_CHANGED: str = "people.changed"
 #   ai.profiles  extension → core, {} → {"profiles": [...], "uses": {use id: profile id | None}}.
 #   Errors (the response's error code): no_profile, budget, busy, failed, invalid.
 METHOD_AI_ASK: str = "ai.ask"
+#   ai.chat      extension → core, a conversation for a model that may call tools: {use, profile?, messages:
+#                [{role: system|user|assistant|tool, content, tool_calls? (assistant: [{id, name, args}]),
+#                tool_call_id? (tool)}], tools?: [{name, description, parameters (JSON schema)}], schema?, timeout?,
+#                label?} → ai.ask's answer plus message: {content, tool_calls: [{id, name, args}]} (`text` is the
+#                content, or the JSON answer with a schema). The profile's model and tuning answer, not its
+#                instructions (the messages hold the whole prompt); a plan profile (Claude Code, Codex) is passed
+#                over: it can't take a conversation or tools. Errors as ai.ask's.
+METHOD_AI_CHAT: str = "ai.chat"
 METHOD_AI_PROFILES: str = "ai.profiles"
 AI_ERROR_NO_PROFILE: str = "no_profile"  # no profile given and none picked for the use
 AI_ERROR_BUDGET: str = "budget"          # every profile in the chain is over its limit

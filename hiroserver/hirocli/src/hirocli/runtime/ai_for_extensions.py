@@ -1,11 +1,12 @@
-"""AI asks for extensions — the ``ai.ask`` and ``ai.profiles`` requests (Phase 7a).
+"""AI asks for extensions — the ``ai.ask``, ``ai.chat`` and ``ai.profiles`` requests (Phase 7a).
 
 An extension (HomeHiro first) asks the core's AI instead of keeping its own keys, models and
 limits: ``ai.ask`` names one of the extension's declared uses (``ExtensionInfo.uses``), and the
 core asks the profile the admin picked for ``"<extension>:<use>"`` (or the profile the ask names:
 a copy's own pick), walking its fallbacks (services/ai_ask). ``ai.profiles`` lists the profiles
-and this extension's use → profile map for its pickers. Extensions only: the app can't spend the
-home's AI budget by being connected.
+and this extension's use → profile map for its pickers. ``ai.chat`` is ``ai.ask`` for a conversation
+whose model may call the extension's tools (EvalHiro runs Hiro's recall agent through it): the same profile
+walk, limits and AI usage. Extensions only: the app can't spend the home's AI budget by being connected.
 
 Errors answer the contract's codes (``no_profile``, ``budget``, ``busy``, ``failed``, ``invalid``)
 as the response's error code, through ``RequestRefused``.
@@ -18,7 +19,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from hiro_channel_sdk.constants import AI_ERROR_INVALID, METHOD_AI_ASK, METHOD_AI_PROFILES
+from hiro_channel_sdk.constants import AI_ERROR_INVALID, METHOD_AI_ASK, METHOD_AI_CHAT, METHOD_AI_PROFILES
 from hiro_commons.log import Logger
 
 from ..domain.credential_store import CredentialStore
@@ -27,7 +28,7 @@ from ..domain.people import get_person
 from ..domain.workspace import workspace_id_for_path
 from ..services.ai_ask import AskError, extension_use_map, get_ask_runner, profile_rows
 from ..services.ai_ask.folders import check_folder
-from ..services.ai_ask.params import ask_request_from_params
+from ..services.ai_ask.params import ask_request_from_params, chat_request_from_params
 from .request_handler import EXTENSIONS_ONLY, RequestContext, RequestRefused
 
 log = Logger.get("AI.ASK")
@@ -76,6 +77,19 @@ async def handle_ai_ask(params: dict[str, Any], ctx: RequestContext) -> dict[str
     return answer.to_dict()
 
 
+async def handle_ai_chat(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
+    name = await _caller_name(ctx)
+    use = params.get("use")
+    if not isinstance(use, str) or not use.strip():
+        raise RequestRefused(AI_ERROR_INVALID, "use is required (one of the extension's declared uses).")
+    try:
+        request = chat_request_from_params(params, use_key=f"{name}:{use.strip()}", who=name)
+        answer = await get_ask_runner(ctx.workspace_path).ask(request, prefs=ctx.server_ctx.preferences.current)
+    except AskError as exc:
+        raise RequestRefused(exc.code, exc.message) from exc
+    return answer.to_dict()
+
+
 async def handle_ai_profiles(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
     del params
     name = await _caller_name(ctx)
@@ -92,5 +106,6 @@ def _profile_rows(ctx: RequestContext) -> list[dict[str, Any]]:
 
 AI_REQUEST_HANDLERS: tuple[tuple[str, Any, frozenset[str]], ...] = (
     (METHOD_AI_ASK, handle_ai_ask, EXTENSIONS_ONLY),
+    (METHOD_AI_CHAT, handle_ai_chat, EXTENSIONS_ONLY),
     (METHOD_AI_PROFILES, handle_ai_profiles, EXTENSIONS_ONLY),
 )

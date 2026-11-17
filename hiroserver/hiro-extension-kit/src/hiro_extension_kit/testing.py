@@ -452,6 +452,14 @@ def ai_answer() -> dict[str, Any]:
     return copy.deepcopy(_AI_ANSWER)
 
 
+def ai_chat_answer(content: str = "", tool_calls: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """`ai.chat`'s answer: `ai_answer()`'s, with the next message (its words, or the tools it calls)."""
+    answer = copy.deepcopy(_AI_ANSWER)
+    answer["text"] = content
+    answer["message"] = {"content": content, "tool_calls": copy.deepcopy(tool_calls or [])}
+    return answer
+
+
 def ai_profiles(uses: dict[str, str | None]) -> dict[str, Any]:
     """`ai.profiles`' answer: three profiles, and which one each of the app's uses (`"<extension>:<use>"`) points at."""
     return {"profiles": copy.deepcopy(_AI_PROFILES), "uses": dict(uses)}

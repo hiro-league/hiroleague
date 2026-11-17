@@ -1,4 +1,4 @@
-"""Reading an ``ai.ask``'s params (wire JSON) into an ``AskRequest`` — refusals are ``invalid``."""
+"""Reading an ``ai.ask``'s or ``ai.chat``'s params (wire JSON) into an ``AskRequest`` — refusals are ``invalid``."""
 
 from __future__ import annotations
 
@@ -88,3 +88,80 @@ def ask_request_from_params(params: dict[str, Any], *, use_key: str | None, who:
         label=(label or "").strip(),
         folder=(folder or "").strip(),  # not yet checked: ai_for_extensions resolves it against what is allowed
     )
+
+
+ROLES = ("system", "user", "assistant", "tool")
+MAX_MESSAGES = 200  # a recall loop is a few dozen turns at most
+MAX_TOOLS = 32
+
+
+def chat_request_from_params(params: dict[str, Any], *, use_key: str | None, who: str) -> AskRequest:
+    """``ai.chat``'s params → an ``AskRequest`` carrying the conversation and the tools (refusals are ``invalid``)."""
+    messages = [_message(m, i) for i, m in enumerate(_listed(params.get("messages"), "messages", MAX_MESSAGES))]
+    tools = [_tool(t, i) for i, t in enumerate(_listed(params.get("tools") or [], "tools", MAX_TOOLS))]
+    schema = params.get("schema")
+    if schema is not None and not isinstance(schema, dict):
+        raise AskError(AI_ERROR_INVALID, "schema must be a JSON schema object.")
+    if schema is not None and tools:
+        raise AskError(AI_ERROR_INVALID, "A conversation asks for tools or for a schema, not both.")
+    timeout = params.get("timeout")
+    if timeout is not None and (isinstance(timeout, bool) or not isinstance(timeout, (int, float))):
+        raise AskError(AI_ERROR_INVALID, "timeout must be a number of seconds.")
+    profile = params.get("profile")
+    if profile is not None and not isinstance(profile, str):
+        raise AskError(AI_ERROR_INVALID, "profile must be a profile id.")
+    label = params.get("label")
+    if label is not None and (not isinstance(label, str) or len(label.strip()) > MAX_LABEL):
+        raise AskError(AI_ERROR_INVALID, f"label must be text of at most {MAX_LABEL} characters.")
+    return AskRequest(
+        prompt="",
+        use=use_key,
+        profile_id=profile or None,
+        schema=schema,
+        timeout=float(timeout) if timeout is not None else None,
+        who=who,
+        label=(label or "").strip(),
+        messages=messages,
+        tools=tools or None,
+    )
+
+
+def _listed(value: Any, what: str, most: int) -> list[Any]:
+    if not isinstance(value, list) or (what == "messages" and not value):
+        raise AskError(AI_ERROR_INVALID, f"{what} must be a list" + (" of at least one message." if what == "messages" else "."))
+    if len(value) > most:
+        raise AskError(AI_ERROR_INVALID, f"At most {most} {what} in one conversation.")
+    return value
+
+
+def _message(m: Any, i: int) -> dict[str, Any]:
+    where = f"messages[{i}]"
+    if not isinstance(m, dict) or m.get("role") not in ROLES:
+        raise AskError(AI_ERROR_INVALID, f"{where} needs a role: one of {', '.join(ROLES)}.")
+    content = m.get("content", "")
+    if not isinstance(content, str):
+        raise AskError(AI_ERROR_INVALID, f"{where}.content must be text.")
+    out: dict[str, Any] = {"role": m["role"], "content": content}
+    if m["role"] == "assistant" and m.get("tool_calls"):
+        calls = m["tool_calls"]
+        if not isinstance(calls, list) or not all(
+            isinstance(c, dict) and isinstance(c.get("id"), str) and isinstance(c.get("name"), str)
+            and isinstance(c.get("args", {}), dict) for c in calls
+        ):
+            raise AskError(AI_ERROR_INVALID, f"{where}.tool_calls must be [{{id, name, args}}].")
+        out["tool_calls"] = [{"id": c["id"], "name": c["name"], "args": c.get("args") or {}} for c in calls]
+    if m["role"] == "tool":
+        if not isinstance(m.get("tool_call_id"), str) or not m["tool_call_id"]:
+            raise AskError(AI_ERROR_INVALID, f"{where} answers a tool call: it needs its tool_call_id.")
+        out["tool_call_id"] = m["tool_call_id"]
+    return out
+
+
+def _tool(t: Any, i: int) -> dict[str, Any]:
+    if not (isinstance(t, dict) and isinstance(t.get("name"), str) and t["name"].strip()
+            and isinstance(t.get("parameters"), dict)):
+        raise AskError(AI_ERROR_INVALID, f"tools[{i}] needs a name and its parameters (a JSON schema).")
+    description = t.get("description", "")
+    if not isinstance(description, str):
+        raise AskError(AI_ERROR_INVALID, f"tools[{i}].description must be text.")
+    return {"name": t["name"].strip(), "description": description, "parameters": t["parameters"]}
