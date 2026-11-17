@@ -11,6 +11,7 @@ import json
 import math
 from typing import Any
 
+from hiro_memory.replies import usage_from_metadata
 from langchain_core.messages import AIMessage
 
 from .events import make_event
@@ -23,33 +24,6 @@ AGENT_TOOL_ARGS_MAX = 2000
 AGENT_TOOL_RESULT_MAX = 4000
 
 _MEMORY_TEXT_KEYS = ("memory", "text", "content", "data", "value")
-
-
-def normalize_reply_content(content: Any) -> str:
-    """Convert LangChain/provider message content into Hiro's plain-text body."""
-    if isinstance(content, str):
-        return content
-    if content is None:
-        return ""
-    if not isinstance(content, list):
-        return str(content)
-
-    parts: list[str] = []
-    for block in content:
-        if isinstance(block, str):
-            parts.append(block)
-            continue
-        if not isinstance(block, dict):
-            parts.append(str(block))
-            continue
-        text = block.get("text")
-        if isinstance(text, str):
-            parts.append(text)
-            continue
-        cv = block.get("content")
-        if isinstance(cv, str):
-            parts.append(cv)
-    return "\n".join(p for p in parts if p)
 
 
 def relevance_of(item: Any) -> float | None:
@@ -108,43 +82,6 @@ def llm_usage_payload(
     return payload
 
 
-def usage_from_metadata(raw: dict[str, Any]) -> dict[str, int]:
-    out: dict[str, int] = {}
-    for key in ("input_tokens", "output_tokens", "total_tokens"):
-        value = _int_token(raw.get(key))
-        if value is not None:
-            out[key] = value
-
-    input_details = raw.get("input_token_details")
-    if isinstance(input_details, dict):
-        cached = _int_token(input_details.get("cache_read"))
-        if cached is not None:
-            out["cached_input_tokens"] = cached
-
-    output_details = raw.get("output_token_details")
-    if isinstance(output_details, dict):
-        reasoning = _int_token(output_details.get("reasoning"))
-        if reasoning is not None:
-            out["reasoning_tokens"] = reasoning
-
-    return out
-
-
-def _int_token(value: Any) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float) and value.is_integer():
-        return int(value)
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return None
-    return None
-
-
 def estimate_text_tokens(text: str) -> int:
     stripped = str(text or "")
     if not stripped:
@@ -161,7 +98,7 @@ def event_identity_from_state(state: dict[str, Any]) -> dict[str, Any]:
     """Standard event-payload identity fields (``inbound_id``/``chat_channel_id``/``character_id``)
     pulled from graph state or ``Send`` sub-state.
 
-    Distinct from :func:`hirocli.runtime.agent_graph.ledger.identity.identity_from_state`, which
+    Distinct from :func:`hiro_memory.ledger.identity.identity_from_state`, which
     resolves the broader ledger-row identity (``run_id``/``device_id``/``user_id``/``branch_index``
     from envelope + config + ``current_run`` fallback). The two return different shapes; keep the
     names disambiguated — a bare ``identity_from_state`` import is otherwise easy to confuse.

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
 
-from ..graph_kit import normalize_reply_content
+from hiro_memory.replies import normalize_reply_content
 
 
 def prepend_system(messages: list[AnyMessage], system_prompt: str | None) -> list[AnyMessage]:

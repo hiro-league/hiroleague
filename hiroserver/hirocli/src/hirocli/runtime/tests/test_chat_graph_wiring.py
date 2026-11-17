@@ -11,7 +11,8 @@ from hirocli.domain.data_store import ensure_data_db
 from hirocli.runtime.agent_graph import ChatAgentGraph, ChatGraphConfig
 from hirocli.runtime.preferences_runtime import WorkspacePreferencesRuntime
 from hirocli.runtime.tests.chat_graph_topology import chat_topology, load_topology_fixture
-from hirocli.runtime.tests.graph_fakes import FakeKnowledgeSubgraph, ScriptedChatModel, echo_tool, make_agent_services
+from hirocli.runtime.tests.graph_fakes import FakeKnowledgeSubgraph, echo_tool, make_agent_services
+from hiro_memory.testing import ScriptedChatModel
 
 _TOPOLOGY_COMBOS = (
     ("text_only", [], None),

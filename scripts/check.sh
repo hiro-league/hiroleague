@@ -17,9 +17,9 @@
 #   - build-kit: the shared build, check and deploy scripts read by bash (`bash -n`: no syntax error reaches a deploy);
 #   - build-kit: hiro-work's tests (build-kit/work: the environments' commands);
 #   - hiroserver: the pytest suite, one part per area of the uv workspace, each with the packages it depends on (the
-#     kit needs the SDK, which needs commons), so a change runs only the areas it reaches. The two big areas run on
-#     every core with pytest-xdist (scripts/run-tests.sh: Ctrl-C won't stop it, use Ctrl-Break or close the terminal;
-#     a running Hiro server may hold the venv's lock: `hiro stop` first).
+#     kit needs the SDK, which needs commons), so a change runs only the areas it reaches. The extension kit, the memory
+#     library (hiro-memory) and hirocli run on every core with pytest-xdist (scripts/run-tests.sh: Ctrl-C won't stop
+#     it, use Ctrl-Break or close the terminal; a running Hiro server may hold the venv's lock: `hiro stop` first).
 #
 # Without --all a part is skipped when its files are the same as on GitHub's dev (origin/dev), or as when it last
 # passed here. Files nothing here checks (device_apps, docs, *.md outside these folders...) never start a part.
@@ -54,10 +54,11 @@ part "hiroserver: commons and SDK tests" "hiroserver/hiro-commons hiroserver/hir
     "${REPO_ROOT}/scripts/run-tests.sh" -q hiro-commons hiro-channel-sdk
 part "hiroserver: extension kit tests" "hiroserver/hiro-extension-kit hiroserver/hiro-channel-sdk hiroserver/hiro-commons ${ws}" \
     "${REPO_ROOT}/scripts/run-tests.sh" -q -n auto hiro-extension-kit
+part "hiroserver: memory library tests" "hiroserver/hiro-memory hiroserver/hiro-commons ${ws}"     "${REPO_ROOT}/scripts/run-tests.sh" -q -n auto hiro-memory
 part "hiroserver: gateway and channels tests" "hiroserver/gateway hiroserver/channels hiroserver/hiro-channel-sdk hiroserver/hiro-commons ${ws}" \
     "${REPO_ROOT}/scripts/run-tests.sh" -q gateway channels
 # hirocli's tests also read the knowledge corpus in eval/
-part "hiroserver: hirocli tests" "hiroserver/hirocli hiroserver/hiroleague hiroserver/knowledge hiroserver/hiro-channel-sdk hiroserver/hiro-commons eval ${ws}" \
+part "hiroserver: hirocli tests" "hiroserver/hirocli hiroserver/hiroleague hiroserver/knowledge hiroserver/hiro-memory hiroserver/hiro-channel-sdk hiroserver/hiro-commons eval ${ws}" \
     "${REPO_ROOT}/scripts/run-tests.sh" -q -n auto hirocli
 
 # The core's tests run alone: onnxruntime's phantom Ctrl-C reaches every process in the console, and a Node check

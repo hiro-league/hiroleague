@@ -17,7 +17,8 @@ from hirocli.runtime.agent_graph.nodes.media import MediaNodes
 from hirocli.runtime.agent_graph.nodes.memory import MemoryNodes
 from hirocli.runtime.agent_graph.nodes.tts import TTSNodes
 from hirocli.runtime.preferences_runtime import WorkspacePreferencesRuntime
-from hirocli.runtime.tests.graph_fakes import ScriptedChatModel, make_agent_services
+from hirocli.runtime.tests.graph_fakes import make_agent_services
+from hiro_memory.testing import ScriptedChatModel
 
 MEDIA_NODE_LABELS = frozenset({"ingest", "stt", "vision", "gather", "media_failed"})
 CONTEXT_NODE_LABELS = frozenset({"trim_history", "context_build", "compose_context"})

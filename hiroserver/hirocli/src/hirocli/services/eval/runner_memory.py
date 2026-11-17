@@ -19,8 +19,8 @@ from typing import TYPE_CHECKING, Any
 from hiro_commons.log import Logger
 
 from hirocli.domain.events import get_domain_event_bus
-from hirocli.runtime.agent_graph.tracing import traced_run
-from hirocli.services.knowledge.constants import KNOWLEDGE_GRAPH_INGEST_COMPLETED
+from hiro_memory.tracing import traced_run
+from hiro_memory.graph.constants import KNOWLEDGE_GRAPH_INGEST_COMPLETED
 
 from hirocli.services.eval.constants import (
     EVAL_COMPLETED,
@@ -30,7 +30,7 @@ from hirocli.services.eval.constants import (
     EVAL_STARTED,
 )
 from hirocli.services.knowledge.converters import utc_now_iso
-from hirocli.services.knowledge.graph.group_scope import (
+from hiro_memory.graph.group_scope import (
     eval_memory_group_id,
     slug_group_part,
 )
@@ -213,11 +213,11 @@ async def _recall_via_agent(
     parallel question. When either is omitted (direct ``_memory_question`` test entry, etc.)
     this function loads them from the workspace as a fallback.
     """
-    from hirocli.services.memory.agent.presentation import (
+    from hiro_memory.conversation.agent.presentation import (
         accumulated_item_to_recall_row,
         present_accumulator,
     )
-    from hirocli.services.memory.agent.retriever import MemoryRetriever
+    from hiro_memory.conversation.agent.retriever import MemoryRetriever
 
     limits = retrieval_limits
     prompt_text = retrieval_prompt_text
@@ -285,7 +285,7 @@ def _persist_retrieval_trace(
     transcript = getattr(retrieval_result, "transcript", None) or []
     if not transcript:
         return
-    from hirocli.services.memory.agent.agent_trace import write_agent_retrieval_trace
+    from hiro_memory.conversation.agent.agent_trace import write_agent_retrieval_trace
 
     write_agent_retrieval_trace(
         workspace_path,
@@ -302,7 +302,7 @@ def _memory_recall_output_preview(
 ) -> str:
     """Ledger preview for the ``memory_recall`` node (P6)."""
     from hirocli.services.knowledge.ledger_runner import preview_answer
-    from hirocli.services.memory.agent.agent_trace import format_memory_recall_output_preview
+    from hiro_memory.conversation.agent.agent_trace import format_memory_recall_output_preview
 
     facts_preview = preview_answer(" | ".join(facts) or "(nothing recalled)")
     if retrieval_result is None:
@@ -351,7 +351,7 @@ async def _memory_question(
     The run holds a ``memory_recall`` node (graph-search spans), an ``eval_answer`` node, and an
     ``eval_judge`` node — all priced. Returns the unified row (``legs={'recall': {...}}`` with the
     model answer + verdict mark + recalled facts, plus ``gold``)."""
-    from hirocli.runtime.agent_graph.ledger import RunAccumulator, current_entry, current_run
+    from hiro_memory.ledger import RunAccumulator, current_entry, current_run
     from hirocli.services.eval.judge import (
         RecallRenderOptions,
         answer_from_context,
@@ -535,7 +535,7 @@ async def _memory_question(
         },
     }
     if retrieval_result is not None:
-        from hirocli.services.memory.agent.agent_trace import build_retrieval_loop_payload
+        from hiro_memory.conversation.agent.agent_trace import build_retrieval_loop_payload
 
         limits = retrieval_limits
         if limits is None:
@@ -751,7 +751,7 @@ async def run_memory_eval(
     supersession + the Kuzu write lock both require it).
 
     Returns the summary payload (also published as ``eval.completed``)."""
-    from hirocli.services.knowledge.graph.graphiti_corpus import load_episodes_file
+    from hiro_memory.graph.graphiti_corpus import load_episodes_file
 
     bus = get_domain_event_bus()
     rid = run_id or f"memeval-{uuid.uuid4()}"
@@ -765,9 +765,10 @@ async def run_memory_eval(
     # One ledger sink for the whole eval → the remember/build shows as ONE Graph Run and each
     # recall shows as its own retrieve run, mirroring the knowledge track (ingest run + per-question
     # answer runs). Lazy import keeps the ledger off this module's base import path.
-    from hirocli.runtime.agent_graph.ledger import LedgerSink, RunAccumulator, current_run
+    from hiro_memory.ledger import RunAccumulator, current_run
+    from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
 
-    sink = LedgerSink(workspace_path)
+    sink = workspace_ledger_sink(workspace_path)
     # Answer + judge each use their OWN eval model/tuning (separated — graph.eval.answer_* vs
     # graph.eval.judge_*). The judge is only built when requested.
     answer_model, answer_model_id = build_eval_answer_model(workspace_path)

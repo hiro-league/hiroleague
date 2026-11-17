@@ -9,9 +9,9 @@ from unittest.mock import patch
 import pytest
 
 from hirocli.domain.preferences import WorkspacePreferences
-from hirocli.services.knowledge.graph.graphiti_session import graphiti_session
-from hirocli.services.knowledge.graph.ledger_tracer import current_rerank_usage
-from hirocli.services.knowledge.graph.retrieval_trace import current_capture
+from hirocli.services.knowledge.graphiti_session import graphiti_session
+from hiro_memory.graph.ledger_tracer import current_rerank_usage
+from hiro_memory.graph.retrieval_trace import current_capture
 
 
 class _FakeService:
@@ -56,7 +56,7 @@ async def test_graphiti_session_yields_none_when_service_unavailable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        "hirocli.services.knowledge.graph.GraphitiMemoryService.from_preferences",
+        "hirocli.services.knowledge.graph_factory.build_graph_service",
         lambda *a, **k: None,
     )
     prefs = WorkspacePreferences()
@@ -70,7 +70,7 @@ async def test_graphiti_session_resets_context_vars_and_closes_on_success(tmp_pa
     fake = _FakeService()
     prefs = WorkspacePreferences()
     with patch(
-        "hirocli.services.knowledge.graph.GraphitiMemoryService.from_preferences",
+        "hirocli.services.knowledge.graph_factory.build_graph_service",
         return_value=fake,
     ):
         assert current_rerank_usage.get() is None
@@ -91,7 +91,7 @@ async def test_graphiti_session_closes_on_search_error(tmp_path: Path) -> None:
     fake = _BoomService()
     prefs = WorkspacePreferences()
     with patch(
-        "hirocli.services.knowledge.graph.GraphitiMemoryService.from_preferences",
+        "hirocli.services.knowledge.graph_factory.build_graph_service",
         return_value=fake,
     ):
         with pytest.raises(RuntimeError, match="search boom"):
@@ -108,7 +108,7 @@ async def test_graphiti_session_sets_capture_when_trace_enabled(tmp_path: Path) 
     prefs = WorkspacePreferences()
     prefs.graph.observability = "trace"
     with patch(
-        "hirocli.services.knowledge.graph.GraphitiMemoryService.from_preferences",
+        "hirocli.services.knowledge.graph_factory.build_graph_service",
         return_value=fake,
     ):
         async with graphiti_session(prefs, tmp_path) as session:

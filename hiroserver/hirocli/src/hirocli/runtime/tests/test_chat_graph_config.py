@@ -7,7 +7,7 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from hirocli.runtime.agent_graph.config import ChatGraphConfig
-from hirocli.runtime.tests.graph_fakes import ScriptedChatModel
+from hiro_memory.testing import ScriptedChatModel
 
 
 def test_construction_with_all_fields() -> None:

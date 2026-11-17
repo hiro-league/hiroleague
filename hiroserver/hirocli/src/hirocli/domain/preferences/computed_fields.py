@@ -68,7 +68,7 @@ def _graph_embedder_locked(
 ) -> bool:
     # Graph embedder locks independently, on graph (not knowledge) indexing — read from the
     # graph-indexed marker (the Kuzu DB can't be opened to count while the server holds it).
-    from hirocli.services.knowledge.graph.graph_index_marker import is_graph_indexed
+    from hiro_memory.graph.graph_index_marker import is_graph_indexed
 
     return is_graph_indexed(workspace_path)
 

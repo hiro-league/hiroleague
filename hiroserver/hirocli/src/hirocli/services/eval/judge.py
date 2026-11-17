@@ -40,7 +40,7 @@ from hirocli.services.eval.scoring import (
 
 # Recalled-context renderer moved to the shared memory module (P3) so runtime doesn't import eval;
 # re-exported below so eval's own callers (answer/judge/evidence, runner_memory, tests) are unchanged.
-from hirocli.services.memory.agent.presentation import RecallRenderOptions, format_recall_context
+from hiro_memory.conversation.agent.presentation import RecallRenderOptions, format_recall_context
 
 log = Logger.get("SVC.KNOWLEDGE.EVAL.JUDGE")
 
@@ -136,8 +136,8 @@ async def _ledger_llm_node(
 
     # Shared usage extractor: pulls cached-read + reasoning tokens (nested in *_token_details), not
     # just the flat input/output counts — so eval rows price like every other LLM node.
-    from hirocli.runtime.agent_graph.graph_kit import usage_from_metadata
-    from hirocli.runtime.agent_graph.ledger import current_entry
+    from hiro_memory.replies import usage_from_metadata
+    from hiro_memory.ledger import current_entry
 
     provider = _provider_prefix(model_id)
     # captures={"usage","decision"} is REQUIRED: without it to_row() blanks the entire usage +
@@ -200,7 +200,7 @@ async def answer_from_context(
     should decline (tests memory recall honestly)."""
     from langchain_core.messages import HumanMessage, SystemMessage
 
-    from hirocli.runtime.agent_graph.graph_kit import normalize_reply_content
+    from hiro_memory.replies import normalize_reply_content
 
     instr = (instructions or "").strip() or DEFAULT_MEMORY_EVAL_ANSWER_PROMPT
     recalled = format_recall_context(context, render) or "(no elements recalled)"

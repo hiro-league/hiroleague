@@ -4,7 +4,7 @@
 > experience up to the quality the **memory-eval** track already reaches.
 >
 > **Eval vs chat today:** the eval recall leg runs an **agentic retrieval loop**
-> (`services/memory/agent/`, `run_retrieval`); chat still does a single `memory.search()` + a flat
+> (`hiro_memory/conversation/agent/`, `run_retrieval`); chat still does a single `memory.search()` + a flat
 > `memory_block`. Code **takes precedence over docs**. Retrieval **config/engine is already shared**
 > across both (§1 Configuration) — the gaps are in **ingestion inputs** (§2 + the Ingestion design)
 > and **chat retrieval flow + output formatting** (the *Chat retrieval* section), not configuration.
@@ -31,7 +31,7 @@ searches across several turns, accumulates a deduped / time-sorted set, and prod
 (Exit B)) **and** the **accumulated recalled rows** — which eval's grounding answerer + judge
 consume.
 
-The loop is **already surface-neutral** (`services/memory/agent/`); the only eval-bound parts are
+The loop is **already surface-neutral** (`hiro_memory/conversation/agent/`); the only eval-bound parts are
 the prefs namespace (`graph.eval.*`), the call site (`runner_memory.py`), the eval-only verbatim
 fallback, and *who answers*. So adopting it in chat is **lift-and-share, not a rewrite**.
 
@@ -141,10 +141,10 @@ single-shot, so it ships safe and tunes up. Chat consumes **both outputs** — t
 
 | Eval component | File | In chat? |
 |---|---|---|
-| `run_retrieval` loop | `services/memory/agent/retrieval_agent.py` | **Reuse** — add chat flags: feed **history** + **disable verbatim fallback** (enable abstain) |
-| `SearchMemoryTool` | `services/memory/agent/search_tool.py` | **Reuse** as-is |
-| `Accumulator` | `services/memory/agent/accumulator.py` | **Reuse** as-is |
-| `present_accumulator` / `accumulated_item_to_recall_row` | `services/memory/agent/presentation.py` | **Reuse** as-is |
+| `run_retrieval` loop | `hiro_memory/conversation/agent/retrieval_agent.py` | **Reuse** — add chat flags: feed **history** + **disable verbatim fallback** (enable abstain) |
+| `SearchMemoryTool` | `hiro_memory/conversation/agent/search_tool.py` | **Reuse** as-is |
+| `Accumulator` | `hiro_memory/conversation/agent/accumulator.py` | **Reuse** as-is |
+| `present_accumulator` / `accumulated_item_to_recall_row` | `hiro_memory/conversation/agent/presentation.py` | **Reuse** as-is |
 | `format_recall_context` (rich render) | `services/eval/judge.py` | **Reuse** — chat renders memory with it (**replaces** the flat `memory_block`) |
 | Draft `answer_text` | `run_retrieval` output | **Consume** — inject as a `search_conclusion` block in the persona prompt |
 | History → loop input | knowledge does it; memory doesn't | **New** — feed recent messages so turn 1 does the rewrite (**subsumes I4**) |
@@ -152,7 +152,7 @@ single-shot, so it ships safe and tunes up. Chat consumes **both outputs** — t
 | Caps / model | `graph.eval.retrieval_agent`, `graph.eval.retrieval_model` | **Done (P1)** — chat got its **own** `memory.retrieval.{limits,model,tuning_profile}` (turns=4 default); the `memory.retrieval.*` split is no longer deferred |
 | Shared entrypoint | _does not exist yet_ | **New** small `MemoryRetriever` seam (eval + chat both call) |
 | Persona / answering prompt | `call_model` (`compose_context`) | **Update** to consume `search_conclusion` + rich facts (light grounding; retuned) |
-| Loop transcript + trajectory + preview | `services/memory/agent/agent_trace.py` (P6/P8/P9) | **Reuse** — pure over `RetrievalResult.transcript`; chat calls `write_agent_retrieval_trace` (**generalize** the `question_id` key → G3) + `format_memory_recall_output_preview` (G2) |
+| Loop transcript + trajectory + preview | `hiro_memory/conversation/agent/agent_trace.py` (P6/P8/P9) | **Reuse** — pure over `RetrievalResult.transcript`; chat calls `write_agent_retrieval_trace` (**generalize** the `question_id` key → G3) + `format_memory_recall_output_preview` (G2) |
 | `memory_recall` ledger node | `_write_recall_usage` + `@graph_logged` wrapper | **Reuse** — chat names its recall node `memory_recall` w/ `captures={"usage","decision"}`; usage lands automatically (G1) |
 | Graph-Runs → detail bridge | `store.find_row_by_run_id` (`run_id → eval_results.db`) | **New (chat-safe)** — a chat run isn't in `eval_results.db`; add a sidecar-backed trajectory + recall view (G4) |
 | Answerer / judge | `services/eval/judge.py` | **Not used** — persona answers in chat |
@@ -194,7 +194,7 @@ prompt, so persona voice is preserved.
 > today: one **`memory_recall`** ledger node (cost / decision / preview), the loop **transcript
 > sidecar** (turns · sub-queries), and the per-search **retrieval traces** — all reachable from the
 > node row. **Most of this machinery already exists** — it was built for eval
-> (`services/memory/agent/agent_trace.py`, tagged P6/P8/P9). The catch: **every *write / persist /
+> (`hiro_memory/conversation/agent/agent_trace.py`, tagged P6/P8/P9). The catch: **every *write / persist /
 > resolve* path is eval-bound.** Phase 2's one-liner ("`_write_recall_usage` → cost shows as the
 > recall node") only covers the *cost* slice; the transcript, the node decision/preview, and the
 > detail dialog are the rest of a *complete* representation.
@@ -325,7 +325,7 @@ Tests updated (numbering, durations, whole-turn span, no_fold, parent aggregate,
 | # | Phase | Goal | Ships safe because | Validate |
 |---|---|---|---|---|
 | **2** ✅ | Wire the pre-pass loop **+ graph-run wiring (G1–G3, G5)** — **done 2026-07-02** | `memory_search_node` runs `MemoryRetriever.retrieve` (chat cfg, fed history, **abstain on**); stashes rich rows + **`memory_draft`**; decision distinguishes recalled/**abstained**/errored/empty (G2) + `format_memory_recall_output_preview` (G2); transcript sidecar under `trace` (G3); usage lands via `_write_recall_usage` (G1); **flat render kept** (P3). **Node NOT renamed** — kept `memory_search` (rename → `memory_recall` deferred to P5/G4 to avoid 8-fixture churn; usage/decision land name-independently). New `build_memory_retrieval_model` (`memory.retrieval.model → llm.default_chat`). | reuses eval caps (turns=4); usage/preview land on the wrapper entry (no new ledger plumbing) | **latency/cost inflection** (loop = ≥1 extra LLM call/turn); abstain skips chit-chat; recall node shows model/tokens/cost + decision. Tests: 283 runtime (incl. rewritten node tests + regenerated snapshot fixtures) + 270 domain/memory/eval + `svelte-check`. **G5** per-search trace nesting: deferred verify (needs a live `trace` run) |
-| **3** ✅ | Rich rendering **+ chat render caps** — **done 2026-07-02** | flat `memory_block` → shared `format_recall_context` (moved out of `services/eval` into `services/memory/agent/presentation.py`; eval re-exports); **new `memory.retrieval.render.*` prefs** (chat copy of eval's "Answer context" caps + temporal toggles) on the Memory tab, built into a chat `RecallRenderOptions` | pure formatting on rows in hand | temporal / relationship / `SUPERSEDED` visible; kinds grouped; no bad truncation; render caps editable + honored — 640 backend + 69 frontend prefs, `svelte-check` clean |
+| **3** ✅ | Rich rendering **+ chat render caps** — **done 2026-07-02** | flat `memory_block` → shared `format_recall_context` (moved out of `services/eval` into `hiro_memory/conversation/agent/presentation.py`; eval re-exports); **new `memory.retrieval.render.*` prefs** (chat copy of eval's "Answer context" caps + temporal toggles) on the Memory tab, built into a chat `RecallRenderOptions` | pure formatting on rows in hand | temporal / relationship / `SUPERSEDED` visible; kinds grouped; no bad truncation; render caps editable + honored — 640 backend + 69 frontend prefs, `svelte-check` clean |
 | **4** ✅ | Draft + persona answer — **done 2026-07-02** | inject the loop's draft as a `## Memory search conclusion` block + a **light** grounding nudge, both in **turn_context** (not the system prompt); persona consumes conclusion + rich facts | persona still owns voice (turn_context only; blocks conditional on recall) | memory actually used; voice preserved; draft overridable — 283 runtime tests. *Temp retune → Phase 6.* |
 | **5** ✅ | Graph-run detail parity (G4, admin) — **done 2026-07-02** | node rename `memory_search → memory_recall` (40 files, consistent); eval-detail (ⓘ) marker **gated to eval runs** so chat recall no longer dead-ends; **new trajectory (📊) marker** on a chat `memory_recall` row → `GET /graph-runs/{run_id}/retrieval-loop` (reads the agent-transcript sidecar) → a dialog reusing the eval **`EvalRetrievalTrajectory`** renderer (turns/sub-queries); the per-search pipeline stays on the ⌗ marker alongside | pure read/render + a mechanical rename; endpoint returns null off-`trace` | chat `memory_recall` row (under `trace`) opens the loop trajectory, no toast — 283 runtime + 81 graph-runs + 7 agent-trace + `svelte-check` |
 
@@ -366,7 +366,7 @@ from `runner_memory._recall_via_agent` and bakes in two eval-isms: it seeds
 `messages = [SystemMessage(prompt), HumanMessage(question)]` (no history) and runs an
 **unconditional verbatim fallback** on an empty accumulator (`retrieval_agent.py:359-370`).
 
-- **New** `MemoryRetriever` (`services/memory/agent/retriever.py`) — surface-neutral callable:
+- **New** `MemoryRetriever` (`hiro_memory/conversation/agent/retriever.py`) — surface-neutral callable:
   `retrieve(query, *, memory, limits, prompt_text, model, model_id, user_id, character_id, history=None, allow_abstain=False) -> RetrievalResult`. Just forwards to `run_retrieval`.
 - **Extend** `run_retrieval(...)` with `history: list[AnyMessage] | None = None` (seeded into
   `messages` before the `HumanMessage(question)`) and `allow_abstain: bool = False` (gates the
@@ -378,7 +378,7 @@ from `runner_memory._recall_via_agent` and bakes in two eval-isms: it seeds
   `question_id`. Generalize that parameter to a neutral `leg`/`slot` string (eval passes the
   question id; chat will pass `step_index`) so the sidecar stem works for both surfaces.
 - *Validate:* eval track regression (unchanged); `test_agent_trace` still green.
-- **Built 2026-07-02:** new `services/memory/agent/retriever.py` (`MemoryRetriever.retrieve`,
+- **Built 2026-07-02:** new `hiro_memory/conversation/agent/retriever.py` (`MemoryRetriever.retrieve`,
   dispatched through the `retrieval_agent` module so tests monkeypatching `run_retrieval` still
   bind); `run_retrieval` gained `history` / `allow_abstain` (both default to eval behavior — abstain
   returns `RetrievalResult(∅, "")` only when `acc.size()==0 and allow_abstain`); trace key renamed
@@ -490,12 +490,12 @@ the deferred split was **pulled into P1**: chat gets its **own** `memory.retriev
   prefs tests → **server restart**). *(These are NOT the retrieval-loop caps — they bound how the
   recalled set is rendered into the prompt, the answer/rendering stage.)*
 - **Layering:** `format_recall_context` lives under `services/eval` — importing eval into runtime is
-  a smell; **move it to a shared render module** (e.g. `services/memory/agent/presentation.py`) as
+  a smell; **move it to a shared render module** (e.g. `hiro_memory/conversation/agent/presentation.py`) as
   part of this phase (common-utility rule); eval imports from the new home.
 - *Validate:* temporal / relationship / `SUPERSEDED` present, kinds grouped, no bad truncation;
   chat render caps editable on the Memory tab and honored by the renderer.
 - **Built 2026-07-02:** `RecallRenderOptions` + `format_recall_context` (+ `_format_recall_item` etc.)
-  **moved** `services/eval/judge.py` → `services/memory/agent/presentation.py`; `judge.py` re-exports
+  **moved** `services/eval/judge.py` → `hiro_memory/conversation/agent/presentation.py`; `judge.py` re-exports
   them (eval callers/tests unchanged, but runtime no longer imports eval). `context_assembly.memory_block`
   now takes a `render` and calls `format_recall_context` (flat one-bullet list gone; dead
   `_format_memory_date`/`memory_text` removed). New `MemoryRetrievalRenderPreferences`
@@ -814,8 +814,8 @@ prefs tests → **server restart**). UI card placement to be confirmed with the 
 | 2 | `data.db` layer | durable per-conversation ingest cursor: read / advance / query-stale (for the sweep). |
 | 3 | `runtime/agent_graph/nodes/memory.py` (`_store_turn_memory`) | batching controller: gap/count/size flush logic, reconstruct window from durable history, resolve `Character.name` + `memory.user_name`, build the timestamped transcript. |
 | 4 | background sweep (runtime) | hourly pass flushing conversations idle > `idle_flush_hours`. |
-| 5 | `services/memory/graphiti_conversation.py` (`add`/`__init__`) | accept a pre-assembled window body (`speaker=""`), apply the turn-granular chunk guard, pass the user-only `custom_extraction_instructions` override; anchor episode uuid = window's last user message id. |
-| 6 | `services/knowledge/graph/graphiti_service.py` (`ingest_chunks`) | new optional `custom_extraction_instructions` pass-through (append memory clause to shared nudge). |
+| 5 | `hiro_memory/conversation/graphiti_conversation.py` (`add`/`__init__`) | accept a pre-assembled window body (`speaker=""`), apply the turn-granular chunk guard, pass the user-only `custom_extraction_instructions` override; anchor episode uuid = window's last user message id. |
+| 6 | `hiro_memory/graph/graphiti_service.py` (`ingest_chunks`) | new optional `custom_extraction_instructions` pass-through (append memory clause to shared nudge). |
 | 7 | `services/memory/__init__.py` (factories) | chat facade = windowed/user-only config; eval facade unchanged (per-line, two-sided). |
 
 `graphiti_ingest.py` / `ingest_episodes` stay **unchanged**.

@@ -193,7 +193,7 @@ def check_embedder_transition(
     the save-time guard both call this with their own "did this path change" predicate and exception
     type — so the rule (and the messages) live in one place, and this module owns the service imports."""
     from hirocli.services.knowledge import count_knowledge_points
-    from hirocli.services.knowledge.graph.graph_index_marker import is_graph_indexed
+    from hiro_memory.graph.graph_index_marker import is_graph_indexed
 
     if changed("knowledge.default_embedding_model") and count_knowledge_points(workspace_path) > 0:
         raise error(

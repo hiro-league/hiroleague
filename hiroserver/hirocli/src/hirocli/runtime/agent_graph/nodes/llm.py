@@ -30,14 +30,14 @@ from ..graph_kit import (
     emit,
     emit_for,
     llm_usage_payload,
-    normalize_reply_content,
     tool_args_one_line,
     tool_call_args,
     tool_call_id,
     tool_call_name,
     tool_result_bounded,
 )
-from ..ledger import graph_logged, observe, record_child
+from hiro_memory.replies import normalize_reply_content
+from hiro_memory.ledger import graph_logged, observe, record_child
 from ..node_group import NodeGroup
 from ..state import GraphState
 from ._helpers import _error_slug

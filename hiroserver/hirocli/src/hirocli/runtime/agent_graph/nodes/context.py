@@ -30,7 +30,7 @@ from ..context_assembly import (
     memory_grounding_block,
     search_conclusion_block,
 )
-from ..ledger import graph_logged, observe
+from hiro_memory.ledger import graph_logged, observe
 from ..node_group import NodeGroup
 from ..state import GraphState
 

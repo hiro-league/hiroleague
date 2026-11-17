@@ -92,7 +92,7 @@ async def get_preferences(
         runtime = _preferences_runtime(request, workspace_id)
         # Reconcile the graph-embedder lock with LIVE graph data before reading it: backfills a
         # graph that was populated before the marker existed, and clears it after a full wipe.
-        from hirocli.services.knowledge.graph.graph_index_marker import sync_graph_indexed_marker
+        from hiro_memory.graph.graph_index_marker import sync_graph_indexed_marker
 
         await sync_graph_indexed_marker(runtime._workspace_path)
         return {
@@ -120,7 +120,7 @@ async def patch_preferences(
         runtime = _preferences_runtime(request, workspace_id)
         runtime.update_many(body.edits)
         # Keep the graph-embedder lock in sync with live data for the returned payload.
-        from hirocli.services.knowledge.graph.graph_index_marker import sync_graph_indexed_marker
+        from hiro_memory.graph.graph_index_marker import sync_graph_indexed_marker
 
         await sync_graph_indexed_marker(runtime._workspace_path)
         logger.info(

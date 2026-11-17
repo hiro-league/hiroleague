@@ -31,7 +31,7 @@ from ..events import (
     GRAPH_TTS_COMPLETED,
 )
 from ..graph_kit import IDENTITY_PEER_KEYS, emit
-from ..ledger import graph_logged, observe
+from hiro_memory.ledger import graph_logged, observe
 from ..node_group import NodeGroup
 from ..outcomes import NodeOutcome, emit_outcome
 from ..state import GraphState

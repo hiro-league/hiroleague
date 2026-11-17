@@ -67,7 +67,7 @@ planned — the split is about order, not cutting.
 | V5 | Graph export exposed **through the Tool Registry** (`knowledge_graph_export`), then an HTTP route + API client wrapper | repo rule *consider-creating-tools-first* / prototype D10 — all knowledge surfaces go through the Tool Registry |
 | V6 | **Reuse `expand_entities_to_chunk_ids`** for the query overlay (extended to also return touched node/edge ids) | one expansion path for ingest, retrieval, and viz — no parallel logic |
 | V7 | New tab lives in the **existing knowledge controller composition** as a `knowledge-graph.svelte.ts` sub-model | matches `ask`/`browse`/`ingest` sub-controller pattern |
-| V8 | Keep the whole feature **rip-out-able** (frontend `features/knowledge/graph/`, backend stays in `services/knowledge/graph/`) | mirrors the prototype's isolation boundary |
+| V8 | Keep the whole feature **rip-out-able** (frontend `features/knowledge/graph/`, backend stays in `hiro_memory/graph/`) | mirrors the prototype's isolation boundary |
 
 > **Version check required before adding `force-graph`** (repo rule *check-package-versions*).
 > Verify the current stable version at implementation time; do not assume.
@@ -121,7 +121,7 @@ incremental too.
 ### 5.1 `GraphStore`: add a whole-graph read
 
 There is **no list-all op today** — traversal is always anchored by id/name. Add a
-snapshot to the Protocol (`services/knowledge/graph/store.py`) + the Ladybug adapter:
+snapshot to the Protocol (`hiro_memory/graph/store.py`) + the Ladybug adapter:
 
 ```python
 # store.py — GraphStore Protocol

@@ -38,9 +38,9 @@ def create_memory_service(
         return None
 
     try:
-        from hirocli.services.knowledge.graph.graphiti_service import GraphitiMemoryService
+        from hirocli.services.knowledge.graph_factory import build_graph_service
 
-        graph_service = GraphitiMemoryService.from_preferences(
+        graph_service = build_graph_service(
             prefs,
             workspace_path,
             credential_store=credential_store,
@@ -64,9 +64,9 @@ def create_memory_service(
         )
         return None
 
-    from hirocli.services.knowledge.graph.graph_events import graph_event_bus_sink
+    from hirocli.services.knowledge.graph_events import graph_event_bus_sink
 
-    from .graphiti_conversation import GraphitiConversationMemory
+    from hiro_memory.conversation.graphiti_conversation import GraphitiConversationMemory
 
     # Snapshot the temporal lens at construction (replaces the former D8 hardcoded "current"):
     # memory recall now follows ``graph.temporal_default`` like every other leg. The
@@ -110,14 +110,14 @@ def create_eval_memory_service(
     Graphiti engine can't be built, rather than returning ``None`` — a silent eval is worse than a
     clear error.
     """
-    from hirocli.services.knowledge.graph.graphiti_service import GraphitiMemoryService
-    from hirocli.services.knowledge.graph.group_scope import eval_memory_group_id
+    from hirocli.services.knowledge.graph_factory import build_graph_service
+    from hiro_memory.graph.group_scope import eval_memory_group_id
 
-    from .graphiti_conversation import GraphitiConversationMemory
+    from hiro_memory.conversation.graphiti_conversation import GraphitiConversationMemory
 
     # require_backend=False: the eval builds even when knowledge-graph *retrieval* is toggled off
     # (it only needs the extraction model + embedder), mirroring create_memory_service.
-    graph_service = GraphitiMemoryService.from_preferences(
+    graph_service = build_graph_service(
         prefs, workspace_path, credential_store=credential_store, require_backend=False
     )
     if graph_service is None:
@@ -126,7 +126,7 @@ def create_eval_memory_service(
             "model + embedder (an AI profile in graph.extraction_profile or llm.chat_profile + provider key)."
         )
 
-    from hirocli.services.knowledge.graph.graph_events import graph_event_bus_sink
+    from hirocli.services.knowledge.graph_events import graph_event_bus_sink
 
     group = eval_memory_group_id(set_id)
     # Eval mirrors the runtime: read the admin temporal lens from prefs (replaces D8 hardcode)

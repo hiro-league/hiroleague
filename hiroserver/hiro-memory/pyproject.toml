@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hiro-memory"
+version = "0.2.0"
+description = "Hiro's memory engine: the Graphiti graph, conversation memory and recall, and the run ledger, shared by the core and EvalHiro"
+readme = "README.md"
+# Same window as hirocli: kuzu==0.11.3 has no Windows/macOS wheel for 3.14.
+requires-python = ">=3.12,<3.14"
+license = { text = "MIT" }
+authors = [
+    { name = "Michel Habib", email = "michelhabib@gmail.com" },
+]
+
+keywords = ["hiroleague", "memory", "graphiti", "kuzu"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "hiro-commons~=0.2.0",
+    "pydantic>=2",
+    "langchain-core>=1.0",
+    "langsmith>=0.14",
+    "graphiti-core==0.29.1",
+    "kuzu==0.11.3",
+]
+
+[project.urls]
+Homepage = "https://www.hiroleague.com"
+Documentation = "https://docs.hiroleague.com"
+Repository = "https://github.com/hiro-league/hiroleague"
+Issues = "https://github.com/hiro-league/hiroleague/issues"
+
+[tool.uv.sources]
+hiro-commons = { workspace = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hiro_memory"]
+# Tests live beside the code (test_*.py); keep them out of the published wheel.
+exclude = ["**/test_*.py", "**/conftest.py"]

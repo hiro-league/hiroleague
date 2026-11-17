@@ -6,14 +6,16 @@ from langchain_core.messages import AIMessage, HumanMessage
 from hirocli.domain.data_store import get_default_user_id
 from hirocli.runtime.agent_graph.nodes.context import ContextNodes
 from hirocli.runtime.agent_graph.nodes.memory import MemoryNodes
-from hirocli.runtime.tests.graph_fakes import RecordingLedgerSink, make_agent_services
+from hirocli.runtime.tests.graph_fakes import make_agent_services
+from hiro_memory.testing import RecordingLedgerSink
 from hirocli.runtime.agent_graph.events import GRAPH_MEMORY_RETRIEVED, GRAPH_MEMORY_STORED
-from hirocli.runtime.agent_graph.ledger import LedgerEntry, LedgerSink, current_entry
+from hiro_memory.ledger import LedgerEntry, current_entry
+from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
 from hirocli.runtime.preferences_runtime import WorkspacePreferencesRuntime
-from hirocli.domain.memory import MemoryAddResult, MemoryUsage
-from hirocli.services.memory.agent import MemoryRetriever
-from hirocli.services.memory.agent.accumulator import Accumulator
-from hirocli.services.memory.agent.retrieval_agent import RetrievalResult
+from hiro_memory.conversation.results import MemoryAddResult, MemoryUsage
+from hiro_memory.conversation.agent import MemoryRetriever
+from hiro_memory.conversation.agent.accumulator import Accumulator
+from hiro_memory.conversation.agent.retrieval_agent import RetrievalResult
 
 
 def _canned_recall(
@@ -305,7 +307,7 @@ async def test_store_turn_memory_threads_ledger_sink_and_leaves_row_usage_blank(
     calls: list[dict] = []
     _patch_ingest(monkeypatch, returns=1, sink=calls)
 
-    sink = LedgerSink(tmp_path)
+    sink = workspace_ledger_sink(tmp_path)
     entry = LedgerEntry(
         sink=sink,
         node="memory_ingest",
@@ -356,7 +358,7 @@ async def test_store_turn_memory_no_new_facts_is_not_a_failure(tmp_path, monkeyp
     calls: list[dict] = []
     _patch_ingest(monkeypatch, returns=0, sink=calls)
 
-    sink = LedgerSink(tmp_path)
+    sink = workspace_ledger_sink(tmp_path)
     entry = LedgerEntry(
         sink=sink,
         node="memory_ingest",

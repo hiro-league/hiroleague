@@ -21,7 +21,7 @@ from hiro_commons.log import Logger
 from hirocli.domain.memory_ingest_cursor import advance_cursor, get_cursor
 from hirocli.domain.message_store import list_messages
 
-from .windowing import WinTurn, plan_windows
+from hiro_memory.conversation.windowing import WinTurn, plan_windows
 
 log = Logger.get("SVC.MEMORY.WINDOWED_INGEST")
 

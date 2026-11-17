@@ -221,7 +221,7 @@ def _memory_corpus_entry(base: Path, stem: str) -> dict[str, Any] | None:
     qpath = base / f"{stem}.questions.yaml"
     episodes = 0
     try:
-        from hirocli.services.knowledge.graph.graphiti_corpus import load_episodes_file
+        from hiro_memory.graph.graphiti_corpus import load_episodes_file
 
         episodes = len(load_episodes_file(f))
     except Exception:

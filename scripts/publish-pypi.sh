@@ -80,6 +80,7 @@ set -euo pipefail
 # reorder this list.
 PACKAGES_BUILD_PATHS=(
     "hiro-commons"
+    "hiro-memory"
     "hiro-channel-sdk"
     "gateway"
     "channels/hiro-channel-devices"
@@ -92,6 +93,7 @@ PACKAGES_BUILD_PATHS=(
 # distribution filenames).
 PACKAGES_DIST_PREFIXES=(
     "hiro_commons"
+    "hiro_memory"
     "hiro_channel_sdk"
     "hirogate"
     "hiro_channel_devices"

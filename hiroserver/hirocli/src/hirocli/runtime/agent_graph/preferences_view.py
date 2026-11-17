@@ -55,7 +55,7 @@ class PreferencesView:
     def memory_recall_render(self):
         """Build the chat ``RecallRenderOptions`` from ``memory.retrieval.render`` (P3) — the temporal
         toggles + per-kind caps the memory block renders with. Defaults when prefs are unavailable."""
-        from ...services.memory.agent.presentation import RecallRenderOptions
+        from hiro_memory.conversation.agent.presentation import RecallRenderOptions
 
         retrieval = getattr(getattr(self.current, "memory", None), "retrieval", None)
         r = getattr(retrieval, "render", None)

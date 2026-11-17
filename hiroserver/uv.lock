@@ -14,6 +14,7 @@ members = [
     "hiro-channel-whatsapp",
     "hiro-commons",
     "hiro-extension-kit",
+    "hiro-memory",
     "hirocli",
     "hirogate",
     "hiroleague",
@@ -978,6 +979,29 @@ dev = [
 ]
 
 [[package]]
+name = "hiro-memory"
+version = "0.2.0"
+source = { editable = "hiro-memory" }
+dependencies = [
+    { name = "graphiti-core" },
+    { name = "hiro-commons" },
+    { name = "kuzu" },
+    { name = "langchain-core" },
+    { name = "langsmith" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "graphiti-core", specifier = "==0.29.1" },
+    { name = "hiro-commons", editable = "hiro-commons" },
+    { name = "kuzu", specifier = "==0.11.3" },
+    { name = "langchain-core", specifier = ">=1.0" },
+    { name = "langsmith", specifier = ">=0.14" },
+    { name = "pydantic", specifier = ">=2" },
+]
+
+[[package]]
 name = "hirocli"
 version = "0.2.0"
 source = { editable = "hirocli" }
@@ -993,6 +1017,7 @@ dependencies = [
     { name = "graphiti-core" },
     { name = "hiro-channel-sdk" },
     { name = "hiro-commons" },
+    { name = "hiro-memory" },
     { name = "hirogate" },
     { name = "httpx" },
     { name = "httpx2" },
@@ -1050,6 +1075,7 @@ requires-dist = [
     { name = "graphiti-core", specifier = "==0.29.1" },
     { name = "hiro-channel-sdk", editable = "hiro-channel-sdk" },
     { name = "hiro-commons", editable = "hiro-commons" },
+    { name = "hiro-memory", editable = "hiro-memory" },
     { name = "hirogate", editable = "gateway" },
     { name = "httpx", specifier = ">=0.28" },
     { name = "httpx2", specifier = ">=2.16" },

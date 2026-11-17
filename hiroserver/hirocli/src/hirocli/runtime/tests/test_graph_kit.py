@@ -23,15 +23,14 @@ from hirocli.runtime.agent_graph.graph_kit import (
     knowledge_results_rows,
     llm_usage_payload,
     memory_text,
-    normalize_reply_content,
     relevance_of,
     tool_args_one_line,
     tool_call_args,
     tool_call_id,
     tool_call_name,
     tool_result_bounded,
-    usage_from_metadata,
 )
+from hiro_memory.replies import normalize_reply_content, usage_from_metadata
 
 
 def _collect_events() -> tuple[list[dict[str, Any]], Any]:

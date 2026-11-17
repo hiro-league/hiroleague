@@ -40,11 +40,11 @@ from hirocli.runtime.agent_graph.graph_kit import (
     estimate_text_tokens,
     knowledge_results_rows,
 )
-from hirocli.runtime.agent_graph.ledger import current_entry, graph_logged, observe
+from hiro_memory.ledger import current_entry, graph_logged, observe
 from hirocli.runtime.agent_graph.node_group import NodeGroup
 from hirocli.runtime.agent_graph.services import AgentServices
 from hirocli.services.knowledge.constants import DEFAULT_SPARSE_MODEL
-from hirocli.services.knowledge.graph.graphiti_session import graphiti_session
+from hirocli.services.knowledge.graphiti_session import graphiti_session
 
 from .config import KnowledgeGraphConfig
 from .helpers import (
@@ -286,7 +286,7 @@ class KnowledgeRetrievalNodes(NodeGroup):
         # Graphiti fact-search → episodes→chunk_ids. The chunk_ids drive the by-id
         # passage fetch (``graph_fetch``) for the graphiti leg. SOFT FALLBACK: any
         # miss/error → empty result → effective_leg=FLAT → normal flat search.
-        from hirocli.services.knowledge.graph import graphiti_db_path
+        from hiro_memory.graph import graphiti_db_path
 
         db_path = graphiti_db_path(self.services.workspace_path)
         if not db_path.exists():
@@ -342,13 +342,13 @@ class KnowledgeRetrievalNodes(NodeGroup):
         if entry is not None:
             # Sanctioned direct-entry use: priced rerank roll-up + per-stage trace sidecar keyed by
             # this run/step. observe() can't express these — they consume the LedgerEntry itself.
-            from hirocli.services.knowledge.graph.retrieval_ledger import flush_graph_expand
+            from hiro_memory.graph.retrieval_ledger import flush_graph_expand
 
             flush_graph_expand(entry, expansion, rerank_usage=rerank_usage)
             # Persist the full per-stage trace sidecar (when capture was engaged) keyed by
             # this run + step, so the retrieval-trace dialog can link it to this row.
             if capture is not None and capture.trace is not None:
-                from hirocli.services.knowledge.graph.retrieval_trace import (
+                from hiro_memory.graph.retrieval_trace import (
                     write_trace_sidecar,
                 )
 
@@ -658,17 +658,23 @@ class KnowledgeRetrievalNodes(NodeGroup):
         best-effort — any miss (no graph / read error) yields ``{}`` and dateless passages."""
         if state.get("effective_leg") != RetrievalLeg.GRAPHITI.value or not hits:
             return {}
-        from hirocli.services.knowledge.graph.graphiti_service import (
+        from hiro_memory.graph.graphiti_service import (
             graphiti_db_path,
             read_episode_valid_at,
         )
+
+        from hirocli.services.knowledge.graph_factory import graph_query_timeout
 
         db_path = graphiti_db_path(self.services.workspace_path)
         if not db_path.exists():
             return {}
         point_ids = [h.point_id for h in hits if getattr(h, "point_id", "")]
         try:
-            raw = await read_episode_valid_at(db_path, point_ids)
+            raw = await read_episode_valid_at(
+                db_path,
+                point_ids,
+                query_timeout_s=graph_query_timeout(self.services.workspace_path),
+            )
         except Exception as exc:
             # Graph DB read — non-fatal provenance; log and answer without passage dates.
             log.warning(

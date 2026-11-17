@@ -9,7 +9,7 @@ import pytest
 
 from hiro_commons.log import Logger
 from hirocli.runtime.agent_graph.node_group import NodeGroup
-from hirocli.runtime.agent_graph.ledger import (
+from hiro_memory.ledger import (
     LedgerSink,
     RunAccumulator,
     current_entry,
@@ -17,7 +17,7 @@ from hirocli.runtime.agent_graph.ledger import (
     current_substep,
     graph_logged,
 )
-from hirocli.runtime.agent_graph.ledger.pricing import price_row
+from hiro_memory.ledger.pricing import price_row
 
 
 from hirocli.runtime.agent_graph.nodes.media import MediaNodes

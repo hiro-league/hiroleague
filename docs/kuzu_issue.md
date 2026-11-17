@@ -24,8 +24,8 @@ Both the eval extraction and the Graph page open their **own** `KuzuDriver` agai
 
 | Consumer | Code path | Kuzu object |
 |----------|-----------|-------------|
-| Eval extraction | `eval_run` → `asyncio.create_task(_runner())` ([knowledge.py:901](hiroserver/hirocli/src/hirocli/admin_svelte/routes/knowledge.py:901)) → `ingest_adam_corpus_via_service` → `GraphitiMemoryService.from_preferences` ([eval_runner.py:485](hiroserver/hirocli/src/hirocli/services/knowledge/eval_runner.py:485)) → `KuzuDriver(...)` ([graphiti_service.py:184](hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_service.py:184)) | `kuzu.Database` **#1** (READ_WRITE), held open for the whole multi-minute build |
-| Graph page | `GET .../graph` ([knowledge.py:738](hiroserver/hirocli/src/hirocli/admin_svelte/routes/knowledge.py:738)) → `graph_snapshot_payload` → `read_graph_snapshot` → `KuzuDriver(str(path))` ([graphiti_service.py:453](hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_service.py:453)) | `kuzu.Database` **#2** — opened fresh on every request |
+| Eval extraction | `eval_run` → `asyncio.create_task(_runner())` ([knowledge.py:901](hiroserver/hirocli/src/hirocli/admin_svelte/routes/knowledge.py:901)) → `ingest_adam_corpus_via_service` → `GraphitiMemoryService.from_preferences` ([eval_runner.py:485](hiroserver/hirocli/src/hirocli/services/knowledge/eval_runner.py:485)) → `KuzuDriver(...)` ([graphiti_service.py:184](hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_service.py:184)) | `kuzu.Database` **#1** (READ_WRITE), held open for the whole multi-minute build |
+| Graph page | `GET .../graph` ([knowledge.py:738](hiroserver/hirocli/src/hirocli/admin_svelte/routes/knowledge.py:738)) → `graph_snapshot_payload` → `read_graph_snapshot` → `KuzuDriver(str(path))` ([graphiti_service.py:453](hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_service.py:453)) | `kuzu.Database` **#2** — opened fresh on every request |
 
 The eval is a fire-and-forget `asyncio.create_task` in the **same FastAPI process** that serves the Graph page route. So when you open the page mid-build, the snapshot tries to construct a **second `kuzu.Database`** on a file already locked by the eval's driver.
 
@@ -33,7 +33,7 @@ The eval is a fire-and-forget `asyncio.create_task` in the **same FastAPI proces
 
 > Only **one READ_WRITE Database object** can connect to a database at any time... you cannot have a READ_WRITE `db1` and a separate READ_ONLY or READ_WRITE `db2` and concurrently query the same database.
 
-The rule is **one `Database` object per file** — many `Connection`s from that *one* Database are fine, but a second `Database` (which is what each `KuzuDriver(path)` builds internally) is not. Our design currently creates a fresh Database per ingest *and* per snapshot read. They only coexist without error because, outside of eval, the windows don't overlap and `_release_kuzu` ([graphiti_service.py:101](hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_service.py:101)) deterministically drops the lock between operations. During a long eval build, the windows **do** overlap → lock error.
+The rule is **one `Database` object per file** — many `Connection`s from that *one* Database are fine, but a second `Database` (which is what each `KuzuDriver(path)` builds internally) is not. Our design currently creates a fresh Database per ingest *and* per snapshot read. They only coexist without error because, outside of eval, the windows don't overlap and `_release_kuzu` ([graphiti_service.py:101](hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_service.py:101)) deterministically drops the lock between operations. During a long eval build, the windows **do** overlap → lock error.
 
 ```
                  same process (admin FastAPI server)
@@ -70,7 +70,7 @@ The DB file itself is fine — this is an in-process locking conflict, not corru
 
 ## TL;DR
 
-- **Root cause:** Eval build and the Graph page each construct a **separate `kuzu.Database`** on the same file, in the **same server process**. Kuzu allows only **one Database object per file** → "Could not set lock on file" when they overlap. ([graphiti_service.py:184](hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_service.py:184) vs [:453](hiroserver/hirocli/src/hirocli/services/knowledge/graph/graphiti_service.py:453); eval is in-process via `asyncio.create_task` at [knowledge.py:901](hiroserver/hirocli/src/hirocli/admin_svelte/routes/knowledge.py:901)).
+- **Root cause:** Eval build and the Graph page each construct a **separate `kuzu.Database`** on the same file, in the **same server process**. Kuzu allows only **one Database object per file** → "Could not set lock on file" when they overlap. ([graphiti_service.py:184](hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_service.py:184) vs [:453](hiroserver/hiro-memory/src/hiro_memory/graph/graphiti_service.py:453); eval is in-process via `asyncio.create_task` at [knowledge.py:901](hiroserver/hirocli/src/hirocli/admin_svelte/routes/knowledge.py:901)).
 - **`READ_ONLY` mode won't fix it** — the docs forbid a RW Database and a separate RO Database on the same file concurrently.
 - **Real fix (Option A):** one **shared Database per workspace**, many Connections — lets you view the graph during a build. **Fallback (Option B):** fail-fast "build in progress" message.
 - **Unblock now:** finish the eval, or restart the server / `hiro stop` — the file is not corrupted.

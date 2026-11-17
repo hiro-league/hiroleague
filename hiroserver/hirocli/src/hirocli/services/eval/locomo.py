@@ -120,7 +120,7 @@ def _load_episode_bodies(corpus_id: str, questions_path: Path) -> dict[str, dict
     if not path.exists():
         return {}
     # Lazy import: parse_episodes_jsonl pulls in graphiti_core; keep it off eval_locomo's import path.
-    from hirocli.services.knowledge.graph.graphiti_corpus import parse_episodes_jsonl
+    from hiro_memory.graph.graphiti_corpus import parse_episodes_jsonl
 
     try:
         episodes = parse_episodes_jsonl(

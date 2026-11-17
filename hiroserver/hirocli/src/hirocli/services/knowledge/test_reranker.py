@@ -10,7 +10,7 @@ from langchain_core.documents import Document
 from langchain_core.documents.compressor import BaseDocumentCompressor
 
 from hirocli.domain.preferences import WorkspacePreferences
-from hirocli.runtime.agent_graph.ledger import LedgerSink
+from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
 from hirocli.runtime.agent_graph.services import AgentServices
 from hirocli.services.knowledge.agent import KnowledgeGraphConfig
 from hirocli.services.knowledge.agent.helpers import minmax_relevances
@@ -155,7 +155,7 @@ class _FakeService:
 def _graph(service, prefs: WorkspacePreferences, tmp_path: Path) -> KnowledgeRetrievalNodes:
     """Materialize a ``KnowledgeRetrievalNodes`` group for direct node-call unit tests."""
     return KnowledgeRetrievalNodes(
-        AgentServices(workspace_path=tmp_path, ledger_sink=LedgerSink(tmp_path)),
+        AgentServices(workspace_path=tmp_path, ledger_sink=workspace_ledger_sink(tmp_path)),
         KnowledgeGraphConfig(service=service, prefs=prefs, workspace_id="ws"),
     )
 

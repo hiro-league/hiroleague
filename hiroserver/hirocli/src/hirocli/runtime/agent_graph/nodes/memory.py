@@ -26,12 +26,9 @@ from ..events import (
     GRAPH_MEMORY_STORED,
     GRAPH_REPLY_COMPLETED,
 )
-from ..graph_kit import (
-    IDENTITY_PEER_KEYS,
-    emit,
-    normalize_reply_content,
-)
-from ..ledger import current_entry, graph_logged, observe, record_child, substep_scope
+from ..graph_kit import IDENTITY_PEER_KEYS, emit
+from hiro_memory.replies import normalize_reply_content
+from hiro_memory.ledger import current_entry, graph_logged, observe, record_child, substep_scope
 from ..node_group import NodeGroup
 from ..outcomes import NodeOutcome, emit_outcome
 from ..state import GraphState
@@ -120,12 +117,12 @@ class MemoryNodes(NodeGroup):
 
         # Lazy imports keep the retrieval-loop deps off this module's base import path.
         from ....domain.preferences import resolve_chat_retrieval_agent_prompt
-        from ....services.memory.agent import (
+        from hiro_memory.conversation.agent import (
             MemoryRetriever,
             accumulated_item_to_recall_row,
             present_accumulator,
         )
-        from ....services.memory.agent.agent_trace import (
+        from hiro_memory.conversation.agent.agent_trace import (
             build_recall_ledger_substeps,
             format_recall_items_preview,
             summarize_agent_transcript,

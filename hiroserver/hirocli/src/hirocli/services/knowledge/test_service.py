@@ -9,7 +9,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from hirocli.domain.preferences import WorkspacePreferences, save_preferences
-from hirocli.runtime.agent_graph.ledger import LedgerSink
+from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
 from hirocli.runtime.agent_graph.services import AgentServices
 import hirocli.services.knowledge.agent.answer_nodes as knowledge_answer_module
 import hirocli.services.knowledge.agent.retrieval_nodes as knowledge_retrieval_module
@@ -603,7 +603,7 @@ async def test_answer_skips_call_model_when_no_results(
     prefs = WorkspacePreferences()
     ws = tmp_path / "workspace"
     graph = KnowledgeAgentGraph(
-        AgentServices(workspace_path=ws, ledger_sink=LedgerSink(ws))
+        AgentServices(workspace_path=ws, ledger_sink=workspace_ledger_sink(ws))
     ).build(KnowledgeGraphConfig(service=FakeEmbedService(), prefs=prefs))
     state = await graph.ainvoke(
         {
@@ -651,7 +651,7 @@ async def test_answer_prompt_honors_citation_and_language_preferences(
     prefs.knowledge.answering.language_policy = "prefer_arabic"
     ws = tmp_path / "workspace"
     nodes = KnowledgeAnswerNodes(
-        AgentServices(workspace_path=ws, ledger_sink=LedgerSink(ws)),
+        AgentServices(workspace_path=ws, ledger_sink=workspace_ledger_sink(ws)),
         KnowledgeGraphConfig(service=object(), prefs=prefs),
     )
     state = {
@@ -678,7 +678,7 @@ def _rewrite_nodes(
     """
     ws = tmp_path / "workspace"
     return KnowledgeRetrievalNodes(
-        AgentServices(workspace_path=ws, ledger_sink=LedgerSink(ws)),
+        AgentServices(workspace_path=ws, ledger_sink=workspace_ledger_sink(ws)),
         KnowledgeGraphConfig(service=object(), prefs=prefs or WorkspacePreferences()),
     )
 

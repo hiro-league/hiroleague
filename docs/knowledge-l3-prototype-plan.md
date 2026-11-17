@@ -25,7 +25,7 @@ LLM summarization. *Thesis first; everything else later.*
 
 | # | Decision | Reference |
 |---|---|---|
-| D1 | **Integrated vertical slice** (not throwaway CLI), isolated in `services/knowledge/graph/` so it stays rip-out-able | user call |
+| D1 | **Integrated vertical slice** (not throwaway CLI), isolated in `hiro_memory/graph/` so it stays rip-out-able | user call |
 | D2 | **Synthetic relational + Arabic corpus** for eval (deliberate multi-hop relations) | user call |
 | D3 | Primary goal = **relational retrieval quality** (graph-on vs graph-off A/B on the same eval) | user call |
 | D4 | **LadybugDB** (`pip install ladybug`) as the embedded graph DB, behind a thin `GraphStore` port | L3 §6 |
@@ -367,7 +367,7 @@ the thesis test.**
 - [x] `rapidfuzz==3.14.5` verified (Python ≥3.10; win_amd64 cp310–313; MIT); pinned.
 - [x] Added via `uv add` in `hirocli/`; `mintdocs/build/local-build/first-time-setup.mdx` updated.
 - [x] `workspace/knowledge/graph/` created on first ingest (via `LadybugGraphStore.open`); `mintdocs/architecture/misc/workspace-folder.mdx` updated.
-- [x] `services/knowledge/graph/` submodule with isolated, rip-out-able boundary.
+- [x] `hiro_memory/graph/` submodule with isolated, rip-out-able boundary.
 
 ### Phase 1 — GraphStore port + Ladybug adapter ✅
 - [x] `GraphStore` Protocol (5 ops: `upsert_node/edge`, `find_by_name_exact`, `find_candidates_by_name`, `neighbors`, `edges`, `get_node`, `close`).
@@ -383,7 +383,7 @@ the thesis test.**
 - [x] `GraphIngestStats` reports per-branch counts + token totals (cost/quality signals to the ledger).
 - [x] **Tool**: `KnowledgeGraphIngestTool` registered as `knowledge_graph_ingest` (Tool Registry).
 - [x] Reads chunks from existing `KnowledgeService.get_document` (Qdrant `point_id` = graph `chunk_id` — direct join for Phase 3).
-- [x] **31 new tests** (resolver + ingest), 46 total in `services/knowledge/graph/`, all green.
+- [x] **31 new tests** (resolver + ingest), 46 total in `hiro_memory/graph/`, all green.
 
 ### Phase 3 — Retrieval integration — *exercises Example D* ✅
 - [x] `QueryRewrite` extended with `entities[]` field + prompt examples (proper nouns + qualified relational mentions).
@@ -444,7 +444,7 @@ The CLI harness has an in-server twin so the eval runs from the admin **Ask → 
 ## 11. TL;DR
 
 - **Goal:** prove graph-aug beats flat RAG on relational/multi-hop personal-data Qs.
-- **Form:** integrated slice in `services/knowledge/graph/`, behind Tool Registry, with
+- **Form:** integrated slice in `hiro_memory/graph/`, behind Tool Registry, with
   a `use_graph` toggle that makes A/B free.
 - **Stack:** Ladybug (graph) + existing Qdrant (evidence) + `model_factory` (extraction)
   + `rapidfuzz` + `GraphStore` port.

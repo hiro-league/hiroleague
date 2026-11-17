@@ -22,16 +22,8 @@ from hirocli.runtime.agent_graph.nodes.llm import LLMNodes
 from hirocli.runtime.agent_graph.nodes.memory import MemoryNodes
 from hirocli.runtime.agent_graph.nodes.tts import TTSNodes
 from hirocli.runtime.preferences_runtime import WorkspacePreferencesRuntime
-from hirocli.runtime.tests.graph_fakes import (
-    FakeMemory,
-    FakeVoiceEngine,
-    RecordingLedgerSink,
-    ScriptedChatModel,
-    ai_text,
-    ai_tool_call,
-    echo_tool,
-    make_agent_services,
-)
+from hirocli.runtime.tests.graph_fakes import FakeMemory, FakeVoiceEngine, echo_tool, make_agent_services
+from hiro_memory.testing import RecordingLedgerSink, ScriptedChatModel, ai_text, ai_tool_call
 
 
 def _config(
@@ -163,9 +155,9 @@ async def test_compose_context_writes_turn_context_not_messages(tmp_path: Path) 
 async def test_memory_recall_with_fake_memory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Phase 2: the node runs the agentic loop. Stub the model builder + the loop with a canned
     # result so the node test stays focused (the loop itself is covered by test_retrieval_agent).
-    from hirocli.services.memory.agent import MemoryRetriever
-    from hirocli.services.memory.agent.accumulator import Accumulator
-    from hirocli.services.memory.agent.retrieval_agent import RetrievalResult
+    from hiro_memory.conversation.agent import MemoryRetriever
+    from hiro_memory.conversation.agent.accumulator import Accumulator
+    from hiro_memory.conversation.agent.retrieval_agent import RetrievalResult
 
     ensure_data_db(tmp_path)
     runtime = WorkspacePreferencesRuntime(tmp_path)

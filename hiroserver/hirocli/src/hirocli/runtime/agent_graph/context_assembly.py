@@ -21,7 +21,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from ...services.memory.agent.presentation import RecallRenderOptions, format_recall_context
+from hiro_memory.conversation.agent.presentation import RecallRenderOptions, format_recall_context
 
 # Section order (lower first). Instructions → knowledge → memory, matching the prompt design;
 # the citation instruction trails last (it refers back to the knowledge it annotates).

@@ -92,6 +92,8 @@ dependencies = [
     "pillow>=12.2",
     "hiro-commons~=0.2.0",
     "hiro-channel-sdk~=0.2.0",
+    # The memory engine (graph, conversation memory, run ledger), shared with EvalHiro.
+    "hiro-memory~=0.2.0",
     # hirocli imports hirogateway.service / .instance / .config to drive the
     # `hiro gateway *` lifecycle commands, so hirogate is a real library
     # dependency of hirocli, not just a co-located process. VPS-only deploys
@@ -115,6 +117,7 @@ hiro = "hirocli.commands.app:app"
 [tool.uv.sources]
 hiro-commons = { workspace = true }
 hiro-channel-sdk = { workspace = true }
+hiro-memory = { workspace = true }
 hirogate = { workspace = true }
 en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
 

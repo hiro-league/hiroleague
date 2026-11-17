@@ -17,12 +17,9 @@ from hiro_commons.log import Logger
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 from langgraph.types import StreamWriter
 
-from ..graph_kit import (
-    KNOWLEDGE_PREVIEW_MAX,
-    knowledge_results_rows,
-    normalize_reply_content,
-)
-from ..ledger import graph_logged, observe, substep_scope
+from ..graph_kit import KNOWLEDGE_PREVIEW_MAX, knowledge_results_rows
+from hiro_memory.replies import normalize_reply_content
+from hiro_memory.ledger import graph_logged, observe, substep_scope
 from ..node_group import NodeGroup
 from ..state import GraphState
 

@@ -10,8 +10,9 @@ from typing import Any
 import pytest
 
 from hiro_commons.log import Logger
-from hirocli.runtime.agent_graph.ledger import LedgerSink, graph_logged
-from hirocli.runtime.agent_graph.ledger.wrapper import wrap_graph_callable, wrap_graph_node
+from hiro_memory.ledger import LedgerSink, graph_logged
+from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
+from hiro_memory.ledger.wrapper import wrap_graph_callable, wrap_graph_node
 from hirocli.runtime.tests.graph_fakes import make_agent_services
 
 
@@ -54,7 +55,7 @@ async def test_bound_async_wrapper_outcomes(
     expected_status: str,
     exc: BaseException | None,
 ) -> None:
-    owner = _Owner(LedgerSink(tmp_path))
+    owner = _Owner(workspace_ledger_sink(tmp_path))
 
     class Nodes(_Owner):
         @graph_logged()
@@ -91,7 +92,7 @@ def test_bound_sync_wrapper_outcomes(
     expected_status: str,
     exc: BaseException | None,
 ) -> None:
-    owner = _Owner(LedgerSink(tmp_path))
+    owner = _Owner(workspace_ledger_sink(tmp_path))
 
     class Nodes(_Owner):
         @graph_logged()
@@ -129,7 +130,7 @@ async def test_plain_async_wrapper_outcomes(
     expected_status: str,
     exc: BaseException | None,
 ) -> None:
-    owner = _Owner(LedgerSink(tmp_path))
+    owner = _Owner(workspace_ledger_sink(tmp_path))
 
     @graph_logged()
     async def probe(state: dict[str, Any]) -> dict[str, Any]:
@@ -165,7 +166,7 @@ def test_plain_sync_wrapper_outcomes(
     expected_status: str,
     exc: BaseException | None,
 ) -> None:
-    owner = _Owner(LedgerSink(tmp_path))
+    owner = _Owner(workspace_ledger_sink(tmp_path))
 
     @graph_logged()
     def probe(state: dict[str, Any]) -> dict[str, Any]:

@@ -91,7 +91,7 @@ fi
 # (seen 2026-11-06: Phase 3's extension socket missing from the release). Other packages stay cached.
 REFRESH=()
 for member in hiroserver/hiroleague hiroserver/hirocli hiroserver/gateway hiroserver/hiro-channel-sdk \
-              hiroserver/hiro-commons hiroserver/channels/*; do
+              hiroserver/hiro-commons hiroserver/hiro-memory hiroserver/channels/*; do
   name=$(sed -n 's/^name = "\(.*\)"/\1/p' "$member/pyproject.toml" 2>/dev/null | head -n 1)
   [ -n "$name" ] && REFRESH+=(--refresh-package "$name")
 done

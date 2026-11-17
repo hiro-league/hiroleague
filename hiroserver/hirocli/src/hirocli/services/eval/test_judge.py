@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from hirocli.domain.memory import MemoryAddResult
+from hiro_memory.conversation.results import MemoryAddResult
 from hirocli.services.eval.judge import (
     MEMORY_EVAL_ANSWER_SYSTEM_PROMPT,
     _JudgeOutput,
@@ -178,8 +178,8 @@ def test_recall_metadata_survives_search_to_answer_render() -> None:
     hops accumulator → reduce → recall-row adaptation → answer-prompt render — the missing-hop
     class of bug that starved/flattened the answerer's context."""
     from hirocli.services.eval.judge import RecallRenderOptions
-    from hirocli.services.memory.agent.accumulator import Accumulator
-    from hirocli.services.memory.agent.presentation import accumulated_item_to_recall_row, present_accumulator
+    from hiro_memory.conversation.agent.accumulator import Accumulator
+    from hiro_memory.conversation.agent.presentation import accumulated_item_to_recall_row, present_accumulator
 
     acc = Accumulator()
     acc.merge(

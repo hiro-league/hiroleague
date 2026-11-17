@@ -35,7 +35,7 @@ from hirocli.services.eval.constants import (
     EVAL_CANCELLED,
     EVAL_FAILED,
 )
-from hirocli.services.knowledge.graph.group_scope import KNOWLEDGE_GROUP_ID
+from hiro_memory.graph.group_scope import KNOWLEDGE_GROUP_ID
 
 log = Logger.get("ADMIN.EVAL")
 
@@ -837,8 +837,10 @@ async def eval_corpuses(
     already built for it) is read from the selected workspace's graph — it drives the
     picker's "Rebuild graph" default + wipe warning."""
     from hirocli.services.eval.runner import DEFAULT_EVAL_FOLDER, discover_corpuses
-    from hirocli.services.knowledge.graph import distinct_group_ids_with_prefix, graphiti_db_path
-    from hirocli.services.knowledge.graph.group_scope import (
+    from hiro_memory.graph import distinct_group_ids_with_prefix, graphiti_db_path
+
+    from hirocli.services.knowledge.graph_factory import graph_query_timeout
+    from hiro_memory.graph.group_scope import (
         EVAL_KNOWLEDGE_PREFIX,
         EVAL_MEMORY_PREFIX,
         eval_knowledge_group_id,
@@ -870,7 +872,9 @@ async def eval_corpuses(
             ws_path = Path(entry.path)
             log_dir = str(ws_path / "logs")
             db_path = graphiti_db_path(ws_path)
-            existing = await distinct_group_ids_with_prefix(db_path, prefix)
+            existing = await distinct_group_ids_with_prefix(
+                db_path, prefix, query_timeout_s=graph_query_timeout(ws_path)
+            )
             if track == "memory":
                 from hirocli.services.eval.store import (
                     coalesce_ingested_ranges,
@@ -907,7 +911,7 @@ async def eval_corpus(path: str = "") -> Any:
     (``load_episodes_file`` sorts by timestamp), plus light meta (episode count + date span)
     for the stats header. Read-only and workspace-independent — episodes live beside their
     question banks. Memory-track only; knowledge corpora are folders of ``.md`` docs."""
-    from hirocli.services.knowledge.graph.graphiti_corpus import load_episodes_file
+    from hiro_memory.graph.graphiti_corpus import load_episodes_file
 
     try:
         cpath = Path(path.strip())
@@ -952,8 +956,8 @@ async def eval_corpus_extraction(
     tab show whether each turn extracted anything and link straight to its ingest-pipeline trace.
     Empty ``{}`` when the corpus was ingested with graph tracing off (``observability != "trace"``)
     or hasn't been remembered yet — the tab then just omits the per-episode counts/button."""
-    from hirocli.services.knowledge.graph.group_scope import eval_memory_group_id
-    from hirocli.services.knowledge.graph.ingest_trace import read_group_ingest_extraction
+    from hiro_memory.graph.group_scope import eval_memory_group_id
+    from hiro_memory.graph.ingest_trace import read_group_ingest_extraction
 
     try:
         cid = corpus_id.strip()

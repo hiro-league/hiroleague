@@ -11,20 +11,19 @@ import pytest
 from hiro_commons.log import Logger
 from hirocli.domain.data_store import ensure_data_db, get_default_user_id
 from hirocli.runtime.agent_graph import ChatAgentGraph, ChatGraphConfig
-from hirocli.runtime.agent_graph.ledger import GRAPH_LEDGER_COLUMNS, LedgerSink
+from hiro_memory.ledger import GRAPH_LEDGER_COLUMNS, LedgerSink
+from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
 from hirocli.runtime.preferences_runtime import WorkspacePreferencesRuntime
 from hirocli.runtime.tests.graph_fakes import (
     FakeKnowledgeSubgraph,
     FakeMemory,
     FakeSTT,
-    ScriptedChatModel,
-    ai_text,
-    ai_tool_call,
     echo_tool,
     make_agent_services,
     make_inbound_envelope,
     run_graph,
 )
+from hiro_memory.testing import ScriptedChatModel, ai_text, ai_tool_call
 from hirocli.runtime.tests.ledger_row_snapshot import (
     load_ledger_fixture,
     read_graph_log_rows,
@@ -83,7 +82,7 @@ async def _capture_rows(
     ensure_data_db(tmp_path)
     runtime = WorkspacePreferencesRuntime(tmp_path)
     runtime.update_many({"memory.enabled": True})
-    sink = LedgerSink(tmp_path)
+    sink = workspace_ledger_sink(tmp_path)
     services = make_agent_services(tmp_path, ledger_sink=sink, preferences=runtime, **service_kwargs)
     compiled = ChatAgentGraph(services).build(
         ChatGraphConfig(

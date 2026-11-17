@@ -12,8 +12,8 @@ from typing import Any
 
 import pytest
 
-from hirocli.services.memory.agent.accumulator import Accumulator
-from hirocli.services.memory.agent.presentation import accumulated_item_to_recall_row, present_accumulator
+from hiro_memory.conversation.agent.accumulator import Accumulator
+from hiro_memory.conversation.agent.presentation import accumulated_item_to_recall_row, present_accumulator
 
 
 async def verbatim_recall_shim(

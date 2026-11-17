@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from hirocli.runtime.agent_graph.ledger import GRAPH_LEDGER_COLUMNS
+from hiro_memory.ledger import GRAPH_LEDGER_COLUMNS
 
 _FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 # Timing fields vary run-to-run; the gate compares everything else byte-for-byte.

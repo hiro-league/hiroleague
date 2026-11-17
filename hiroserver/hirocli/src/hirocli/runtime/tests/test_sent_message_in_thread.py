@@ -13,7 +13,7 @@ import pytest
 from hiro_commons.log import Logger
 from langchain_core.messages import AIMessage
 
-from hirocli.runtime.agent_graph.ledger import LedgerSink
+from hiro_memory.ledger import LedgerSink
 from hirocli.runtime.tests.graph_fakes import make_inbound_envelope, run_graph
 from hirocli.runtime.tests.state_contract_helpers import build_checkpointed_chat, turn_state
 

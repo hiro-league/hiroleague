@@ -129,7 +129,7 @@ def count_graph_llm_usage(workspace_path: Path, usage: Any) -> None:
     """
     # Lazy: the ledger package imports this module (its sink counts rows here).
     from ...domain.model_catalog import get_model_catalog
-    from ...runtime.agent_graph.ledger.pricing import price_row
+    from hiro_memory.ledger.pricing import price_row
 
     row = {
         "row_kind": "node",

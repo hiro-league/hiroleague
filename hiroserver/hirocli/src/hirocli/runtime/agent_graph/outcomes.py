@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .graph_kit import IDENTITY_KEYS, emit_for
-from .ledger import observe
+from hiro_memory.ledger import observe
 
 
 @dataclass(frozen=True)

@@ -11,13 +11,11 @@ from hirocli.runtime.agent_graph import ChatAgentGraph, ChatGraphConfig
 from hirocli.runtime.tests.graph_fakes import (
     FakeMemory,
     FakeSTT,
-    RecordingLedgerSink,
-    ScriptedChatModel,
-    ai_text,
     make_agent_services,
     make_inbound_envelope,
     run_graph,
 )
+from hiro_memory.testing import RecordingLedgerSink, ScriptedChatModel, ai_text
 
 
 class _TrackingSTT(FakeSTT):

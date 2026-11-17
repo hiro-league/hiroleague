@@ -10,11 +10,12 @@ from langchain_core.messages import AIMessage
 
 from hiro_commons.log import Logger
 from hirocli.domain.preferences import ResolvedModel, WorkspacePreferences
-from hirocli.runtime.agent_graph.ledger import (
+from hiro_memory.ledger import (
     LedgerSink,
     RunAccumulator,
     current_run,
 )
+from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
 from hirocli.runtime.agent_graph.services import AgentServices
 from hirocli.services.knowledge.agent import KnowledgeAgentGraph, KnowledgeGraphConfig
 from hirocli.services.knowledge.ledger_runner import (
@@ -103,7 +104,7 @@ async def test_knowledge_graph_writes_ledger_rows_for_standalone_run(
     )
 
     graph_builder = KnowledgeAgentGraph(
-        AgentServices(workspace_path=workspace, ledger_sink=LedgerSink(workspace))
+        AgentServices(workspace_path=workspace, ledger_sink=workspace_ledger_sink(workspace))
     )
     graph = graph_builder.build(
         KnowledgeGraphConfig(service=FakeRetrievalService(), prefs=WorkspacePreferences())
@@ -148,7 +149,7 @@ async def test_knowledge_graph_nests_under_parent_run_without_aggregate_row(
 ) -> None:
     workspace = tmp_path / "workspace"
     parent_run_id = "chat-msg-123"
-    sink = LedgerSink(workspace)
+    sink = workspace_ledger_sink(workspace)
     parent = RunAccumulator(
         sink=sink,
         run_id=parent_run_id,
@@ -175,7 +176,7 @@ async def test_knowledge_graph_nests_under_parent_run_without_aggregate_row(
     )
 
     graph_builder = KnowledgeAgentGraph(
-        AgentServices(workspace_path=workspace, ledger_sink=LedgerSink(workspace))
+        AgentServices(workspace_path=workspace, ledger_sink=workspace_ledger_sink(workspace))
     )
     graph = graph_builder.build(
         KnowledgeGraphConfig(service=FakeRetrievalService(), prefs=WorkspacePreferences())

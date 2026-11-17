@@ -239,7 +239,7 @@ selector. Pure addition on top of A — nothing in A changes (the proof the gram
 
 ## 9. Phase A task breakdown
 
-1. ✅ **Policy module** (`services/knowledge/graph/group_scope.py`) — namespace registry
+1. ✅ **Policy module** (`hiro_memory/graph/group_scope.py`) — namespace registry
    (`mem_`/`kb_`/`eval_`) + mint fns (`memory_group_id` / `knowledge_group_id` / `eval_group_id`)
    + `validate_group_id` guard + `classify_group`. Centralized the memory/slug helpers
    (`graphiti_conversation` + `graphiti_service.is_memory_group_id` import from here — no dupes).

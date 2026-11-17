@@ -15,8 +15,8 @@ from hiro_commons.log import Logger
 from hirocli.admin.shared.result import Result
 from hirocli.domain.config import load_config, resolve_log_dir
 from hirocli.domain.workspace import resolve_workspace
-from hirocli.runtime.agent_graph.ledger import GRAPH_LEDGER_COLUMNS
-from hirocli.runtime.agent_graph.tracing import langsmith_run_id
+from hiro_memory.ledger import GRAPH_LEDGER_COLUMNS
+from hiro_memory.tracing import langsmith_run_id
 
 INITIAL_GRAPH_LEDGER_LINES = 100
 
@@ -135,7 +135,7 @@ class GraphLedgerService:
         if not rid:
             return Result.failure("run_id is required.")
         try:
-            from hirocli.services.knowledge.graph.retrieval_trace import read_trace_sidecar
+            from hiro_memory.graph.retrieval_trace import read_trace_sidecar
 
             entry, _ = resolve_workspace(workspace)
             records = read_trace_sidecar(Path(entry.path), rid)
@@ -162,7 +162,7 @@ class GraphLedgerService:
             return Result.failure("run_id is required.")
         try:
             from hirocli.domain.preferences import load_preferences
-            from hirocli.services.memory.agent.agent_trace import (
+            from hiro_memory.conversation.agent.agent_trace import (
                 build_retrieval_loop_payload,
                 read_agent_recall_result,
                 read_agent_retrieval_trace,
@@ -213,7 +213,7 @@ class GraphLedgerService:
         if not rid:
             return Result.failure("run_id is required.")
         try:
-            from hirocli.services.knowledge.graph.ingest_trace import read_ingest_trace_sidecar
+            from hiro_memory.graph.ingest_trace import read_ingest_trace_sidecar
 
             entry, _ = resolve_workspace(workspace)
             records = read_ingest_trace_sidecar(Path(entry.path), rid)

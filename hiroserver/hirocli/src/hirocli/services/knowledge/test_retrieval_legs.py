@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from hirocli.domain.preferences import load_preferences
-from hirocli.runtime.agent_graph.ledger import LedgerSink
+from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
 from hirocli.runtime.agent_graph.services import AgentServices
 from hirocli.runtime.tests.graph_fakes import FakeKnowledgeService, run_graph
 from hirocli.services.knowledge.agent import KnowledgeAgentGraph, KnowledgeGraphConfig
@@ -104,7 +104,7 @@ def test_route_after_expand_reads_effective_leg(
 def _build(tmp_path: Path):
     prefs = load_preferences(tmp_path)
     graph = KnowledgeAgentGraph(
-        AgentServices(workspace_path=tmp_path, ledger_sink=LedgerSink(tmp_path))
+        AgentServices(workspace_path=tmp_path, ledger_sink=workspace_ledger_sink(tmp_path))
     )
     return graph.build_retrieval(
         KnowledgeGraphConfig(service=FakeKnowledgeService(), prefs=prefs)

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from hirocli.domain.model_catalog import get_model_catalog
-from hirocli.runtime.agent_graph.ledger.pricing import price_row
+from hiro_memory.ledger.pricing import price_row
 
 
 @pytest.fixture
