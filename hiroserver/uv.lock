@@ -983,6 +983,7 @@ name = "hiro-memory"
 version = "0.2.0"
 source = { editable = "hiro-memory" }
 dependencies = [
+    { name = "fastapi" },
     { name = "graphiti-core" },
     { name = "hiro-commons" },
     { name = "kuzu" },
@@ -993,6 +994,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "fastapi", specifier = ">=0.115" },
     { name = "graphiti-core", specifier = "==0.29.1" },
     { name = "hiro-commons", editable = "hiro-commons" },
     { name = "kuzu", specifier = "==0.11.3" },

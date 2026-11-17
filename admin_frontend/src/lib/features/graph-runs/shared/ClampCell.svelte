@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ChevronDown, ChevronUp } from '@lucide/svelte';
-  import Highlight from '$lib/search/Highlight.svelte';
+  import Highlight from '$kit/search/highlight.svelte';
 
   // A potentially-long table cell (entity summary / episode content) clamped to 3 lines with a
   // more/less toggle, search matches still highlighted. Owns its own open state — the retrieval

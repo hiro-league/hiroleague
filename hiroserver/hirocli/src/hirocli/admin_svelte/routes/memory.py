@@ -1,20 +1,26 @@
-"""Admin routes for long-term (Graphiti) memory inspection and deletion."""
+"""Admin routes for long-term (Graphiti) memory and the graph viewer.
+
+The routes the UI kit's graph viewer and memories table call are the memory library's
+(``hiro_memory.routes.graph_routes``), mounted here with the core's hooks: the selected workspace, its
+live (or a new) memory service, ``graph.query_timeout_s``, the workspace's default user, and the
+knowledge base's chunk text and search. The two routes no kit piece calls stay here.
+"""
 
 from __future__ import annotations
 
-import datetime as dt
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Request
-
 from hiro_commons.log import Logger
+from hiro_memory.routes import graph_routes
 
 from hirocli.admin_svelte.deps import SelectedWorkspaceIdDep
 from hirocli.admin_svelte.result_payload import api_failure
 from hirocli.domain.data_store import get_default_user_id
 from hirocli.domain.preferences import load_preferences
 from hirocli.domain.workspace import resolve_workspace
+from hirocli.services.knowledge.graph_factory import graph_query_timeout
 from hirocli.services.memory import create_memory_service
 
 log = Logger.get("ADMIN.MEMORY")
@@ -37,114 +43,53 @@ def _live_memory_service(request: Request, workspace_path: Path) -> tuple[bool, 
     return True, getattr(ctx, "memory_service", None)
 
 
-def _metadata(row: dict[str, Any]) -> dict[str, Any]:
-    value = row.get("metadata")
-    return value if isinstance(value, dict) else {}
+async def _memory_for(request: Request, workspace_path: Path) -> Any | None:
+    """The server's own memory service for its workspace, else one built from that workspace's
+    preferences (None when memory is off there)."""
+    is_live_workspace, service = _live_memory_service(request, workspace_path)
+    if not is_live_workspace:
+        service = create_memory_service(workspace_path, load_preferences(workspace_path))
+    return service
 
 
-def _first_value(row: dict[str, Any], *keys: str) -> Any:
-    meta = _metadata(row)
-    for key in keys:
-        if key in row and row[key] not in (None, ""):
-            return row[key]
-        if key in meta and meta[key] not in (None, ""):
-            return meta[key]
-    return None
+def _selected_workspace(workspace_id: SelectedWorkspaceIdDep) -> Path:
+    entry, _ = resolve_workspace(workspace_id)
+    return Path(entry.path).resolve()
 
 
-def _timestamp_seconds(value: Any) -> float:
-    if value in (None, ""):
-        return 0.0
-    if isinstance(value, (int, float)):
-        numeric = float(value)
-        return numeric / 1000 if numeric > 10_000_000_000 else numeric
-    if isinstance(value, str):
-        text = value.strip()
-        try:
-            numeric = float(text)
-            return numeric / 1000 if numeric > 10_000_000_000 else numeric
-        except ValueError:
-            pass
-        try:
-            parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
-            return parsed.timestamp()
-        except (ValueError, OverflowError, OSError):
-            # datetime.timestamp() raises OSError [Errno 22] on Windows (and OverflowError elsewhere)
-            # for out-of-range dates — pre-1970, year-0001, or far-future — which a Graphiti fact can
-            # carry as a weird extracted valid_at/created_at (e.g. a BEAM eval fact). Sort those as
-            # epoch-0 instead of 500ing the entire Memories list for that group.
-            return 0.0
-    return 0.0
+async def _chunk_details(request: Request, workspace_path: Path, ids: list[str]) -> list[dict[str, Any]]:
+    # The knowledge service covers both kinds of chunk: Qdrant for knowledge, Kuzu for memory.
+    from hirocli.admin_svelte.routes.knowledge import _close_if_owned, knowledge_service_for
+
+    service, owned = knowledge_service_for(request, workspace_path)
+    try:
+        return await service.get_chunk_details(ids)
+    finally:
+        await _close_if_owned(service, owned)
 
 
-def _memory_updated_sort_key(row: dict[str, Any]) -> float:
-    updated = _first_value(row, "updated_at", "updatedAt", "updated")
-    created = _first_value(row, "created_at", "createdAt", "created")
-    return _timestamp_seconds(updated) or _timestamp_seconds(created)
+async def _search_chunks(request: Request, workspace_path: Path, text: str, limit: int) -> list[str]:
+    from hirocli.admin_svelte.routes.knowledge import _close_if_owned, knowledge_service_for
+
+    service, owned = knowledge_service_for(request, workspace_path)
+    try:
+        return await service.search_chunk_ids_by_text(text, limit=limit)
+    finally:
+        await _close_if_owned(service, owned)
 
 
-def _sort_memories(memories: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return sorted(memories, key=_memory_updated_sort_key, reverse=True)
-
-
-def _success(data: Any) -> Any:
-    return data
+memory_graph_router = graph_routes(
+    workspace=_selected_workspace,
+    memory=_memory_for,
+    query_timeout=graph_query_timeout,
+    default_user_id=get_default_user_id,
+    chunk_details=_chunk_details,
+    search_chunks=_search_chunks,
+)
 
 
 def _service_unavailable() -> Any:
     return api_failure("Memory service is disabled or unavailable.")
-
-
-async def _resolve_memory_service(
-    request: Request,
-    workspace_id: str | None,
-) -> tuple[Any | None, Path]:
-    entry, _ = resolve_workspace(workspace_id)
-    workspace_path = Path(entry.path)
-    is_live_workspace, service = _live_memory_service(request, workspace_path)
-    if not is_live_workspace:
-        prefs = load_preferences(workspace_path)
-        service = create_memory_service(workspace_path, prefs)
-    return service, workspace_path
-
-
-@memory_router.get("/memory/list")
-async def list_workspace_memories(
-    workspace_id: SelectedWorkspaceIdDep,
-    request: Request,
-    group_id: str | None = None,
-) -> Any:
-    """List memories. Default (no ``group_id``): all of the workspace default user's
-    conversation-memory groups. With ``group_id``: that one partition's facts — lets the
-    Memories group selector show ANY group (memory / knowledge / eval), mirroring the Graph
-    tab. The client-supplied scope is re-validated at this API boundary (firm group policy,
-    docs/graph-group-policy-design.md §6) so a crafted/empty id can't trigger an all-groups
-    scan."""
-    try:
-        service, workspace_path = await _resolve_memory_service(request, workspace_id)
-        if service is None:
-            return _success({"memory_enabled": False, "memories": []})
-        gid = (group_id or "").strip()
-        if gid:
-            # Group filter: re-mint the untrusted client scope against the closed grammar.
-            from hiro_memory.graph.group_scope import (
-                GroupPolicyError,
-                validate_group_id,
-            )
-
-            try:
-                gid = validate_group_id(gid)
-            except GroupPolicyError as exc:
-                return api_failure(f"Invalid memory group: {exc}")
-            memories = _sort_memories(await service.list_facts_in_groups([gid]))
-        else:
-            memories = _sort_memories(
-                await service.list_all(user_id=get_default_user_id(workspace_path))
-            )
-        return _success({"memory_enabled": True, "memories": memories})
-    except Exception as exc:
-        log.error("list memories - admin failed", error=str(exc), exc_info=True)
-        return api_failure(str(exc))
 
 
 @memory_router.post("/memory/clear")
@@ -154,72 +99,14 @@ async def clear_workspace_memories(
 ) -> Any:
     """Delete all long-term memories for the workspace default user."""
     try:
-        service, workspace_path = await _resolve_memory_service(request, workspace_id)
+        workspace_path = _selected_workspace(workspace_id)
+        service = await _memory_for(request, workspace_path)
         if service is None:
             return _service_unavailable()
         deleted = await service.clear_all(user_id=get_default_user_id(workspace_path))
-        return _success({"deleted_count": deleted})
+        return {"deleted_count": deleted}
     except Exception as exc:
         log.error("clear memories - admin failed", error=str(exc), exc_info=True)
-        return api_failure(str(exc))
-
-
-@memory_router.post("/memory/clear-group")
-async def clear_workspace_group(
-    workspace_id: SelectedWorkspaceIdDep,
-    request: Request,
-) -> Any:
-    """Wipe ONE graph partition — backs the admin "Clear group" action. Unlike
-    ``/memory/delete`` (forgets specific fact edges), this drops the whole group: facts +
-    entities + episodes + communities. The client-supplied ``group_id`` is re-validated at
-    this API boundary against the closed group grammar (firm group policy,
-    docs/graph-group-policy-design.md §6) so a crafted/empty id can't wipe an unintended
-    partition. Returns the episode count removed."""
-    try:
-        body = await request.json()
-        raw_gid = body.get("group_id") if isinstance(body, dict) else None
-        gid = str(raw_gid or "").strip()
-        if not gid:
-            return api_failure("'group_id' is required.")
-        # Re-mint the untrusted client scope against the closed grammar before any write.
-        from hiro_memory.graph.group_scope import (
-            GroupPolicyError,
-            validate_group_id,
-        )
-
-        try:
-            gid = validate_group_id(gid)
-        except GroupPolicyError as exc:
-            return api_failure(f"Invalid memory group: {exc}")
-        service, _ = await _resolve_memory_service(request, workspace_id)
-        if service is None:
-            return _service_unavailable()
-        deleted = await service.clear_groups([gid])
-        return _success({"deleted_count": deleted})
-    except Exception as exc:
-        log.error("clear group - admin failed", error=str(exc), exc_info=True)
-        return api_failure(str(exc))
-
-
-@memory_router.post("/memory/delete")
-async def delete_workspace_memories(
-    workspace_id: SelectedWorkspaceIdDep,
-    request: Request,
-) -> Any:
-    """Delete several long-term memories (Graphiti fact edges) by id — backs the admin
-    "Clear shown" action over the displayed/filtered rows. Idempotent for missing ids."""
-    try:
-        body = await request.json()
-        ids = body.get("ids") if isinstance(body, dict) else None
-        if not isinstance(ids, list):
-            return api_failure("'ids' must be a list of memory ids.")
-        service, _ = await _resolve_memory_service(request, workspace_id)
-        if service is None:
-            return _service_unavailable()
-        deleted = await service.delete_many([str(i) for i in ids if str(i).strip()])
-        return _success({"deleted_count": deleted})
-    except Exception as exc:
-        log.error("delete memories (batch) - admin failed", error=str(exc), exc_info=True)
         return api_failure(str(exc))
 
 
@@ -231,14 +118,14 @@ async def delete_workspace_memory(
 ) -> Any:
     """Delete one long-term memory (Graphiti fact edge) by id."""
     try:
-        service, _ = await _resolve_memory_service(request, workspace_id)
+        service = await _memory_for(request, _selected_workspace(workspace_id))
         if service is None:
             return _service_unavailable()
         mid = str(memory_id or "").strip()
         if not mid:
             return api_failure("Memory id is required.")
         await service.delete(mid)
-        return _success({"memory_id": mid})
+        return {"memory_id": mid}
     except Exception as exc:
         log.error("delete memory - admin failed", memory_id=memory_id, error=str(exc), exc_info=True)
         return api_failure(str(exc))

@@ -1,0 +1,159 @@
+<script lang="ts">
+	// The memories table's sticky toolbar: the group, character, source, date and search filters, then Clear
+	// memories, Clear group and Refresh.
+	// UI kit: from the HiroLeague admin's Memories page.
+	import { RefreshCw, Trash2 } from '@lucide/svelte';
+	import FilterBar from '$kit/ui/filter-bar.svelte';
+	import SearchInput from '$kit/ui/search-input.svelte';
+	import FilterSelect from '$kit/ui/filter-select.svelte';
+	import StickyBar from '$kit/ui/sticky-bar.svelte';
+	import { Button } from '$kit/components/ui/button/index.js';
+	import Field from '$kit/ui/field.svelte';
+	import DateField from '$kit/ui/date-field.svelte';
+	import type { MemoryFilterKey } from './shared/memory-pure';
+
+	let {
+		filters,
+		setFilter,
+		groupsForMemoryFilterDropdown = [],
+		characterOptions,
+		sourcesForMemoryFilterDropdown,
+		canClearMemories,
+		clearableMemoryCount,
+		memoryActionBusy,
+		memoriesLoading,
+		onRequestClearMemories,
+		onRequestClearGroup,
+		onRefreshMemories
+	}: {
+		filters: Record<MemoryFilterKey, string>;
+		setFilter: (key: MemoryFilterKey, value: string) => void;
+		groupsForMemoryFilterDropdown?: { value: string; label: string }[];
+		characterOptions: { value: string; label: string }[];
+		sourcesForMemoryFilterDropdown: { value: string; label: string }[];
+		/** Offer "Clear memories" (row filter active + relation facts in view). */
+		canClearMemories: boolean;
+		/** Relation-fact count "Clear memories" would delete (button label). */
+		clearableMemoryCount: number;
+		memoryActionBusy: boolean;
+		memoriesLoading: boolean;
+		onRequestClearMemories: () => void;
+		onRequestClearGroup: () => void;
+		onRefreshMemories: () => void;
+	} = $props();
+</script>
+
+<StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
+	<div class="memories-controls">
+		<FilterBar class="min-w-0 flex-1 items-end">
+			{#if groupsForMemoryFilterDropdown.length > 0}
+				<!-- A single group is always selected — no "All" scope (it only ever meant conversation
+						 memory, never knowledge/eval, which was confusing). No placeholder option. -->
+				<FilterSelect
+					label="Group"
+					value={filters.mem_group}
+					onValueChange={(v) => setFilter('mem_group', v)}
+					class="min-w-[12rem]"
+					options={groupsForMemoryFilterDropdown}
+				/>
+			{/if}
+			<FilterSelect
+				label="Character"
+				value={filters.mem_char}
+				onValueChange={(v) => setFilter('mem_char', v)}
+				placeholder="All characters"
+				class="min-w-[10rem]"
+				options={characterOptions}
+			/>
+			<FilterSelect
+				label="Source"
+				value={filters.mem_source}
+				onValueChange={(v) => setFilter('mem_source', v)}
+				placeholder="All sources"
+				class="min-w-[10rem]"
+				options={sourcesForMemoryFilterDropdown}
+			/>
+			<Field label="From" class="min-w-[9rem]">
+				<DateField clearable value={filters.mem_from} onchange={(v) => setFilter('mem_from', v)} />
+			</Field>
+			<Field label="To" class="min-w-[9rem]">
+				<DateField clearable value={filters.mem_to} onchange={(v) => setFilter('mem_to', v)} />
+			</Field>
+			<SearchInput
+				label="Search"
+				value={filters.mem_q}
+				onValueChange={(v) => setFilter('mem_q', v)}
+				placeholder="Search memory text, id, source…"
+				class="min-w-[12rem] flex-1"
+			/>
+		</FilterBar>
+		<div class="memories-actions">
+			{#if canClearMemories}
+				<!-- Deletes only the filtered relation facts in view (entities are excluded — use
+						 Clear group for those). Hidden when no row filter narrows the list. -->
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					disabled={memoryActionBusy || memoriesLoading}
+					onclick={onRequestClearMemories}
+					title="Delete the filtered facts currently shown"
+				>
+					<Trash2 size={14} aria-hidden="true" />
+					Clear {clearableMemoryCount}
+					{clearableMemoryCount === 1 ? 'memory' : 'memories'}
+				</Button>
+			{/if}
+			{#if groupsForMemoryFilterDropdown.length > 0}
+				<!-- Wipes the whole selected partition: facts + entities + episodes + communities. -->
+				<Button
+					type="button"
+					variant="destructive"
+					size="sm"
+					disabled={memoryActionBusy || memoriesLoading}
+					onclick={onRequestClearGroup}
+					title="Delete the entire selected group (facts, entities, episodes)"
+				>
+					<Trash2 size={14} aria-hidden="true" />
+					Clear group
+				</Button>
+			{/if}
+			<Button
+				type="button"
+				variant="ghost"
+				size="icon"
+				class="text-muted-foreground hover:text-foreground"
+				disabled={memoriesLoading}
+				aria-label="Refresh memories list"
+				title="Refresh memories list"
+				onclick={onRefreshMemories}
+			>
+				<RefreshCw
+					size={17}
+					strokeWidth={2}
+					class={memoriesLoading ? 'motion-safe:animate-spin' : ''}
+					aria-hidden="true"
+				/>
+			</Button>
+		</div>
+	</div>
+</StickyBar>
+
+<style>
+	.memories-controls {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: flex-end;
+		gap: 12px;
+		row-gap: 12px;
+	}
+
+	.memories-actions {
+		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 10px;
+		flex: 0 0 auto;
+		margin-left: auto;
+	}
+</style>

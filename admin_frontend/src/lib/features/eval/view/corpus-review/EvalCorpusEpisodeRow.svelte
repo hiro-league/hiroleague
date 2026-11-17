@@ -5,7 +5,7 @@
   import MarkdownPreview from '$lib/components/ui/markdown/MarkdownPreview.svelte';
   import { Microscope, Share2 } from '@lucide/svelte';
   import type { CorpusEpisodeExtraction, EvalEpisode } from '$lib/api/eval';
-  import Highlight from '$lib/search/Highlight.svelte';
+  import Highlight from '$kit/search/highlight.svelte';
   import { approxTokens, fmtCompact, fmtEpisodeDate } from '$lib/features/eval/shared/eval-format';
   import { CORPUS_CLAMP_MAX_HEIGHT } from '$lib/features/eval/shared/eval-corpus-review-pure';
 

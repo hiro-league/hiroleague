@@ -30,15 +30,9 @@ from ..services.knowledge.graph_factory import build_graph_service, graph_query_
 from hiro_memory.graph import (
     GraphitiEpisodeInput,
     GraphitiMemoryService,
-    graphiti_db_path,
 )
 from hiro_memory.graph.graphiti_ingest import GraphEventSink
-from hiro_memory.graph.graphiti_serialize import build_graph_dtos
-from hiro_memory.graph.graphiti_service import (
-    read_graph_episodes,
-    read_graph_group_ids,
-    read_graph_snapshot,
-)
+from hiro_memory.graph.views import graph_snapshot_payload
 from .base import Tool, ToolParam
 
 log = Logger.get("SVC.KNOWLEDGE.GRAPH.TOOL")
@@ -47,12 +41,6 @@ log = Logger.get("SVC.KNOWLEDGE.GRAPH.TOOL")
 # Chunks per document we pull in one round-trip from Qdrant. Documents larger
 # than this are paged via scroll_offset. 200 covers a typical .md note.
 _CHUNK_PAGE_SIZE = 200
-
-# Safety caps for the whole-graph export (the Graph tab's load path). The graph is
-# small by design; these only exist so a runaway graph can't produce an unbounded
-# payload. The response flags ``truncated`` when a cap is hit.
-_DEFAULT_NODE_LIMIT = 5000
-_DEFAULT_EDGE_LIMIT = 10000
 
 
 def _resolve_path(workspace: str | None) -> Path:
@@ -89,88 +77,6 @@ def _resolve_service(
         return service, ws, False
     workspace_path = _runtime_workspace(runtime) or _resolve_path(workspace)
     return create_knowledge_service(workspace_path), workspace_path, True
-
-
-async def graph_snapshot_payload(
-    workspace_path: Path,
-    *,
-    node_limit: int | None = None,
-    edge_limit: int | None = None,
-    group_ids: list[str] | None = None,
-) -> dict[str, Any]:
-    """Whole-graph export for the admin Graph tab (Graphiti → wire DTO).
-
-    Read-only: reads every entity node + RELATES_TO fact from Kuzu (no models),
-    maps to the viz DTO (entities + relations + temporal windows). ``group_ids`` selects the
-    partition — default knowledge group, or a ``mem_{user}_{character}`` conversation-memory
-    group. Returns an empty graph when none is built yet — never an ingest side effect.
-    ``truncated`` flags a safety-cap hit.
-    """
-    node_limit = node_limit or _DEFAULT_NODE_LIMIT
-    edge_limit = edge_limit or _DEFAULT_EDGE_LIMIT
-    nodes, edges, chunk_to_document, episode_mentions = await read_graph_snapshot(
-        graphiti_db_path(workspace_path),
-        node_limit=node_limit,
-        edge_limit=edge_limit,
-        group_ids=group_ids,
-        query_timeout_s=graph_query_timeout(workspace_path),
-    )
-    truncated = len(nodes) >= node_limit or len(edges) >= edge_limit
-    dtos = build_graph_dtos(
-        nodes, edges, chunk_to_document=chunk_to_document, episode_mentions=episode_mentions
-    )
-    return {
-        "nodes": dtos["nodes"],
-        "edges": dtos["edges"],
-        "truncated": truncated,
-        "counts": {"nodes": len(nodes), "edges": len(edges)},
-    }
-
-
-def _label_graph_group(group_id: str) -> dict[str, str]:
-    """One Graph-tab selector entry: ``{id, label, kind}``. Both the **logical label** and the
-    **kind** come from the firm group-ID policy (group_scope) so naming is defined in one place
-    (docs/graph-group-policy-design.md §4) — knowledge/memory/eval render as logical names, not
-    raw ids; legacy/unknown ids fall back to the raw id so they stay selectable/removable."""
-    from hiro_memory.graph.group_scope import classify_group, group_label
-
-    return {"id": group_id, "label": group_label(group_id), "kind": classify_group(group_id)}
-
-
-async def graph_groups_payload(workspace_path: Path) -> dict[str, Any]:
-    """List the graph's partitions for the admin Graph tab's group selector.
-
-    Returns ``{"default_group_id", "groups": [{id, label, kind}]}`` — "Knowledge" first,
-    then conversation-memory groups, then any others. Empty when no graph is built yet.
-    """
-    group_ids, default_gid = await read_graph_group_ids(
-        graphiti_db_path(workspace_path), query_timeout_s=graph_query_timeout(workspace_path)
-    )
-    labeled = [_label_graph_group(g) for g in group_ids]
-    # Stable, friendly order: knowledge first, then memory, then eval, then other — each
-    # alphabetical.
-    kind_rank = {"knowledge": 0, "memory": 1, "eval": 2, "other": 3}
-    labeled.sort(key=lambda g: (kind_rank.get(g["kind"], 9), g["label"].lower()))
-    return {"default_group_id": default_gid, "groups": labeled}
-
-
-async def graph_episodes_payload(
-    workspace_path: Path, group_id: str, *, limit: int = 2000
-) -> dict[str, Any]:
-    """List a graph partition's episodes for the admin Graph tab's episode filter.
-
-    Returns ``{"episodes": [{id, snippet, preview, valid_at, document_id}]}`` ordered by chunk_id
-    (== corpus episode order). Each ``id`` is a chunk_id the client matches against node/edge
-    ``chunk_ids`` to filter the graph to those episodes. Empty when the group has no episodes
-    / no graph built yet.
-    """
-    episodes = await read_graph_episodes(
-        graphiti_db_path(workspace_path),
-        group_id,
-        limit=limit,
-        query_timeout_s=graph_query_timeout(workspace_path),
-    )
-    return {"episodes": episodes}
 
 
 async def _gather_episodes(
@@ -589,7 +495,10 @@ class KnowledgeGraphExportTool(Tool):
         runtime = getattr(self, "_runtime", None)
         workspace_path = _runtime_workspace(runtime) or _resolve_path(workspace)
         return await graph_snapshot_payload(
-            workspace_path, node_limit=node_limit, edge_limit=edge_limit
+            workspace_path,
+            node_limit=node_limit,
+            edge_limit=edge_limit,
+            query_timeout_s=graph_query_timeout(workspace_path),
         )
 
 
@@ -597,5 +506,4 @@ __all__ = [
     "KnowledgeGraphExportTool",
     "KnowledgeGraphIngestBatchTool",
     "KnowledgeGraphIngestTool",
-    "graph_snapshot_payload",
 ]

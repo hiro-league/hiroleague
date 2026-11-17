@@ -8,7 +8,7 @@
 <script lang="ts">
   import { Badge } from '$kit/components/ui/badge/index.js';
   import * as Table from '$kit/components/ui/table/index.js';
-  import Highlight from '$lib/search/Highlight.svelte';
+  import Highlight from '$kit/search/highlight.svelte';
   import { fmtEpisodeDate } from '$lib/features/eval/shared/eval-format';
   import type { EvalRecallRender, RecalledFact } from '$lib/features/eval/shared/eval-events';
   import {

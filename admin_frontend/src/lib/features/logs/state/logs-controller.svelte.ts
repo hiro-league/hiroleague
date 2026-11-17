@@ -32,7 +32,7 @@ import {
   syncScopeMsgOrdinalsFromRows,
   type ScopeMsgOrdinalState
 } from '../shared/logs-ordinal';
-import { createTextSearch } from '$lib/search/create-text-search.svelte';
+import { createTextSearch } from '$kit/search/text-search.svelte';
 import { createListSelection } from '$lib/state/create-resource.svelte';
 
 const INITIAL_TAIL_LINES = 500;

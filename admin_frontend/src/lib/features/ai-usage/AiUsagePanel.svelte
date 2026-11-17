@@ -10,7 +10,7 @@
   import Segmented from '$kit/ui/segmented.svelte';
   import FilterBar from '$kit/ui/filter-bar.svelte';
   import FilterSelect from '$kit/ui/filter-select.svelte';
-  import MultiSelectFilter from '$lib/components/ui/multi-select-filter.svelte';
+  import MultiSelectFilter from '$kit/ui/multi-select-filter.svelte';
   import HelpTip from '$kit/ui/help-tip.svelte';
   import AiUsageChart from './AiUsageChart.svelte';
   import AiUsageRangePicker from './AiUsageRangePicker.svelte';

@@ -3,7 +3,7 @@
   import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
   import type { IngestTraceRecord } from '$lib/api/graph-runs';
-  import { shortGraphId } from '$lib/format/short-graph-id';
+  import { shortGraphId } from '$kit/memory/short-id';
   import ExpandCollapseButtons from './shared/ExpandCollapseButtons.svelte';
   import TraceDialogShell from './shared/TraceDialogShell.svelte';
   import TraceTabs, { type TraceTab } from './shared/TraceTabs.svelte';

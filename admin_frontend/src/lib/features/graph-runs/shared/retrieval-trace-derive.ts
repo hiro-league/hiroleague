@@ -9,7 +9,7 @@ import type {
   RetrievalTraceItem,
   RetrievalTraceStage
 } from '$lib/api/graph-runs';
-import { matchesQuery } from '$lib/search/match';
+import { matchesQuery } from '$kit/search/match';
 import { isCurrent } from './trace-format';
 
 // ── Lane model ────────────────────────────────────────────────────────────────────────

@@ -3,7 +3,7 @@
   import { LoaderCircle, Plus, X } from '@lucide/svelte';
   import * as Popover from '$kit/components/ui/popover/index.js';
   import { cn } from '$lib/utils';
-  import { matchesQuery } from '$lib/search/match';
+  import { matchesQuery } from '$kit/search/match';
 
   type TagOption = { id: number; name: string };
 

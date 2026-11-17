@@ -8,7 +8,6 @@ import {
   jsonRecordCodec,
   jsonStringField
 } from './codecs';
-import { decodeGraphOptionsRaw, encodeGraphOptions, GRAPH_OPTION_DEFAULTS } from '$lib/features/knowledge/graph/knowledge-graph-prefs';
 
 describe('enumCodec', () => {
   it('round-trips allowed members and falls back on garbage', () => {
@@ -61,13 +60,5 @@ describe('jsonRecordCodec', () => {
   it('round-trips', () => {
     const value = { name: 'beta', on: true };
     expect(codec.decode(codec.encode(value)!)).toEqual(value);
-  });
-});
-
-describe('graph options codec payload', () => {
-  it('matches legacy encodeGraphOptions output', () => {
-    const sample = { ...GRAPH_OPTION_DEFAULTS, linkStrength: 0.75, searchFocusMode: 'dim' as const };
-    const encoded = encodeGraphOptions(sample);
-    expect(decodeGraphOptionsRaw(encoded)).toEqual(decodeGraphOptionsRaw(JSON.stringify(sample)));
   });
 });

@@ -3,16 +3,16 @@
   import type { CharacterRow } from '$lib/api/characters';
   import type { GraphLedgerRow } from '$lib/api/graph-runs';
   import FilterBar from '$kit/ui/filter-bar.svelte';
-  import SearchInput from '$lib/search/SearchInput.svelte';
+  import SearchInput from '$kit/ui/search-input.svelte';
   import FilterSelect from '$kit/ui/filter-select.svelte';
   import StickyBar from '$kit/ui/sticky-bar.svelte';
   import TableShell from '$kit/ui/table-shell.svelte';
   import AvatarNameCell from '$kit/ui/avatar-name-cell.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import { FileText } from '@lucide/svelte';
-  import { formatCompactDateTime } from '$lib/format/timestamp-cell';
-  import Highlight from '$lib/search/Highlight.svelte';
-  import { matchesQuery } from '$lib/search/match';
+  import { formatCompactDateTime } from '$kit/format/timestamp';
+  import Highlight from '$kit/search/highlight.svelte';
+  import { matchesQuery } from '$kit/search/match';
   import {
     graphRunsDateCellClass,
     graphRunsLogsIconLinkClass,

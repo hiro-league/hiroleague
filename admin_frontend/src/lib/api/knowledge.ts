@@ -1,3 +1,9 @@
+import type {
+  GraphChunkDetail,
+  GraphEpisode,
+  GraphExport,
+  GraphGroups
+} from '$kit/memory/source';
 import { apiRequest } from './client';
 
 export type KnowledgeScannedFile = {
@@ -442,7 +448,6 @@ export function runKnowledgeGraphIngestBatch(
   });
 }
 
-
 export function answerKnowledge(
   query: string,
   topK = 20,
@@ -535,74 +540,14 @@ export function updateKnowledgeDocumentMetadata(
 }
 
 // ---------------------------------------------------------------------------
-// Graph viz (MVP) — whole-graph export + live event payload shapes.
-// Shapes mirror hiro_memory/graph/serialize.py. Edges use source/target
-// (not source_id/target_id) so they drop straight into force-graph's link model.
+// Graph viz — the calls behind the kit's graph viewer (kit memory/graph). The shapes are the kit's
+// (`$kit/memory/source`), which mirror the memory library's router.
 // ---------------------------------------------------------------------------
-
-export type GraphNodeDTO = {
-  id: string;
-  name: string;
-  type: string;
-  aliases: string[];
-  chunk_ids: string[];
-  document_ids: string[];
-  // Graphiti's generated entity description (EntityNode.summary). Already serialized by
-  // the backend; surfaced in the node detail pane (#5).
-  summary: string;
-};
-
-export type GraphEdgeDTO = {
-  id: string;
-  source: string;
-  target: string;
-  rel_type: string;
-  fact: string;
-  chunk_ids: string[];
-  document_ids: string[];
-  // Temporal window: valid_at = became true, invalid_at = stopped being true,
-  // expired_at = when the system learned it was superseded (set → retired fact).
-  valid_at: string | null;
-  invalid_at: string | null;
-  expired_at: string | null;
-  // Transaction time: when the fact row was written to the graph DB (distinct from valid_at,
-  // which is the event/world time). The Graph tab's "Creation Date" filter reads this.
-  created_at: string | null;
-};
-
-export type KnowledgeGraphExportData = {
-  nodes: GraphNodeDTO[];
-  edges: GraphEdgeDTO[];
-  truncated: boolean;
-  counts: { nodes: number; edges: number };
-};
-
-// Live SSE payloads (knowledge.graph.*). `group_id` tags the partition (knowledge default
-// vs a mem_{user}_{character} conversation-memory group) so the Graph tab routes the delta
-// to the group it's currently viewing. Older events may omit it (treated as knowledge).
-export type GraphNodeEvent = {
-  node: GraphNodeDTO;
-  is_new: boolean;
-  document_id: string;
-  group_id?: string | null;
-};
-export type GraphEdgeEvent = {
-  edge: GraphEdgeDTO;
-  is_new: boolean;
-  document_id: string;
-  group_id?: string | null;
-};
-export type GraphIngestProgress = {
-  document_id: string;
-  chunk_index: number;
-  chunk_total: number;
-  group_id?: string | null;
-};
 
 export function exportKnowledgeGraph(
   opts: { nodeLimit?: number; edgeLimit?: number; groupIds?: string[] } = {}
-): Promise<KnowledgeGraphExportData> {
-  return apiRequest<KnowledgeGraphExportData>('/knowledge/graph/export', {
+): Promise<GraphExport> {
+  return apiRequest<GraphExport>('/knowledge/graph/export', {
     method: 'POST',
     body: {
       node_limit: opts.nodeLimit ?? null,
@@ -613,31 +558,11 @@ export function exportKnowledgeGraph(
   });
 }
 
-// Graph partitions for the Graph tab's group selector.
-export type GraphGroupKind = 'knowledge' | 'memory' | 'eval' | 'other';
-export type GraphGroup = { id: string; label: string; kind: GraphGroupKind };
-export type KnowledgeGraphGroupsData = {
-  default_group_id: string | null;
-  groups: GraphGroup[];
-};
-
 /** List the graph's partitions (Knowledge + each conversation-memory group). */
-export function listKnowledgeGraphGroups(): Promise<KnowledgeGraphGroupsData> {
-  return apiRequest<KnowledgeGraphGroupsData>('/knowledge/graph/groups', { timeoutMs: 30000 });
+export function listKnowledgeGraphGroups(): Promise<GraphGroups> {
+  return apiRequest<GraphGroups>('/knowledge/graph/groups', { timeoutMs: 30000 });
 }
 
-// One episode (== a citable chunk) for the Graph tab's episode filter. `id` IS the chunk_id
-// that node/edge `chunk_ids` carry, so selecting episodes filters the graph to the
-// entities/facts they produced. Ordered by id (== corpus episode order) by the backend.
-export type GraphEpisode = {
-  id: string;
-  snippet: string;
-  /** De-stamped multi-line transcript (speaker turns, no inline "[ts]") shown as the picker's
-   *  hover tooltip. The compact "time · turns" label is derived client-side from `snippet`. */
-  preview: string;
-  valid_at: string | null;
-  document_id: string;
-};
 export type KnowledgeGraphEpisodesData = { episodes: GraphEpisode[] };
 
 /** List a partition's episodes for the Graph tab's episode multi-select (ordered by id). */
@@ -651,7 +576,6 @@ export function listKnowledgeGraphEpisodes(
   });
 }
 
-
 /** Delete one document's episodes/entities/facts from the knowledge graph, keeping its
  *  Qdrant chunks. Backs the Browse tab per-document "Remove from graph" action. */
 export function removeDocumentFromKnowledgeGraph(
@@ -662,19 +586,6 @@ export function removeDocumentFromKnowledgeGraph(
     { method: 'POST', body: { document_id: documentId }, timeoutMs: 120000 }
   );
 }
-
-// One provenance chunk for a selected node/edge: the real text + its owning document.
-export type GraphChunkDetail = {
-  id: string;
-  text: string;
-  document_id: string;
-  document_title: string;
-  ord: number;
-  heading_path: string | null;
-  // Episode event time (ISO) — the chunk's semantic `valid_at` (reference/corpus date),
-  // not the Qdrant ingest time. Null when there's no episode or no temporal date.
-  valid_at: string | null;
-};
 
 export type GraphChunksDetailData = { chunks: GraphChunkDetail[] };
 

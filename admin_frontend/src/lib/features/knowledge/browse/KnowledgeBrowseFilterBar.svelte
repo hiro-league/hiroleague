@@ -1,7 +1,7 @@
 <script lang="ts">
   import { FilterX } from '@lucide/svelte';
   import FilterBar from '$kit/ui/filter-bar.svelte';
-  import SearchInput from '$lib/search/SearchInput.svelte';
+  import SearchInput from '$kit/ui/search-input.svelte';
   import FilterSelect from '$kit/ui/filter-select.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import Field from '$kit/ui/field.svelte';

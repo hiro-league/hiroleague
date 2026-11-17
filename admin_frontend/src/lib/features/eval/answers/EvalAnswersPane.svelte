@@ -19,7 +19,7 @@
   import EvalNotRunList from '$lib/features/eval/answers/EvalNotRunList.svelte';
   import { SortState } from '$kit/ui/sort.svelte';
   import { distinctOptionsWithSentinel } from '$kit/ui/distinct-options';
-  import SearchInput from '$lib/search/SearchInput.svelte';
+  import SearchInput from '$kit/ui/search-input.svelte';
   import {
     EVAL_ANSWER_FILTER_KEYS,
     evalAnswerFilterOrAll,
@@ -34,7 +34,7 @@
     type AnsMark,
     type AnsSortKey
   } from '$lib/features/eval/shared/eval-derive';
-  import { matchesQuery, rowMatches } from '$lib/search/match';
+  import { matchesQuery, rowMatches } from '$kit/search/match';
   import type { EvalRow } from '$lib/features/eval/shared/eval-row';
   import type { EvalTrackConfig } from '$lib/features/eval/shared/eval-tracks';
   import type { EvalModel } from '$lib/features/eval/state/eval-model.svelte';

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Checkbox } from '$kit/components/ui/checkbox/index.js';
   import { CAT } from '$kit/ui/category';
-  import GraphRangeSlider from '$lib/features/knowledge/graph/GraphRangeSlider.svelte';
+  import GraphRangeSlider from '$kit/memory/graph/range-slider.svelte';
   import type { CorpusExtractionFilters } from '$lib/features/eval/state/eval-corpus-extraction-filters.svelte';
 
   interface Props {

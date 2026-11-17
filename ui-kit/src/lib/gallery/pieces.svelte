@@ -42,6 +42,7 @@
 	import { TABLE_GRID_ROW } from '$kit/ui/table-grid';
 	import { Inbox, Plus, Trash2 } from '@lucide/svelte';
 	import AppSwitcher from '$kit/components/app-switcher.svelte';
+	import MemoryPieces from './memory-pieces.svelte';
 	import type { AppTile } from '$kit/api/apps';
 
 	// The app switcher's sample list: HiroLeague (no core here: its logo falls back to an icon), this app, one offline.
@@ -350,6 +351,10 @@
 						{/if}
 					</div>
 				</div>
+			</Panel>
+
+			<Panel title="Memory: the memories table and the graph" description="Long-term memory as the core's admin and EvalHiro show it (kit memory/), here on made-up data. A page hands each piece a MemorySource; the real one reads the memory library's routes." class="md:col-span-2">
+				<MemoryPieces />
 			</Panel>
 
 			<Dialog.Root bind:open={dialogOpen}>

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import SearchInput from '$lib/search/SearchInput.svelte';
+  import SearchInput from '$kit/ui/search-input.svelte';
   import EvalCorpusExtractionFilters from '$lib/features/eval/view/corpus-review/EvalCorpusExtractionFilters.svelte';
   import type { CorpusExtractionFilters } from '$lib/features/eval/state/eval-corpus-extraction-filters.svelte';
 

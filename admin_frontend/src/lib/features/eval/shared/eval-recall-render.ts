@@ -6,7 +6,7 @@
  * truth, in lockstep with the backend (`services/eval/judge.py`).
  */
 import type { EvalRecallRender, RecalledFact } from '$lib/features/eval/shared/eval-events';
-import { rowMatches } from '$lib/search/match';
+import { rowMatches } from '$kit/search/match';
 
 /** Caps for legs/runs predating the stamped `render` field (mirror the graph.eval pref defaults). */
 export const DEFAULT_RECALL_RENDER: EvalRecallRender = {

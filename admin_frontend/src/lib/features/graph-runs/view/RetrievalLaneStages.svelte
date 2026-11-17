@@ -11,10 +11,10 @@
     RetrievalTraceRecord,
     RetrievalTraceStage
   } from '$lib/api/graph-runs';
-  import { shortGraphId } from '$lib/format/short-graph-id';
+  import { shortGraphId } from '$kit/memory/short-id';
   import ClampCell from '../shared/ClampCell.svelte';
   import FlowNav from '../shared/FlowNav.svelte';
-  import Highlight from '$lib/search/Highlight.svelte';
+  import Highlight from '$kit/search/highlight.svelte';
   import StageCard from '../shared/StageCard.svelte';
   import TraceTable from '../shared/TraceTable.svelte';
   import ValidityPill from '../shared/ValidityPill.svelte';

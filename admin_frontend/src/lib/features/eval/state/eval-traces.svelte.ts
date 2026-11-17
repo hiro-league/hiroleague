@@ -17,7 +17,7 @@ import {
 } from '$lib/api/graph-runs';
 import { createRetrievalTraceDialogController } from '$lib/features/graph-runs/state/retrieval-trace-dialog.svelte';
 import { exportEvalResultsLocomo } from '$lib/api/eval';
-import { seedGraphEpisodeFocus } from '$lib/features/knowledge/graph/knowledge-graph-prefs';
+import { seedGraphEpisodeFocus } from '$kit/memory/graph/state/graph-persistence';
 import { formatEvalRowForAI } from '$lib/features/eval/shared/eval-clipboard';
 import type { EvalRow } from '$lib/features/eval/shared/eval-row';
 import type { EvalModel } from '$lib/features/eval/state/eval-model.svelte';

@@ -55,9 +55,9 @@ log = Logger.get("ADMIN.KNOWLEDGE")
 # Feature-gating split (no back-compat): endpoints that OTHER, non-gated features depend on live on
 # `knowledge_shared_router`, which is ALWAYS mounted (see admin_svelte/api.py); only the
 # Knowledge-admin-only endpoints stay on `knowledge_router`, which is gated behind the `knowledge`
-# feature. Shared = local embedder/reranker model management (Settings model pickers), the graph
-# VIEWER endpoints (the Memories page reuses the knowledge graph viewer), and the `/knowledge/events`
-# SSE stream (shell multiplexer + graph live-updates + eval progress). Same module scope, so both
+# feature. Shared = local embedder/reranker model management (Settings model pickers) and the
+# `/knowledge/events` SSE stream (shell multiplexer + graph live-updates + eval progress). The graph
+# viewer's endpoints are the memory library's router, mounted in routes/memory.py. Same module scope, so both
 # routers share the module-level helpers/services — the split only changes what gets gated.
 knowledge_router = APIRouter()
 knowledge_shared_router = APIRouter()
@@ -108,7 +108,12 @@ async def _resolve_service(
     workspace_id: str | None,
 ) -> tuple[KnowledgeService, bool]:
     entry, _ = resolve_workspace(workspace_id)
-    workspace_path = Path(entry.path)
+    return knowledge_service_for(request, Path(entry.path))
+
+
+def knowledge_service_for(request: Request, workspace_path: Path) -> tuple[KnowledgeService, bool]:
+    """The live knowledge service for the server's own workspace, else a new one the caller closes
+    (``owned``: pass it to ``_close_if_owned``)."""
     is_live_workspace, service = _live_knowledge_service(request, workspace_path)
     if is_live_workspace and service is not None:
         return service, False
@@ -818,164 +823,6 @@ async def graph_ingest_batch(
         return api_failure(str(exc))
 
 
-class GraphExportBody(BaseModel):
-    """Graph export request. ``node_types`` / ``document_id`` are reserved for
-    the Phase 2 filters and ignored in the MVP; the limits are safety caps.
-    ``group_ids`` selects the partition (default knowledge group, or a
-    ``mem_{user}_{character}`` conversation-memory group)."""
-
-    node_types: list[str] | None = None
-    document_id: str | None = None
-    node_limit: int | None = None
-    edge_limit: int | None = None
-    group_ids: list[str] | None = None
-
-
-class GraphChunksDetailBody(BaseModel):
-    """Graph viz — resolve a selected node/edge's provenance chunk_ids to text."""
-
-    chunk_ids: list[str] = []
-
-
-class GraphSearchChunksBody(BaseModel):
-    """Graph viz — chunk-text search: find point_ids whose chunk text matches ``text``."""
-
-    text: str = ""
-    limit: int = 200
-
-
-@knowledge_shared_router.post("/knowledge/graph/export")
-async def graph_export(
-    body: GraphExportBody,
-    workspace_id: SelectedWorkspaceIdDep,
-    request: Request,
-) -> Any:
-    """Graph viz — whole-graph export, the Graph tab's load path.
-
-    Read-only and independent of Qdrant: resolves the workspace path and returns
-    all entity nodes + RELATES_TO facts from the Graphiti (Kuzu) graph. Empty graph
-    when none built yet.
-    """
-    from hiro_memory.graph.group_scope import GroupPolicyError, validate_group_id
-    from hirocli.tools.knowledge_graph import graph_snapshot_payload
-
-    try:
-        entry, _ = resolve_workspace(workspace_id)
-        workspace_path = Path(entry.path).resolve()
-        # API-boundary scope guard (docs/graph-group-policy-design.md §6): never trust a raw
-        # client group_id. Re-validate each against the firm grammar so a crafted/empty group
-        # can't trigger an all-groups scan or read a non-namespaced partition. This is the
-        # admin Graph tab (admin-scoped), so viewing any *named* partition is intentional;
-        # validation rejects only malformed/empty/unknown-namespace ids.
-        if body.group_ids:
-            try:
-                validated_groups: list[str] | None = [
-                    validate_group_id(g) for g in body.group_ids
-                ]
-            except GroupPolicyError as exc:
-                return api_failure(f"Invalid graph group: {exc}")
-        else:
-            validated_groups = None
-        payload = await graph_snapshot_payload(
-            workspace_path,
-            node_limit=body.node_limit,
-            edge_limit=body.edge_limit,
-            group_ids=validated_groups,
-        )
-        return _success(payload)
-    except Exception as exc:
-        # With the shared driver, in-process opens no longer collide; a lock error here
-        # means an EXTERNAL process holds the file (a 2nd hiro / stale handle). Return a
-        # clean "busy" message instead of a raw stack (docs §4.5).
-        from hiro_memory.graph.graphiti_service import is_kuzu_lock_error
-
-        if is_kuzu_lock_error(exc):
-            log.warning("⚠️ knowledge graph export — graph DB busy (external lock held)")
-            return api_failure(
-                "Graph database is busy (a build may be running in another process) — "
-                "try again shortly."
-            )
-        log.error("knowledge graph export failed", error=str(exc), exc_info=True)
-        return api_failure(str(exc))
-
-
-@knowledge_shared_router.get("/knowledge/graph/groups")
-async def graph_groups(
-    workspace_id: SelectedWorkspaceIdDep,
-    request: Request,
-) -> Any:
-    """List the graph's partitions for the Graph tab's group selector — "Knowledge" plus
-    each ``mem_{user}_{character}`` conversation-memory graph. Read-only; empty when no
-    graph is built yet."""
-    from hirocli.tools.knowledge_graph import graph_groups_payload
-
-    try:
-        entry, _ = resolve_workspace(workspace_id)
-        workspace_path = Path(entry.path).resolve()
-        payload = await graph_groups_payload(workspace_path)
-        return _success(payload)
-    except Exception as exc:
-        from hiro_memory.graph.graphiti_service import is_kuzu_lock_error
-
-        if is_kuzu_lock_error(exc):
-            log.warning("⚠️ knowledge graph groups — graph DB busy (external lock held)")
-            return api_failure(
-                "Graph database is busy (a build may be running in another process) — "
-                "try again shortly."
-            )
-        log.error("knowledge graph groups failed", error=str(exc), exc_info=True)
-        return api_failure(str(exc))
-
-
-class GraphEpisodesBody(BaseModel):
-    """Graph viz — list a partition's episodes for the Graph tab's episode multi-select."""
-
-    group_id: str | None = None
-    limit: int = 2000
-
-
-@knowledge_shared_router.post("/knowledge/graph/episodes")
-async def graph_episodes(
-    body: GraphEpisodesBody,
-    workspace_id: SelectedWorkspaceIdDep,
-) -> Any:
-    """List a graph partition's episodes (id + snippet + valid_at) for the Graph tab's
-    episode multi-select filter. Each id is a chunk_id, so the client filters the graph to
-    an episode's entities/facts by matching node/edge ``chunk_ids``. Ordered by id (corpus
-    episode order). Read-only; empty when the group has no episodes. Defaults to the
-    knowledge group when none given."""
-    from hiro_memory.graph.group_scope import (
-        KNOWLEDGE_GROUP_ID,
-        GroupPolicyError,
-        validate_group_id,
-    )
-    from hirocli.tools.knowledge_graph import graph_episodes_payload
-
-    try:
-        entry, _ = resolve_workspace(workspace_id)
-        workspace_path = Path(entry.path).resolve()
-        # Same API-boundary scope guard as graph_export: never trust a raw client group_id.
-        group_id = (body.group_id or "").strip() or KNOWLEDGE_GROUP_ID
-        try:
-            validated = validate_group_id(group_id)
-        except GroupPolicyError as exc:
-            return api_failure(f"Invalid graph group: {exc}")
-        limit = max(1, min(int(body.limit or 2000), 5000))
-        payload = await graph_episodes_payload(workspace_path, validated, limit=limit)
-        return _success(payload)
-    except Exception as exc:
-        from hiro_memory.graph.graphiti_service import is_kuzu_lock_error
-
-        if is_kuzu_lock_error(exc):
-            log.warning("⚠️ knowledge graph episodes — graph DB busy (external lock held)")
-            return api_failure(
-                "Graph database is busy (a build may be running in another process) — "
-                "try again shortly."
-            )
-        log.error("knowledge graph episodes failed", error=str(exc), exc_info=True)
-        return api_failure(str(exc))
-
-
 class GraphRemoveDocumentBody(BaseModel):
     """Per-document graph delete — drops one document's episodes/entities/facts."""
 
@@ -1041,62 +888,6 @@ async def graph_remove_document(
                 "try again shortly."
             )
         log.error("knowledge graph remove-document failed", error=str(exc), exc_info=True)
-        return api_failure(str(exc))
-
-
-@knowledge_shared_router.post("/knowledge/graph/chunks-detail")
-async def graph_chunks_detail(
-    body: GraphChunksDetailBody,
-    workspace_id: SelectedWorkspaceIdDep,
-    request: Request,
-) -> Any:
-    """Graph viz — chunk text + document titles for a selected node/edge's chunk_ids.
-
-    Lazy provenance lookup (Qdrant-backed): the Graph tab calls this when a node or
-    edge is selected so the detail panel can show real chunk text + document names
-    instead of opaque chunk ids. Mirrors the get_document route's service wiring.
-    """
-    # Cap one selection's lookup — a node rolls up the chunks of every touching edge.
-    ids = [str(c) for c in (body.chunk_ids or []) if c][:200]
-    if not ids:
-        return _success({"chunks": []})
-    try:
-        service, owned = await _resolve_service(request, workspace_id)
-        try:
-            return _success({"chunks": await service.get_chunk_details(ids)})
-        finally:
-            await _close_if_owned(service, owned)
-    except Exception as exc:
-        log.error("knowledge graph chunks-detail failed", error=str(exc), exc_info=True)
-        return api_failure(str(exc))
-
-
-@knowledge_shared_router.post("/knowledge/graph/search-chunks")
-async def graph_search_chunks(
-    body: GraphSearchChunksBody,
-    workspace_id: SelectedWorkspaceIdDep,
-    request: Request,
-) -> Any:
-    """Graph viz — chunk-text search → matching Qdrant point_ids (== graph chunk_ids).
-
-    Literal case-insensitive substring scan over chunk payloads. The Graph tab maps the
-    returned ids onto nodes/edges via their ``chunk_ids`` (G6) to highlight everything
-    sourced from a matching chunk. Blank query → empty result (caller clears the search).
-    """
-    text = (body.text or "").strip()
-    if not text:
-        return _success({"point_ids": []})
-    # Cap the scan so a hot search box can't sweep an unbounded collection per keystroke.
-    limit = max(1, min(int(body.limit or 200), 500))
-    try:
-        service, owned = await _resolve_service(request, workspace_id)
-        try:
-            point_ids = await service.search_chunk_ids_by_text(text, limit=limit)
-            return _success({"point_ids": point_ids})
-        finally:
-            await _close_if_owned(service, owned)
-    except Exception as exc:
-        log.error("knowledge graph search-chunks failed", error=str(exc), exc_info=True)
         return api_failure(str(exc))
 
 

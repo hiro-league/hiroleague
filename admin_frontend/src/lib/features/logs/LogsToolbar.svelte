@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ChevronDown, ChevronUp, PanelRightClose, PanelRightOpen, Pause, Play, Trash2 } from '@lucide/svelte';
-  import SearchInput from '$lib/search/SearchInput.svelte';
+  import SearchInput from '$kit/ui/search-input.svelte';
   import type { LogTimeRange } from '$lib/api/logs';
   import { Button } from '$kit/components/ui/button/index.js';
   import AdminIconToggleGroup from '$lib/components/page/AdminIconToggleGroup.svelte';

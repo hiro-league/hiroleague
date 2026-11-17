@@ -1,9 +1,5 @@
-import type {
-  GraphEdgeEvent,
-  GraphIngestProgress,
-  GraphNodeEvent,
-  KnowledgeJobData
-} from '$lib/api/knowledge';
+import type { GraphEdgeEvent, GraphIngestProgress, GraphNodeEvent } from '$kit/memory/source';
+import type { KnowledgeJobData } from '$lib/api/knowledge';
 import { knowledgeJobFromEvent } from './knowledge-jobs';
 import { knowledgeEventStream } from './knowledge-event-stream.svelte';
 

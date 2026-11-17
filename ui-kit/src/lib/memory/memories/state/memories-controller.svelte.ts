@@ -1,0 +1,454 @@
+// The memories table's state: the long-term memory (Graphiti facts) list of one graph partition, its filters and
+// sort (kept in the address), and the View JSON, Source turns, Clear memories and Clear group flows. Every call goes
+// through the app's `MemorySource`.
+// UI kit: from the HiroLeague admin's Memories page (features/memories/state/memories-controller.svelte.ts).
+// Exposes `$derived` values through getters (a shorthand property would capture a stale value).
+import { errorMessage } from '$kit/api/client';
+import type { GraphGroup, MemoryRow, MemorySource, NamedItem } from '$kit/memory/source';
+import { preserveStickyAnchorAround } from '$kit/ui/preserve-sticky-anchor';
+import { useTableFilters } from '$kit/ui/table-filters.svelte';
+import { asSortDirection, SortState } from '$kit/ui/sort.svelte';
+import {
+	DEFAULT_MEMORY_SORT,
+	MEMORY_FILTER_KEYS,
+	MEMORY_SORT_COLUMNS,
+	memoryDateInputMs,
+	memoryId,
+	memoryKind,
+	memoryRowPassesFilters,
+	memorySourceOptions,
+	sortMemories,
+	type CharacterMap,
+	type ChannelMap,
+	type MemoryFilterKey,
+	type MemorySortColumn
+} from '../shared/memory-pure';
+import { clearGroup, deleteMemories, loadMemoriesList } from './memories-service';
+import { createMemoryProvenance } from './memories-provenance.svelte';
+
+export type MemoriesControllerOptions = {
+	/** Where the rows, groups, names and source turns come from. Read at each call, so a getter follows a host
+	 *  that swaps its source (a swap doesn't reload by itself: call `refreshMemories`). */
+	source: MemorySource;
+};
+
+/** Make it while a component starts (it uses `$effect`); call `mount()` once the component is mounted. */
+export function createMemoriesController(opts: MemoriesControllerOptions) {
+	let chatChannels = $state<NamedItem[]>([]);
+	let characters = $state<NamedItem[]>([]);
+
+	let memoriesError = $state('');
+	let memoriesLoading = $state(false);
+	let memoryEnabled = $state<boolean | null>(null);
+	let memoriesRows = $state<MemoryRow[]>([]);
+	let memoryActionBusy = $state(false);
+	let memoryJsonRow = $state<MemoryRow | null>(null);
+	let clearMemoriesConfirmOpen = $state(false);
+	let clearGroupConfirmOpen = $state(false);
+
+	// Provenance drill-down (originating conversation turn(s) for a fact) is its own module.
+	const provenance = createMemoryProvenance(() => opts.source);
+
+	// Group filter (server-side): a single group is ALWAYS selected — a group id = that one
+	// partition's facts (memory / knowledge / eval). There is no "all groups" scope anymore
+	// (it was confusing: "all" only ever meant conversation-memory groups, never knowledge/eval).
+	// Unlike the other filters (client-side over the loaded rows), changing this RELOADS the list.
+	// Options come from the source's `listGroups`, the same list the graph viewer uses.
+	let memoryGroups = $state<GraphGroup[]>([]);
+	// The backend's suggested default partition (from `listGroups`) — used only as a
+	// fallback when the workspace has no conversation-memory group to land on.
+	let memoryDefaultGroupId = $state<string | null>(null);
+
+	// All Memories-table filters live in one URL-synced controller (deep-linkable, survives reload)
+	// and column ordering in a sibling sort controller. `setFilter` (below) is the single write path.
+	const tableFilters = useTableFilters<MemoryFilterKey>({ keys: MEMORY_FILTER_KEYS, urlSync: true });
+	const sort = new SortState<MemorySortColumn>({
+		initial: DEFAULT_MEMORY_SORT.column,
+		order: DEFAULT_MEMORY_SORT.direction,
+		allowed: MEMORY_SORT_COLUMNS,
+		url: { sortParam: 'mem_sort', orderParam: 'mem_sort_dir' }
+	});
+
+	const memorySearchQuery = $derived(tableFilters.filters.mem_q);
+
+	const characterMap = $derived.by((): CharacterMap => {
+		const m: CharacterMap = {};
+		for (const c of characters) m[c.id] = c;
+		return m;
+	});
+
+	// Keyed by the id as a string: rows carry numeric channel ids, `NamedItem` ids are strings.
+	const channelById = $derived.by((): ChannelMap => {
+		const m: ChannelMap = new Map();
+		for (const c of chatChannels) m.set(String(c.id), c);
+		return m;
+	});
+
+	// group_id → logical label (Knowledge / Memory · char / Eval · …), for the table's Group
+	// column. Falls back to the raw id in the column when a row's group isn't in the list.
+	const memoryGroupLabelById = $derived.by((): Map<string, string> => {
+		const m = new Map<string, string>();
+		for (const g of memoryGroups) m.set(g.id, g.label);
+		return m;
+	});
+
+	const sortedMemoriesRows = $derived(
+		sortMemories(memoriesRows, sort.key ?? DEFAULT_MEMORY_SORT.column, asSortDirection(sort.direction), {
+			characterMap,
+			channelById,
+			groupLabelById: memoryGroupLabelById
+		})
+	);
+
+	// Parse the date-range inputs into ms epoch (NaN = unset). "to" is end-of-day inclusive.
+	const memoryDateFromMs = $derived(memoryDateInputMs(tableFilters.filters.mem_from));
+	const memoryDateToMs = $derived(memoryDateInputMs(tableFilters.filters.mem_to, true));
+
+	const sourcesForMemoryFilterDropdown = $derived(memorySourceOptions(memoriesRows));
+
+	const visibleMemoriesRows = $derived.by(() =>
+		sortedMemoriesRows.filter((row) =>
+			memoryRowPassesFilters(row, {
+				characterId: tableFilters.filters.mem_char,
+				sourceFilter: tableFilters.filters.mem_source,
+				searchQuery: memorySearchQuery,
+				dateFromMs: memoryDateFromMs,
+				dateToMs: memoryDateToMs,
+				characterMap,
+				channelById
+			})
+		)
+	);
+
+	const charactersForFilterDropdown = $derived.by(() =>
+		[...characters].sort((a, b) => a.name.localeCompare(b.name))
+	);
+
+	// Group dropdown options (logical labels from the backend's group policy). The backend
+	// already returns them in a friendly order (knowledge → memory → eval → other); we keep it.
+	const memoryGroupsForFilterDropdown = $derived.by((): { value: string; label: string }[] =>
+		memoryGroups.map((g) => ({ value: g.id, label: g.label }))
+	);
+
+	// The group to land on when none is selected: the first conversation-memory group (this is a
+	// Memories page), else the backend's suggested default, else the first group of any kind.
+	const defaultMemoryGroupId = $derived.by((): string => {
+		const mem = memoryGroups.find((g) => g.kind === 'memory');
+		if (mem) return mem.id;
+		const backendDefault = (memoryDefaultGroupId ?? '').trim();
+		if (backendDefault && memoryGroups.some((g) => g.id === backendDefault)) return backendDefault;
+		return memoryGroups[0]?.id ?? '';
+	});
+
+	// Logical label of the selected group — for the "Clear group" dialog copy.
+	const selectedGroupLabel = $derived.by((): string => {
+		const gid = tableFilters.filters.mem_group.trim();
+		return memoryGroupLabelById.get(gid) || gid;
+	});
+
+	// True when a ROW-LEVEL filter is narrowing the view. The group is now the base scope (always
+	// set), NOT a filter — so it's excluded here. Governs whether "Clear memories" is offered.
+	const memoryRowFiltersActive = $derived(
+		tableFilters.filters.mem_char.trim() !== '' ||
+			tableFilters.filters.mem_source.trim() !== '' ||
+			tableFilters.filters.mem_from.trim() !== '' ||
+			tableFilters.filters.mem_to.trim() !== '' ||
+			memorySearchQuery.trim() !== ''
+	);
+
+	// "Clear memories" deletes only the shown RELATION facts (edge ids). Entity/summary rows are
+	// excluded for now (their delete semantics are undecided) — use "Clear group" to wipe those.
+	const clearableMemoryIds = $derived.by((): string[] =>
+		visibleMemoriesRows
+			.filter((row) => memoryKind(row) === 'relation')
+			.map((row) => memoryId(row))
+			.filter(Boolean)
+	);
+
+	/**
+	 * Single write path for every table filter. Group scope is server-side, so changing it reloads
+	 * the list for the newly selected partition; the client-side filters just preserve the sticky
+	 * scroll anchor across the re-render. No-ops when the value is unchanged.
+	 */
+	function setFilter(key: MemoryFilterKey, value: string) {
+		if (value === tableFilters.filters[key]) return;
+		tableFilters.set(key, value);
+		// Group scope is server-side and reloaded by the groupScopeReload effect below
+		// (so browser back/forward gets the same reload). Client-side filters only need
+		// the sticky scroll anchor preserved across the re-render.
+		if (key !== 'mem_group') {
+			preserveStickyAnchorAround();
+		}
+	}
+
+	// Row-level narrowing keys (everything except the base group scope). Clearing these also
+	// drops them from the URL (useTableFilters deletes empty params).
+	const MEMORY_ROW_FILTER_KEYS: MemoryFilterKey[] = [
+		'mem_char',
+		'mem_source',
+		'mem_from',
+		'mem_to',
+		'mem_q'
+	];
+
+	// Drop any active row filters. Called when the base group scope changes out from under them
+	// (e.g. after a Clear group jumps to a new partition) so stale narrowing from the OLD group
+	// can't hide every row of the new one — which read as "the clear wiped everything".
+	function resetRowFilters() {
+		for (const key of MEMORY_ROW_FILTER_KEYS) {
+			if (tableFilters.filters[key].trim()) setFilter(key, '');
+		}
+	}
+
+	// Reload the list whenever the server-side group partition changes from ANY source —
+	// setFilter or browser history navigation (popstate re-reads the URL into the filters).
+	// Seeded with the initial value so this is a no-op on first run (mount already loads it).
+	let lastLoadedGroup = tableFilters.filters.mem_group.trim();
+	$effect(() => {
+		const group = tableFilters.filters.mem_group.trim();
+		if (group === lastLoadedGroup) return;
+		lastLoadedGroup = group;
+		void loadMemories();
+	});
+
+	// Names for the ids rows carry. A source without them leaves the lists empty: the table shows the ids.
+	async function loadChatChannels() {
+		const channels = opts.source.channels;
+		if (!channels) return;
+		try {
+			chatChannels = await channels.call(opts.source);
+		} catch {
+			// Leave the last loaded channels visible.
+		}
+	}
+
+	async function loadCharacters() {
+		const list = opts.source.characters;
+		if (!list) return;
+		try {
+			characters = await list.call(opts.source);
+		} catch {
+			// Leave the last loaded characters visible.
+		}
+	}
+
+	async function loadMemories() {
+		memoriesError = '';
+		memoriesLoading = true;
+		try {
+			// Scope to the selected partition when one is chosen; '' loads the page default.
+			const r = await loadMemoriesList(opts.source, tableFilters.filters.mem_group.trim() || undefined);
+			memoryEnabled = r.memoryEnabled;
+			memoriesRows = r.memories;
+			memoriesError = r.error;
+		} finally {
+			memoriesLoading = false;
+		}
+	}
+
+	// Populate the group selector from the same list the graph viewer uses (all partitions:
+	// knowledge / memory / eval). Failure is non-fatal — the dropdown just stays at its default
+	// "All memory" option; the list itself is unaffected.
+	async function loadMemoryGroups() {
+		try {
+			const data = await opts.source.listGroups();
+			memoryGroups = data.groups;
+			memoryDefaultGroupId = data.default_group_id;
+		} catch {
+			// Non-fatal — the selector stays with whatever group was last loaded.
+		}
+	}
+
+	function closeMemoryJsonDialog() {
+		memoryJsonRow = null;
+	}
+
+	function closeClearMemoriesDialog() {
+		if (!memoryActionBusy) clearMemoriesConfirmOpen = false;
+	}
+
+	function requestClearMemoriesConfirm() {
+		clearMemoriesConfirmOpen = true;
+	}
+
+	function requestClearGroupConfirm() {
+		clearGroupConfirmOpen = true;
+	}
+
+	function closeClearGroupDialog() {
+		if (!memoryActionBusy) clearGroupConfirmOpen = false;
+	}
+
+	function showMemoryJsonRow(row: MemoryRow) {
+		memoryJsonRow = row;
+	}
+
+	// "Clear memories": delete exactly the shown RELATION facts by edge id. Entity/summary rows
+	// are excluded (see clearableMemoryIds) — those go through "Clear group".
+	async function confirmClearMemories() {
+		memoryActionBusy = true;
+		memoriesError = '';
+		try {
+			await deleteMemories(opts.source, clearableMemoryIds);
+			clearMemoriesConfirmOpen = false;
+			await loadMemories();
+		} catch (e) {
+			memoriesError = errorMessage(e);
+		} finally {
+			memoryActionBusy = false;
+		}
+	}
+
+	// "Clear group": wipe the whole selected partition (facts + entities + episodes +
+	// communities). The group then disappears from the selector, so re-seed to a new default.
+	async function confirmClearGroup() {
+		const gid = tableFilters.filters.mem_group.trim();
+		if (!gid) {
+			clearGroupConfirmOpen = false;
+			return;
+		}
+		memoryActionBusy = true;
+		memoriesError = '';
+		try {
+			await clearGroup(opts.source, gid);
+			clearGroupConfirmOpen = false;
+			await loadMemoryGroups();
+			// Stale row filters belonged to the wiped group — drop them so they don't hide the next
+			// group's rows (which looked like "the clear emptied everything").
+			resetRowFilters();
+			// The cleared group is gone (its episodes were deleted). Land on a fresh default;
+			// if one is still selectable, changing it reloads via the group-scope effect.
+			const next = defaultMemoryGroupId;
+			if (next && next !== gid) {
+				setFilter('mem_group', next);
+			} else {
+				await loadMemories();
+			}
+		} catch (e) {
+			memoriesError = errorMessage(e);
+		} finally {
+			memoryActionBusy = false;
+		}
+	}
+
+	/**
+	 * Call once mounted: loads the groups, then the memories, and the character/channel names
+	 * used by the filters and the Character column.
+	 */
+	function mount(): void {
+		void initGroupsThenLoad();
+		void loadChatChannels();
+		void loadCharacters();
+	}
+
+	// A single group is always selected now. Load the group list first, then land on a group
+	// (respecting a deep-linked ?mem_group=), and only then load its memories — so we never do the
+	// wasteful "all groups" fetch the old empty-scope default triggered.
+	async function initGroupsThenLoad(): Promise<void> {
+		await loadMemoryGroups();
+		const current = tableFilters.filters.mem_group.trim();
+		// A group in the URL that no longer exists (e.g. it was just cleared, then the page was
+		// refreshed) must NOT be loaded as-is — it would read empty forever. Fall back to the
+		// default and drop the old group's stale row filters.
+		const known = current !== '' && memoryGroups.some((g) => g.id === current);
+		const def = defaultMemoryGroupId;
+		if (!known && def) {
+			if (current) resetRowFilters();
+			setFilter('mem_group', def); // group-scope effect reloads the list for the new group
+		} else {
+			await loadMemories(); // valid deep-linked group, or no groups at all → load (scoped / fallback)
+		}
+	}
+
+	return {
+		get memoriesError() {
+			return memoriesError;
+		},
+		get memoriesLoading() {
+			return memoriesLoading;
+		},
+		get memoryEnabled() {
+			return memoryEnabled;
+		},
+		get sortedMemoriesRows() {
+			return sortedMemoriesRows;
+		},
+		get visibleMemoriesRows() {
+			return visibleMemoriesRows;
+		},
+		get charactersForFilterDropdown() {
+			return charactersForFilterDropdown;
+		},
+		get memoryGroupsForFilterDropdown() {
+			return memoryGroupsForFilterDropdown;
+		},
+		get memoryGroupLabelById() {
+			return memoryGroupLabelById;
+		},
+		get sourcesForMemoryFilterDropdown() {
+			return sourcesForMemoryFilterDropdown;
+		},
+		get characterMap() {
+			return characterMap;
+		},
+		get channelById() {
+			return channelById;
+		},
+		get memoryActionBusy() {
+			return memoryActionBusy;
+		},
+		get memoryJsonRow() {
+			return memoryJsonRow;
+		},
+		get memoryProvenanceRow() {
+			return provenance.row;
+		},
+		get memoryProvenanceChunks() {
+			return provenance.chunks;
+		},
+		get memoryProvenanceLoading() {
+			return provenance.loading;
+		},
+		get memoryProvenanceError() {
+			return provenance.error;
+		},
+		get clearMemoriesConfirmOpen() {
+			return clearMemoriesConfirmOpen;
+		},
+		get clearGroupConfirmOpen() {
+			return clearGroupConfirmOpen;
+		},
+		// "Clear memories" is offered only when a row-level filter is active AND there are relation
+		// facts in view to delete (entities are excluded from this action).
+		get canClearMemories() {
+			return memoryRowFiltersActive && clearableMemoryIds.length > 0;
+		},
+		get clearableMemoryCount() {
+			return clearableMemoryIds.length;
+		},
+		get selectedGroupLabel() {
+			return selectedGroupLabel;
+		},
+		// URL-synced filter values (read) + single write path; column sort controller.
+		get filters() {
+			return tableFilters.filters;
+		},
+		setFilter,
+		sort,
+		mount,
+		loadMemories,
+		refreshMemories: loadMemories,
+		closeMemoryJsonDialog,
+		closeClearMemoriesDialog,
+		requestClearMemoriesConfirm,
+		requestClearGroupConfirm,
+		closeClearGroupDialog,
+		confirmClearGroup,
+		showMemoryJsonRow,
+		showMemoryProvenance: provenance.open,
+		closeMemoryProvenance: provenance.close,
+		confirmClearMemories
+	};
+}
+
+export type MemoriesController = ReturnType<typeof createMemoriesController>;

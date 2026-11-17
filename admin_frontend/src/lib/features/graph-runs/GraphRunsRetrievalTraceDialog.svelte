@@ -1,8 +1,8 @@
 <script lang="ts">
   import { Settings2 } from '@lucide/svelte';
-  import SearchInput from '$lib/search/SearchInput.svelte';
+  import SearchInput from '$kit/ui/search-input.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
-  import Highlight from '$lib/search/Highlight.svelte';
+  import Highlight from '$kit/search/highlight.svelte';
   import type { RetrievalTraceRecord } from '$lib/api/graph-runs';
   import ExpandCollapseButtons from './shared/ExpandCollapseButtons.svelte';
   import TraceDialogShell from './shared/TraceDialogShell.svelte';

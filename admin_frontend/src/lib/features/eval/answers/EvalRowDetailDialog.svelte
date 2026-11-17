@@ -10,12 +10,12 @@
 -->
 <script lang="ts">
   import { Scissors } from '@lucide/svelte';
-  import SearchInput from '$lib/search/SearchInput.svelte';
+  import SearchInput from '$kit/ui/search-input.svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import * as Table from '$kit/components/ui/table/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
-  import Highlight from '$lib/search/Highlight.svelte';
+  import Highlight from '$kit/search/highlight.svelte';
   import EvalLegActions from '$lib/features/eval/answers/EvalLegActions.svelte';
   import EvalRecalledTable from '$lib/features/eval/answers/EvalRecalledTable.svelte';
   import { fmtCost, fmtEpisodeDate } from '$lib/features/eval/shared/eval-format';

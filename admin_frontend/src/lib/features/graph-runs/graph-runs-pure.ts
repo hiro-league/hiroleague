@@ -7,7 +7,7 @@ import type { ChatChannelRow } from '$lib/api/chat-channels';
 import type { CharacterRow } from '$lib/api/characters';
 import type { GraphLedgerRow } from '$lib/api/graph-runs';
 import { DISTINCT_EMPTY_VALUE } from '$kit/ui/distinct-options';
-import { rowMatches } from '$lib/search/match';
+import { rowMatches } from '$kit/search/match';
 import {
   formatAgentElapsedMs,
   formatTokenCount,

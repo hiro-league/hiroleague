@@ -25,6 +25,8 @@ classifiers = [
 ]
 dependencies = [
     "hiro-commons~=0.2.0",
+    # The graph viewer's and memories table's routes (hiro_memory.routes), mounted by their owner.
+    "fastapi>=0.115",
     "pydantic>=2",
     "langchain-core>=1.0",
     "langsmith>=0.14",

@@ -11,7 +11,7 @@
   import { Checkbox } from '$kit/components/ui/checkbox/index.js';
   import SortHead from '$kit/ui/sort-head.svelte';
   import type { SortState } from '$kit/ui/sort.svelte';
-  import Highlight from '$lib/search/Highlight.svelte';
+  import Highlight from '$kit/search/highlight.svelte';
   import EvalResultRowDetail from '$lib/features/eval/answers/EvalResultRowDetail.svelte';
   import { EVAL_ANSWERS_TABLE_STICKY_TOP } from '$lib/features/eval/shared/eval-table-ui';
   import { fmtDateTime, fmtTime } from '$lib/features/eval/shared/eval-format';

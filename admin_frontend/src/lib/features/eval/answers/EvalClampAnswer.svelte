@@ -4,7 +4,7 @@
 -->
 <script lang="ts">
   import { ChevronDown, ChevronUp } from '@lucide/svelte';
-  import Highlight from '$lib/search/Highlight.svelte';
+  import Highlight from '$kit/search/highlight.svelte';
 
   interface Props {
     text: string;

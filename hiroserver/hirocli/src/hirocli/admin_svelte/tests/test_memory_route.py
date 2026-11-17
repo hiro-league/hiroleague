@@ -4,6 +4,8 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from hirocli.admin_svelte.routes import memory as memory_route
 from hirocli.domain.data_store import ensure_data_db, get_default_user_id
@@ -57,128 +59,6 @@ class FakeMemoryService:
 
 
 @pytest.mark.asyncio
-async def test_memory_list_uses_live_workspace_service(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    ensure_data_db(tmp_path)
-    user_id = get_default_user_id(tmp_path)
-    service = FakeMemoryService()
-    request = SimpleNamespace(
-        app=SimpleNamespace(
-            state=SimpleNamespace(
-                ctx=SimpleNamespace(workspace_path=tmp_path, memory_service=service)
-            )
-        )
-    )
-
-    monkeypatch.setattr(
-        memory_route,
-        "resolve_workspace",
-        lambda workspace_id: (SimpleNamespace(path=str(tmp_path)), None),
-    )
-
-    def fail_create(*_: Any, **__: Any) -> None:
-        raise AssertionError("route should not open a second memory service")
-
-    monkeypatch.setattr(memory_route, "create_memory_service", fail_create)
-
-    result = await memory_route.list_workspace_memories("ws-1", request)
-
-    assert result == {
-        "memory_enabled": True,
-        "memories": [{"memory": "remembered"}],
-    }
-    assert service.calls == [{"user_id": user_id, "character_id": None}]
-
-
-@pytest.mark.asyncio
-async def test_memory_list_orders_by_updated_desc(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    service = FakeMemoryService(
-        [
-            {"id": "old", "memory": "old", "updated_at": "2026-05-17T12:00:00Z"},
-            {"id": "new", "memory": "new", "updated_at": "2026-05-18T12:00:00Z"},
-            {"id": "created-only", "memory": "created", "created_at": "2026-05-18T10:00:00Z"},
-        ]
-    )
-    request = SimpleNamespace(
-        app=SimpleNamespace(
-            state=SimpleNamespace(
-                ctx=SimpleNamespace(workspace_path=tmp_path, memory_service=service)
-            )
-        )
-    )
-
-    monkeypatch.setattr(
-        memory_route,
-        "resolve_workspace",
-        lambda workspace_id: (SimpleNamespace(path=str(tmp_path)), None),
-    )
-
-    result = await memory_route.list_workspace_memories("ws-1", request)
-
-    assert [row["id"] for row in result["memories"]] == ["new", "created-only", "old"]
-
-
-@pytest.mark.asyncio
-async def test_memory_list_group_filter_reads_that_partition(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # With ?group_id=, the route reads that one partition via list_facts_in_groups (the group
-    # selector path) instead of the default user's list_all — lets the Memories list show any
-    # group (memory / knowledge / eval), like the Graph tab.
-    service = FakeMemoryService(group_rows=[{"id": "k1", "memory": "kb fact", "source": "knowledge"}])
-    request = SimpleNamespace(
-        app=SimpleNamespace(
-            state=SimpleNamespace(
-                ctx=SimpleNamespace(workspace_path=tmp_path, memory_service=service)
-            )
-        )
-    )
-    monkeypatch.setattr(
-        memory_route,
-        "resolve_workspace",
-        lambda workspace_id: (SimpleNamespace(path=str(tmp_path)), None),
-    )
-
-    result = await memory_route.list_workspace_memories("ws-1", request, group_id="kb_main")
-
-    assert result["memories"] == [{"id": "k1", "memory": "kb fact", "source": "knowledge"}]
-    assert service.calls == [{"group_ids": ["kb_main"]}]
-
-
-@pytest.mark.asyncio
-async def test_memory_list_group_filter_rejects_unknown_namespace(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # The client scope is re-validated at the API boundary: an out-of-grammar group is rejected,
-    # never read (no all-groups fallthrough).
-    service = FakeMemoryService()
-    request = SimpleNamespace(
-        app=SimpleNamespace(
-            state=SimpleNamespace(
-                ctx=SimpleNamespace(workspace_path=tmp_path, memory_service=service)
-            )
-        )
-    )
-    monkeypatch.setattr(
-        memory_route,
-        "resolve_workspace",
-        lambda workspace_id: (SimpleNamespace(path=str(tmp_path)), None),
-    )
-
-    result = await memory_route.list_workspace_memories("ws-1", request, group_id="bogus_group")
-
-    assert result.status_code == 400
-    assert service.calls == []
-
-
-@pytest.mark.asyncio
 async def test_memory_clear_uses_live_workspace_service(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -203,63 +83,6 @@ async def test_memory_clear_uses_live_workspace_service(
 
     assert result == {"deleted_count": 2}
     assert service.calls == [{"clear_user_id": user_id, "character_id": None}]
-
-
-def _request_with_body(tmp_path, service: FakeMemoryService, body: Any) -> SimpleNamespace:
-    """A fake FastAPI Request whose ``.json()`` yields ``body`` (routes that read a POST body)."""
-
-    async def _json() -> Any:
-        return body
-
-    return SimpleNamespace(
-        app=SimpleNamespace(
-            state=SimpleNamespace(
-                ctx=SimpleNamespace(workspace_path=tmp_path, memory_service=service)
-            )
-        ),
-        json=_json,
-    )
-
-
-@pytest.mark.asyncio
-async def test_memory_clear_group_wipes_validated_partition(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # "Clear group" wipes ONE partition (facts + entities + episodes) via clear_groups after
-    # re-validating the client group_id at the API boundary.
-    service = FakeMemoryService()
-    request = _request_with_body(tmp_path, service, {"group_id": "kb_main"})
-    monkeypatch.setattr(
-        memory_route,
-        "resolve_workspace",
-        lambda workspace_id: (SimpleNamespace(path=str(tmp_path)), None),
-    )
-
-    result = await memory_route.clear_workspace_group("ws-1", request)
-
-    assert result == {"deleted_count": 3}
-    assert service.calls == [{"clear_group_ids": ["kb_main"]}]
-
-
-@pytest.mark.asyncio
-async def test_memory_clear_group_requires_group_id(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # A missing/blank group_id is rejected before any wipe (never falls through to clear_groups).
-    service = FakeMemoryService()
-    request = _request_with_body(tmp_path, service, {"group_id": "  "})
-    monkeypatch.setattr(
-        memory_route,
-        "resolve_workspace",
-        lambda workspace_id: (SimpleNamespace(path=str(tmp_path)), None),
-    )
-
-    result = await memory_route.clear_workspace_group("ws-1", request)
-
-    assert result.status_code == 400
-    assert service.calls == []
 
 
 @pytest.mark.asyncio
@@ -287,14 +110,23 @@ async def test_memory_delete_uses_mem0_memory_id(
     assert service.deleted_ids == ["mem-1"]
 
 
-def test_sort_memories_tolerates_out_of_range_dates() -> None:
-    """A Graphiti fact can carry an out-of-range valid_at/created_at (pre-1970, year-0001,
-    far-future). datetime.timestamp() raises OSError on Windows / OverflowError elsewhere for
-    those — the sort must NOT 500 the whole Memories list; such rows sort as epoch-0 (oldest)."""
-    rows = [
-        {"id": "recent", "created_at": "2026-07-01T09:00:00+00:00"},
-        {"id": "ancient", "created_at": "0001-01-01T00:00:00+00:00"},
-    ]
-    # year-0001 → datetime.timestamp() raises (OSError on Windows) → treated as epoch-0, sorts last.
-    ordered = [r["id"] for r in memory_route._sort_memories(rows)]
-    assert ordered == ["recent", "ancient"]
+def test_memory_list_uses_live_workspace_service(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The mounted memory library router reads the server's own memory service for its workspace
+    (never a second one) and lists the workspace's default user without a group_id."""
+    ensure_data_db(tmp_path)
+    user_id = get_default_user_id(tmp_path)
+    service = FakeMemoryService()
+
+    def fail_create(*_: Any, **__: Any) -> None:
+        raise AssertionError("route should not open a second memory service")
+
+    monkeypatch.setattr(memory_route, "create_memory_service", fail_create)
+    app = FastAPI()
+    app.state.ctx = SimpleNamespace(workspace_path=tmp_path, memory_service=service)
+    app.include_router(memory_route.memory_graph_router, prefix="/api")
+    app.dependency_overrides[memory_route._selected_workspace] = lambda: tmp_path
+
+    result = TestClient(app).get("/api/memory/list").json()
+
+    assert result == {"memory_enabled": True, "memories": [{"memory": "remembered"}]}
+    assert service.calls == [{"user_id": user_id, "character_id": None}]

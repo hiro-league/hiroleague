@@ -1,5 +1,5 @@
 import type { CorpusEpisodeExtraction, EvalEpisode } from '$lib/api/eval';
-import { rowMatches } from '$lib/search/match';
+import { rowMatches } from '$kit/search/match';
 
 /** Collapsed episode bodies clamp to this many text lines until expanded. */
 export const CORPUS_CLAMP_LINES = 6;

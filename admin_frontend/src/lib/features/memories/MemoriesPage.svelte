@@ -6,31 +6,28 @@
   import PageTabs from '$kit/ui/page-tabs.svelte';
   import type { PageTab } from '$kit/ui/page-tabs.svelte';
   import Notice from '$kit/ui/notice.svelte';
+  import GraphPanel from '$kit/memory/graph/graph-panel.svelte';
+  import { createGraphModel } from '$kit/memory/graph/state/create-graph-model.svelte';
+  import MemoriesPanel from '$kit/memory/memories/memories-panel.svelte';
+  import { MEMORIES_A11Y } from '$kit/memory/memories/shared/memories-a11y';
   import { ADMIN_PAGE_MAX_W_WIDE } from '$lib/styling/admin-tokens';
   import { createMemoriesPreferences } from '$lib/preferences/memories-preferences.svelte';
   import type { MemoriesTabPreference } from '$lib/preferences/keys';
-  import MemoriesPanel from './MemoriesPanel.svelte';
-  import MemoriesDialogs from './MemoriesDialogs.svelte';
-  import { MEMORIES_A11Y } from './shared/memories-a11y';
-  // The entity-graph viz moved here from the Knowledge page as a second tab. The
-  // component still lives under features/knowledge/graph (it renders the
-  // knowledge entity graph); the Memories controller owns its model + live SSE.
-  import KnowledgeGraphPanel from '$lib/features/knowledge/graph/KnowledgeGraphPanel.svelte';
-  import { createKnowledgeGraphModel } from '$lib/features/knowledge/state/knowledge-graph.svelte';
-  import { createMemoriesPageController } from './state/memories-controller.svelte';
+  import { chatOverlay } from '$lib/features/chat-channels/overlay/chat-overlay-store.svelte';
+  import { adminMemorySource } from './state/memory-source';
 
+  // The memories table and the entity graph are the UI kit's pieces (kit memory/), fed by the admin's
+  // data source: its own API calls for the selected workspace, and the knowledge events stream for live
+  // graph updates.
   const tabPrefs = createMemoriesPreferences();
-  const ctl = createMemoriesPageController();
 
-  // The entity-graph viz (second tab) is a self-contained knowledge model owned here, not by the
-  // memories controller. Its live SSE runs at the page level so deltas keep accumulating even
-  // while the user is on the Memories tab; the panel still owns rendering + its initial load.
+  // The graph's live updates run at the page level so deltas keep accumulating even while the Memories
+  // tab shows; the panel still owns rendering and its first load.
   let graphError = $state<string | null>(null);
-  const graph = createKnowledgeGraphModel({ setError: (msg) => (graphError = msg) });
+  const graph = createGraphModel({ source: adminMemorySource, setError: (msg) => (graphError = msg) });
 
   onMount(() => {
     tabPrefs.initialize();
-    ctl.mount();
     return graph.connectEvents();
   });
 
@@ -68,58 +65,18 @@
     />
     {/snippet}
   </PageHeader>
-  
 
   {#if tabPrefs.activeTab === 'graph' && graphError}
     <Notice message={graphError} />
   {/if}
 
+  <!-- The table stays mounted while the Graph tab shows, so going back keeps its rows (it owns its controller). -->
+  <MemoriesPanel source={adminMemorySource} hidden={tabPrefs.activeTab === 'graph'} />
   {#if tabPrefs.activeTab === 'graph'}
-    <KnowledgeGraphPanel {graph} />
-  {:else}
-    <MemoriesPanel
-      filters={ctl.filters}
-      setFilter={ctl.setFilter}
-      sort={ctl.sort}
-      hidden={false}
-      memoriesError={ctl.memoriesError}
-      memoriesLoading={ctl.memoriesLoading}
-      memoryEnabled={ctl.memoryEnabled}
-      memoriesTotalCount={ctl.sortedMemoriesRows.length}
-      visibleMemoriesRows={ctl.visibleMemoriesRows}
-      charactersForFilterDropdown={ctl.charactersForFilterDropdown}
-      groupsForMemoryFilterDropdown={ctl.memoryGroupsForFilterDropdown}
-      sourcesForMemoryFilterDropdown={ctl.sourcesForMemoryFilterDropdown}
-      characterMap={ctl.characterMap}
-      channelById={ctl.channelById}
-      groupLabelById={ctl.memoryGroupLabelById}
-      memoryActionBusy={ctl.memoryActionBusy}
-      canClearMemories={ctl.canClearMemories}
-      clearableMemoryCount={ctl.clearableMemoryCount}
-      onRequestClearMemories={ctl.requestClearMemoriesConfirm}
-      onRequestClearGroup={ctl.requestClearGroupConfirm}
-      onRefreshMemories={() => void ctl.refreshMemories()}
-      onViewJson={ctl.showMemoryJsonRow}
-      onViewProvenance={ctl.showMemoryProvenance}
+    <GraphPanel
+      {graph}
+      overlayOpen={chatOverlay.open}
+      emptyMessage="No graph yet — build it from the Add tab (enable “build entity graph”)."
     />
   {/if}
 </section>
-
-<MemoriesDialogs
-  memoryJsonRow={ctl.memoryJsonRow}
-  memoryProvenanceRow={ctl.memoryProvenanceRow}
-  memoryProvenanceChunks={ctl.memoryProvenanceChunks}
-  memoryProvenanceLoading={ctl.memoryProvenanceLoading}
-  memoryProvenanceError={ctl.memoryProvenanceError}
-  clearMemoriesConfirmOpen={ctl.clearMemoriesConfirmOpen}
-  clearGroupConfirmOpen={ctl.clearGroupConfirmOpen}
-  clearableMemoryCount={ctl.clearableMemoryCount}
-  selectedGroupLabel={ctl.selectedGroupLabel}
-  memoryActionBusy={ctl.memoryActionBusy}
-  onCloseMemoryJson={ctl.closeMemoryJsonDialog}
-  onCloseProvenance={ctl.closeMemoryProvenance}
-  onCloseClearMemories={ctl.closeClearMemoriesDialog}
-  onConfirmClearMemories={() => void ctl.confirmClearMemories()}
-  onCloseClearGroup={ctl.closeClearGroupDialog}
-  onConfirmClearGroup={() => void ctl.confirmClearGroup()}
-/>

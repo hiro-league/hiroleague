@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { IngestTraceEdge, IngestTraceNode } from '$lib/api/graph-runs';
-  import { shortGraphId } from '$lib/format/short-graph-id';
+  import { shortGraphId } from '$kit/memory/short-id';
   import TraceTable from '../shared/TraceTable.svelte';
   import ValidityPill from '../shared/ValidityPill.svelte';
   import { fmtDate, isCurrent, temporalTitle } from '../shared/trace-format';

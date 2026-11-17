@@ -28,7 +28,7 @@ from hirocli.admin_svelte.routes.graph_runs import graph_runs_router
 from hirocli.admin_svelte.routes.image_lab import image_lab_router
 from hirocli.admin_svelte.routes.knowledge import knowledge_router, knowledge_shared_router
 from hirocli.admin_svelte.routes.logs import logs_router
-from hirocli.admin_svelte.routes.memory import memory_router
+from hirocli.admin_svelte.routes.memory import memory_graph_router, memory_router
 from hirocli.admin_svelte.routes.metrics import metrics_router
 from hirocli.admin_svelte.routes.people import people_router
 from hirocli.admin_svelte.routes.preferences import preferences_router
@@ -60,6 +60,7 @@ if feature_active("knowledge"):
     api_router.include_router(knowledge_router)
 if feature_active("eval"):
     api_router.include_router(eval_router)
+api_router.include_router(memory_graph_router)
 api_router.include_router(memory_router)
 api_router.include_router(config_router)
 api_router.include_router(catalog_router)
