@@ -249,6 +249,35 @@ def changed_repos(env: int, tasks: list[Task]) -> list[str]:
     return out
 
 
+def leftovers(env: int, tasks: list[Task]) -> list[dict[str, str]]:
+    """What an environment holds that no task there owns, for the foot of CodeHiro's environment card (relay.py posts
+    it): a repo its task doesn't claim with uncommitted files, and in env1..env5 with no task, any repo that isn't as a
+    free environment's should be: on a branch of its own (not detached), with commits its trunk lacks, or behind it.
+    One row per repo: ``{"repo", "what"}``, what is wrong in words."""
+    task = next((t for t in tasks if t.env == env and t.state == "working"), None)
+    out = []
+    for repo in REPOS:
+        d = repo_dir(env, repo)
+        if not (d / ".git").exists() or (task and repo in task.repos):
+            continue
+        n = len(dirty(d))
+        what = [f"{n} uncommitted file{'' if n == 1 else 's'}"] if n else []
+        if env and not task:
+            main = main_of(repo)
+            branch = git(d, "branch", "--show-current")
+            if branch:
+                what.append(f"on branch {branch}")
+            ahead = int(git(d, "rev-list", "--count", f"{main}..HEAD"))
+            behind = int(git(d, "rev-list", "--count", f"HEAD..{main}"))
+            if ahead:
+                what.append(f"{ahead} commit{'' if ahead == 1 else 's'} not on {main}")
+            if behind:
+                what.append(f"{behind} commit{'' if behind == 1 else 's'} behind {main}")
+        if what:
+            out.append({"repo": repo, "what": ", ".join(what)})
+    return out
+
+
 # ---------------------------------------------------------------------------------------------------------- state
 
 

@@ -11,7 +11,9 @@ It reads the lines the deploy scripts already print (git prints a hook's lines w
   "==> <part>" ... "passed in N s" or "FAILED in N s".
 
 A line it doesn't know changes nothing, so a new line in a deploy script only goes untimed until a row is added here.
-The stages are steps inside the train's "deploy" step (``parent: deploy``), named in plain words.
+The stages are steps inside the train's "deploy" step (``parent: deploy``), named in plain words. A stage that ran tests
+(a check part, the tests in an image's build) ends with how many it ran (``tests``), counted from what it printed as the
+check engine counts them on the PC (check_events.count_tests).
 """
 
 from __future__ import annotations
@@ -19,6 +21,8 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Callable
+
+from check_events import count_tests
 
 # A deploy script's line (after "<repo>: "), by how it starts -> the stage it begins. The longer prefix first.
 STAGES = [
@@ -52,7 +56,7 @@ BUILD = "Build the image"
 START = "Start the new version"
 
 DOCKER_STEP = re.compile(r"^#(\d+) \[[^\]]+\] RUN (.*)$")
-DOCKER_OUTPUT = re.compile(r"^#(\d+) \d+\.\d+ ")
+DOCKER_OUTPUT = re.compile(r"^#(\d+) \d+\.\d+ (.*)$")
 DOCKER_DONE = re.compile(r"^#(\d+) DONE (\d+(?:\.\d+)?)s$")
 DOCKER_OTHER = re.compile(r"^#(\d+) (CACHED|ERROR|CANCELED)\b")
 DOCKER_ANY = re.compile(r"^#\d+ ")
@@ -80,6 +84,8 @@ class Stages:
         self.running: dict[str, float] = {}  # the named Docker steps running, since when
         self.parts: dict[str, float] = {}  # the check parts running, since when
         self.block: str | None = None  # the check part whose block is printing
+        self.printed: list[str] = []  # that block's lines so far, for its count of tests
+        self.output: dict[str, list[str]] = {}  # each named Docker step's output so far, for its count of tests
         self.built = False  # Docker's build began
 
     def _start(self, step: str, at: float | None = None) -> float:
@@ -87,9 +93,12 @@ class Stages:
         self.emit(step=step, phase="start", at=at)
         return at
 
-    def _end(self, step: str, since: float, ok: bool, seconds: float | None = None) -> None:
+    def _end(self, step: str, since: float, ok: bool, seconds: float | None = None,
+             printed: list[str] | None = None) -> None:
         now = self.clock()
-        self.emit(step=step, phase="end", at=now, ok=ok, seconds=round(now - since if seconds is None else seconds, 1))
+        tests = count_tests("\n".join(printed)) if printed else 0
+        self.emit(step=step, phase="end", at=now, ok=ok, seconds=round(now - since if seconds is None else seconds, 1),
+                  **({"tests": tests} if tests else {}))
 
     def _next(self, step: str | None) -> None:
         """The deploy script's stage running now ends (as it said: failed or fine) and *step* begins."""
@@ -123,10 +132,13 @@ class Stages:
         if m := PART_STARTED.match(text):
             self.parts[m.group(1)] = self._start(f"Check: {m.group(1)}")
         elif m := PART_BLOCK.match(text):
-            self.block = m.group(1)
+            self.block, self.printed = m.group(1), []
         elif (m := PART_END.match(text)) and self.block in self.parts:
-            self._end(f"Check: {self.block}", self.parts.pop(self.block), m.group(1) == "passed", float(m.group(2)))
-            self.block = None
+            self._end(f"Check: {self.block}", self.parts.pop(self.block), m.group(1) == "passed", float(m.group(2)),
+                      self.printed)
+            self.block, self.printed = None, []
+        elif self.block:
+            self.printed.append(text)
 
     def _docker(self, text: str) -> None:
         if not self.built:
@@ -138,21 +150,23 @@ class Stages:
             n, name = m.group(1), run_name(m.group(2))
             if name and n not in self.runs:  # Docker repeats a step's line when steps print side by side
                 self.runs[n] = (name, self.clock())
-        elif (m := DOCKER_OUTPUT.match(text)) and m.group(1) in self.runs and m.group(1) not in self.running:
-            name, announced = self.runs[m.group(1)]
-            self.running[m.group(1)] = self._start(name, announced)
+        elif (m := DOCKER_OUTPUT.match(text)) and m.group(1) in self.runs:
+            if m.group(1) not in self.running:
+                name, announced = self.runs[m.group(1)]
+                self.running[m.group(1)] = self._start(name, announced)
+            self.output.setdefault(m.group(1), []).append(m.group(2))
         elif (m := DOCKER_DONE.match(text)) and m.group(1) in self.runs:
             n, seconds = m.group(1), float(m.group(2))
             name, announced = self.runs.pop(n)
             since = self.running.pop(n, None)
             if since is None:
                 since = self._start(name, announced)
-            self._end(name, since, True, seconds)
+            self._end(name, since, True, seconds, self.output.pop(n, None))
         elif (m := DOCKER_OTHER.match(text)) and m.group(1) in self.runs:
             n = m.group(1)
             name, _ = self.runs.pop(n)
             if n in self.running:
-                self._end(name, self.running.pop(n), m.group(2) != "ERROR")
+                self._end(name, self.running.pop(n), m.group(2) != "ERROR", printed=self.output.pop(n, None))
 
     def close(self, ok: bool) -> None:
         """The deploy ended: what still runs ends with it, failed unless the deploy went live."""

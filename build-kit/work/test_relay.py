@@ -42,15 +42,21 @@ def test_changes_are_said_for_made_environments_only_when_they_differ(tmp_path, 
     monkeypatch.setattr(relay.hw, "TASKS", tmp_path / "tasks")
     (tmp_path / "env2" / "hiroleague" / ".git").mkdir(parents=True)  # env2 is made; env1, env3 to env5 aren't
     found = {0: ["codehiro"], 2: []}
+    left = {0: [], 2: []}
     monkeypatch.setattr(relay.hw, "changed_repos", lambda env, tasks: found[env])
+    monkeypatch.setattr(relay.hw, "leftovers", lambda env, tasks: left[env])
     sent = []
-    monkeypatch.setattr(relay.hw, "event", lambda **e: sent.append((e["env"], e["step"], e["repos"])))
+    monkeypatch.setattr(relay.hw, "event", lambda **e: sent.append((e["env"], e["step"], e["repos"], e["leftovers"])))
     said = relay.changes({})
-    assert said == found and sent == [(0, "changes", ["codehiro"]), (2, "changes", [])]
+    assert sent == [(0, "changes", ["codehiro"], []), (2, "changes", [], [])]
     sent.clear()
     found[2] = ["homehiro"]
+    said = relay.changes(said)
+    assert sent == [(2, "changes", ["homehiro"], [])]  # env0 is as it was said
+    sent.clear()
+    left[2] = [{"repo": "nethiro", "what": "3 commits behind main"}]
     relay.changes(said)
-    assert sent == [(2, "changes", ["homehiro"])]  # env0 is as it was said
+    assert sent == [(2, "changes", ["homehiro"], [{"repo": "nethiro", "what": "3 commits behind main"}])]
 
 
 def test_it_asks_codehiro_beside_the_events_it_sends():

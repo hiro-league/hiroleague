@@ -67,23 +67,35 @@ def tail(output: str | None) -> str | None:
 
 # What test runners print per test, as the checks run them: pytest's progress characters (-q, with xdist too:
 # "....F.s  [ 42%]"), unittest's dots (one line, written as they go), pytest -v's "PASSED"/"FAILED" lines, and vitest's
-# file lines ("✓ src/x.test.ts (12 tests) 4ms").
+# file lines ("✓ src/x.test.ts (12 tests) 4ms"). Their totals, once a runner ends: unittest's "Ran 237 tests in 20.3s"
+# (its dots share lines with what the tests log, so the total is the count) and vitest's "Tests  45 passed (47)" (a
+# run not on a terminal prints no file lines, only that). Colours (vitest's, through a deploy) are left out first.
 _DOTS = re.compile(r"^\s*([.FEsxX]+)\s*(\[\s*\d+%\])?\s*$")
 _VERBOSE = re.compile(r"::\S+.*\b(PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)\b")
 _VITEST = re.compile(r"^\s*[✓✔❯×✗✘]\s+\S.*\((\d+) tests?\b")
+_UNITTEST_RAN = re.compile(r"^Ran (\d+) tests? in ")
+_VITEST_TOTAL = re.compile(r"^\s*Tests\s+.*\((\d+)\)\s*$")
+_COLOUR = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def count_tests(text: str) -> int:
     """How many tests a part's output shows done so far (0 when it shows none: a linter, a build)."""
-    n = 0
-    for line in text.splitlines():
+    dots = files = 0
+    ran: list[int] = []
+    totals: list[int] = []
+    for line in _COLOUR.sub("", text).splitlines():
         if m := _DOTS.match(line):
-            n += len(m.group(1))
+            dots += len(m.group(1))
         elif _VERBOSE.search(line):
-            n += 1
+            dots += 1
         elif m := _VITEST.match(line):
-            n += int(m.group(1))
-    return n
+            files += int(m.group(1))
+        elif m := _UNITTEST_RAN.match(line):
+            ran.append(int(m.group(1)))
+        elif m := _VITEST_TOTAL.match(line):
+            totals.append(int(m.group(1)))
+    # A runner's own total wins over what was counted on the way (the same tests, counted twice otherwise)
+    return (sum(ran) if ran else dots) + (sum(totals) if totals else files)
 
 
 def tests_in(output: str | None) -> int:
