@@ -11,18 +11,19 @@ def task(id, env, repos, state="working"):
     return hw.Task(id=id, title=id, env=env, repos=repos, state=state)
 
 
-def test_each_environment_owns_15_consecutive_ports():
+def test_each_environment_owns_17_consecutive_ports():
     assert hw.ports(0)["core-admin"] == 7000
     assert hw.ports(2)["core-socket"] == 7201
     assert hw.ports(5)["codehiro-ui"] == 7512
     assert hw.ports(1)["core-plugin"] == 7114
-    assert sorted(hw.ports(3).values()) == list(range(7300, 7315))
+    assert hw.ports(4)["evalhiro-ui"] == 7416
+    assert sorted(hw.ports(3).values()) == list(range(7300, 7317))
 
 
 def test_claims_keep_the_core_first_and_a_kit_change_claims_the_apps():
     assert hw.expand(["homehiro", "hiroleague"], kit=False) == ["hiroleague", "homehiro"]
     assert hw.expand(["hiroleague"], kit=True) == ["hiroleague", "homehiro", "nethiro", "trainhiro", "studyhiro",
-                                                    "codehiro"]
+                                                    "codehiro", "evalhiro"]
     with pytest.raises(hw.Stop):
         hw.expand(["nope"], kit=False)
 

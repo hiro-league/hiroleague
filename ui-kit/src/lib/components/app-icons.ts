@@ -1,12 +1,13 @@
 // The icons an app may name for its tile (its site's `icon`, the backend kit's `Extension.site_icon`): a few of
 // lucide's names, so the kit doesn't carry every icon. A name not here draws a plain app window; add one here when an
 // app names a new one. "hiroleague" isn't here: the core's tile shows the core's own logo (app-switcher.svelte).
-import { AppWindow, ChartColumn, GraduationCap, House, Network, ScanFace } from '@lucide/svelte';
+import { AppWindow, ChartColumn, FlaskConical, GraduationCap, House, Network, ScanFace } from '@lucide/svelte';
 
 export const APP_ICONS = {
 	house: House, // HomeHiro
 	network: Network, // NetHiro
 	'scan-face': ScanFace, // TrainHiro
+	'flask-conical': FlaskConical, // EvalHiro
 	'graduation-cap': GraduationCap, // StudyHiro
 	chart: ChartColumn // the code reports
 } as const;
