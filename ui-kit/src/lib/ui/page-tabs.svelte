@@ -21,10 +21,12 @@
 
 <script lang="ts" generics="T extends string">
 	// A page's tabs from a list, in the page header: the pill strip (the page's main tabs) or the underlined strip
-	// (tabs inside a tab). It looks like shadcn's Tabs, and adds what a list of tabs needs: a tab that is a link, a
-	// count beside a name, and a place after the tabs for one more of the page's own (an open record's tab).
-	// UI kit, step 3: from the HiroLeague admin's AdminTabStrip, on the kit's look.
+	// (tabs inside a tab). It adds what a list of tabs needs: a tab that is a link, a count beside a name, and a place
+	// after the tabs for one more of the page's own (an open record's tab).
+	// UI kit, step 7d: built on shadcn-svelte's Tabs (its list and triggers: the arrow keys move between tabs, Enter
+	// or a click picks one); a tab with `href` is still a link. Tabs size to their words, not to equal widths.
 	import type { Snippet } from 'svelte';
+	import * as Tabs from '$kit/components/ui/tabs/index.js';
 	import { cn } from '$kit/utils';
 
 	interface Props {
@@ -38,51 +40,30 @@
 	}
 	let { tabs, value, onchange, label, variant = 'default', class: className, extra }: Props = $props();
 
-	const TAB =
-		"relative inline-flex h-[calc(100%_-_1px)] items-center justify-center gap-1.5 rounded-md border border-transparent px-2 py-0.5 text-sm font-medium whitespace-nowrap text-foreground/60 transition-all hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none aria-disabled:pointer-events-none aria-disabled:opacity-50 dark:text-muted-foreground dark:hover:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4";
-	const ON = {
-		// dark: a blue tint, since the light pill's raised look is lost there (input/30 on muted was nearly the track's grey)
-		default: 'bg-background text-foreground shadow-sm dark:border-primary/60 dark:bg-primary/30 dark:text-foreground',
-		line: "text-foreground after:absolute after:inset-x-0 after:bottom-[-5px] after:h-0.5 after:bg-foreground dark:text-foreground"
-	} as const;
+	// dark: a blue tint on the picked pill, since the light pill's raised look is lost there
+	const TAB = cn(
+		'flex-none px-2',
+		variant === 'default' && 'dark:data-active:border-primary/60 dark:data-active:bg-primary/30'
+	);
 </script>
 
-<div
-	class={cn('inline-flex h-8 w-fit max-w-full items-center text-muted-foreground', variant === 'default' ? 'rounded-lg bg-muted p-[3px]' : 'gap-1', className)}
-	role="tablist"
-	aria-label={label}
->
-	{#each tabs as t (t.id)}
-		{@const on = t.id === value}
-		{#if t.href}
-			<a
-				id={t.htmlId}
-				href={t.disabled ? undefined : t.href}
-				role="tab"
-				aria-selected={on}
-				aria-disabled={t.disabled}
-				aria-label={t.ariaLabel}
-				aria-controls={t.ariaControls}
-				title={t.title}
-				class={cn(TAB, on && ON[variant])}
-				>{#if t.icon}<t.icon />{/if}{t.label}{#if t.count !== undefined}<span class="text-xs text-muted-foreground tabular-nums">({t.count})</span>{/if}</a
-			>
-		{:else}
-			<button
-				type="button"
-				id={t.htmlId}
-				role="tab"
-				aria-selected={on}
-				aria-disabled={t.disabled}
-				aria-label={t.ariaLabel}
-				aria-controls={t.ariaControls}
-				title={t.title}
-				disabled={t.disabled}
-				class={cn(TAB, on && ON[variant])}
-				onclick={() => onchange?.(t.id)}
-				>{#if t.icon}<t.icon />{/if}{t.label}{#if t.count !== undefined}<span class="text-xs text-muted-foreground tabular-nums">({t.count})</span>{/if}</button
-			>
-		{/if}
-	{/each}
-	{#if extra}{@render extra()}{/if}
-</div>
+<Tabs.Root value={value} onValueChange={(v) => v !== value && onchange?.(v as T)} activationMode="manual" class="w-fit max-w-full gap-0">
+	<Tabs.List {variant} aria-label={label} class={cn('max-w-full', className)}>
+		{#each tabs as t (t.id)}
+			<Tabs.Trigger value={t.id} disabled={t.disabled} id={t.htmlId} aria-label={t.ariaLabel} aria-controls={t.ariaControls} title={t.title} class={TAB}>
+				{#snippet child({ props })}
+					{#if t.href}
+						<a {...props} href={t.disabled ? undefined : t.href}
+							>{#if t.icon}<t.icon />{/if}{t.label}{#if t.count !== undefined}<span class="text-xs text-muted-foreground tabular-nums">({t.count})</span>{/if}</a
+						>
+					{:else}
+						<button {...props}
+							>{#if t.icon}<t.icon />{/if}{t.label}{#if t.count !== undefined}<span class="text-xs text-muted-foreground tabular-nums">({t.count})</span>{/if}</button
+						>
+					{/if}
+				{/snippet}
+			</Tabs.Trigger>
+		{/each}
+		{#if extra}{@render extra()}{/if}
+	</Tabs.List>
+</Tabs.Root>

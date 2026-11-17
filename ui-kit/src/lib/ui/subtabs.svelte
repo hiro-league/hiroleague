@@ -8,9 +8,14 @@
    * - `toolbar` — trailing icon/actions row (refresh, collapse, …).
    * - `scrollable` — keep tabs on one line; on overflow, flanking chevron
    *   buttons scroll the strip left/right (the scrollbar itself stays hidden).
+   *
+   * UI kit, step 7d: built on shadcn-svelte's Tabs (root, list and triggers): the arrow keys move between the
+   * fixed tabs, Enter or a click picks one and reaches `onSelect` through Tabs' value. `extraTabs` sit in the same
+   * list, as the page's own buttons.
    */
   import type { Snippet } from 'svelte';
   import { ChevronLeft, ChevronRight } from '@lucide/svelte';
+  import * as Tabs from '$kit/components/ui/tabs/index.js';
   import { cn } from '$kit/utils';
   import { SUBTAB_STRIP_SHELL, SUBTAB_TABLIST } from './subtab-class';
   import SubtabButton from './subtab-button.svelte';
@@ -108,7 +113,12 @@
   });
 </script>
 
-<div class={cn(SUBTAB_STRIP_SHELL, className)}>
+<Tabs.Root
+  value={active}
+  onValueChange={(v) => v !== active && onSelect?.(v as TId)}
+  activationMode="manual"
+  class={cn(SUBTAB_STRIP_SHELL, className)}
+>
   {#if scrollable && overflowing}
     <button
       type="button"
@@ -120,8 +130,9 @@
       <ChevronLeft size={18} aria-hidden="true" />
     </button>
   {/if}
-  <div
-    bind:this={tablistEl}
+  <Tabs.List
+    bind:ref={tablistEl}
+    variant="line"
     class={cn(
       SUBTAB_TABLIST,
       // Hide the native scrollbar — the chevron buttons are the affordance (trackpad/shift-wheel
@@ -129,29 +140,27 @@
       scrollable &&
         'flex-nowrap overflow-x-auto overflow-y-hidden scroll-smooth [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
     )}
-    role="tablist"
     aria-label={ariaLabel}
     onscroll={scrollable ? measure : undefined}
   >
     {#each tabs as tab (tab.id)}
       <SubtabButton
+        value={tab.id}
         label={tab.label}
         count={tab.count}
         countText={tab.countText}
         countClass={tab.countClass}
-        active={tab.id === active}
         disabled={tab.disabled}
         ariaLabel={tab.ariaLabel}
         htmlId={tab.htmlId}
         ariaControls={tab.ariaControls}
         title={tab.title}
-        onclick={() => onSelect?.(tab.id)}
       />
     {/each}
     {#if extraTabs}
       {@render extraTabs()}
     {/if}
-  </div>
+  </Tabs.List>
   {#if scrollable && overflowing}
     <button
       type="button"
@@ -168,4 +177,4 @@
       {@render toolbar()}
     </div>
   {/if}
-</div>
+</Tabs.Root>
