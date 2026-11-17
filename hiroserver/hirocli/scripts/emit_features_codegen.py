@@ -26,7 +26,8 @@ def main() -> None:
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     registry = feature_registry()
-    args.out.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8")
+    # newline="\n": LF on Windows too, like the node generators and .gitattributes (CRLF left the file listed as modified)
+    args.out.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8", newline="\n")
 
 
 if __name__ == "__main__":

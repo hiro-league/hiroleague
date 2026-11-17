@@ -46,7 +46,7 @@ part "ui-kit: check" "ui-kit" \
 part "build-kit: bash -n" "build-kit" \
     bash -c "cd '${REPO_ROOT}/build-kit' && for f in *.sh; do bash -n \"\$f\" || exit 1; done"
 # hiro-work, the environments' commands (build-kit/work): its choices of ports, claims and environment.
-part "build-kit: hiro-work tests" "build-kit/work" \
+part "build-kit: hiro-work tests" "build-kit/work build-kit/check-engine.sh" \
     bash -c "cd '${REPO_ROOT}/hiroserver' && uv run python -m pytest ../build-kit/work -q -p no:cacheprovider"
 # What every area reads: the workspace's own settings and lock, and the runner
 ws="hiroserver/pyproject.toml hiroserver/uv.lock scripts/run-tests.sh"
