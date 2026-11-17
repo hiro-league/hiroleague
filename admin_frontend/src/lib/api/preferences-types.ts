@@ -36,17 +36,16 @@ export type KnowledgeAnsweringPreferences = GeneratedKnowledgeAnsweringPreferenc
 
 /** Persisted knowledge prefs plus admin GET payload enrichments. */
 export type KnowledgePreferences = Omit<GeneratedKnowledgePreferences, 'answering'> & {
-  // Lock flag (admin GET enrichment): true once the knowledge collection has points, so the
-  // knowledge embedder override can't change (dimension-bound). The resolved value is no longer
-  // sent — the empty box inherits llm.default_embedder directly.
-  default_embedding_model_locked?: boolean;
+  // Lock flag (admin GET enrichment): true once the knowledge collection has points, so the model
+  // the knowledge embeds with can't change (dimension-bound).
+  embedder_profile_locked?: boolean;
   answering: KnowledgeAnsweringPreferences;
 };
 
 /** Persisted graph prefs plus admin GET payload enrichments. */
 export type GraphPreferences = GeneratedGraphPreferences & {
-  // True once the graph has been indexed — locks the graph embedder override (dimension-bound).
-  embedder_model_locked?: boolean;
+  // True once the graph has been indexed — locks the model the graph embeds with (dimension-bound).
+  embedder_profile_locked?: boolean;
 };
 
 /** Workspace preferences as returned by GET/PATCH (persisted shape + computed fields). */

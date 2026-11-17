@@ -30,21 +30,9 @@ export const MODELS_MANIFEST: PrefTabManifest = {
             { kind: 'aiProfile', path: 'llm.chat_profile' },
             { kind: 'model', modelKind: 'stt', path: 'llm.default_stt', labelled: true },
             { kind: 'aiProfile', path: 'llm.vision_profile' },
-            { kind: 'voiceProfile', path: 'voice.hiro_profile' },
-            {
-              kind: 'model',
-              modelKind: 'embedding',
-              path: 'llm.default_embedder',
-              labelled: true,
-              download: 'embedder'
-            },
-            {
-              kind: 'model',
-              modelKind: 'rerank',
-              path: 'llm.default_reranker',
-              labelled: true,
-              download: 'reranker'
-            }
+            // The embedders and rerankers are profiles (Catalog → Profiles); each search picks one in
+            // the Graph Engine and Knowledge tabs.
+            { kind: 'voiceProfile', path: 'voice.hiro_profile' }
           ]
         },
         // Workspace-wide provider HTTP settings: connection keepalive, plus the response timeout and

@@ -125,6 +125,14 @@ class ExtensionVoiceUse(BaseModel):
     name: str
 
 
+class ExtensionSearchUse(BaseModel):
+    """One thing the extension asks the core to embed (``ai.embed``) or to rerank (``ai.rerank``): the core's admin
+    points each at an embedding or a reranker profile (``embedding.uses`` / ``rerank.uses["<extension>:<id>"]``)."""
+
+    id: str
+    name: str
+
+
 class ExtensionInfo(BaseModel):
     """Self-description an extension sends when it signs in (and answers to extension.info)."""
 
@@ -136,6 +144,10 @@ class ExtensionInfo(BaseModel):
     uses: list[ExtensionUse] = Field(default_factory=list)
     # What it asks the core to say aloud (Phase 7b: voice.speak), each pointed at a voice profile.
     voice_uses: list[ExtensionVoiceUse] = Field(default_factory=list)
+    # What it asks the core to turn into vectors (ai.embed) and to put in order (ai.rerank), each pointed at an
+    # embedding or a reranker profile.
+    embed_uses: list[ExtensionSearchUse] = Field(default_factory=list)
+    rerank_uses: list[ExtensionSearchUse] = Field(default_factory=list)
     # The git repo it is built from, by name ("homehiro": ~/homehiro.git on the server); "" = not said. The code reports
     # keep a report for each extension's repo (extensions.list).
     repo: str = ""

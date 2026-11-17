@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from hiro_channel_sdk import ExtensionFeature, ExtensionUse, ExtensionVoiceUse
+from hiro_channel_sdk import ExtensionFeature, ExtensionSearchUse, ExtensionUse, ExtensionVoiceUse
 
 from .auth.identity import Caller
 from .auth.rules import Rule
@@ -60,6 +60,8 @@ class Extension:
     can_do: Sequence[dict[str, Any]] = ()  # what other apps may ask it to do, and sign-ins it offers (offers.can_do)
     uses: Sequence[ExtensionUse] = ()  # what it asks the core's AI for
     voice_uses: Sequence[ExtensionVoiceUse] = ()  # what it asks the core to say aloud
+    embed_uses: Sequence[ExtensionSearchUse] = ()  # what it asks the core to turn into vectors (llm.search.embed)
+    rerank_uses: Sequence[ExtensionSearchUse] = ()  # what it asks the core to put in order (llm.search.rerank)
     # Its address until a name is claimed, e.g. HomeHiro's hand-written http://homehiro.local. "": none, and the app
     # claims <name>.hiro.local by itself on its first connection.
     site_default: str = ""

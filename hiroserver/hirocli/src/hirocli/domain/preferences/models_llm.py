@@ -38,36 +38,6 @@ class LLMPreferences(BaseModel):
     default_stt: str | None = pref_field(
         model_kind="stt", default=None, title="Default speech-to-text model"
     )
-    # Workspace-wide default cross-encoder reranker. Both the knowledge retrieval reranker
-    # (knowledge.retrieval.reranker.model_id) and the graph fact-search reranker
-    # (graph.reranker.model_id) fall back to this when their own model is empty — one place
-    # to manage the reranker for both legs. Null = no default (each leg reranks only if it
-    # sets its own model).
-    default_reranker: str | None = pref_field(
-        model_kind="rerank",
-        default=None,
-        title="Default reranker model",
-        description=(
-            "Default cross-encoder reranker. The knowledge and graph rerankers both fall "
-            "back to this when their own model is empty. Empty = no default. Cloud models "
-            "need a provider key; local models must be downloaded first."
-        ),
-    )
-    # Workspace-wide default embedder. The knowledge embedder (knowledge.default_embedding_model)
-    # and the graph embedder (graph.embedder_model) both fall back to this when their own model is
-    # empty. NOT forced to any model: null = no default, and indexing is blocked until an embedder
-    # is chosen (embedding is mandatory + dimension-bound, so there is no silent fallback). Never
-    # locked — it only seeds consumers that have not indexed yet.
-    default_embedder: str | None = pref_field(
-        model_kind="embedding",
-        default=None,
-        title="Default embedder model",
-        description=(
-            "Default embedder. The knowledge and graph embedders both fall back to this when "
-            "their own model is empty. Empty = no default (indexing is blocked until one is "
-            "chosen). Cloud models need a provider key; local models must be downloaded first."
-        ),
-    )
     # Warm-keepalive window (seconds) for outbound HTTPS connections to model providers (OpenAI +
     # DeepSeek, chat + embeddings). Human-paced chat turns are usually >5s apart — the SDK default —
     # so the first provider call each turn re-does a TLS handshake (~1s+); a larger window keeps the

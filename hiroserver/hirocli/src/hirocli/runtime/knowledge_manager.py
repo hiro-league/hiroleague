@@ -74,10 +74,18 @@ class KnowledgeManager:
             await service.close()
 
     def _register_preference_reactors(self) -> None:
+        # The knowledge's embedding profile pick, and the embedding profiles themselves (the picked one's model
+        # may be edited): the reactor reloads only when the knowledge's model changed.
         self._ctx.preference_reactor.on_change(
-            "knowledge.default_embedding_model",
+            "knowledge.embedder_profile",
             self._embedding_reload_reactor,
             key="knowledge.embedding-reload",
+            debounce_ms=0,
+        )
+        self._ctx.preference_reactor.on_change(
+            "embedding.profiles",
+            self._embedding_reload_reactor,
+            key="knowledge.embedding-profile-reload",
             debounce_ms=0,
         )
 
@@ -86,10 +94,10 @@ class KnowledgeManager:
         changed_workspace_path: Path,
         changes: dict[str, tuple[object, object]],
     ) -> None:
-        # React to the knowledge override OR the workspace default — either can change the
-        # effective knowledge embedder (resolve_knowledge_embedder_model accounts for which wins).
-        transition = changes.get("knowledge.default_embedding_model") or changes.get(
-            "llm.default_embedder"
+        # React to the knowledge's embedding profile pick, or to an embedding profile's model (the picked
+        # one may be the one edited): reload only when the model the knowledge embeds with changed.
+        transition = changes.get("knowledge.embedder_profile") or next(
+            (t for path, t in changes.items() if path.startswith("embedding.profiles.")), None
         )
         if transition is None or transition[0] == transition[1]:
             return
@@ -101,6 +109,9 @@ class KnowledgeManager:
         from hirocli.services.knowledge.embedder import resolve_knowledge_embedder
 
         prefs = self._ctx.preferences.current
+        model = resolve_knowledge_embedder_model(prefs)
+        if model == (getattr(self.service.embedder, "model_name", "") or None):
+            return  # another embedding profile changed, not the knowledge's model
         wid = workspace_id_for_path(changed_workspace_path)
         reload_cred_store = (
             CredentialStore(changed_workspace_path, wid) if wid is not None else None
@@ -108,7 +119,7 @@ class KnowledgeManager:
         new_embedder = await asyncio.to_thread(
             resolve_knowledge_embedder,
             changed_workspace_path,
-            resolve_knowledge_embedder_model(prefs),
+            model,
             credential_store=reload_cred_store,
         )
         await asyncio.to_thread(self.service.reload_embedder, new_embedder)

@@ -58,9 +58,14 @@ class PairedExtension(BaseModel):
         """The voice uses it last declared (Phase 7b, ExtensionVoiceUse dicts: id, name)."""
         return declared_uses(self.info, "voice_uses")
 
+    def declared_search_uses(self, kind: str) -> list[dict[str, Any]]:
+        """The embed (``kind="embedding"``) or rerank (``"rerank"``) uses it last declared (ExtensionSearchUse dicts)."""
+        return declared_uses(self.info, "embed_uses" if kind == "embedding" else "rerank_uses")
+
 
 def declared_uses(info: dict[str, Any], key: str = "uses") -> list[dict[str, Any]]:
-    """The ``uses`` (or ``voice_uses``) list of an extension's info dict, keeping only well-formed entries."""
+    """The ``uses`` (or ``voice_uses``, ``embed_uses``, ``rerank_uses``) list of an extension's info dict, keeping only
+    well-formed entries."""
     raw = info.get(key)
     if not isinstance(raw, list):
         return []

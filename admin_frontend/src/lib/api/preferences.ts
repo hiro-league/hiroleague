@@ -44,7 +44,7 @@ export function normalizeWorkspacePreferences(prefs: WorkspacePreferences): Work
     knowledge: {
       ...defaults.knowledge,
       ...prefs.knowledge,
-      default_embedding_model_locked: prefs.knowledge?.default_embedding_model_locked,
+      embedder_profile_locked: prefs.knowledge?.embedder_profile_locked,
       chunking: {
         ...defaults.knowledge.chunking,
         ...prefs.knowledge?.chunking,

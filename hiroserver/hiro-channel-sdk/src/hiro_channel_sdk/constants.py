@@ -171,6 +171,23 @@ AI_ERROR_BUSY: str = "busy"              # wait=false and the plan tool is alrea
 AI_ERROR_FAILED: str = "failed"          # every profile tried failed (the message says why)
 AI_ERROR_INVALID: str = "invalid"        # the ask itself is wrong (no prompt, bad picture, bad schema)
 
+# The core searches for extensions with the same models as Hiro's memory (embedding and reranker profiles;
+# hiroleague domain/preferences/models_search.py). Like ai.ask, the core doesn't check that the use was declared.
+#   ai.embed         extension → core, {use, profile?, texts: [text]} → {vectors: [[float]], dimensions, model,
+#                    profile_id, profile_name, ms}. `use` is the extension's own embed use id (ExtensionInfo.embed_uses);
+#                    the core embeds with the profile picked for "<extension>:<use>", or `profile`. A query and a
+#                    document are embedded the same way.
+#   ai.rerank        extension → core, {use, profile?, query, documents: [text], top_n?} → {results: [{index, score}],
+#                    model, profile_id, profile_name, ms}: the documents in order of relevance, best first, each by its
+#                    index in `documents`, with the model's score in [0, 1]; top_n keeps the best n (default: all).
+#   memory.settings  extension → core, {} → {memory, graph, embedder: {profile_id, model}, reranker: {profile_id,
+#                    model}}: chat's memory settings as the core runs them (preferences memory and graph, without
+#                    graph.eval), and the models its memory embeds and reranks with.
+#   Errors (the response's error code): no_profile, invalid, failed (AI_ERROR_*).
+METHOD_AI_EMBED: str = "ai.embed"
+METHOD_AI_RERANK: str = "ai.rerank"
+METHOD_MEMORY_SETTINGS: str = "memory.settings"
+
 # Phase 7b: the core speaks (voice profiles; hiroleague services/voice).
 #   voice.speak     extension → core, {text, use? | profile?, person?, label?}
 #                   → {ogg_b64, seconds, waveform_b64, cached, cost, profile_id, profile_name, provider,

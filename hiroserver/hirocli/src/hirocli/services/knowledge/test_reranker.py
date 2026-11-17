@@ -176,11 +176,17 @@ async def test_rerank_node_noop_when_disabled(tmp_path: Path) -> None:
     assert svc.calls == []  # service never invoked when disabled
 
 
+def _rerank_prefs(model: str) -> WorkspacePreferences:
+    """Reranking on, with a reranker profile for ``model``."""
+    return WorkspacePreferences.model_validate({
+        "rerank": {"profiles": {"r": {"label": "R", "model": model}}},
+        "knowledge": {"retrieval": {"reranker": {"enabled": True, "profile": "r"}}},
+    })
+
+
 @pytest.mark.asyncio
 async def test_rerank_node_success_sets_reranked(tmp_path: Path) -> None:
-    prefs = WorkspacePreferences()
-    prefs.knowledge.retrieval.reranker.enabled = True
-    prefs.knowledge.retrieval.reranker.model_id = "local:ms-marco-multibert-l-12"
+    prefs = _rerank_prefs("local:ms-marco-multibert-l-12")
     reranked = [_hit(2, "c", 0.1)]
     svc = _FakeService(result=reranked)
     graph = _graph(svc, prefs, tmp_path)
@@ -192,9 +198,7 @@ async def test_rerank_node_success_sets_reranked(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_rerank_node_falls_back_on_error(tmp_path: Path) -> None:
-    prefs = WorkspacePreferences()
-    prefs.knowledge.retrieval.reranker.enabled = True
-    prefs.knowledge.retrieval.reranker.model_id = "local:bge-reranker-v2-m3"
+    prefs = _rerank_prefs("local:bge-reranker-v2-m3")
     svc = _FakeService(error=reg.RerankerNotDownloadedError("local:bge-reranker-v2-m3"))
     graph = _graph(svc, prefs, tmp_path)
     out = await graph.rerank_node(_state_with_hits([_hit(0, "a", 0.9)]))

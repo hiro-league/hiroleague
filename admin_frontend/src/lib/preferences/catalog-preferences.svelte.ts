@@ -2,7 +2,7 @@ import { PREF_KEYS, type CatalogTabPreference } from './keys';
 import { createTabPreferences, type TabPreferences } from './create-tab-preferences.svelte';
 
 // Phase 7b mockup: voices is a sub-tab of Profiles (with profiles and uses).
-const ALLOWED: readonly CatalogTabPreference[] = ['providers', 'models', 'profiles', 'voices', 'uses'] as const;
+const ALLOWED: readonly CatalogTabPreference[] = ['providers', 'models', 'profiles', 'voices', 'embedders', 'rerankers', 'uses'] as const;
 
 export function createCatalogPreferences(): TabPreferences<CatalogTabPreference> {
   return createTabPreferences<CatalogTabPreference>({

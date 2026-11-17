@@ -185,7 +185,7 @@ def test_load_preferences_missing_file_persists_defaults(tmp_path: Path) -> None
     assert not preferences_file(ws).exists()
     prefs = load_preferences(ws)
     assert preferences_file(ws).is_file()
-    assert prefs.version == 4
+    assert prefs.version == 5
     assert prefs.media.input.voice is True
     assert prefs.chat.max_messages == 6
 

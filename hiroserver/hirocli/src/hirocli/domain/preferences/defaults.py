@@ -38,13 +38,16 @@ def pref_field(
     read_only: bool = False,
     ai_profile_ref: bool = False,
     voice_profile_ref: bool = False,
+    embedding_profile_ref: bool = False,
+    rerank_profile_ref: bool = False,
     **field_kwargs: Any,
 ) -> Any:
     """``Field(...)`` for a preference with the admin-UI ``json_schema_extra`` metadata named.
 
     Phase 7b step 5 (tuning profiles → AI profiles): ``ai_profile_ref=True`` marks a field whose value
     is an ``ai.profiles`` id (one of Hiro's jobs, see ``jobs.JOB_PRESETS``) and ``voice_profile_ref=True``
-    one whose value is a ``voice.profiles`` id. The root validator finds them by the marker
+    one whose value is a ``voice.profiles`` id; ``embedding_profile_ref`` / ``rerank_profile_ref`` one whose
+    value is an ``embedding.profiles`` / ``rerank.profiles`` id (Hiro's searching uses). The root validator finds them by the marker
     (``iter_profile_refs``) and checks the profile exists, and the markers ARE copied into the admin
     field map (``preferences_schema._META_KEYS``) so the admin renders a profile picker for them.
     """
@@ -65,10 +68,14 @@ def pref_field(
         extra["ai_profile_ref"] = True
     if voice_profile_ref:
         extra["voice_profile_ref"] = True
+    if embedding_profile_ref:
+        extra["embedding_profile_ref"] = True
+    if rerank_profile_ref:
+        extra["rerank_profile_ref"] = True
     return Field(json_schema_extra=extra, **field_kwargs)
 
 
-ProfileRefMarker = Literal["ai_profile_ref", "voice_profile_ref"]
+ProfileRefMarker = Literal["ai_profile_ref", "voice_profile_ref", "embedding_profile_ref", "rerank_profile_ref"]
 
 
 def iter_profile_refs(

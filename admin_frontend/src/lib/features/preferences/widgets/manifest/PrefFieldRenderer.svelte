@@ -15,7 +15,6 @@
     preferenceHint
   } from '$lib/features/preferences/shared/preferences-schema';
   import type { CustomFieldKey, PrefFieldSpec } from './manifest-types';
-  import { Badge } from '$kit/components/ui/badge/index.js';
   import PrefFieldGrid from '$lib/features/preferences/widgets/PrefFieldGrid.svelte';
   import PrefNumberField from '$lib/features/preferences/widgets/PrefNumberField.svelte';
   import PrefTextField from '$lib/features/preferences/widgets/PrefTextField.svelte';
@@ -24,7 +23,6 @@
   import PrefSelectField from '$lib/features/preferences/widgets/PrefSelectField.svelte';
   import PrefModelPicker from '$lib/features/preferences/widgets/PrefModelPicker.svelte';
   import PrefProfileField from '$lib/features/preferences/widgets/PrefProfileField.svelte';
-  import PrefModelDownload from '$lib/features/preferences/widgets/PrefModelDownload.svelte';
   import PrefPanel from '$lib/features/preferences/widgets/PrefPanel.svelte';
   import PromptField from '$lib/features/preferences/widgets/prompts/PromptField.svelte';
   import ActivePromptLibraryField from '$lib/features/preferences/widgets/prompts/ActivePromptLibraryField.svelte';
@@ -80,57 +78,20 @@
       : undefined}
   />
 {:else if spec.kind === 'model'}
-  {#if spec.download}
-    <div class="grid gap-2">
-      <PrefModelPicker
-        {ctrl}
-        kind={spec.modelKind}
-        path={spec.path}
-        embedded
-        labelled={spec.labelled ?? false}
-        emptyFallbackId={spec.emptyFallback
-          ? (getPreferenceByPath(draft, spec.emptyFallback) as string | null)
-          : null}
-      />
-      <PrefModelDownload
-        {ctrl}
-        kind={spec.download}
-        modelId={getPreferenceByPath(draft, spec.path) as string | null}
-      />
-    </div>
-  {:else}
-    <PrefModelPicker
-      {ctrl}
-      kind={spec.modelKind}
-      path={spec.path}
-      embedded
-      labelled={spec.labelled ?? false}
-      emptyFallbackId={spec.emptyFallback
-        ? (getPreferenceByPath(draft, spec.emptyFallback) as string | null)
-        : null}
-    />
-  {/if}
-{:else if spec.kind === 'embedder'}
-  {@const locked = Boolean(getPreferenceByPath(draft, spec.lockedPath))}
-  <div class="grid gap-2">
-    <h4 class={HEADING_CLASS}>
-      {spec.heading}
-      {#if locked}<Badge variant="outline">Locked while indexed</Badge>{/if}
-    </h4>
-    <PrefModelPicker
-      {ctrl}
-      kind="embedding"
-      path={spec.path}
-      embedded
-      emptyFallbackId={draft.llm.default_embedder}
-      busy={ctrl.busy || locked}
-    />
-    <PrefModelDownload
-      {ctrl}
-      kind="embedder"
-      modelId={getPreferenceByPath(draft, spec.path) as string | null}
-    />
-  </div>
+  <PrefModelPicker
+    {ctrl}
+    kind={spec.modelKind}
+    path={spec.path}
+    embedded
+    labelled={spec.labelled ?? false}
+  />
+{:else if spec.kind === 'searchProfile'}
+  <PrefProfileField
+    {ctrl}
+    path={spec.path}
+    kind={spec.profileKind}
+    locked={spec.lockedPath ? Boolean(getPreferenceByPath(draft, spec.lockedPath)) : false}
+  />
 {:else if spec.kind === 'aiProfile'}
   <!-- Phase 7b step 5: a job's AI profile (was a model picker + a tuning profile). -->
   <PrefProfileField {ctrl} path={spec.path} kind="ai" />

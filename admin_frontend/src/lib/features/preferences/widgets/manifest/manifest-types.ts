@@ -62,21 +62,17 @@ export type PrefFieldSpec =
       path: PrefModelIdPath;
       modelKind: PrefModelKind;
       labelled?: boolean;
-      /** Path whose draft value seeds the empty-box "inherited default" (e.g. llm.default_reranker). */
-      emptyFallback?: PreferencePath;
-      /** Render the inline local-model download affordance below the picker. */
-      download?: 'embedder' | 'reranker';
     }
-  /** Embedding model picker with a "locked while indexed" badge + inline download (embedders are
-   * dimension-bound). `lockedPath` is the backend-computed `*_locked` flag; the empty box inherits
-   * `llm.default_embedder`. Used by the graph + knowledge embedders. */
-  | { kind: 'embedder'; path: PrefModelIdPath; lockedPath: PreferencePath; heading: string }
   /** Phase 7b step 5: one of Hiro's jobs → ONE AI profile (an `ai_profile_ref` field; replaced the
    *  model + tuning-profile pair). A select of `ai.profiles` (no plan-tool models), the picked profile
    *  in one line (or what the job falls back to), and a link to Catalog → Profiles. */
   | { kind: 'aiProfile'; path: PreferencePath }
   /** Phase 7b step 5: Hiro's own voice → a voice profile (a `voice_profile_ref` field). */
   | { kind: 'voiceProfile'; path: PreferencePath }
+  /** One of Hiro's searches → an embedding or a reranker profile (an `embedding_profile_ref` /
+   *  `rerank_profile_ref` field). An embedder's pick locks once its data is indexed: `lockedPath` is the
+   *  backend-computed `*_locked` flag (embedders are dimension-bound). */
+  | { kind: 'searchProfile'; path: PreferencePath; profileKind: 'embedding' | 'rerank'; lockedPath?: PreferencePath }
   /** Responsive field grid (the 2-col default; `cols: 3` for dense numeric rows). */
   | { kind: 'grid'; cols?: 2 | 3; fields: PrefFieldSpec[] }
   /** A single stacked column (`grid gap-3`) — one grid cell holding several children. */
@@ -159,9 +155,9 @@ export function fieldSpecPaths(spec: PrefFieldSpec): string[] {
     case 'textarea':
     case 'select':
     case 'model':
-    case 'embedder':
     case 'aiProfile':
     case 'voiceProfile':
+    case 'searchProfile':
       return [spec.path];
     case 'prompt':
       return [spec.path];

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from hiro_commons.constants.storage import PREFERENCES_FILENAME
 
@@ -49,10 +49,10 @@ def load_preferences(workspace_path: Path) -> WorkspacePreferences:
     f = preferences_file(workspace_path)
     if f.exists():
         text = f.read_text(encoding="utf-8")
-        # Phase 7b step 5: a file older than v4 is converted once (AI profiles for Hiro's jobs);
-        # a v4 file validates exactly as before.
-        if '"version"' not in text or _raw_version(text) < 4:
-            return _load_converting_v3(workspace_path, text)
+        # A file older than v5 is converted once: v3 → v4 (AI profiles for Hiro's jobs), then v4 → v5
+        # (embedding and reranker profiles); a v5 file validates exactly as before.
+        if '"version"' not in text or _raw_version(text) < 5:
+            return _load_converting(workspace_path, text)
         return WorkspacePreferences.model_validate_json(text)
     # Missing file: use structural defaults and persist so the workspace always has a real prefs file.
     prefs = WorkspacePreferences()
@@ -71,38 +71,50 @@ def _raw_version(text: str) -> int:
     """The raw file's ``version`` (0 when unreadable; validation then reports the real problem)."""
     try:
         data = json.loads(text)
-        return int(data.get("version") or 0) if isinstance(data, dict) else 4
+        return int(data.get("version") or 0) if isinstance(data, dict) else 5
     except (ValueError, TypeError, AttributeError):
-        return 4  # not JSON: let model_validate_json raise its usual error
+        return 5  # not JSON: let model_validate_json raise its usual error
 
 
-def _load_converting_v3(workspace_path: Path, text: str) -> WorkspacePreferences:
-    """The one-time v3 → v4 conversion (``convert_v4``): convert, validate, save as v4, log once."""
-    from .convert_v4 import convert_preferences_v3_to_v4, write_converted_characters
+def _load_converting(workspace_path: Path, text: str) -> WorkspacePreferences:
+    """The one-time conversions, oldest first: v3 → v4 (``convert_v4``) when older than v4, then v4 → v5
+    (``convert_v5``). Converted and validated in memory, then saved as v5 and logged once per step; on any
+    failure ``preferences.json`` is left as it was."""
+    from .convert_v4 import convert_preferences_v3_to_v4, needs_conversion, write_converted_characters
+    from .convert_v5 import convert_preferences_v4_to_v5
 
-    raw = json.loads(text)
+    data = json.loads(text)
+    summary_v4 = None
     try:
-        data, summary = convert_preferences_v3_to_v4(workspace_path, raw)
+        if needs_conversion(data):
+            data, summary_v4 = convert_preferences_v3_to_v4(workspace_path, data)
+        data, summary_v5 = convert_preferences_v4_to_v5(workspace_path, data)
         prefs = WorkspacePreferences.model_validate(data)
     except Exception as exc:
         logger.error(
-            "❌ Preferences conversion failed — workspace · v3 → v4 (preferences.json left as it was)",
+            "❌ Preferences conversion failed — workspace · to v5 (preferences.json left as it was)",
             extra={"error": str(exc), "workspace_path": str(workspace_path.resolve())},
             exc_info=True,
         )
         raise
     # Written straight to disk (no preferences.saved event: this is the load, nothing changed live).
     _write_preferences_file(workspace_path, prefs)
-    write_converted_characters(summary)
+    if summary_v4 is not None:
+        write_converted_characters(summary_v4)
+        logger.info(
+            "✅ Preferences converted — workspace · v3 → v4 (AI profiles for Hiro's jobs) · %s",
+            summary_v4.line(),
+            extra={
+                "ai_profiles": summary_v4.ai_profiles,
+                "voice_profiles": summary_v4.voice_profiles,
+                "backup": summary_v4.backup,
+                "workspace_path": str(workspace_path.resolve()),
+            },
+        )
     logger.info(
-        "✅ Preferences converted — workspace · v3 → v4 (AI profiles for Hiro's jobs) · %s",
-        summary.line(),
-        extra={
-            "ai_profiles": summary.ai_profiles,
-            "voice_profiles": summary.voice_profiles,
-            "backup": summary.backup,
-            "workspace_path": str(workspace_path.resolve()),
-        },
+        "✅ Preferences converted — workspace · v4 → v5 (embedding and reranker profiles) · %s",
+        summary_v5.line(),
+        extra={"backup": summary_v5.backup, "workspace_path": str(workspace_path.resolve())},
     )
     return prefs
 
@@ -165,7 +177,7 @@ def save_preferences(
                 previous = None
 
     effective_changes = compute_effective_changes(previous, prefs)
-    _validate_pre_save_transition(workspace_path, effective_changes, prefs)
+    _validate_pre_save_transition(workspace_path, previous, prefs)
 
     # Prune editable prompt fields still at their built-in default so they stay ABSENT from the
     # file and re-apply the code constant on every load — a true reset that auto-tracks future
@@ -179,64 +191,45 @@ def save_preferences(
 
 def check_embedder_transition(
     workspace_path: Path,
+    previous: WorkspacePreferences,
+    updated: WorkspacePreferences,
     *,
-    changed: Callable[[str], bool],
-    knowledge_inherits_default: bool,
-    graph_inherits_default: bool,
     error: type[Exception] = ValueError,
 ) -> None:
-    """Raise ``error`` if an embedder change would orphan stored (dimension-bound) vectors.
+    """Raise ``error`` if a change would orphan stored (dimension-bound) vectors.
 
-    The single source for the embedder-lock rules: the knowledge override locks on knowledge points,
-    the graph override on the graph-indexed marker, and the workspace default (``llm.default_embedder``)
-    is blocked only when an empty-override consumer was indexed using it. The runtime PATCH guard and
-    the save-time guard both call this with their own "did this path change" predicate and exception
-    type — so the rule (and the messages) live in one place, and this module owns the service imports."""
+    The single source for the embedder-lock rule: once the knowledge collection has points, the model the
+    knowledge embeds with can't change, and once the graph is indexed, the model the graph embeds with
+    can't. The rule reads the MODEL each search ends up with (``resolve_*_embedder_model``), so it holds
+    whatever changed it: another profile picked, the picked profile's model edited, or the profile removed.
+    The runtime PATCH guard and the save-time guard both call it with their own exception type — so the rule
+    (and the messages) live in one place, and this module owns the service imports."""
     from hirocli.services.knowledge import count_knowledge_points
     from hiro_memory.graph.graph_index_marker import is_graph_indexed
 
-    if changed("knowledge.default_embedding_model") and count_knowledge_points(workspace_path) > 0:
-        raise error(
-            "knowledge.default_embedding_model cannot be changed while the knowledge collection "
-            "has points. Delete all knowledge documents first."
-        )
+    from .resolvers import resolve_graphiti_embedder_model, resolve_knowledge_embedder_model
 
-    if changed("graph.embedder_model") and is_graph_indexed(workspace_path):
+    old, new = resolve_knowledge_embedder_model(previous), resolve_knowledge_embedder_model(updated)
+    if old != new and count_knowledge_points(workspace_path) > 0:
         raise error(
-            "graph.embedder_model cannot be changed while the graph has indexed data. "
-            "Reset the graph first."
+            f"The knowledge embedder can't change from {old} to {new or 'none'} while the knowledge "
+            "collection has documents: their vectors were made with it. Delete all knowledge documents first."
         )
-
-    if changed("llm.default_embedder"):
-        if knowledge_inherits_default and count_knowledge_points(workspace_path) > 0:
-            raise error(
-                "llm.default_embedder cannot be changed: the knowledge collection was indexed "
-                "using it (no Knowledge embedder override). Set a Knowledge embedder override or "
-                "delete all knowledge documents first."
-            )
-        if graph_inherits_default and is_graph_indexed(workspace_path):
-            raise error(
-                "llm.default_embedder cannot be changed: the graph was indexed using it (no "
-                "Graph embedder override). Set a Graph embedder override or reset the graph first."
-            )
+    old, new = resolve_graphiti_embedder_model(previous), resolve_graphiti_embedder_model(updated)
+    if old != new and is_graph_indexed(workspace_path):
+        raise error(
+            f"The memory graph's embedder can't change from {old} to {new or 'none'} while the graph has "
+            "indexed data: its vectors were made with it. Reset the graph first."
+        )
 
 
 def _validate_pre_save_transition(
     workspace_path: Path,
-    effective_changes: dict[str, tuple[Any, Any]],
+    previous: WorkspacePreferences | None,
     prefs: WorkspacePreferences,
 ) -> None:
-    """Save-time embedder guard — runs on every persist (see :func:`check_embedder_transition`)."""
-
-    def _changed(path: str) -> bool:
-        t = effective_changes.get(path)
-        return t is not None and t[0] != t[1]
-
-    check_embedder_transition(
-        workspace_path,
-        changed=_changed,
-        knowledge_inherits_default=not (prefs.knowledge.default_embedding_model or "").strip(),
-        graph_inherits_default=not (prefs.graph.embedder_model or "").strip(),
-    )
-
+    """Save-time embedder guard — runs on every persist (see :func:`check_embedder_transition`). A first
+    save (no previous file) changes nothing that was indexed."""
+    if previous is not None:
+        check_embedder_transition(workspace_path, previous, prefs)
 

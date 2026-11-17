@@ -75,6 +75,7 @@ def info_for(site_url: str) -> ExtensionInfo:
         shows=[{"kind": OFFER_KIND_SITE, "title": e.site_title, "icon": e.site_icon, "url": site_url, "roles": []}],
     )
     return ExtensionInfo(name=e.name, version=e.version, description=e.description, offers=offers, uses=list(e.uses), voice_uses=list(e.voice_uses),
+                         embed_uses=list(e.embed_uses), rerank_uses=list(e.rerank_uses),
                          repo=e.repo,  # its repo: the code reports keep a report for it (HiroLeague's extensions.list)
                          features=list(e.features))  # its features and rights, granted per role in HiroLeague
 

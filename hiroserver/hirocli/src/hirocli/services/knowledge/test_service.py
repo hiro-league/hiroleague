@@ -118,7 +118,10 @@ async def test_markdown_ingest_search_and_detail(tmp_path: Path) -> None:
 
         runtime = WorkspacePreferencesRuntime(workspace)
         with pytest.raises(PreferencePathError):
-            runtime.update("knowledge.default_embedding_model", "openai:text-embedding-3-small")
+            runtime.update_many({
+                "embedding.profiles.small": {"label": "Small", "model": "openai:text-embedding-3-small"},
+                "knowledge.embedder_profile": "small",
+            })
 
         deleted = await service.delete_document(documents.documents[0].id)
         assert deleted["deleted"] is True
@@ -342,8 +345,10 @@ async def test_direct_save_preferences_enforces_knowledge_embedding_lock(tmp_pat
     service = KnowledgeService(workspace, embedder=FakeEmbedder(), sparse_embedder=FakeSparseEmbedder())
     try:
         await service.ingest_and_wait([str(note)])
-        prefs = WorkspacePreferences()
-        prefs.knowledge.default_embedding_model = "openai:text-embedding-3-small"
+        prefs = WorkspacePreferences.model_validate({
+            "embedding": {"profiles": {"small": {"label": "Small", "model": "openai:text-embedding-3-small"}}},
+            "knowledge": {"embedder_profile": "small"},
+        })
         with pytest.raises(ValueError):
             save_preferences(workspace, prefs, previous=WorkspacePreferences())
     finally:

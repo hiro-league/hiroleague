@@ -9,14 +9,9 @@ export type PrefModelKind = 'chat' | 'stt' | 'tts' | 'embedding' | 'rerank';
 // Phase 7b step 5: the chat-model fields of Hiro's jobs (default chat, knowledge answering, graph
 // extraction / small, eval answer / judge / retrieval, memory retrieval) and the default TTS model
 // became AI- / voice-profile fields (`aiProfile` / `voiceProfile` manifest kinds), so they're gone here.
-export type PrefModelIdPath =
-  | 'llm.default_stt'
-  | 'llm.default_reranker'
-  | 'llm.default_embedder'
-  | 'knowledge.default_embedding_model'
-  | 'knowledge.retrieval.reranker.model_id'
-  | 'graph.embedder_model'
-  | 'graph.reranker.model_id';
+// The embedders and rerankers are profiles too (Catalog → Profiles: `embedding_profile_ref` /
+// `rerank_profile_ref` fields), so speech-to-text is the one bare model field left.
+export type PrefModelIdPath = 'llm.default_stt';
 
 // #6: every model-id path must be a real preference path. This alias fails to compile if the
 // hand-written PrefModelIdPath union ever drifts from the generated PreferencePath set.
@@ -85,28 +80,16 @@ export function prefModelCatalog(
   }
 }
 
-// Model paths whose write is blocked while a backend lock flag is set (dimension-bound embedders
-// that can't change once data is indexed). The picker is already disabled in the UI when locked;
-// this is the last-line guard so a stale enabled control can't sneak a write through. Any path not
-// listed here writes unconditionally.
-const MODEL_PATH_LOCK_GUARDS: Partial<
-  Record<PrefModelIdPath, (draft: WorkspacePreferences) => boolean>
-> = {
-  'knowledge.default_embedding_model': (draft) =>
-    Boolean(draft.knowledge.default_embedding_model_locked)
-};
-
 /**
- * Apply a catalog model id to the draft at `path`. Returns false when a lock guard blocks the write.
- * The write itself is the generic dotted-path setter (`setPreferenceByPath`) — `PrefModelIdPath`
- * keeps the caller type-safe, so a new model field is picked up without editing this function.
+ * Apply a catalog model id to the draft at `path` (always written; returns true). The write itself is
+ * the generic dotted-path setter (`setPreferenceByPath`) — `PrefModelIdPath` keeps the caller
+ * type-safe, so a new model field is picked up without editing this function.
  */
 export function applyModelIdToDraft(
   draft: WorkspacePreferences,
   path: PrefModelIdPath,
   id: string | null
 ): boolean {
-  if (MODEL_PATH_LOCK_GUARDS[path]?.(draft)) return false;
   setPreferenceByPath(draft, path, id);
   return true;
 }

@@ -18,7 +18,7 @@ function prefs(overrides: Record<string, unknown> = {}): WorkspacePreferences {
       // Phase 7b step 5: each job points at an AI profile (small steps unset → borrows extraction's).
       extraction_profile: 'p-extract',
       small_profile: null,
-      embedder_model: 'e-model',
+      embedder_profile: 'emb',
       entity_ontology: 'open',
       temporal_default: 'current',
       k_hop: 2,
@@ -26,7 +26,7 @@ function prefs(overrides: Record<string, unknown> = {}): WorkspacePreferences {
       search_scope: 'group',
       sim_min_score: 0.3,
       observability: 'trace',
-      reranker: { model_id: 'rr', min_relevance: 0.5 },
+      reranker: { profile: 'rr-profile', min_relevance: 0.5 },
       eval: {
         answer_profile: 'p-answer',
         // Judge unset → borrows Hiro's chat profile.
@@ -58,10 +58,13 @@ function prefs(overrides: Record<string, unknown> = {}): WorkspacePreferences {
         min_score: 0.2,
         hybrid: true,
         prefetch_limit: 40,
-        reranker: { enabled: false, model_id: null, top_n: 5 }
+        reranker: { enabled: false, profile: null, top_n: 5 }
       }
     },
     memory: { search: { enabled: true } },
+    // The searches pick embedding and reranker profiles; the lines show their models.
+    embedding: { profiles: { emb: { label: 'Embedder', model: 'e-model' } }, uses: {} },
+    rerank: { profiles: { 'rr-profile': { label: 'Reranker', model: 'rr' } }, uses: {} },
     llm: { chat_profile: 'p-chat' },
     ai: {
       profiles: {

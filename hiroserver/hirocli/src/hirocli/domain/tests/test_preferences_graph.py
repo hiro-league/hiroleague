@@ -15,10 +15,12 @@ from hirocli.domain.preferences import (
     GraphPreferences,
     WorkspacePreferences,
     resolve_graph_reranker_model,
+    resolve_graph_reranker_profile,
     resolve_graphiti_embedder_model,
     resolve_graphiti_extraction_model,
     resolve_knowledge_embedder_model,
     resolve_knowledge_reranker_model,
+    resolve_knowledge_reranker_profile,
 )
 
 
@@ -89,20 +91,28 @@ def test_mmr_rejected_for_all_episodes_scopes() -> None:
     assert GraphPreferences(search_scope="edges_and_episodes", search_recipe="cross_encoder")
 
 
-def test_embedder_resolvers_fall_back_to_workspace_default() -> None:
+def test_embedder_resolvers_read_each_legs_profile() -> None:
     prefs = WorkspacePreferences()
-    # No forced default: nothing set anywhere → None (indexing is gated, no silent model).
+    # No forced default: no profile picked → None (indexing is gated, no silent model).
     assert resolve_graphiti_embedder_model(prefs) is None
     assert resolve_knowledge_embedder_model(prefs) is None
-    # The workspace default (llm.default_embedder) feeds BOTH legs when neither overrides.
-    prefs.llm.default_embedder = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-    assert resolve_graphiti_embedder_model(prefs) == prefs.llm.default_embedder
-    assert resolve_knowledge_embedder_model(prefs) == prefs.llm.default_embedder
-    # Per-leg overrides win over the default.
-    prefs.graph.embedder_model = "openai:text-embedding-3-small"
-    prefs.knowledge.default_embedding_model = "openai:text-embedding-3-large"
+    prefs = WorkspacePreferences.model_validate({
+        "embedding": {"profiles": {
+            "local": {"label": "Local", "model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"},
+            "small": {"label": "Small", "model": "openai:text-embedding-3-small"},
+        }},
+        "graph": {"embedder_profile": "small"},
+        "knowledge": {"embedder_profile": "local"},
+    })
     assert resolve_graphiti_embedder_model(prefs) == "openai:text-embedding-3-small"
-    assert resolve_knowledge_embedder_model(prefs) == "openai:text-embedding-3-large"
+    assert resolve_knowledge_embedder_model(prefs) == "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+
+
+def test_a_pick_must_name_an_existing_search_profile() -> None:
+    with pytest.raises(ValidationError, match="unknown embedding profile"):
+        WorkspacePreferences.model_validate({"graph": {"embedder_profile": "nope"}})
+    with pytest.raises(ValidationError, match="unknown reranker profile"):
+        WorkspacePreferences.model_validate({"knowledge": {"retrieval": {"reranker": {"profile": "nope"}}}})
 
 
 def test_extraction_resolver_none_when_no_model_configured(tmp_path) -> None:
@@ -113,30 +123,31 @@ def test_extraction_resolver_none_when_no_model_configured(tmp_path) -> None:
     assert resolve_graphiti_extraction_model(prefs, tmp_path, workspace_id="w") is None
 
 
-def test_reranker_resolvers_fall_back_to_default() -> None:
+def test_reranker_resolvers_read_each_legs_profile() -> None:
     prefs = WorkspacePreferences()
-    # Nothing set anywhere → no reranker for either leg.
+    # No profile picked → no reranker for either leg.
     assert resolve_knowledge_reranker_model(prefs) is None
     assert resolve_graph_reranker_model(prefs) is None
-
-    # The workspace default reranker feeds BOTH legs when neither sets its own model.
-    prefs.llm.default_reranker = "cohere:rerank-v3.5"
-    assert resolve_knowledge_reranker_model(prefs) == "cohere:rerank-v3.5"
-    assert resolve_graph_reranker_model(prefs) == "cohere:rerank-v3.5"
-
-    # Per-leg overrides win over the default.
-    prefs.knowledge.retrieval.reranker.model_id = "local:bge-reranker-v2-m3"
-    prefs.graph.reranker.model_id = "voyage:rerank-2"
+    prefs = WorkspacePreferences.model_validate({
+        "rerank": {"profiles": {
+            "bge": {"label": "BGE", "model": "local:bge-reranker-v2-m3", "device": "cuda"},
+            "voyage": {"label": "Voyage", "model": "voyage:rerank-2"},
+        }},
+        "graph": {"reranker": {"profile": "voyage"}},
+        "knowledge": {"retrieval": {"reranker": {"profile": "bge"}}},
+    })
     assert resolve_knowledge_reranker_model(prefs) == "local:bge-reranker-v2-m3"
     assert resolve_graph_reranker_model(prefs) == "voyage:rerank-2"
+    # The profile carries where a local model runs.
+    assert resolve_knowledge_reranker_profile(prefs).device == "cuda"
+    assert resolve_graph_reranker_profile(prefs).device is None
 
 
 def test_graph_reranker_defaults() -> None:
     # Cross-encoder reranker sub-prefs: no model, relevance gate at the 0.3 default.
     rr = WorkspacePreferences().graph.reranker
-    assert rr.model_id is None  # null → fall back to the workspace default reranker
+    assert rr.profile is None  # null → no reranker (the fact search uses RRF)
     assert rr.min_relevance == 0.3  # drop facts below 0.3 cross-encoder relevance
-    assert rr.device is None
 
 
 def test_graph_reranker_min_relevance_bounds() -> None:

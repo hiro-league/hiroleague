@@ -16,7 +16,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from hiro_channel_sdk import ExtensionFeature, ExtensionUse, ExtensionVoiceUse
+from hiro_channel_sdk import ExtensionFeature, ExtensionSearchUse, ExtensionUse, ExtensionVoiceUse
 
 from hiro_extension_kit import extension, identity
 
@@ -62,6 +62,8 @@ TEST_EXTENSION = extension.Extension(
     site_icon="flask", features=FEATURES, rules=RULES,
     uses=[ExtensionUse(id="sites", name="Sorting sites", json=True)],
     voice_uses=[ExtensionVoiceUse(id="speak", name="Speak")],
+    embed_uses=[ExtensionSearchUse(id="embedding", name="Embedding")],
+    rerank_uses=[ExtensionSearchUse(id="reranking", name="Reranking")],
     auth=False,  # every request is the owner; the tests of sign-in and roles turn it on (testing.auth)
     outputs=False,  # nothing is sent or spoken; a test that sends turns it on (testing.outputs)
     rights_from="home", rights_from_what="System health",

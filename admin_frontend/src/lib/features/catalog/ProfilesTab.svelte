@@ -1,6 +1,6 @@
 <script lang="ts" module>
   import type { CatalogTabPreference } from '$lib/preferences/keys';
-  export type ProfilesSub = Extract<CatalogTabPreference, 'profiles' | 'voices' | 'uses'>;
+  export type ProfilesSub = Extract<CatalogTabPreference, 'profiles' | 'voices' | 'embedders' | 'rerankers' | 'uses'>;
 </script>
 
 <script lang="ts">
@@ -27,6 +27,9 @@
   import VoiceProfileEditorDialog from './voice/VoiceProfileEditorDialog.svelte';
   import VoiceProfilesList from './voice/VoiceProfilesList.svelte';
   import { VoiceController } from './voice/voice-controller.svelte';
+  // Embedding and reranker profiles (preferences embedding.* / rerank.*), and Hiro's four searches.
+  import RetrievalProfilesList from './retrieval/RetrievalProfilesList.svelte';
+  import { retrieval } from './retrieval/retrieval-controller.svelte';
 
   let {
     ai,
@@ -44,14 +47,18 @@
 
   const voice = new VoiceController();
   onMount(() => void voice.load());
+  onMount(() => void retrieval.load());
 
   const voiceUseCount = $derived(voice.uses.extensions.reduce((n, e) => n + e.uses.filter((u) => u.status !== 'removed').length, 0));
   // Uses: Hiro's jobs + its voice (one speaking use), then the extensions' AI and voice uses.
   const hiroUseCount = $derived(ai.jobs.length + 1);
+  const retrievalUseCount = $derived(retrieval.uses.filter((u) => !u.removed).length);
   const subtabs = $derived([
     { id: 'profiles' as const, label: 'AI profiles', count: ai.profiles.length },
     { id: 'voices' as const, label: 'Voice profiles', count: voice.profiles.length },
-    { id: 'uses' as const, label: 'Uses', count: hiroUseCount + ai.uses.length + voiceUseCount }
+    { id: 'embedders' as const, label: 'Embedding profiles', count: retrieval.profiles('embedding').length },
+    { id: 'rerankers' as const, label: 'Reranker profiles', count: retrieval.profiles('reranker').length },
+    { id: 'uses' as const, label: 'Uses', count: hiroUseCount + ai.uses.length + voiceUseCount + retrievalUseCount }
   ]);
 
   let voiceEditing = $state<VoiceProfileRow | null>(null);
@@ -82,6 +89,9 @@
         editVoice(r);
         pendingEdit = null;
       } else if (!voice.loading && voice.profiles.length) pendingEdit = null;
+    } else if (active === 'embedders' || active === 'rerankers') {
+      // Opened from a settings field's "Edit in Catalog → Profiles" link: the list's own Edit opens it.
+      pendingEdit = null;
     } else if (active === 'profiles') {
       if (ai.profiles.some((p) => p.id === id)) {
         ai.editProfile(id);
@@ -98,6 +108,10 @@
     <AiProfilesTab {ai} />
   {:else if active === 'voices'}
     <VoiceProfilesList ctrl={voice} onedit={editVoice} onduplicate={duplicateVoice} />
+  {:else if active === 'embedders'}
+    <RetrievalProfilesList kind="embedding" />
+  {:else if active === 'rerankers'}
+    <RetrievalProfilesList kind="reranker" />
   {:else}
     <AiUsesTab {ai} {voice} />
   {/if}
