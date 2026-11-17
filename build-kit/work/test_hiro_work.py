@@ -28,26 +28,45 @@ def test_claims_keep_the_core_first_and_a_kit_change_claims_the_apps():
         hw.expand(["nope"], kit=False)
 
 
-def test_a_task_works_in_env0_while_its_repos_are_free_there():
-    assert hw.pick_env(["homehiro"], [], None) == 0
-    assert hw.pick_env(["homehiro"], [task("a", 0, ["nethiro"])], None) == 0
+def test_a_task_never_works_in_env0_the_trunk():
+    assert hw.pick_env([], None) == 1
+    with pytest.raises(hw.Stop, match="trunk"):
+        hw.pick_env([], 0)
 
 
-def test_a_task_goes_to_the_first_free_environment_when_env0_holds_a_repo():
-    tasks = [task("a", 0, ["hiroleague", "homehiro"]), task("b", 1, ["nethiro"])]
-    assert hw.pick_env(["homehiro"], tasks, None) == 2
+def test_a_task_goes_to_the_first_free_environment():
+    tasks = [task("a", 1, ["hiroleague", "homehiro"]), task("b", 3, ["nethiro"])]
+    assert hw.pick_env(tasks, None) == 2
 
 
-def test_parked_and_finished_tasks_hold_nothing():
-    tasks = [task("a", 0, ["homehiro"], state="parked"), task("b", None, ["homehiro"], state="parked")]
-    assert hw.pick_env(["homehiro"], tasks, None) == 0
+def test_parked_tasks_hold_no_environment():
+    tasks = [task("a", None, ["homehiro"], state="parked")]
+    assert hw.pick_env(tasks, None) == 1
 
 
-def test_asking_for_a_busy_place_is_refused():
+def test_asking_for_a_busy_environment_is_refused():
     with pytest.raises(hw.Stop):
-        hw.pick_env(["homehiro"], [task("a", 0, ["homehiro"])], 0)
-    with pytest.raises(hw.Stop):
-        hw.pick_env(["homehiro"], [task("a", 3, ["nethiro"])], 3)
+        hw.pick_env([task("a", 3, ["nethiro"])], 3)
+    assert hw.pick_env([task("a", 3, ["nethiro"])], 4) == 4
+
+
+def test_a_step_of_open_work_joins_it_unless_michel_gives_it_its_own_branch(tmp_path, monkeypatch):
+    monkeypatch.setattr(hw, "TASKS", tmp_path)
+    plan = hw.Task(id="plan", title="Memory plan", env=1, repos=["hiroleague"])
+    step1 = hw.Task(id="step1", title="Step 1", env=2, repos=["evalhiro"], part_of="Memory plan")
+    parked = hw.Task(id="old", title="Old", env=None, repos=["homehiro"], state="parked", part_of="Other plan")
+    for t in (plan, step1, parked):
+        hw.save(t)
+    tasks = hw.load_tasks()
+    assert [t.id for t in hw.same_work("plan", tasks)] == ["plan", "step1"]  # by id: the task and its pieces
+    assert [t.id for t in hw.same_work("Memory plan", tasks)] == ["plan", "step1"]  # by name
+    assert [t.id for t in hw.same_work("Other plan", tasks)] == ["old"]  # a parked piece counts
+    assert hw.same_work("New work", tasks) == [] and hw.same_work("", tasks) == []
+    args = dict(task="step2", repos="nethiro", kit=False, title=None, env=None, part_of="plan", about=None,
+                no_real_reads=False, real_writes=False, real_ai=False, own_branch=False)
+    with pytest.raises(hw.Stop, match="guard.py join"):
+        hw.cmd_start(hw.argparse.Namespace(**args))
+    assert not hw.task_path("step2").exists()  # refused before any claim
 
 
 def test_a_task_record_from_a_newer_hiro_work_is_read_and_its_new_fields_kept(tmp_path, monkeypatch):
@@ -63,9 +82,9 @@ def test_a_task_record_from_a_newer_hiro_work_is_read_and_its_new_fields_kept(tm
 
 
 def test_when_every_environment_is_busy_a_new_task_is_refused():
-    tasks = [task("a", 0, ["homehiro"])] + [task(f"t{e}", e, ["nethiro"]) for e in range(1, 6)]
+    tasks = [task(f"t{e}", e, ["nethiro"]) for e in range(1, 6)]
     with pytest.raises(hw.Stop):
-        hw.pick_env(["homehiro"], tasks, None)
+        hw.pick_env(tasks, None)
 
 
 def test_launch_json_lists_each_repos_servers_on_the_environments_own_ports(tmp_path, monkeypatch):
@@ -187,6 +206,30 @@ def test_a_land_merges_env0_into_a_new_app_that_has_no_github_repo_yet(tmp_path,
     monkeypatch.setattr(hw, "repo_dir", lambda env, r: tmp_path / f"env{env}" / r)
     hw.merge_latest(hw.Task(id="t", title="t", env=1, repos=["evalhiro"]), 1)  # no origin: only main is merged
     assert run("merge-base", "--is-ancestor", "main", "HEAD") == ""  # raised if main weren't in the branch
+
+
+def test_sync_brings_the_trunk_into_a_tasks_branch_without_landing(tmp_path, monkeypatch):
+    read = _events(tmp_path, monkeypatch)
+    monkeypatch.setattr(hw, "TASKS", tmp_path / "tasks")
+    hw.TASKS.mkdir()
+    monkeypatch.setattr(hw, "REPOS", ["evalhiro"])
+    monkeypatch.setattr(hw, "repo_dir", lambda env, r: tmp_path / f"env{env}" / r)
+    monkeypatch.setattr(hw, "install", lambda *a, **k: [])
+    for who in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{who}_NAME", "t")
+        monkeypatch.setenv(f"GIT_{who}_EMAIL", "t@t")
+    repo = _repo(tmp_path / "env1" / "evalhiro", "skeleton")
+    run = lambda *a: hw.git(repo, *a)  # noqa: E731
+    run("checkout", "-q", "-b", "task/t")
+    run("commit", "-q", "--allow-empty", "-m", "phase 1")
+    run("checkout", "-q", "main")
+    run("commit", "-q", "--allow-empty", "-m", "landed by another task")
+    run("checkout", "-q", "task/t")
+    hw.save(task("t", 1, ["evalhiro"]))
+    hw.cmd_sync(hw.argparse.Namespace(task="t"))
+    assert run("merge-base", "--is-ancestor", "main", "HEAD") == ""  # raised if main weren't in the branch
+    assert run("branch", "--show-current") == "task/t" and hw.get("t").state == "working"  # not landed
+    assert [e["step"] for e in read() if e["phase"] == "end"][-1] == "sync"
 
 
 def test_a_land_stops_the_environments_servers_before_it_installs_anything(tmp_path, monkeypatch):
@@ -384,28 +427,27 @@ def test_changed_repos_are_a_claims_new_work_or_any_uncommitted_files(tmp_path, 
     monkeypatch.setattr(hw, "ROOT", tmp_path)
     monkeypatch.setattr(hw, "REPOS", ["hiroleague", "codehiro", "nethiro", "homehiro"])
     for repo in ("hiroleague", "codehiro", "nethiro"):
-        _repo(tmp_path / "env0" / repo, "one")
-    t = task("t", 0, ["hiroleague", "codehiro", "nethiro"])
-    t.base = {r: hw.git(tmp_path / "env0" / r, "rev-parse", "HEAD") for r in t.repos}
-    (tmp_path / "env0" / "nethiro" / "stray.txt").write_text("someone's", encoding="utf-8")
-    t.before = {"nethiro": hw.dirty(tmp_path / "env0" / "nethiro")}  # uncommitted before the task: not its own
-    assert hw.changed_repos(0, [t]) == []  # claimed, nothing new; homehiro isn't there
-    (tmp_path / "env0" / "codehiro" / "edit.txt").write_text("mine", encoding="utf-8")
-    hw.git(tmp_path / "env0" / "hiroleague", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q",
+        _repo(tmp_path / "env1" / repo, "one")
+    t = task("t", 1, ["hiroleague", "codehiro"])
+    t.base = {r: hw.git(tmp_path / "env1" / r, "rev-parse", "HEAD") for r in t.repos}
+    assert hw.changed_repos(1, [t]) == []  # claimed, nothing new; homehiro isn't there
+    (tmp_path / "env1" / "codehiro" / "edit.txt").write_text("mine", encoding="utf-8")
+    (tmp_path / "env1" / "nethiro" / "stray.txt").write_text("someone's", encoding="utf-8")
+    hw.git(tmp_path / "env1" / "hiroleague", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q",
            "--allow-empty", "-m", "two")
-    assert hw.changed_repos(0, [t]) == ["hiroleague", "codehiro"]  # a commit since the base, an edit
-    assert hw.changed_repos(0, []) == ["codehiro", "nethiro"]  # no task: any uncommitted files
+    assert hw.changed_repos(1, [t]) == ["hiroleague", "codehiro", "nethiro"]  # a commit, an edit, a stray file
+    assert hw.changed_repos(1, []) == ["codehiro", "nethiro"]  # no task: any uncommitted files
 
 
 def test_a_commit_needs_a_task_that_claims_its_repo(tmp_path, monkeypatch):
     monkeypatch.setattr(hw, "ROOT", tmp_path)
     monkeypatch.setattr(hw, "TASKS", tmp_path / "tasks")
     hw.TASKS.mkdir()
-    folder = tmp_path / "env0" / "homehiro" / "backend"
+    folder = tmp_path / "env1" / "homehiro" / "backend"
     folder.mkdir(parents=True)
     with pytest.raises(hw.Stop, match="claim <task> homehiro"):
         hw.cmd_fresh(type("A", (), {"path": str(folder)})())
-    hw.save(task("t", 0, ["homehiro"]))
+    hw.save(task("t", 1, ["homehiro"]))
     hw.cmd_fresh(type("A", (), {"path": str(folder)})())  # claimed: the commit goes on
     hw.cmd_fresh(type("A", (), {"path": str(tmp_path / "elsewhere")})())  # not an environment's repo
 
@@ -415,12 +457,14 @@ def test_claim_adds_a_free_repo_and_refuses_one_held(tmp_path, monkeypatch):
     monkeypatch.setattr(hw, "ROOT", tmp_path)
     monkeypatch.setattr(hw, "TASKS", tmp_path / "tasks")
     hw.TASKS.mkdir()
-    _repo(tmp_path / "env0" / "hiro-docs", "one")
-    hw.save(task("t", 0, ["codehiro"]))
-    hw.save(task("other", 0, ["nethiro"]))
+    docs = _repo(tmp_path / "env1" / "hiro-docs", "one")
+    monkeypatch.setattr(hw, "fresh_base", lambda repo, task: hw.git(docs, "rev-parse", "HEAD"))
+    hw.save(task("t", 1, ["codehiro"]))
+    hw.save(task("other", 1, ["nethiro"]))
     hw.cmd_claim(type("A", (), {"task": "t", "repos": "hiro-docs", "kit": False})())
     t = hw.get("t")
-    assert t.repos == ["codehiro", "hiro-docs"] and t.base["hiro-docs"] and t.before["hiro-docs"] == []
+    assert t.repos == ["codehiro", "hiro-docs"] and t.base["hiro-docs"]
+    assert hw.git(docs, "branch", "--show-current") == "task/t"  # the claimed repo is on the task's branch
     assert read()[-1]["step"] == "claim"
     with pytest.raises(hw.Stop, match="nethiro by other"):
         hw.cmd_claim(type("A", (), {"task": "t", "repos": "nethiro", "kit": False})())

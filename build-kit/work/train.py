@@ -671,7 +671,7 @@ def open_window(a) -> None:
 
 
 def still_open(plan) -> list[str]:
-    """Open tasks still working on a repo this train ships: their work isn't in it until they land or finish."""
+    """Open tasks still working on a repo this train ships: their work isn't in it until they land."""
     shipping = set(plan.push) | set(plan.first) | set(plan.then)
     return [f"{t.id} (env{t.env}, {t.title}): {', '.join(sorted(shipping & set(t.repos)))}"
             for t in hw.load_tasks() if t.state == "working" and shipping & set(t.repos)]
