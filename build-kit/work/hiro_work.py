@@ -207,8 +207,14 @@ class Stop(Exception):
 # ------------------------------------------------------------------------------------------------------- commands
 
 
+# Why: the PC's helper (relay.py) runs as pythonw, with no console; each git it starts would open a console window of
+# its own, flashing on screen every minute. The output is captured, so no command here needs a window.
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
 def run(args: list[str], cwd: Path | None = None, check: bool = True) -> str:
-    out = subprocess.run(args, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    out = subprocess.run(args, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                         creationflags=NO_WINDOW)
     if check and out.returncode != 0:
         raise Stop(f"{' '.join(args[:4])} failed in {cwd}:\n{(out.stderr or out.stdout).strip()[-1500:]}")
     return out.stdout.strip()
