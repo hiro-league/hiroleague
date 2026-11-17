@@ -61,6 +61,14 @@ def test_memory_settings_are_read_from_the_core(core):
     assert core.asked[-1] == ("memory.settings", {})
 
 
+def test_knowledge_settings_are_read_from_the_core(core):
+    answer = {"knowledge": {"retrieval": {"top_k": 8}}, "embedder": {"profile_id": "e", "model": "m"},
+              "reranker": {"profile_id": None, "model": None}, "sparse_model": "Qdrant/bm25"}
+    core.answers["knowledge.settings"] = answer
+    assert asyncio.run(search.knowledge_settings()) == answer
+    assert core.asked[-1] == ("knowledge.settings", {})
+
+
 @pytest.mark.parametrize(
     ("code", "error"),
     [("no_profile", Unavailable), ("invalid", Invalid), ("failed", LLMError), ("timeout", LLMError)],

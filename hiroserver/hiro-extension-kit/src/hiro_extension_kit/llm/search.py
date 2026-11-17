@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from hiro_channel_sdk import ExtensionRequestError
-from hiro_channel_sdk.constants import METHOD_AI_EMBED, METHOD_AI_RERANK, METHOD_MEMORY_SETTINGS
+from hiro_channel_sdk.constants import METHOD_AI_EMBED, METHOD_AI_RERANK, METHOD_KNOWLEDGE_SETTINGS, METHOD_MEMORY_SETTINGS
 
 from .. import calls, identity
 from ..errors import Invalid, Unavailable
@@ -141,4 +141,10 @@ async def memory_settings() -> dict[str, Any]:
     return await _request(METHOD_MEMORY_SETTINGS, {}, "memory settings", "read memory settings", SETTINGS_TIMEOUT)
 
 
-__all__ = ["Embedded", "Ranked", "Reranked", "embed", "memory_settings", "rerank"]
+async def knowledge_settings() -> dict[str, Any]:
+    """Chat's knowledge-base settings as the core runs them: {knowledge, embedder, reranker, sparse_model}
+    (`knowledge.settings`)."""
+    return await _request(METHOD_KNOWLEDGE_SETTINGS, {}, "knowledge settings", "read knowledge settings", SETTINGS_TIMEOUT)
+
+
+__all__ = ["Embedded", "Ranked", "Reranked", "embed", "knowledge_settings", "memory_settings", "rerank"]

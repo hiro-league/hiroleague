@@ -19,13 +19,17 @@ from hiro_channel_sdk.constants import (
     AI_ERROR_INVALID,
     METHOD_AI_EMBED,
     METHOD_AI_RERANK,
+    METHOD_KNOWLEDGE_SETTINGS,
     METHOD_MEMORY_SETTINGS,
 )
+from hiro_memory.knowledge.constants import DEFAULT_SPARSE_MODEL
 from hiro_commons.log import Logger
 
 from ..domain.preferences import (
     resolve_graph_reranker_profile,
     resolve_graphiti_embedder_model,
+    resolve_knowledge_embedder_model,
+    resolve_knowledge_reranker_profile,
 )
 from ..services import search_profiles as search
 from .ai_for_extensions import _caller_name
@@ -116,8 +120,26 @@ async def handle_memory_settings(params: dict[str, Any], ctx: RequestContext) ->
     }
 
 
+async def handle_knowledge_settings(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
+    """Chat's knowledge-base settings, read only (EvalHiro's knowledge eval runs the knowledge base as chat does)."""
+    del params
+    await _caller_name(ctx)
+    prefs = ctx.server_ctx.preferences.current
+    reranker = resolve_knowledge_reranker_profile(prefs)
+    return {
+        "knowledge": prefs.knowledge.model_dump(mode="json"),
+        "embedder": {"profile_id": prefs.knowledge.embedder_profile, "model": resolve_knowledge_embedder_model(prefs)},
+        "reranker": {
+            "profile_id": prefs.knowledge.retrieval.reranker.profile,
+            "model": reranker.model if reranker is not None else None,
+        },
+        "sparse_model": DEFAULT_SPARSE_MODEL,
+    }
+
+
 SEARCH_REQUEST_HANDLERS: tuple[tuple[str, Any, frozenset[str]], ...] = (
     (METHOD_AI_EMBED, handle_ai_embed, EXTENSIONS_ONLY),
     (METHOD_AI_RERANK, handle_ai_rerank, EXTENSIONS_ONLY),
     (METHOD_MEMORY_SETTINGS, handle_memory_settings, EXTENSIONS_ONLY),
+    (METHOD_KNOWLEDGE_SETTINGS, handle_knowledge_settings, EXTENSIONS_ONLY),
 )
