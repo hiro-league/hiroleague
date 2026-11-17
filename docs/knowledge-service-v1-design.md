@@ -419,7 +419,7 @@ browser: Firefox" instead of just "Default".
 
 Single Knowledge page in the admin UI with three tabs. This section is the
 source of truth for what the user sees and interacts with. Implementation
-follows the `svelte-best-practice` skill.
+follows the frontend guide (hiro-docs `standards/guides/frontend.md`).
 
 ### Tab 1 — Ingest
 

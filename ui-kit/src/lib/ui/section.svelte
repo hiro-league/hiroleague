@@ -3,7 +3,7 @@
    * Translucent section card used for nested groupings inside another card.
    *
    * Optional `collapsible` mode adds a chevron header toggle; the body stays in
-   * the DOM with `hidden` (see svelte-best-practice §10 / §11.3).
+   * the DOM with `hidden` (frontend guide §9).
    */
   import type { Snippet } from 'svelte';
   import { getContext, hasContext, onMount, untrack } from 'svelte';
