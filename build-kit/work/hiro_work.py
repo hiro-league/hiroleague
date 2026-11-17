@@ -252,7 +252,8 @@ def changed_repos(env: int, tasks: list[Task]) -> list[str]:
 def leftovers(env: int, tasks: list[Task]) -> list[dict[str, str]]:
     """What an environment holds that no task there owns, for the foot of CodeHiro's environment card (relay.py posts
     it): a repo its task doesn't claim with uncommitted files, and in env1..env5 with no task, any repo that isn't as a
-    free environment's should be: on a branch of its own (not detached), with commits its trunk lacks, or behind it.
+    free environment's should be: on a branch of its own (not detached), or with commits its trunk lacks. Being behind
+    the trunk isn't one: a free environment stays where its last task left it, and the next start brings it up.
     One row per repo: ``{"repo", "what"}``, what is wrong in words."""
     task = next((t for t in tasks if t.env == env and t.state == "working"), None)
     out = []
@@ -268,11 +269,8 @@ def leftovers(env: int, tasks: list[Task]) -> list[dict[str, str]]:
             if branch:
                 what.append(f"on branch {branch}")
             ahead = int(git(d, "rev-list", "--count", f"{main}..HEAD"))
-            behind = int(git(d, "rev-list", "--count", f"HEAD..{main}"))
             if ahead:
                 what.append(f"{ahead} commit{'' if ahead == 1 else 's'} not on {main}")
-            if behind:
-                what.append(f"{behind} commit{'' if behind == 1 else 's'} behind {main}")
         if what:
             out.append({"repo": repo, "what": ", ".join(what)})
     return out

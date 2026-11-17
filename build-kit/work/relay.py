@@ -18,7 +18,7 @@ refused and logged. One helper at a time (C:\hiro\run\relay.pid). Its log is C:\
 Every minute it also says which repos each environment has changed (hiro_work.changed_repos): a "changes" event for
 each environment whose list differs from the last one said (all of them when it starts), so the card can dim a claim
 nothing has changed yet. The same event says what the environment holds that no task there owns
-(hiro_work.leftovers: uncommitted files, a stray branch, commits off or behind the trunk), shown at the card's foot.
+(hiro_work.leftovers: uncommitted files, a stray branch, commits off the trunk), shown at the card's foot.
 
     pythonw relay.py              run (what the Startup shortcut starts)
     python relay.py --install     a shortcut in this Windows user's Startup folder ("Hiro League work relay": starts it

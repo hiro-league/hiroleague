@@ -54,9 +54,9 @@ def test_changes_are_said_for_made_environments_only_when_they_differ(tmp_path, 
     said = relay.changes(said)
     assert sent == [(2, "changes", ["homehiro"], [])]  # env0 is as it was said
     sent.clear()
-    left[2] = [{"repo": "nethiro", "what": "3 commits behind main"}]
+    left[2] = [{"repo": "nethiro", "what": "1 uncommitted file"}]
     relay.changes(said)
-    assert sent == [(2, "changes", ["homehiro"], [{"repo": "nethiro", "what": "3 commits behind main"}])]
+    assert sent == [(2, "changes", ["homehiro"], [{"repo": "nethiro", "what": "1 uncommitted file"}])]
 
 
 def test_it_asks_codehiro_beside_the_events_it_sends():
