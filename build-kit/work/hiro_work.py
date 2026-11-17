@@ -1004,7 +1004,12 @@ def merge_latest(task: Task, env: int) -> None:
 
 
 def land_steps(task: Task, env: int) -> None:
-    """Merge the latest, check, then fast-forward env0 (cmd_land's own steps)."""
+    """Stop the servers, merge the latest, check, then fast-forward env0 (cmd_land's own steps)."""
+    # A fix: the task's own servers stop before any install. A running Vite holds node_modules' native .node files
+    # (lightningcss), and on Windows npm ci can't unlink them (EPERM), which failed the eval-app land on Nov 17, 2026.
+    # Only this environment's servers: env0's are Michel's and are never touched.
+    with step(task.id, env, "servers down"):
+        servers_down(env)
     # 1. Bring each branch up to GitHub and to env0's dev/main
     merge_latest(task, env)
     # 2. The checks, one repo at a time (each already uses every core)

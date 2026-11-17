@@ -189,6 +189,30 @@ def test_a_land_merges_env0_into_a_new_app_that_has_no_github_repo_yet(tmp_path,
     assert run("merge-base", "--is-ancestor", "main", "HEAD") == ""  # raised if main weren't in the branch
 
 
+def test_a_land_stops_the_environments_servers_before_it_installs_anything(tmp_path, monkeypatch):
+    _events(tmp_path, monkeypatch)
+    order = []
+
+    class Installing(Exception):
+        pass
+
+    def install(env, repo, task=None, force=False):
+        order.append(("install", env, repo))
+        raise Installing  # the first install is all this test needs to see
+
+    repo = tmp_path / "env1" / "codehiro"
+    (repo / "scripts").mkdir(parents=True)
+    (repo / "scripts" / "check.sh").write_text("")
+    monkeypatch.setattr(hw, "repo_dir", lambda env, r: tmp_path / f"env{env}" / r)
+    monkeypatch.setattr(hw, "servers_down", lambda env, names=None: order.append(("down", env)))
+    monkeypatch.setattr(hw, "merge_latest", lambda task, env: order.append(("merge", env)))
+    monkeypatch.setattr(hw, "kit_changed", lambda env, task: False)
+    monkeypatch.setattr(hw, "install", install)
+    with pytest.raises(Installing):
+        hw.land_steps(hw.Task(id="t", title="t", env=1, repos=["codehiro"]), 1)
+    assert order == [("down", 1), ("merge", 1), ("install", 1, "codehiro")]  # only env1's servers; never env0's
+
+
 def test_part_of_is_a_name_or_a_tasks_title(tmp_path, monkeypatch):
     monkeypatch.setattr(hw, "TASKS", tmp_path)
     hw.save(hw.Task(id="plan", title="Work-flow plan", env=0, repos=["hiro-docs"]))
