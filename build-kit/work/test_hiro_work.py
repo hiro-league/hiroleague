@@ -213,6 +213,50 @@ def test_a_land_stops_the_environments_servers_before_it_installs_anything(tmp_p
     assert order == [("down", 1), ("merge", 1), ("install", 1, "codehiro")]  # only env1's servers; never env0's
 
 
+def _node_repo(tmp_path, monkeypatch, up: set[int]):
+    """env0's homehiro with one frontend, npm replaced by a list of its calls, `up` the ports that answer."""
+    _events(tmp_path, monkeypatch)
+    sub = hw.NODE["homehiro"][0]
+    (tmp_path / "env0" / "homehiro" / sub / "node_modules").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "env0" / "homehiro" / sub / "package-lock.json").write_text("{}")
+    calls = []
+    monkeypatch.setattr(hw, "repo_dir", lambda env, r: tmp_path / f"env{env}" / r)
+    monkeypatch.setattr(hw, "PYTHON", {})
+    monkeypatch.setattr(hw, "run", lambda cmd, **kw: calls.append(cmd))
+    monkeypatch.setattr(hw, "listening", lambda port: port in up)
+    return calls
+
+
+def test_an_install_waits_when_the_servers_run_on_those_packages(tmp_path, monkeypatch):
+    ui_port = hw.ports(0)["homehiro-ui"]
+    calls = _node_repo(tmp_path, monkeypatch, {ui_port})
+    assert hw.install(0, "homehiro", force=True, spare_servers=True) == ["homehiro-ui"]
+    assert calls == []  # npm ci never ran under the running Vite
+
+
+def test_an_install_runs_when_the_servers_are_down_or_not_spared(tmp_path, monkeypatch):
+    calls = _node_repo(tmp_path, monkeypatch, set())
+    assert hw.install(0, "homehiro", force=True, spare_servers=True) == []
+    assert len(calls) == 1 and calls[0][:2] == ["npm.cmd", "ci"]
+    calls = _node_repo(tmp_path, monkeypatch, {hw.ports(0)["homehiro-ui"]})
+    hw.install(0, "homehiro", force=True)  # envN installs run after land stopped the servers
+    assert len(calls) == 1
+
+
+def test_only_the_cores_admin_and_an_apps_frontend_have_a_dev_server(tmp_path, monkeypatch):
+    monkeypatch.setattr(hw, "listening", lambda port: True)
+    assert hw.ui_server_up(0, "hiroleague", "admin_frontend") == "core-ui"
+    assert hw.ui_server_up(0, "hiroleague", "ui-kit") is None
+
+
+def test_the_install_command_names_the_server_to_stop(tmp_path, monkeypatch, capsys):
+    _node_repo(tmp_path, monkeypatch, {hw.ports(0)["homehiro-ui"]})
+    monkeypatch.setattr(hw, "needs_install", lambda stamp, lock, force: True)
+    with pytest.raises(hw.Stop, match="hiro-work down 0 homehiro-ui"):
+        hw.cmd_install(hw.argparse.Namespace(env=0, repos=["homehiro"]))
+    assert "hiro-work install 0 homehiro" in hw.waiting_installs_note({"homehiro": ["homehiro-ui"]})
+
+
 def test_part_of_is_a_name_or_a_tasks_title(tmp_path, monkeypatch):
     monkeypatch.setattr(hw, "TASKS", tmp_path)
     hw.save(hw.Task(id="plan", title="Work-flow plan", env=0, repos=["hiro-docs"]))

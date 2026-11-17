@@ -389,8 +389,19 @@ def needs_install(stamp: Path, lock: Path, force: bool) -> bool:
     return stamp.read_text() != file_sha(lock)
 
 
-def install(env: int, repo: str, task: str | None = None, force: bool = False) -> None:
-    """Install a repo's packages in an environment only when its lock file changed since the last install there."""
+def ui_server_up(env: int, repo: str, sub: str) -> str | None:
+    """The name of the environment's running dev server that holds this frontend's node_modules, or None. A running
+    Vite loads native .node files (lightningcss) from it, and on Windows npm ci can't unlink them (EPERM)."""
+    # The core's admin is the core's one served frontend (ui-kit has no server of its own); an app has one frontend
+    name, served = ("core-ui", "admin_frontend") if repo == "hiroleague" else (f"{repo}-ui", sub)
+    every = servers(env)
+    return name if sub == served and name in every and listening(every[name].port) else None
+
+
+def install(env: int, repo: str, task: str | None = None, force: bool = False, spare_servers: bool = False) -> list[str]:
+    """Install a repo's packages in an environment only when its lock file changed since the last install there.
+    spare_servers: a frontend whose dev server is up is left alone (its install waits); the servers' names come back."""
+    held: list[str] = []
     for sub in PYTHON.get(repo, []):
         d = repo_dir(env, repo) / sub
         stamp, lock = d / ".venv" / ".hiro-lock", d / "uv.lock"
@@ -402,9 +413,14 @@ def install(env: int, repo: str, task: str | None = None, force: bool = False) -
         d = repo_dir(env, repo) / sub
         stamp, lock = d / "node_modules" / ".hiro-lock", d / "package-lock.json"
         if needs_install(stamp, lock, force):
+            up = ui_server_up(env, repo, sub) if spare_servers else None
+            if up:  # the stamp stays old, so the install runs the next time it is asked for with the server down
+                held.append(up)
+                continue
             with step(task, env, "node install", f"{repo}/{sub}"):
                 run(["npm.cmd", "ci", "--prefer-offline", "--no-audit", "--no-fund"], cwd=d)
                 stamp.write_text(file_sha(lock))
+    return held
 
 
 def memory_link(env: int, repo: str) -> None:
@@ -947,7 +963,7 @@ def cmd_land(a) -> None:
     with step(task.id, env, "land"):
         for line in bring_up_others(env, task):
             say(f"  {line}")
-        land_steps(task, env)
+        waiting = land_steps(task, env)
     # 5. Free the environment, keep it warm
     for repo in task.repos:
         d = repo_dir(env, repo)
@@ -961,6 +977,8 @@ def cmd_land(a) -> None:
     event(task=task.id, env=env, step="task", phase="end", ok=True, landed=True)
     say(f"Task {task.id} landed: {', '.join(task.repos)} in env0; env{env} is free. Not pushed: the deploy train "
         "pushes.")
+    if waiting:
+        say(waiting_installs_note(waiting))
 
 
 def held_in_env0(task: Task) -> dict[str, str]:
@@ -1003,8 +1021,9 @@ def merge_latest(task: Task, env: int) -> None:
                                "commit, then land again.")
 
 
-def land_steps(task: Task, env: int) -> None:
-    """Stop the servers, merge the latest, check, then fast-forward env0 (cmd_land's own steps)."""
+def land_steps(task: Task, env: int) -> dict[str, list[str]]:
+    """Stop the servers, merge the latest, check, then fast-forward env0 (cmd_land's own steps). Returns the env0
+    installs left waiting because env0's dev server runs on those packages: {repo: [server names]}."""
     # A fix: the task's own servers stop before any install. A running Vite holds node_modules' native .node files
     # (lightningcss), and on Windows npm ci can't unlink them (EPERM), which failed the eval-app land on Nov 17, 2026.
     # Only this environment's servers: env0's are Michel's and are never touched.
@@ -1038,12 +1057,39 @@ def land_steps(task: Task, env: int) -> None:
         raise Stop("env0 has unfinished edits in " + ", ".join(f"{r} (task {t})" for r, t in held.items())
                    + ": landing waits until that task finishes.")
     # 4. dev/main moves to the branch; env0's checkouts follow (a fast-forward)
+    waiting: dict[str, list[str]] = {}
     for repo in task.repos:
         with step(task.id, env, "fast-forward", repo):
             before = git(repo_dir(0, repo), "rev-parse", "HEAD")
             git(repo_dir(0, repo), "merge", "--ff-only", "-q", task.branch)
             record_commits(task.id, env, repo, before, git(repo_dir(0, repo), "rev-parse", "HEAD"), "land")
-            install(0, repo, task.id)
+            # A fix: env0's servers are Michel's and land never stops them, and npm ci under a running Vite fails
+            # with EPERM after env0 has already moved. So that install waits (hiro-work install 0 <repo>).
+            if held := install(0, repo, task.id, spare_servers=True):
+                waiting[repo] = held
+    return waiting
+
+
+def waiting_installs_note(waiting: dict[str, list[str]]) -> str:
+    """What to tell Michel when land left env0 installs waiting."""
+    lines = ["env0's packages changed under servers that are running, so their install waits:"]
+    for repo, held in waiting.items():
+        names = " ".join(held)
+        lines.append(f"  {repo}: hiro-work down 0 {names}, then hiro-work install 0 {repo}, then hiro-work up 0 {names}")
+    return "\n".join(lines)
+
+
+def cmd_install(a) -> None:
+    """Install packages in an environment where a lock file changed (none named: every repo), servers down."""
+    repos = a.repos or REPOS
+    unknown = [r for r in repos if r not in REPOS]
+    if unknown:
+        raise Stop(f"No repo {', '.join(unknown)}. Repos: {', '.join(REPOS)}.")
+    held = sorted({n for r in repos for n in install(a.env, r, None, spare_servers=True)})
+    if held:  # the rest is installed; a server that runs on the others' packages must stop first
+        raise Stop(f"env{a.env}'s {', '.join(held)} runs on packages that changed: hiro-work down {a.env} "
+                   f"{' '.join(held)}, then install again.")
+    say(f"env{a.env}'s packages are installed.")
 
 
 def cmd_park(a) -> None:
@@ -1471,6 +1517,9 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("env", type=int, choices=list(ENVS))
     c.add_argument("--data", action="store_true",
                    help="env1..5 with no task: copy env0's data again first (servers down)")
+    ins = sub.add_parser("install", help="install packages where a lock file changed (none named: every repo)")
+    ins.add_argument("env", type=int, choices=list(ENVS))
+    ins.add_argument("repos", nargs="*")
     sub.add_parser("status")
     sub.add_parser("sweep")
     rl = sub.add_parser("real", help="env1..5: which real systems a task's copy reaches (copies the data again)")
@@ -1497,7 +1546,7 @@ def main(argv: list[str] | None = None) -> int:
         {"start": cmd_start, "move": cmd_move, "finish": cmd_finish, "land": cmd_land, "park": cmd_park,
          "resume": cmd_resume, "status": cmd_status, "sweep": cmd_sweep, "up": cmd_up, "down": cmd_down,
          "review": cmd_review, "describe": cmd_describe, "claim": cmd_claim, "fresh": cmd_fresh,
-         "configure": cmd_configure, "init": lambda a: init_env(a.env),
+         "configure": cmd_configure, "install": cmd_install, "init": lambda a: init_env(a.env),
          "train": train.cmd_train}[a.cmd](a)
     except Stop as e:
         say(f"\nStopped: {e}")
