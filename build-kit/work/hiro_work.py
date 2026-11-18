@@ -18,6 +18,7 @@ dev/main and env0 is brought up to them. Until then its commits stay on its bran
     hiro-work review <task>                  the task waits for Michel's review (until its next step)
     hiro-work real <task> [--reads] [--ai]   env1..5: which real systems the task's copy reads (data.py)
     hiro-work refresh-data [--apply STAMP] [--files]   live -> env0: a scrubbed live copy, then env0 (data.py)
+    hiro-work copy-list [--check]   every repo's copy list (data.toml): what a copy holds, and how (data.py)
     hiro-work train [repo ...] [--dry-run]   the deploy train: push and deploy, when Michel says (train.py)
     hiro-work audit latest | RUN | list      the doc audit's runs, and start / report to record one (audit.py)
 
@@ -69,9 +70,18 @@ APPS = [a.repo for a in appfile.APPS if a.copy_data]
 SERVED = [a.repo for a in appfile.APPS]
 # The core's other listeners come with its server: their port names start it too (`up 0 core-admin` = `up 0 core`)
 PORT_ALIASES = {"core-admin": "core", "core-socket": "core", "core-http": "core", "core-plugin": "core"}
-# Core workspace folders an environment never gets: the WhatsApp session (two clients on one account break it),
-# the AI tool installs, logs and run files.
-CORE_SKIP = {"channels", "plans", "logs", "run"}
+_lists: data.Lists | None = None
+
+
+def copy_lists() -> data.Lists:
+    """Every repo's copy list (data.toml), read once from env0's repos, the trunk's (copylist.py)."""
+    global _lists
+    if _lists is None:
+        try:
+            _lists = data.load(env_dir(0))
+        except data.copylist.ListError as exc:
+            raise Stop(f"A copy list is wrong: {exc}") from exc
+    return _lists
 
 
 def main_of(repo: str) -> str:
@@ -516,7 +526,8 @@ def write_env_dev(env: int) -> None:
         if not src.exists():  # an app with no .env.dev (Code reports) takes its settings from up (apps.toml api_env)
             continue
         lines = src.read_text(encoding="utf-8").splitlines()
-        forced = {**ENV_DEV_FORCED, "DATA_DIR": (data_dir(env) / app).as_posix(), **data.env_overrides(app, real)}
+        forced = {**ENV_DEV_FORCED, "DATA_DIR": (data_dir(env) / app).as_posix(),
+                  **data.env_overrides(app, real, copy_lists())}
         keep = [ln for ln in lines if ln.split("=", 1)[0].strip() not in forced]
         keep += [f"{k}={v}" for k, v in forced.items() if v is not None]
         (repo_dir(env, app) / ".env.dev").write_text("\n".join(keep) + "\n", encoding="utf-8")
@@ -575,13 +586,12 @@ def configure(env: int, task: str | None = None) -> None:
         cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
         configure_apps(env, appfile.APPS)
         if env:
-            with sqlite3.connect(ws / "db" / "workspace.db") as con:
-                con.execute("update channel_plugins set enabled = 0")
             if workspace_name(env) not in registry_names():
                 run(["uv", "run", "hiro", "workspaces", "create", workspace_name(env), "--path", str(ws)],
                     cwd=repo_dir(env, "hiroleague") / "hiroserver")
-            # Real systems off unless the task asks (data.py): run on every configure, the copy may be fresh
-            for line in data.make_safe(data_dir(env), real_of(env)):
+            # Real systems off unless the task asks, as the copy lists say (the core's turns the WhatsApp channel
+            # off: two clients on one account break it): run on every configure, the copy may be fresh
+            for line in data.make_safe(data_dir(env), real_of(env), copy_lists()):
                 say(f"  {line}")
         write_launch(env)
 
@@ -619,14 +629,6 @@ def registry_names() -> set[str]:
     return {w["name"] for w in json.loads(reg.read_text(encoding="utf-8"))["workspaces"].values()}
 
 
-def copy_db(src: Path, dst: Path) -> None:
-    """A consistent copy of a SQLite database, even while env0's server writes to it (what's in the WAL comes too)."""
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    dst.unlink(missing_ok=True)
-    with sqlite3.connect(f"file:{src.as_posix()}?mode=ro", uri=True) as a, sqlite3.connect(dst) as b:
-        a.backup(b)
-
-
 def remove_tree(path: Path) -> None:
     """shutil.rmtree that also removes read-only files: git marks its pack files read-only on Windows, and CodeHiro's
     data holds git mirrors, so a plain rmtree stops on them."""
@@ -637,46 +639,23 @@ def remove_tree(path: Path) -> None:
 
 
 def refresh_data(env: int, task: str | None = None) -> None:
-    """envN's data from env0's: the databases copied, the pictures hard-linked, the big folders left out (workflow.md,
-    Data and real systems). Removing the old folder first removes only its links: env0's pictures stay."""
+    """envN's data from env0's, as each repo's copy list says (workflow.md, Data and real systems): the databases
+    copied, the pictures hard-linked, the rest left out. Removing the old folder first removes only its links: env0's
+    pictures stay."""
     if env == 0:
         return
-    for app in APPS:
-        src, dst = app_data(0, appfile.BY_REPO[app]), data_dir(env) / app
-        with step(task, env, "data copy", app):
+    lists = copy_lists()
+    for group in [*APPS, data.CORE]:
+        if group == data.CORE:
+            src, dst = data_dir(0) / "core" / "default", data_dir(env) / "core" / "default"
+        else:
+            src, dst = app_data(0, appfile.BY_REPO[group]), data_dir(env) / group
+        with step(task, env, "data copy", group):
             if dst.exists():
                 remove_tree(dst)
             dst.mkdir(parents=True)
-            for db in src.glob("*.db"):
-                copy_db(db, dst / db.name)
-            # The app's link to the core: its key and identity (the core copy below knows the same key)
-            if (src / "hiroleague").is_dir():
-                shutil.copytree(src / "hiroleague", dst / "hiroleague")
-            # Pictures the databases point at: hard links to env0's (data.py)
-            for line in data.link_pictures(src, dst, app):
+            for line in data.copy_group(src, dst, group, lists):
                 say(f"  {line}")
-    with step(task, env, "data copy", "core"):
-        src, dst = data_dir(0) / "core" / "default", data_dir(env) / "core" / "default"
-        if dst.exists():
-            remove_tree(dst)
-        dst.mkdir(parents=True)
-        for item in src.iterdir():
-            if item.name in CORE_SKIP:
-                continue
-            if item.name == "db":
-                (dst / "db").mkdir()
-                for db in item.iterdir():
-                    if db.suffix == ".db" and db.is_file() and db.name != "graphiti_kuzu.db":
-                        copy_db(db, dst / "db" / db.name)
-                    elif db.is_dir():  # the vector store, small
-                        shutil.copytree(db, dst / "db" / db.name)
-                    else:  # Kuzu's file can't be read while env0's core runs: copied when it can be
-                        with contextlib.suppress(OSError):
-                            shutil.copy2(db, dst / "db" / db.name)
-            elif item.is_dir():
-                shutil.copytree(item, dst / item.name)
-            else:
-                shutil.copy2(item, dst / item.name)
     write_env_dev(env)
     configure(env, task)
 
@@ -1030,6 +1009,13 @@ def land_steps(task: Task, env: int) -> dict[str, list[str]]:
             if out.returncode != 0:
                 failed.append(f"{repo} (log: {log})")
                 outcome.fail(f"check.sh failed (log: {log})")
+    # Every copy list as it will be in env0: a wrong one would stop every later start, so it is refused here
+    with step(task.id, env, "copy lists") as outcome:
+        try:
+            data.load(env_dir(env))
+        except data.copylist.ListError as exc:
+            failed.append(f"a copy list: {exc}")
+            outcome.fail(str(exc))
     if failed:
         raise Stop("Checks failed: " + "; ".join(failed) + ". Fix, commit, land again.")
     # 3. dev/main moves to the branch; env0's checkouts follow (a fast-forward)
@@ -1150,7 +1136,7 @@ def servers(env: int) -> dict[str, Server]:
                           p["core-ui"], {"HIRO_ADMIN_ORIGIN": f"http://127.0.0.1:{p['core-admin']}"}),
     }
     if env:  # the provider keys in the PC's environment, blanked unless the task asks for AI (data.py)
-        out["core"].env.update(data.core_env(dict(os.environ), real_of(env)))
+        out["core"].env.update(data.core_env(dict(os.environ), real_of(env), copy_lists()))
     for a in appfile.APPS:  # each app as apps.toml says
         api, ui, repo = p[f"{a.repo}-api"], p[f"{a.repo}-ui"], here / a.repo
         fill = {"port": str(api), "data": str(app_data(env, a)), "repo": "{repo}"}  # {repo} stays for the app
@@ -1509,6 +1495,10 @@ def main(argv: list[str] | None = None) -> int:
     rd.add_argument("--apply", metavar="STAMP", help="a copy in C:\\hiro\\data\\live-copies, or 'latest'")
     rd.add_argument("--files", action="store_true", help="only the picture folders (avatars, StudyHiro's files)")
     rd.set_defaults(func=lambda a: data.cmd_refresh_data(a, sys.modules[__name__]))
+    cl = sub.add_parser("copy-list", help="every repo's copy list (data.toml): what a copy holds, and how")
+    cl.add_argument("--check", action="store_true", help="also name what env0's and live's data folders hold that no "
+                    "list covers")
+    cl.set_defaults(func=lambda a: data.cmd_copy_list(a, sys.modules[__name__]))
     # The deploy train lives in train.py, which imports this module: run as a script, this is __main__, so it is
     # named hiro_work too, or train.py would load a second copy (and its Stop wouldn't be caught here)
     sys.modules.setdefault("hiro_work", sys.modules[__name__])

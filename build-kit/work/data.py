@@ -1,19 +1,22 @@
 r"""Data and real systems for hiro-work (hiro-docs standards/workflow.md, "Data and real systems").
 
-Two jobs, both on copies of the family's data:
+What a copy holds, and how each piece comes along, is written in each repo's copy list (its data.toml, read by
+copylist.py): the core's in the HiroLeague repo, each app's in its own. This module does what the lists say:
 
 - **env1..env5 read, but don't write or spend, by default** (`make_safe`, `env_overrides`, `core_env`): their copy
   of env0's data reads the real systems as env0 does (Home Assistant, Frigate through HA, MQTT, NetHiro's health checks
-  of the house), keeps no login that writes to one (TrainHiro's Frigate, which trains faces; NetHiro's AdGuard login,
-  which changes the blocking rules) and can start no AI call (the core's providers are left out), unless the task
-  asks: `hiro-work start ... --no-real-reads`, `--real-writes`, `--real-ai`, or later `hiro-work real <task> --reads
-  --writes --ai`. Sends and HA's automatic writes stay off either way, and sign-in is on, as in env0
-  (hiro_work.ENV_DEV_FORCED).
-- **`hiro-work refresh-data`: live -> env0** (`cmd_refresh_data`). On Simone each live database is copied with
-  SQLite's backup (as a deploy does) and scrubbed there of what is never copied (tokens and logins in settings,
-  sign-in sessions, pairing keys); the copies come to C:\hiro\data\live-copies\<stamp>. `--apply <stamp>` then stops
-  env0's servers, moves env0's databases to C:\hiro\archive (nothing is deleted), puts the live copies in their place
-  with env0's own settings kept, starts the servers again, and reports row counts per table: live, copy, env0.
+  of the house), keeps no login that writes to one (the lists' `needs = "writes"` settings) and can start no AI call
+  (the core's providers emptied), unless the task asks: `hiro-work start ... --no-real-reads`, `--real-writes`,
+  `--real-ai`, or later `hiro-work real <task> --reads --writes --ai`. Sends and HA's automatic writes stay off either
+  way, and sign-in is on, as in env0 (hiro_work.ENV_DEV_FORCED).
+- **`hiro-work refresh-data`: live -> env0** (`cmd_refresh_data`). On Simone each live database the lists fetch
+  (`live = "copy"`) is copied with SQLite's backup (as a deploy does) and scrubbed there of what is never copied (the
+  lists' per-place settings and tables: tokens and logins, sign-in sessions, pairings); the copies come to
+  C:\hiro\data\live-copies\<stamp>. `--apply <stamp>` then stops env0's servers, moves env0's databases to
+  C:\hiro\archive (nothing is deleted), puts the live copies in their place with env0's own settings kept, starts the
+  servers again, and reports row counts per table: live, copy, env0.
+- **`hiro-work copy-list [--check]`** prints the lists; `--check` names what env0's and live's data folders hold that
+  no list covers (copied nowhere until it is listed).
 
 Standard library only: it runs on the system Python, beside hiro_work.py.
 """
@@ -32,103 +35,111 @@ from pathlib import Path
 from types import ModuleType
 
 import apps as appfile
+import copylist
+from copylist import CORE, CopyList
 
 APPS = [a.repo for a in appfile.APPS if a.copy_data]  # the apps whose data an environment copies (apps.toml)
 READS, WRITES, AI = "reads", "writes", "ai"  # what a task's copy in env1..env5 reaches (Task.real)
 DEFAULT_REAL = [READS]  # a task started without flags, and an environment no task holds: reads, no writes, no AI
 
+Lists = dict[str, CopyList]
+
+
+def load(root: Path) -> Lists:
+    """Every copy list, from the repos under root (hiro-work: env0's, the trunk's)."""
+    return copylist.load_all(root, APPS)
+
+
+def group_dir(data: Path, group: str) -> Path:
+    """A group's data folder inside an environment's data folder (env1..env5; the core's is its workspace)."""
+    return data / "core" / "default" if group == CORE else data / group
+
+
+def settings_db(group: str) -> str:
+    return appfile.BY_REPO[group].settings_db
+
+
 # ------------------------------------------------------------------------------------------- env1..env5: safe
-
-# The setting rows that point an app at a real system it reads (an address or a login): left out of an env1..env5
-# copy without "reads". With no address, HomeHiro's and NetHiro's HA connection doesn't start (ha/gateway.py), so
-# neither does Frigate (its address comes from HA's Frigate integration); HomeHiro's MQTT doesn't connect
-# (streams/sources/frigate.py). HA's address also serves "Sign in with Home Assistant", which needs no HA token.
-READ_KEYS = {
-    "homehiro": ("ha_url", "ha_token", "mqtt_host", "mqtt_port", "mqtt_user", "mqtt_password"),
-    "nethiro": ("ha_url", "ha_token"),
-}
-# The ones that write to a real system: left out without "writes". NetHiro's AdGuard login changes the blocking
-# rules; TrainHiro's Frigate address trains faces there (and FRIGATE_URL in its .env.dev, env_overrides).
-WRITE_KEYS = {
-    "nethiro": ("adguard_login",),
-    "trainhiro": ("frigate_url",),
-}
-# Provider keys the PC's environment may hold (GEMINI_API_KEY, OPENAI_API_KEY...): blanked for an env1..env5 core
-# without "ai", besides its providers being left out
-KEY_VAR = re.compile(r"(API_KEY|API_TOKEN)$")
-
-
-def env_overrides(app: str, real: list[str]) -> dict[str, str | None]:
-    """An app's .env.dev lines in env1..env5 besides OUTPUTS, HA_AUTO_WRITES and AUTH: a value is written, None
-    drops env0's line (the app's default is then off)."""
-    out: dict[str, str | None] = {}
-    if app == "homehiro":
-        out["TALKER_KEY"] = None  # nothing plays with OUTPUTS off: Talker's key stays in env0
-        if AI not in real:
-            out["AUTOMATION_BUDGET_USD"] = "0"  # automations' LLM lines and voices: nothing to spend
-    if app == "trainhiro" and WRITES not in real:
-        out["FRIGATE_URL"] = None
-    return out
-
-
-def core_env(environ: dict[str, str], real: list[str]) -> dict[str, str]:
-    """Extra environment for an env1..env5 core: provider keys in the PC's environment blanked without "ai"
-    (an empty value removes the variable in the server's PowerShell runner)."""
-    if AI in real:
-        return {}
-    return {k: "" for k in environ if KEY_VAR.search(k)}
 
 
 def _tables(con: sqlite3.Connection) -> set[str]:
     return {r[0] for r in con.execute("select name from sqlite_master where type = 'table'")}
 
 
-def make_safe(data: Path, real: list[str]) -> list[str]:
-    """Turn real systems off in an env1..env5 copy (its data folder): what it did, in words."""
+def make_safe(data: Path, real: list[str], lists: Lists) -> list[str]:
+    """Turn real systems off in an env1..env5 copy (its data folder), as the lists say: what it did, in words."""
     did: list[str] = []
-    for kind, table, words in ((READS, READ_KEYS, "reads"), (WRITES, WRITE_KEYS, "writes")):
-        if kind in real:
-            continue
-        for app, keys in table.items():
-            db = data / app / f"{app}.db"
-            if not db.exists():
-                continue
+    for group, lst in lists.items():
+        base = group_dir(data, group)
+        gone_keys = [s.key for s in lst.settings if s.needs and s.needs not in real]
+        db = base / settings_db(group) if group != CORE else None
+        if gone_keys and db is not None and db.exists():
             with contextlib.closing(sqlite3.connect(db)) as con, con:
                 if "setting" in _tables(con):
-                    gone = con.execute(f"delete from setting where key in ({','.join('?' * len(keys))})",
-                                       keys).rowcount
-                    if gone:
-                        did.append(f"{app}: {gone} setting(s) that {words} a real system left out")
-    if READS not in real:
-        # NetHiro's health checks ping and ask the house's devices, Frigate and HA every round: none is enabled
-        db = data / "nethiro" / "nethiro.db"
-        if db.exists():
-            with contextlib.closing(sqlite3.connect(db)) as con, con:
-                if "statusitem" in _tables(con):
-                    n = con.execute("update statusitem set enabled = 0 where enabled").rowcount
-                    if n:
-                        did.append(f"nethiro: {n} health check(s) off")
-    if AI not in real:
-        # No provider set up = no AI call: every ask, the core's own jobs and voices check the providers first
-        # (CredentialStore.is_configured). The plan tools' logins live in the workspace's plans/ folder, which an
-        # environment never gets (hiro_work.CORE_SKIP).
-        prov = data / "core" / "default" / "providers.json"
-        if prov.exists():
-            doc = json.loads(prov.read_text(encoding="utf-8-sig"))
-            if doc.get("providers"):
-                did.append(f"core: {len(doc['providers'])} AI provider(s) left out")
-                doc["providers"] = []
-                prov.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+                    for words in ("reads", "writes"):
+                        keys = [s.key for s in lst.settings if s.needs == words and words not in real]
+                        if not keys:
+                            continue
+                        n = con.execute(f"delete from setting where key in ({','.join('?' * len(keys))})",
+                                        keys).rowcount
+                        if n:
+                            did.append(f"{group}: {n} setting(s) that {words} a real system left out")
+        for sw in lst.switches:
+            if sw.unless is not None and sw.unless in real:
+                continue
+            path = base / sw.path
+            if not path.exists():
+                continue
+            if sw.table is not None:
+                with contextlib.closing(sqlite3.connect(path)) as con, con:
+                    if sw.table not in _tables(con):
+                        continue
+                    n = con.execute(f"update [{sw.table}] set [{sw.column}] = ? where [{sw.column}] is not ?",
+                                    (sw.value, sw.value)).rowcount
+                if n:
+                    did.append(f"{group}: {n} {sw.table} row(s) off ({sw.why})")
+            else:
+                doc = json.loads(path.read_text(encoding="utf-8-sig"))
+                if doc.get(sw.key) != sw.value:
+                    before = doc.get(sw.key)
+                    doc[sw.key] = sw.value
+                    path.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+                    count = f"{len(before)} " if isinstance(before, (list, dict)) else ""
+                    did.append(f"{group}: {sw.path}'s {count}{sw.key} left out ({sw.why})")
     return did
 
 
-def link_pictures(src: Path, dst: Path, app: str) -> list[str]:
-    """An env1..env5 app folder gets env0's picture folders (LIVE_FILES) as hard links: same drive, so instant and
-    no extra space. A file a task adds stays in its environment and deleting one there removes only its link; editing
-    one in place would change env0's too (these apps write a picture once). Camera history (HomeHiro's streams/),
-    recognition clips, LLM request files and agents stay out."""
+def env_overrides(app: str, real: list[str], lists: Lists) -> dict[str, str | None]:
+    """An app's .env.dev lines in env1..env5 besides OUTPUTS, HA_AUTO_WRITES and AUTH: a value is written, None
+    drops env0's line (the app's default is then off)."""
+    lst = lists.get(app)
+    if lst is None:
+        return {}
+    return {e.name: (None if e.drop else e.value) for e in lst.env if e.name and e.applies(real)}
+
+
+def core_env(environ: dict[str, str], real: list[str], lists: Lists) -> dict[str, str]:
+    """Extra environment for an env1..env5 core: the variables the core's list matches (provider keys in the PC's
+    environment) blanked; an empty value removes the variable in the server's PowerShell runner."""
+    out: dict[str, str] = {}
+    for e in lists[CORE].env:
+        if not e.applies(real):
+            continue
+        if e.match:
+            out.update({k: ("" if e.drop else e.value or "") for k in environ if re.search(e.match, k)})
+        elif e.name:
+            out[e.name] = "" if e.drop else e.value or ""
+    return out
+
+
+def link_pictures(src: Path, dst: Path, app: str, lists: Lists) -> list[str]:
+    """An env1..env5 app folder gets env0's folders its list links (`envs = "link"`) as hard links: same drive, so
+    instant and no extra space. A file a task adds stays in its environment and deleting one there removes only its
+    link; editing one in place would change env0's too (these apps write a picture once)."""
     lines = []
-    for folder in LIVE_FILES.get(app, []):
+    lst = lists.get(app)
+    for item in lst.folders("envs", "link") if lst else []:
+        folder = item.path
         if not (src / folder).is_dir():
             continue
         linked = copied = 0
@@ -149,6 +160,57 @@ def link_pictures(src: Path, dst: Path, app: str) -> list[str]:
     return lines
 
 
+def copy_db(src: Path, dst: Path) -> None:
+    """A consistent copy of a SQLite database, even while env0's server writes to it (what's in the WAL comes too)."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.unlink(missing_ok=True)
+    with contextlib.closing(sqlite3.connect(f"file:{src.as_posix()}?mode=ro", uri=True)) as a, \
+            contextlib.closing(sqlite3.connect(dst)) as b:
+        a.backup(b)
+
+
+def listing(folder: Path, group: str) -> list[str]:
+    """A data folder's names as its list names them: top-level, and the core's db/ files as db/<name>."""
+    if not folder.is_dir():
+        return []
+    names = sorted(p.name for p in folder.iterdir())
+    if group == CORE and (folder / "db").is_dir():
+        names = [n for n in names if n != "db"] + sorted(f"db/{p.name}" for p in (folder / "db").iterdir())
+    return names
+
+
+def copy_group(src: Path, dst: Path, group: str, lists: Lists) -> list[str]:
+    """env0's data folder of a group into an environment's, as its list says (`envs`): databases with SQLite's backup,
+    files and folders copied, picture folders hard-linked, the rest left out. What it did, in words: what was linked,
+    what couldn't be read (an optional item), and what env0's folder holds that the list doesn't name."""
+    lst = lists[group]
+    lines: list[str] = []
+    for item in lst.items:
+        if item.envs != "copy" or item.pattern:
+            continue
+        s, d = src / item.path, dst / item.path
+        if not s.exists():
+            continue
+        try:
+            if item.kind == "database":
+                copy_db(s, d)
+            elif item.kind == "folder":
+                shutil.copytree(s, d)
+            else:
+                d.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(s, d)
+        except OSError as exc:
+            if not item.optional:
+                raise
+            lines.append(f"{group}/{item.path}: not copied ({exc.strerror or exc}); {item.why}")
+    if group != CORE:
+        lines += link_pictures(src, dst, group, lists)
+    left = copylist.unlisted(lst, listing(src, group))
+    if left:
+        lines.append(f"! {group}: not in its copy list, so not copied: {', '.join(left)}")
+    return lines
+
+
 def describe(real: list[str]) -> str:
     """The card's line about real systems."""
     reads = "real reads (HA, Frigate, MQTT, health checks)" if READS in real else "real reads off"
@@ -161,47 +223,24 @@ def describe(real: list[str]) -> str:
 
 LIVE_HOST = "simone"
 KEEP_COPIES = 3  # live copies kept on the PC; older ones are pruned
-# Each live database: (its folder on Simone, the databases there). Old snapshots beside them are left out.
-LIVE = {
-    "homehiro": ("~/homehiro/data", ["homehiro.db", "streams.db"]),
-    "nethiro": ("~/nethiro/data", ["nethiro.db"]),
-    "trainhiro": ("~/trainhiro/data", ["trainhiro.db"]),
-    "studyhiro": ("~/studyhiro/data", ["studyhiro.db"]),
-    "core": ("~/.local/share/hiro/workspaces/default/db", ["workspace.db", "data.db", "knowledge.db"]),
-}
-# Per-place settings: never copied from live (scrubbed on Simone), and env0's own are kept. A key is per-place when
-# it is named here or matches the pattern (a token, a password, a login, a key, an address).
-PLACE_KEYS = (
-    "hiroleague_url", "hiroleague_admin_url", "homehiro_url", "nethiro_url", "trainhiro_url", "studyhiro_url",
-    "core_ai_profiles", "core_voice_profiles",  # the place's core's profiles, as last read
-    "ha_url", "ha_token", "ha_link_url", "mqtt_host", "mqtt_port", "mqtt_user", "mqtt_password", "frigate_url",
-    "adguard_login", "adguard_sync", "services_reader", "tv_key", "tv_cast",
-    "last_sync_at", "last_sync_error", "status_last_round_at",
-)
-PLACE_KEY_PATTERN = r"token|password|secret|login|_key$|_url$"
-# Per-place tables: emptied in the live copy, env0's own rows kept. Sign-in sessions; the core's paired apps and
-# devices (their keys), its channel plugins (WhatsApp), LAN names, characters (their folders are the place's) and
-# local model servers.
-PLACE_TABLES = {
-    "workspace.db": ["admin_sessions", "extensions", "devices", "channel_plugins", "site_names", "characters",
-                     "local_models"],
-    **{f"{a}.db": ["websession"] for a in APPS},
-}
-# The folders of pictures the databases point at, copied with them (small: HomeHiro's avatars, StudyHiro's stored
-# files). The big ones (HomeHiro's recognition clips 12 GB, streams/ 2 GB, agents/, llm-requests/) are left out:
-# env0 has its own, and they wait for Michel's OK.
-LIVE_FILES = {"homehiro": ["people"], "studyhiro": ["files"]}
-# Left out of a refresh, said in the report: files beside the databases, the core's memory graph and vector store
-LEFT_OUT = [
-    "HomeHiro's big folders (recognition/, streams/, agents/, llm-requests/) and the other apps' file folders",
-    "the core's memory graph (graphiti_kuzu.db, locked while the live core runs) and vector store (qdrant/)",
-    "the core's preferences.json, providers.json, config.json, characters/ and plans/ (env0's own)",
-    "the WhatsApp session, each app's pairing key (hiroleague/), sign-in sessions, tokens and logins in settings",
-]
 
 
-def is_place_key(key: str) -> bool:
-    return key in PLACE_KEYS or re.search(PLACE_KEY_PATTERN, key) is not None
+def live_spec(lists: Lists) -> dict:
+    """What the scrub on Simone needs, from the lists: each group's live folder and the databases it fetches, the
+    per-place setting keys (the kit's, every app's own) and pattern, and each database's per-place tables."""
+    every = lists[CORE].every_app
+    return {
+        "live": {g: (lst.live, [i.path for i in lst.databases("live")]) for g, lst in lists.items()},
+        "keys": {g: sorted({*every.place_keys, *(s.key for s in lst.settings)}) for g, lst in lists.items()},
+        "pattern": every.place_key_pattern,
+        "tables": {f"{g}/{i.path}": list(i.place_tables) for g, lst in lists.items() for i in lst.databases("live")},
+    }
+
+
+def is_place_key(key: str, group: str, lists: Lists) -> bool:
+    every = lists[CORE].every_app
+    return (key in every.place_keys or any(s.key == key for s in lists[group].settings)
+            or re.search(every.place_key_pattern, key) is not None)
 
 
 def counts(con: sqlite3.Connection, schema: str = "main") -> dict[str, int]:
@@ -216,7 +255,6 @@ SCRUB = r'''
 import json, os, re, sqlite3
 spec = json.loads(__SPEC__)
 pattern = re.compile(spec["pattern"])
-place = set(spec["keys"])
 out = {}
 
 def counts(con):
@@ -224,10 +262,12 @@ def counts(con):
     return {t: con.execute("select count(*) from [%s]" % t).fetchone()[0] for t in names}
 
 for group, (folder, dbs) in spec["live"].items():
+    place = set(spec["keys"][group])
     for name in dbs:
+        key = group + "/" + name
         src = os.path.join(os.path.expanduser(folder), name)
         if not os.path.exists(src):
-            out[group + "/" + name] = {"missing": True}
+            out[key] = {"missing": True}
             continue
         dst = os.path.join(spec["out"], group, name)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
@@ -243,33 +283,37 @@ for group, (folder, dbs) in spec["live"].items():
             gone = [k for (k,) in b.execute("select key from setting") if k in place or pattern.search(k)]
             b.executemany("delete from setting where key = ?", [(k,) for k in gone])
             scrubbed["setting"] = sorted(gone)
-        for t in spec["tables"].get(name, []):
+        for t in spec["tables"].get(key, []):
             if t in tables:
                 scrubbed[t] = b.execute("delete from [%s]" % t).rowcount
         b.commit()
         b.execute("pragma wal_checkpoint(truncate)")
         b.execute("pragma journal_mode = delete")
         alembic = b.execute("select version_num from alembic_version").fetchone() if "alembic_version" in tables else None
-        out[group + "/" + name] = {"live": live, "copy": counts(b), "scrubbed": scrubbed,
-                                   "check": b.execute("pragma quick_check").fetchone()[0],
-                                   "alembic": alembic[0] if alembic else None, "bytes": os.path.getsize(dst)}
+        out[key] = {"live": live, "copy": counts(b), "scrubbed": scrubbed,
+                    "check": b.execute("pragma quick_check").fetchone()[0],
+                    "alembic": alembic[0] if alembic else None, "bytes": os.path.getsize(dst)}
         b.close()
 print(json.dumps(out))
 '''
 
 
-def scrub_script(out: str) -> str:
-    spec = {"out": out, "live": LIVE, "keys": list(PLACE_KEYS), "pattern": PLACE_KEY_PATTERN, "tables": PLACE_TABLES}
-    return SCRUB.replace("__SPEC__", repr(json.dumps(spec)))
+def scrub_script(out: str, lists: Lists) -> str:
+    return SCRUB.replace("__SPEC__", repr(json.dumps({"out": out, **live_spec(lists)})))
 
 
 def live_copies(hw: ModuleType) -> Path:
     return hw.ROOT / "data" / "live-copies"
 
 
-def env0_db(hw: ModuleType, group: str, name: str) -> Path:
-    base = hw.data_dir(0) / "core" / "default" / "db" if group == "core" else hw.data_dir(0) / group
-    return base / name
+def env0_group(hw: ModuleType, group: str) -> Path:
+    """A group's data folder in env0 (Code reports keeps env0's in its repo's data/)."""
+    return hw.data_dir(0) / "core" / "default" if group == CORE else hw.app_data(0, appfile.BY_REPO[group])
+
+
+def env0_db(hw: ModuleType, key: str) -> Path:
+    group, path = key.split("/", 1)
+    return env0_group(hw, group) / path
 
 
 def ssh(args: list[str], stdin: str | None = None, timeout: int = 900) -> str:
@@ -280,8 +324,9 @@ def ssh(args: list[str], stdin: str | None = None, timeout: int = 900) -> str:
     return out.stdout
 
 
-def fetch(hw: ModuleType) -> Path:
-    """Copy and scrub every live database on Simone, bring the copies here, check them: the copy's folder."""
+def fetch(hw: ModuleType, lists: Lists) -> Path:
+    """Copy and scrub every live database the lists fetch on Simone, bring the copies here, check them: the copy's
+    folder."""
     stamp = datetime.now().strftime("%Y-%m-%d_%H%M")
     remote = f"/tmp/hiro-live-copy-{stamp}"
     local = live_copies(hw) / stamp
@@ -290,7 +335,7 @@ def fetch(hw: ModuleType) -> Path:
     live_copies(hw).mkdir(parents=True, exist_ok=True)
     try:
         with hw.step(None, 0, "live copy on Simone"):
-            meta = json.loads(ssh(["python3", "-"], stdin=scrub_script(remote)).strip().splitlines()[-1])
+            meta = json.loads(ssh(["python3", "-"], stdin=scrub_script(remote, lists)).strip().splitlines()[-1])
         with hw.step(None, 0, "bring the copies"):
             # Run from the copies' folder with a relative target: a Windows "C:" path reads as a host to scp
             hw.run(["scp", "-q", "-r", "-o", "BatchMode=yes", f"{LIVE_HOST}:{remote}", "."], cwd=live_copies(hw))
@@ -312,18 +357,21 @@ def fetch(hw: ModuleType) -> Path:
     return local
 
 
-def place_restore(con: sqlite3.Connection, name: str) -> dict[str, int]:
+def place_restore(con: sqlite3.Connection, key: str, lists: Lists) -> dict[str, int]:
     """In a new env0 database (main) with env0's old one attached (old): put back env0's per-place settings and
-    tables. Rows put back, per table."""
+    tables, as the database's list names them. Rows put back, per table."""
+    group, path = key.split("/", 1)
     back: dict[str, int] = {}
     new, old = _tables(con), {r[0] for r in con.execute("select name from old.sqlite_master where type = 'table'")}
     if "setting" in new and "setting" in old:
-        mine = [(k, v) for k, v in con.execute("select key, value from old.setting") if is_place_key(k)]
+        mine = [(k, v) for k, v in con.execute("select key, value from old.setting") if is_place_key(k, group, lists)]
         con.executemany("delete from setting where key = ?",
-                        [(r[0],) for r in con.execute("select key from setting").fetchall() if is_place_key(r[0])])
+                        [(r[0],) for r in con.execute("select key from setting").fetchall()
+                         if is_place_key(r[0], group, lists)])
         con.executemany("insert into setting(key, value) values (?, ?)", mine)
         back["setting"] = len(mine)
-    for t in PLACE_TABLES.get(name, []):
+    item = lists[group].item(path)
+    for t in item.place_tables if item else ():
         if t in new and t in old:
             cols_new = [r[1] for r in con.execute(f"pragma main.table_info([{t}])")]
             cols_old = {r[1] for r in con.execute(f"pragma old.table_info([{t}])")}
@@ -333,7 +381,7 @@ def place_restore(con: sqlite3.Connection, name: str) -> dict[str, int]:
     return back
 
 
-def build(src: Path, old: Path | None, dst: Path, name: str) -> tuple[dict[str, int], dict[str, int]]:
+def build(src: Path, old: Path | None, dst: Path, key: str, lists: Lists) -> tuple[dict[str, int], dict[str, int]]:
     """dst = the live copy with env0's per-place rows from old (env0's database as it is): (counts, put back)."""
     dst.unlink(missing_ok=True)
     with contextlib.closing(sqlite3.connect(f"file:{src.as_posix()}?mode=ro", uri=True)) as a, \
@@ -345,7 +393,7 @@ def build(src: Path, old: Path | None, dst: Path, name: str) -> tuple[dict[str, 
         if old is not None and old.exists():
             con.execute("attach database ? as old", (f"file:{old.as_posix()}?mode=ro",))
             with con:
-                back = place_restore(con, name)
+                back = place_restore(con, key, lists)
             con.execute("detach database old")
         if con.execute("pragma quick_check").fetchone()[0] != "ok":
             raise RuntimeError(f"{dst.name}: SQLite finds the new database unsound")
@@ -380,11 +428,15 @@ def report(meta: dict, env0_now: dict[str, dict[str, int]], env0_after: dict[str
     return "\n".join(lines)
 
 
+def left_out(lists: Lists) -> list[str]:
+    """What a refresh never fetches, per group, as the lists say: env0 keeps its own."""
+    return [f"{g}: {', '.join(i.path for i in lst.items if i.live == 'own')}" for g, lst in lists.items()]
+
+
 def env0_counts(hw: ModuleType, meta: dict) -> dict[str, dict[str, int]]:
     out = {}
     for key in meta:
-        group, name = key.split("/")
-        path = env0_db(hw, group, name)
+        path = env0_db(hw, key)
         if path.exists():
             with contextlib.closing(sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)) as con:
                 out[key] = counts(con)
@@ -405,24 +457,26 @@ def prune(hw: ModuleType) -> list[str]:
     return [p.name for p in old]
 
 
-def live_file_count(group: str, folder: str) -> int:
-    return int(ssh(["find", f"~/{group}/data/{folder}", "-type", "f"], timeout=120).count("\n"))
+def live_file_count(folder: str) -> int:
+    return int(ssh(["find", folder, "-type", "f"], timeout=120).count("\n"))
 
 
-def copy_files(hw: ModuleType, archive: Path) -> list[str]:
-    """LIVE_FILES from Simone into env0 (a tar stream over ssh, into a folder beside env0's; env0's own folder moves
-    to the archive): one line per folder with its file counts, live and env0."""
+def copy_files(hw: ModuleType, archive: Path, lists: Lists) -> list[str]:
+    """The folders the lists fetch from live (`live = "copy"`: the pictures the databases point at) into env0, as a
+    tar stream over ssh into a folder beside env0's; env0's own folder moves to the archive. One line per folder with
+    its file counts, live and env0."""
     lines = []
-    for group, folders in LIVE_FILES.items():
-        for folder in folders:
-            target = hw.data_dir(0) / group / folder
-            stage = hw.data_dir(0) / group / f".{folder}.refresh"
+    for group, lst in lists.items():
+        for item in lst.folders("live", "copy"):
+            folder = item.path
+            target = env0_group(hw, group) / folder
+            stage = env0_group(hw, group) / f".{folder}.refresh"
             if stage.exists():
                 shutil.rmtree(stage)
             stage.mkdir(parents=True)
             with hw.step(None, 0, "files", f"{group}/{folder}"):
-                live = live_file_count(group, folder)
-                sender = subprocess.Popen(["ssh", "-o", "BatchMode=yes", LIVE_HOST, "tar", "-C", f"~/{group}/data",
+                live = live_file_count(f"{lst.live}/{folder}")
+                sender = subprocess.Popen(["ssh", "-o", "BatchMode=yes", LIVE_HOST, "tar", "-C", lst.live,
                                            "-cf", "-", folder], stdout=subprocess.PIPE)
                 # Windows' own tar (bsdtar): Git's GNU tar reads "C:" in a path as a remote host
                 tar = str(Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) / "System32" / "tar.exe")
@@ -445,10 +499,17 @@ def copy_files(hw: ModuleType, archive: Path) -> list[str]:
     return lines
 
 
-def apply(hw: ModuleType, src: Path) -> None:
+def apply(hw: ModuleType, src: Path, lists: Lists) -> None:
     """Put a live copy into env0: servers stopped, env0's databases moved to the archive, the copies in their place
     with env0's own settings, servers started again, row counts reported."""
     meta = json.loads((src / "counts.json").read_text(encoding="utf-8"))
+    # Live copies from before the copy lists name the core's databases without their db/ folder; no shim for them,
+    # the code is young: fetch a new copy instead (working-rules.md, "No backward compatibility")
+    unknown = [k for k in meta if k.split("/", 1)[0] not in lists
+               or lists[k.split("/", 1)[0]].item(k.split("/", 1)[1]) is None]
+    if unknown:
+        raise hw.Stop(f"{src.name} holds {', '.join(unknown)}, which no copy list names: fetch a new copy "
+                      "(hiro-work refresh-data). Nothing was changed.")
     up = [n for n, s in hw.servers(0).items() if hw.listening(s.port)]
     archive = hw.ROOT / "archive" / f"env0-before-refresh-{datetime.now().strftime('%Y-%m-%d_%H%M')}"
     if up:
@@ -465,12 +526,11 @@ def apply(hw: ModuleType, src: Path) -> None:
         for key, m in meta.items():
             if m.get("missing"):
                 continue
-            group, name = key.split("/")
-            target = env0_db(hw, group, name)
+            target = env0_db(hw, key)
             target.parent.mkdir(parents=True, exist_ok=True)
             tmp = target.with_name(target.name + ".refresh")
             with hw.step(None, 0, "build", key):
-                after[key], backs[key] = build(src / group / name, target, tmp, name)
+                after[key], backs[key] = build(src / key, target, tmp, key, lists)
             built[key] = (tmp, target)
     except BaseException:
         for tmp, _ in built.values():
@@ -486,7 +546,7 @@ def apply(hw: ModuleType, src: Path) -> None:
                 if f.exists():
                     shutil.move(str(f), str(keep.with_name(keep.name + suffix)))
             tmp.rename(target)
-    text = report(meta, {}, after, backs) + "\n\nFiles:\n" + "\n".join(copy_files(hw, archive))
+    text = report(meta, {}, after, backs) + "\n\nFiles:\n" + "\n".join(copy_files(hw, archive, lists))
     (archive / "report.txt").write_text(f"Live copy {src.name} into env0\n{text}\n", encoding="utf-8")
     hw.say(text)
     hw.say(f"\nenv0's databases before the refresh: {archive} (put them back by moving them in, servers stopped).")
@@ -499,12 +559,13 @@ def apply(hw: ModuleType, src: Path) -> None:
 
 def cmd_refresh_data(a, hw: ModuleType) -> None:
     """hiro-work refresh-data [--apply STAMP|latest] [--files]: fetch a live copy and show the plan; --apply puts it
-    in env0; --files copies only the picture folders (LIVE_FILES), env0's servers down."""
+    in env0; --files copies only the folders the lists fetch (the pictures), env0's servers down."""
+    lists = load(hw.env_dir(0))
     if getattr(a, "files", False):
         if [n for n, s in hw.servers(0).items() if hw.listening(s.port)]:
             raise hw.Stop("env0's servers are up: hiro-work down 0 first (or use --apply, which stops them).")
         archive = hw.ROOT / "archive" / f"env0-before-refresh-{datetime.now().strftime('%Y-%m-%d_%H%M')}-files"
-        for line in copy_files(hw, archive):
+        for line in copy_files(hw, archive, lists):
             hw.say(line)
         if archive.exists():
             hw.say(f"env0's folders before: {archive}")
@@ -513,13 +574,65 @@ def cmd_refresh_data(a, hw: ModuleType) -> None:
         src = latest(hw) if a.apply == "latest" else live_copies(hw) / a.apply
         if src is None or not (src / "counts.json").exists():
             raise hw.Stop(f"No live copy '{a.apply}' in {live_copies(hw)}.")
-        apply(hw, src)
+        apply(hw, src, lists)
         return
-    src = fetch(hw)
+    src = fetch(hw, lists)
     meta = json.loads((src / "counts.json").read_text(encoding="utf-8"))
     hw.say(report(meta, env0_counts(hw, meta), None))
     up = [n for n, s in hw.servers(0).items() if hw.listening(s.port)]
     hw.say(f"\nLive copy ready: {src}")
-    hw.say("Left out: " + "; ".join(LEFT_OUT) + ".")
+    hw.say("Never fetched (env0 keeps its own), per the copy lists:\n  " + "\n  ".join(left_out(lists)))
     hw.say(f"env0's servers up now: {', '.join(up) or 'none'} (stopped and started again by --apply).")
     hw.say(f"Nothing in env0 changed. To put it in env0: hiro-work refresh-data --apply {src.name}")
+
+
+# ------------------------------------------------------------------------------------------- the lists, shown
+
+
+def show(lists: Lists) -> str:
+    """Every list as text: each item's two copies and why, the per-place settings, the switches and .env lines."""
+    out = []
+    for group, lst in lists.items():
+        out.append(f"\n{group}  (live: {lst.live}; list: {copylist.repo_of(group)}/{copylist.FILE})")
+        for i in lst.items:
+            extra = f"; per place (env0 keeps its own): {', '.join(i.place_tables)}" if i.place_tables else ""
+            out.append(f"  {i.path:24} {i.kind:8} live: {i.live:4}  envs: {i.envs:4}  {i.why}{extra}")
+        for s in lst.settings:
+            out.append(f"  setting {s.key:16} per place{f', needs real {s.needs}' if s.needs else ''}: {s.why}")
+        for sw in lst.switches:
+            what = f"{sw.table}.{sw.column}" if sw.table else sw.key
+            out.append(f"  switch  {sw.path}: {what} = {sw.value!r}{f' unless {sw.unless}' if sw.unless else ''}: "
+                       f"{sw.why}")
+        for e in lst.env:
+            val = "dropped" if e.drop else repr(e.value)
+            out.append(f"  env     {e.name or e.match} {val}{f' unless {e.unless}' if e.unless else ''}: {e.why}")
+    return "\n".join(out)
+
+
+def live_listing(lst: CopyList, group: str) -> list[str]:
+    """A group's live data folder's names, as listing() gives env0's."""
+    folder = lst.live
+    names = ssh(["ls", "-1A", folder], timeout=60).split()
+    if group == CORE and "db" in names:
+        names = [n for n in names if n != "db"] + [f"db/{n}" for n in ssh(["ls", "-1A", f"{folder}/db"],
+                                                                         timeout=60).split()]
+    return sorted(names)
+
+
+def cmd_copy_list(a, hw: ModuleType) -> None:
+    """hiro-work copy-list [--check]: every copy list; --check also names what env0's and live's data folders hold that
+    no list covers."""
+    lists = load(hw.env_dir(0))
+    hw.say(show(lists))
+    if not a.check:
+        return
+    hw.say("\nNot in a copy list (copied nowhere until it is listed):")
+    found = False
+    for group, lst in lists.items():
+        for place, names in (("env0", listing(env0_group(hw, group), group)), ("live", live_listing(lst, group))):
+            left = copylist.unlisted(lst, names)
+            if left:
+                found = True
+                hw.say(f"  {group} in {place}: {', '.join(left)}")
+    if not found:
+        hw.say("  nothing: every file in env0's and live's data folders is listed.")

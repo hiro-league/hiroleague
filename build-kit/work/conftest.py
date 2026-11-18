@@ -1,6 +1,7 @@
 """What every hiro-work test shares: nothing from the shell that runs it."""
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -15,3 +16,14 @@ def no_inherited_git(monkeypatch):
     """
     for name in [n for n in os.environ if n.startswith("GIT_") and n != "GIT_EXEC_PATH"]:
         monkeypatch.delenv(name)
+
+
+@pytest.fixture(autouse=True)
+def core_copy_list_only(monkeypatch):
+    """hiro-work's copy lists in a test: the core's own (this repo's data.toml), never env0's repos on the machine
+    that runs the test. A test that needs the apps' lists builds its own (test_data.py)."""
+    import copylist
+    import hiro_work
+
+    core = copylist.parse((Path(__file__).resolve().parents[2] / "data.toml").read_text("utf-8"), copylist.CORE)
+    monkeypatch.setattr(hiro_work, "_lists", {copylist.CORE: core})

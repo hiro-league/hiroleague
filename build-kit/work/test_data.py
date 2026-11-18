@@ -1,13 +1,20 @@
-"""data.py: env1..env5 read the real systems but write to none and call no AI unless asked; a live copy is scrubbed before it leaves
-Simone; env0 keeps its own settings when a live copy takes its place."""
+"""data.py and copylist.py: each repo's copy list says what a copy holds; env1..env5 read the real systems but write to
+none and call no AI unless asked; a live copy is scrubbed before it leaves Simone; env0 keeps its own settings when a
+live copy takes its place."""
 
 import json
 import sqlite3
 import subprocess
 import sys
 from contextlib import closing
+from pathlib import Path
 
+import pytest
+
+import copylist
 import data
+
+HERE = Path(__file__).resolve().parent
 
 
 def db(path, sql):
@@ -24,125 +31,414 @@ def rows(path, sql):
 
 SETTING = "create table setting(key text primary key, value text);"
 
+# Small lists in the real ones' shape: the core's, HomeHiro's, NetHiro's, TrainHiro's, StudyHiro's
+CORE_LIST = '''
+live = "LIVE/core"
+[every_app]
+place_key_pattern = "token|password|secret|login|_key$|_url$"
+place_keys = ["hiroleague_url", "core_ai_profiles"]
+[[item]]
+path = "db/workspace.db"
+kind = "database"
+live = "copy"
+envs = "copy"
+place_tables = ["extensions", "channel_plugins"]
+why = "the family"
+[[item]]
+path = "db/data.db"
+kind = "database"
+live = "copy"
+envs = "copy"
+why = "chats"
+[[item]]
+path = "db/graphiti_kuzu.db"
+kind = "file"
+live = "own"
+envs = "copy"
+optional = true
+why = "the graph, locked while a core runs"
+[[item]]
+path = "providers.json"
+kind = "file"
+live = "own"
+envs = "copy"
+why = "providers"
+[[item]]
+path = "characters"
+kind = "folder"
+live = "own"
+envs = "copy"
+why = "characters"
+[[item]]
+path = "channels"
+kind = "folder"
+live = "own"
+envs = "none"
+why = "the WhatsApp session"
+[[switch]]
+path = "providers.json"
+key = "providers"
+value = []
+unless = "ai"
+why = "no AI call"
+[[switch]]
+path = "db/workspace.db"
+table = "channel_plugins"
+column = "enabled"
+value = 0
+why = "WhatsApp off"
+[[env]]
+match = "(API_KEY|API_TOKEN)$"
+value = ""
+unless = "ai"
+why = "provider keys"
+'''
+
+APP_LISTS = {
+    "homehiro": '''
+live = "LIVE/homehiro"
+[[item]]
+path = "homehiro.db"
+kind = "database"
+live = "copy"
+envs = "copy"
+place_tables = ["websession"]
+why = "everything"
+[[item]]
+path = "people"
+kind = "folder"
+live = "copy"
+envs = "link"
+why = "avatars"
+[[item]]
+path = "hiroleague"
+kind = "folder"
+live = "own"
+envs = "copy"
+why = "its key"
+[[item]]
+path = "streams"
+kind = "folder"
+live = "own"
+envs = "none"
+why = "camera history"
+[[item]]
+path = "*.before-*"
+kind = "file"
+live = "own"
+envs = "none"
+why = "snapshots"
+[[setting]]
+key = "ha_token"
+needs = "reads"
+why = "HA"
+[[setting]]
+key = "mqtt_host"
+needs = "reads"
+why = "MQTT"
+[[setting]]
+key = "tv_cast"
+why = "the place's TV"
+[[env]]
+name = "TALKER_KEY"
+drop = true
+why = "Talker"
+[[env]]
+name = "AUTOMATION_BUDGET_USD"
+value = "0"
+unless = "ai"
+why = "nothing to spend"
+''',
+    "nethiro": '''
+live = "LIVE/nethiro"
+[[item]]
+path = "nethiro.db"
+kind = "database"
+live = "copy"
+envs = "copy"
+why = "health"
+[[setting]]
+key = "ha_url"
+needs = "reads"
+why = "HA"
+[[setting]]
+key = "adguard_login"
+needs = "writes"
+why = "AdGuard"
+[[switch]]
+path = "nethiro.db"
+table = "statusitem"
+column = "enabled"
+value = 0
+unless = "reads"
+why = "health checks"
+''',
+    "trainhiro": '''
+live = "LIVE/trainhiro"
+[[item]]
+path = "trainhiro.db"
+kind = "database"
+live = "copy"
+envs = "copy"
+why = "recognition"
+[[setting]]
+key = "frigate_url"
+needs = "writes"
+why = "Frigate"
+[[env]]
+name = "FRIGATE_URL"
+drop = true
+unless = "writes"
+why = "Frigate"
+''',
+    "studyhiro": '''
+live = "LIVE/studyhiro"
+[[item]]
+path = "studyhiro.db"
+kind = "database"
+live = "copy"
+envs = "copy"
+why = "studies"
+[[item]]
+path = "files"
+kind = "folder"
+live = "copy"
+envs = "link"
+why = "stored files"
+''',
+}
+
+
+@pytest.fixture
+def lists(tmp_path, monkeypatch):
+    """The fixture lists, as hiro-work reads them from an environment's repos."""
+    root = tmp_path / "repos"
+    (root / "hiroleague").mkdir(parents=True)
+    (root / "hiroleague" / "data.toml").write_text(CORE_LIST.replace("LIVE", (tmp_path / "live").as_posix()), "utf-8")
+    for app, text in APP_LISTS.items():
+        (root / app).mkdir()
+        (root / app / "data.toml").write_text(text.replace("LIVE", (tmp_path / "live").as_posix()), "utf-8")
+    monkeypatch.setattr(data, "APPS", list(APP_LISTS))
+    return data.load(root)
+
+
+# ----------------------------------------------------------------------------------------- the lists themselves
+
+
+def test_the_cores_own_copy_list_reads_and_says_why_for_every_item():
+    lst = copylist.parse((HERE.parent.parent / "data.toml").read_text("utf-8"), copylist.CORE)
+    assert lst.every_app and "_url$" in lst.every_app.place_key_pattern
+    assert {"db/workspace.db", "db/data.db", "db/knowledge.db"} == {i.path for i in lst.databases("live")}
+    assert all(i.why for i in lst.items)
+    assert lst.item("channels").envs == "none" and lst.item("plans").envs == "none"
+
+
+@pytest.mark.parametrize("bad, says", [
+    ('[[item]]\npath = "a.db"\nkind = "database"\nlive = "copy"\nenvs = "copy"\n', "missing why"),
+    ('[[item]]\npath = "a.db"\nkind = "database"\nlive = "fetch"\nenvs = "copy"\nwhy = "w"\n', "live"),
+    ('[[item]]\npath = "a.db"\nkind = "db"\nlive = "copy"\nenvs = "copy"\nwhy = "w"\n', "kind"),
+    ('[[item]]\npath = "*.db"\nkind = "database"\nlive = "own"\nenvs = "none"\nwhy = "w"\n', "not a pattern"),
+    ('[[item]]\npath = "a.json"\nkind = "file"\nlive = "own"\nenvs = "link"\nwhy = "w"\n', "only a folder"),
+    ('[[item]]\npath = "a.db"\nkind = "database"\nlive = "copy"\nenvs = "copy"\nwhy = "w"\ncolour = "red"\n',
+     "unknown field colour"),
+    ('[[item]]\npath = "a"\nkind = "folder"\nlive = "own"\nenvs = "none"\nwhy = "w"\n'
+     '[[switch]]\npath = "b.db"\ntable = "t"\ncolumn = "c"\nvalue = 0\nwhy = "w"\n', "no database or file item"),
+    ('[[item]]\npath = "a"\nkind = "folder"\nlive = "own"\nenvs = "none"\nwhy = "w"\n'
+     '[[env]]\nname = "X"\nwhy = "w"\n', "value or drop"),
+    ('[[item]]\npath = "a"\nkind = "folder"\nlive = "own"\nenvs = "none"\nwhy = "w"\n'
+     '[[setting]]\nkey = "k"\nneeds = "ai"\nwhy = "w"\n', "needs"),
+])
+def test_a_wrong_copy_list_stops_with_the_file_and_the_reason(bad, says):
+    with pytest.raises(copylist.ListError, match=says):
+        copylist.parse('live = "~/x/data"\n' + bad, "homehiro", "homehiro/data.toml")
+
+
+def test_an_app_without_a_copy_list_is_named(tmp_path):
+    (tmp_path / "hiroleague").mkdir()
+    (tmp_path / "hiroleague" / "data.toml").write_text(CORE_LIST, "utf-8")
+    with pytest.raises(copylist.ListError, match="evalhiro has no copy list"):
+        copylist.load_all(tmp_path, ["evalhiro"])
+
+
+def test_what_a_folder_holds_that_its_list_doesnt_name_is_found(lists):
+    names = ["homehiro.db", "homehiro.db-wal", "people", "streams", "streams.db.before-rebuild", "tts-cache"]
+    assert copylist.unlisted(lists["homehiro"], names) == ["tts-cache"]
+
+
+# ----------------------------------------------------------------------------------------- env1..env5: safe
+
 
 def env_copy(tmp_path):
     d = tmp_path / "env3"
     db(d / "homehiro" / "homehiro.db", SETTING + "insert into setting values ('ha_url','http://homeassistant.local'),"
-       "('ha_token','t'),('mqtt_host','192.168.1.10'),('mqtt_password','p'),('status_home_tz','Africa/Cairo');")
+       "('ha_token','t'),('mqtt_host','192.168.1.10'),('tv_cast','[]'),('status_home_tz','Africa/Cairo');")
     db(d / "nethiro" / "nethiro.db", SETTING + "insert into setting values ('ha_url','x'),('adguard_login','{}'),"
        "('dns_blocking','{}'); create table statusitem(id integer, enabled boolean);"
        "insert into statusitem values (1, 1), (2, 1), (3, 0);")
     db(d / "trainhiro" / "trainhiro.db", SETTING + "insert into setting values ('frigate_url','http://f:5000');")
-    (d / "core" / "default").mkdir(parents=True)
+    db(d / "core" / "default" / "db" / "workspace.db",
+       "create table channel_plugins(name text, enabled boolean); insert into channel_plugins values ('whatsapp', 1);")
     (d / "core" / "default" / "providers.json").write_text(
         json.dumps({"version": 1, "providers": [{"provider_id": "google"}, {"provider_id": "codex"}]}),
         encoding="utf-8")
     return d
 
 
-def test_by_default_an_environment_copy_reads_the_real_systems_but_keeps_no_login_that_writes_and_no_ai(tmp_path):
+def test_by_default_an_environment_copy_reads_the_real_systems_but_keeps_no_login_that_writes_and_no_ai(
+        tmp_path, lists):
     d = env_copy(tmp_path)
-    did = data.make_safe(d, [data.READS])
+    did = data.make_safe(d, [data.READS], lists)
     assert len(rows(d / "homehiro" / "homehiro.db", "select key from setting")) == 5  # HA and MQTT kept
     assert rows(d / "nethiro" / "nethiro.db", "select key from setting order by key") == [("dns_blocking",), ("ha_url",)]
     assert rows(d / "nethiro" / "nethiro.db", "select count(*) from statusitem where enabled") == [(2,)]
     assert rows(d / "trainhiro" / "trainhiro.db", "select count(*) from setting") == [(0,)]  # Frigate writes
     assert json.loads((d / "core" / "default" / "providers.json").read_text())["providers"] == []
-    assert any("AI provider" in line for line in did)
+    assert rows(d / "core" / "default" / "db" / "workspace.db", "select enabled from channel_plugins") == [(0,)]
+    assert "core: providers.json's 2 providers left out (no AI call)" in did
 
 
-def test_a_task_that_reads_nothing_has_no_address_of_a_real_system(tmp_path):
+def test_a_task_that_reads_nothing_has_no_address_of_a_real_system(tmp_path, lists):
     d = env_copy(tmp_path)
-    did = data.make_safe(d, [])
-    assert rows(d / "homehiro" / "homehiro.db", "select key from setting") == [("status_home_tz",)]
+    did = data.make_safe(d, [], lists)
+    assert rows(d / "homehiro" / "homehiro.db", "select key from setting order by key") == [
+        ("ha_url",), ("status_home_tz",), ("tv_cast",)]  # ha_url isn't in this small list
     assert rows(d / "nethiro" / "nethiro.db", "select key from setting") == [("dns_blocking",)]
     assert rows(d / "nethiro" / "nethiro.db", "select count(*) from statusitem where enabled") == [(0,)]
-    assert rows(d / "trainhiro" / "trainhiro.db", "select count(*) from setting") == [(0,)]
-    assert json.loads((d / "core" / "default" / "providers.json").read_text())["providers"] == []
-    assert any("AI provider" in line for line in did)
-    assert data.make_safe(d, []) == []  # again: nothing left to do
+    assert "nethiro: 2 statusitem row(s) off (health checks)" in did
+    assert data.make_safe(d, [], lists) == []  # again: nothing left to do
 
 
-def test_a_task_that_asks_keeps_the_writes_and_the_ai(tmp_path):
+def test_a_task_that_asks_keeps_the_writes_and_the_ai_but_never_whatsapp(tmp_path, lists):
     d = env_copy(tmp_path)
-    assert data.make_safe(d, [data.READS, data.WRITES, data.AI]) == []
+    assert data.make_safe(d, [data.READS, data.WRITES, data.AI], lists) == [
+        "core: 1 channel_plugins row(s) off (WhatsApp off)"]
     assert len(rows(d / "homehiro" / "homehiro.db", "select key from setting")) == 5
     assert rows(d / "trainhiro" / "trainhiro.db", "select count(*) from setting") == [(1,)]
     assert rows(d / "nethiro" / "nethiro.db", "select count(*) from statusitem where enabled") == [(2,)]
     assert len(json.loads((d / "core" / "default" / "providers.json").read_text())["providers"]) == 2
 
 
-def test_app_settings_and_the_core_environment_follow_what_the_task_asked():
-    assert data.env_overrides("homehiro", []) == {"TALKER_KEY": None, "AUTOMATION_BUDGET_USD": "0"}
-    assert data.env_overrides("homehiro", [data.AI]) == {"TALKER_KEY": None}
-    assert data.env_overrides("trainhiro", []) == {"FRIGATE_URL": None}
-    assert data.env_overrides("trainhiro", [data.READS]) == {"FRIGATE_URL": None}  # it writes to Frigate
-    assert data.env_overrides("trainhiro", [data.WRITES]) == {}
+def test_app_settings_and_the_core_environment_follow_what_the_task_asked(lists):
+    assert data.env_overrides("homehiro", [], lists) == {"TALKER_KEY": None, "AUTOMATION_BUDGET_USD": "0"}
+    assert data.env_overrides("homehiro", [data.AI], lists) == {"TALKER_KEY": None}
+    assert data.env_overrides("trainhiro", [], lists) == {"FRIGATE_URL": None}
+    assert data.env_overrides("trainhiro", [data.READS], lists) == {"FRIGATE_URL": None}  # it writes to Frigate
+    assert data.env_overrides("trainhiro", [data.WRITES], lists) == {}
+    assert data.env_overrides("studyhiro", [], lists) == {}
     environ = {"GEMINI_API_KEY": "x", "CLOUDFLARE_API_TOKEN": "y", "PATH": "p"}
-    assert data.core_env(environ, []) == {"GEMINI_API_KEY": "", "CLOUDFLARE_API_TOKEN": ""}
-    assert data.core_env(environ, [data.AI]) == {}
+    assert data.core_env(environ, [], lists) == {"GEMINI_API_KEY": "", "CLOUDFLARE_API_TOKEN": ""}
+    assert data.core_env(environ, [data.AI], lists) == {}
 
 
-def test_an_environment_gets_env0s_pictures_as_hard_links_and_its_own_changes_stay_there(tmp_path):
+def test_an_environment_gets_env0s_pictures_as_hard_links_and_its_own_changes_stay_there(tmp_path, lists):
     env0, env = tmp_path / "env0" / "studyhiro", tmp_path / "env1" / "studyhiro"
     (env0 / "files" / "sub").mkdir(parents=True)
     (env0 / "files" / "a.jpg").write_bytes(b"a")
     (env0 / "files" / "sub" / "b.jpg").write_bytes(b"b")
     (env0 / "streams").mkdir()  # not a picture folder: never linked
     (env0 / "streams" / "clip.mp4").write_bytes(b"c")
-    assert data.link_pictures(env0, env, "studyhiro") == ["studyhiro/files: 2 file(s) linked"]
+    assert data.link_pictures(env0, env, "studyhiro", lists) == ["studyhiro/files: 2 file(s) linked"]
     assert (env / "files" / "a.jpg").samefile(env0 / "files" / "a.jpg")  # the same file, no copy
     assert (env / "files" / "sub" / "b.jpg").read_bytes() == b"b"
     assert not (env / "streams").exists()
     (env / "files" / "new.jpg").write_bytes(b"n")  # a task's new picture stays in its environment
     (env / "files" / "a.jpg").unlink()  # removing one there removes only its link
     assert not (env0 / "files" / "new.jpg").exists() and (env0 / "files" / "a.jpg").read_bytes() == b"a"
-    assert data.link_pictures(env0, env, "nethiro") == []  # an app with no picture folders
+    assert data.link_pictures(env0, env, "nethiro", lists) == []  # an app with no picture folders
 
 
-def test_per_place_settings_are_addresses_logins_and_tokens():
-    for key in ("ha_url", "ha_token", "mqtt_password", "adguard_login", "tv_key", "hiroleague_url", "nethiro_url",
+def test_an_environments_copy_takes_what_the_list_copies_and_names_what_it_doesnt_know(tmp_path, lists):
+    src, dst = tmp_path / "env0" / "homehiro", tmp_path / "env2" / "homehiro"
+    db(src / "homehiro.db", "pragma journal_mode=wal;" + SETTING + "insert into setting values ('a','1');")
+    (src / "hiroleague").mkdir()
+    (src / "hiroleague" / "extension_key.pem").write_text("k")
+    (src / "people").mkdir()
+    (src / "people" / "p.jpg").write_bytes(b"p")
+    (src / "streams").mkdir()
+    (src / "streams" / "big.mp4").write_bytes(b"s")
+    (src / "tts-cache").mkdir()
+    dst.mkdir(parents=True)
+    lines = data.copy_group(src, dst, "homehiro", lists)
+    assert rows(dst / "homehiro.db", "select value from setting") == [("1",)]  # with what was still in the WAL
+    assert (dst / "hiroleague" / "extension_key.pem").read_text() == "k"
+    assert (dst / "people" / "p.jpg").samefile(src / "people" / "p.jpg")
+    assert not (dst / "streams").exists() and not (dst / "tts-cache").exists()
+    assert lines == ["homehiro/people: 1 file(s) linked",
+                     "! homehiro: not in its copy list, so not copied: tts-cache"]
+
+
+def test_the_cores_copy_skips_an_optional_file_it_cant_read_and_never_takes_the_whatsapp_session(
+        tmp_path, lists, monkeypatch):
+    src, dst = tmp_path / "env0" / "core", tmp_path / "env2" / "core"
+    db(src / "db" / "workspace.db", "create table people(id text);")
+    (src / "db" / "graphiti_kuzu.db").write_bytes(b"graph")
+    (src / "providers.json").write_text("{}")
+    (src / "characters" / "hiro").mkdir(parents=True)
+    (src / "channels").mkdir()
+    (src / "channels" / "session.db").write_bytes(b"wa")
+    dst.mkdir(parents=True)
+    real_copy = data.shutil.copy2
+
+    def locked(s, d, *a, **k):  # Kuzu's file, locked while env0's core runs
+        if Path(s).name == "graphiti_kuzu.db":
+            raise PermissionError(13, "locked")
+        return real_copy(s, d, *a, **k)
+
+    monkeypatch.setattr(data.shutil, "copy2", locked)
+    lines = data.copy_group(src, dst, data.CORE, lists)
+    assert (dst / "db" / "workspace.db").exists() and (dst / "providers.json").exists()
+    assert (dst / "characters" / "hiro").is_dir() and not (dst / "channels").exists()
+    assert lines == ["core/db/graphiti_kuzu.db: not copied (locked); the graph, locked while a core runs"]
+
+
+# ----------------------------------------------------------------------------------------- live -> env0
+
+
+def test_per_place_settings_are_the_kits_the_apps_own_and_addresses_logins_and_tokens(lists):
+    for key in ("ha_url", "ha_token", "mqtt_host", "adguard_login", "tv_cast", "hiroleague_url", "nethiro_url",
                 "core_ai_profiles", "some_new_secret"):
-        assert data.is_place_key(key), key
+        assert data.is_place_key(key, "homehiro", lists), key
     for key in ("status_home_tz", "dns_blocking", "points_rules", "home_devices", "traffic_settings"):
-        assert not data.is_place_key(key), key
+        assert not data.is_place_key(key, "homehiro", lists), key
+    assert not data.is_place_key("mqtt_host", "studyhiro", lists)  # HomeHiro's own key, not StudyHiro's
 
 
-def live_home(tmp_path, monkeypatch):
-    """A fake Simone: the live databases in tmp folders, as LIVE names them."""
+def live_home(tmp_path):
+    """A fake Simone: the live databases in tmp folders, where the fixture lists name them."""
     live = tmp_path / "live"
     db(live / "homehiro" / "homehiro.db", "pragma journal_mode=wal;" + SETTING +
-       "insert into setting values ('ha_token','live-secret-token'),('ha_url','http://ha'),('status_home_tz','tz');"
+       "insert into setting values ('ha_token','live-secret-token'),('ha_url','http://ha'),('tv_cast','[1]'),"
+       "('status_home_tz','tz');"
        "create table websession(id text primary key, user_id text);"
        "insert into websession values ('live-session-cookie','p1');"
        "create table person(id integer, name text); insert into person values (1,'A'),(2,'B'),(3,'C');")
-    db(live / "core" / "workspace.db", "create table people(person_id text, name text, password_hash text);"
+    db(live / "core" / "db" / "workspace.db", "create table people(person_id text, name text, password_hash text);"
        "insert into people values ('p1','A','h');"
        "create table extensions(extension_id text, public_key text); insert into extensions values ('e1','live-key');")
-    monkeypatch.setattr(data, "LIVE", {"homehiro": (str(live / "homehiro"), ["homehiro.db"]),
-                                       "core": (str(live / "core"), ["workspace.db", "data.db"])})
     return live
 
 
-def test_a_live_copy_is_scrubbed_before_it_leaves_simone(tmp_path, monkeypatch):
-    live_home(tmp_path, monkeypatch)
+def test_a_live_copy_is_scrubbed_before_it_leaves_simone(tmp_path, lists):
+    live_home(tmp_path)
     out = tmp_path / "copy"
-    run = subprocess.run([sys.executable, "-"], input=data.scrub_script(str(out)), capture_output=True, text=True)
+    run = subprocess.run([sys.executable, "-"], input=data.scrub_script(str(out), lists), capture_output=True,
+                         text=True)
     assert run.returncode == 0, run.stderr
     meta = json.loads(run.stdout)
     hh = meta["homehiro/homehiro.db"]
     assert hh["live"]["websession"] == 1 and hh["copy"]["websession"] == 0
-    assert hh["scrubbed"]["setting"] == ["ha_token", "ha_url"]
+    assert hh["scrubbed"]["setting"] == ["ha_token", "ha_url", "tv_cast"]
     assert hh["copy"]["person"] == hh["live"]["person"] == 3 and hh["check"] == "ok"
-    assert meta["core/data.db"] == {"missing": True}
-    assert meta["core/workspace.db"]["scrubbed"] == {"extensions": 1}
+    assert meta["core/db/data.db"] == {"missing": True}
+    assert meta["core/db/workspace.db"]["scrubbed"] == {"extensions": 1}
+    assert meta["nethiro/nethiro.db"] == {"missing": True}
     raw = (out / "homehiro" / "homehiro.db").read_bytes()
     assert b"live-secret-token" not in raw and b"live-session-cookie" not in raw  # overwritten, not only unlinked
     assert not (out / "homehiro" / "homehiro.db-wal").exists()
     assert rows(out / "homehiro" / "homehiro.db", "select key from setting") == [("status_home_tz",)]
 
 
-def test_env0_keeps_its_own_settings_sessions_and_pairings_when_a_live_copy_takes_its_place(tmp_path):
+def test_env0_keeps_its_own_settings_sessions_and_pairings_when_a_live_copy_takes_its_place(tmp_path, lists):
     live = db(tmp_path / "copy" / "homehiro.db", SETTING + "insert into setting values ('status_home_tz','live-tz');"
               "create table websession(id text, user_id text, device text);"
               "create table person(id integer, name text); insert into person values (1,'A'),(2,'B');")
@@ -151,7 +447,7 @@ def test_env0_keeps_its_own_settings_sessions_and_pairings_when_a_live_copy_take
              "create table websession(id text, user_id text); insert into websession values ('s','u');"
              "create table person(id integer, name text); insert into person values (9,'old');")
     new = tmp_path / "env0" / "homehiro.db.refresh"
-    counts, back = data.build(live, old, new, "homehiro.db")
+    counts, back = data.build(live, old, new, "homehiro/homehiro.db", lists)
     assert dict(rows(new, "select key, value from setting")) == {
         "status_home_tz": "live-tz", "ha_url": "http://dev", "ha_token": "dev-token"}
     assert rows(new, "select id, user_id, device from websession") == [("s", "u", None)]
@@ -159,20 +455,35 @@ def test_env0_keeps_its_own_settings_sessions_and_pairings_when_a_live_copy_take
     assert counts == {"person": 2, "setting": 3, "websession": 1} and back == {"setting": 2, "websession": 1}
 
 
-def test_a_new_database_with_no_env0_copy_is_taken_as_it_is(tmp_path):
-    live = db(tmp_path / "copy" / "streams.db", "create table streamrecord(id integer); insert into streamrecord values (1);")
-    counts, back = data.build(live, tmp_path / "env0" / "streams.db", tmp_path / "streams.db.refresh", "streams.db")
-    assert counts == {"streamrecord": 1} and back == {}
+def test_a_new_database_with_no_env0_copy_is_taken_as_it_is(tmp_path, lists):
+    live = db(tmp_path / "copy" / "data.db", "create table messages(id integer); insert into messages values (1);")
+    counts, back = data.build(live, tmp_path / "env0" / "data.db", tmp_path / "data.db.refresh", "core/db/data.db",
+                              lists)
+    assert counts == {"messages": 1} and back == {}
 
 
-def test_the_report_shows_live_copy_and_env0_with_what_was_left_out():
+def test_the_report_shows_live_copy_and_env0_with_what_was_left_out(lists):
     meta = {"homehiro/homehiro.db": {"live": {"setting": 5, "websession": 2, "person": 3},
                                      "copy": {"setting": 3, "websession": 0, "person": 3},
                                      "scrubbed": {"setting": ["ha_token", "ha_url"], "websession": 2},
                                      "check": "ok", "alembic": "abc", "bytes": 2**20},
-            "core/data.db": {"missing": True}}
+            "core/db/data.db": {"missing": True}}
     text = data.report(meta, {}, {"homehiro/homehiro.db": {"setting": 4, "websession": 1, "person": 3}},
                        {"homehiro/homehiro.db": {"setting": 1, "websession": 1}})
     assert "not copied: ha_token, ha_url; env0's 1 kept" in text
     assert "2 row(s) not copied; env0's 1 kept" in text
-    assert "core/data.db: not on Simone" in text
+    assert "core/db/data.db: not on Simone" in text
+    assert "homehiro: hiroleague, streams, *.before-*" in data.left_out(lists)
+
+
+def test_a_live_copy_from_before_the_lists_is_refused_before_anything_changes(tmp_path, lists):
+    src = tmp_path / "old-copy"
+    src.mkdir()
+    (src / "counts.json").write_text(json.dumps({"core/workspace.db": {"missing": True}}))
+
+    class Hw:
+        class Stop(Exception):
+            pass
+
+    with pytest.raises(Hw.Stop, match="fetch a new copy"):
+        data.apply(Hw, src, lists)

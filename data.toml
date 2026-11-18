@@ -1,0 +1,187 @@
+# The core's copy list: what a copy of its workspace holds, and how each piece comes along.
+# hiro-work reads it for every copy: live -> env0 (refresh-data) and env0 -> env1..env5 (start, resume, real, configure).
+# The format is the build kit's (build-kit/work/copylist.py); hiro-docs standards/workflow.md, "Data and real systems".
+# Paths are inside the workspace (C:\hiro\data\envN\core\default; the live folder on Simone).
+
+live = "~/.local/share/hiro/workspaces/default"
+
+# What every app's setting table holds that is per-place, written by the backend kit: never copied from live, and
+# env0's own rows are kept. A key matching the pattern is per-place too (a token, a password, a login, a key, an
+# address). Each app's own copy list adds its own keys.
+[every_app]
+place_key_pattern = "token|password|secret|login|_key$|_url$"
+place_keys = ["hiroleague_url", "hiroleague_admin_url", "core_ai_profiles", "core_voice_profiles"]
+
+[[item]]
+path = "db/workspace.db"
+kind = "database"
+live = "copy"
+envs = "copy"
+# Per-place rows: sign-in sessions, the paired apps and devices (their keys), the channel plugins (WhatsApp), LAN
+# names, characters (their folders are the place's own) and local model servers
+place_tables = ["admin_sessions", "extensions", "devices", "channel_plugins", "site_names", "characters", "local_models"]
+why = "the family list, roles, rights and the AI usage log"
+
+[[item]]
+path = "db/data.db"
+kind = "database"
+live = "copy"
+envs = "copy"
+why = "Hiro's chats: users, channels, messages and their attachments, and memory's ingest cursors"
+
+[[item]]
+path = "db/knowledge.db"
+kind = "database"
+live = "copy"
+envs = "copy"
+why = "the knowledge base's catalog: documents, categories, tags and ingestion jobs"
+
+[[item]]
+path = "db/graphiti_kuzu.db"
+kind = "file"
+live = "own"
+envs = "copy"
+optional = true
+why = "the memory graph: locked while a core runs, so never fetched from live; copied to an environment when env0's core is stopped"
+
+[[item]]
+path = "db/graphiti_kuzu.db.wal"
+kind = "file"
+live = "own"
+envs = "copy"
+optional = true
+why = "the memory graph's log, with it"
+
+[[item]]
+path = "db/.graph_indexed"
+kind = "file"
+live = "own"
+envs = "copy"
+why = "the memory graph's \"indexed\" marker, which locks its embedder: it goes with the graph"
+
+[[item]]
+path = "db/qdrant"
+kind = "folder"
+live = "own"
+envs = "copy"
+why = "the knowledge base's vector store: never fetched from live (env0 has its own)"
+
+[[item]]
+path = "config.json"
+kind = "file"
+live = "own"
+envs = "copy"
+why = "ports and addresses: hiro-work points each environment's at its own ports, and takes LAN names out"
+
+[[item]]
+path = "preferences.json"
+kind = "file"
+live = "own"
+envs = "copy"
+why = "the core's settings (AI, voice, embedding and reranker profiles and their picks): env0's own for now"
+
+[[item]]
+path = "preferences.v3.json"
+kind = "file"
+live = "own"
+envs = "copy"
+why = "an older version of the settings, kept by the core"
+
+[[item]]
+path = "preferences.v4.json"
+kind = "file"
+live = "own"
+envs = "copy"
+why = "an older version of the settings, kept by the core"
+
+[[item]]
+path = "preferences.json.before-*"
+kind = "file"
+live = "own"
+envs = "none"
+why = "snapshots of the settings taken before a change"
+
+[[item]]
+path = "providers.json"
+kind = "file"
+live = "own"
+envs = "copy"
+why = "the AI providers and their keys: env0's own; emptied in env1..env5 unless the task has real AI (below)"
+
+[[item]]
+path = "master_key.pem"
+kind = "file"
+live = "own"
+envs = "copy"
+why = "the workspace's own key"
+
+[[item]]
+path = "characters"
+kind = "folder"
+live = "own"
+envs = "copy"
+why = "Hiro's characters' folders"
+
+[[item]]
+path = "data"
+kind = "folder"
+live = "own"
+envs = "copy"
+why = "chats' media and channel photos"
+
+[[item]]
+path = "knowledge"
+kind = "folder"
+live = "own"
+envs = "copy"
+why = "the knowledge base's source files"
+
+[[item]]
+path = "channels"
+kind = "folder"
+live = "own"
+envs = "none"
+why = "the WhatsApp session: never copied, two clients on one account break it"
+
+[[item]]
+path = "plans"
+kind = "folder"
+live = "own"
+envs = "none"
+why = "the plan tools' logins: never copied"
+
+[[item]]
+path = "logs"
+kind = "folder"
+live = "own"
+envs = "none"
+why = "the place's own logs"
+
+[[item]]
+path = "run"
+kind = "folder"
+live = "own"
+envs = "none"
+why = "the running core's own files"
+
+# In env1..env5: what is turned off, unless the task asks for that real system
+[[switch]]
+path = "providers.json"
+key = "providers"
+value = []
+unless = "ai"
+why = "no AI provider, no AI call: every ask, the core's own jobs and voices check the providers first"
+
+[[switch]]
+path = "db/workspace.db"
+table = "channel_plugins"
+column = "enabled"
+value = 0
+why = "the WhatsApp channel off: two clients on one account break it"
+
+# The core's server in env1..env5: environment variables
+[[env]]
+match = "(API_KEY|API_TOKEN)$"
+value = ""
+unless = "ai"
+why = "provider keys in the PC's environment (GEMINI_API_KEY, OPENAI_API_KEY...) blanked"
