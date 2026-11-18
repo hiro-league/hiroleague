@@ -1,5 +1,6 @@
 import { apiRequest } from './client';
 import type { AppTile } from '$kit/api/apps';
+import type { Place } from '$kit/components/place';
 
 /** The person signed in to the admin (Phase 6: HiroLeague's own sign-in). */
 export type SignedInPerson = {
@@ -21,6 +22,8 @@ export type AuthMe = {
   /** False until `hiro people owner` gave someone a sign-in. */
   anyone_signs_in: boolean;
   sign_in_offers: SignInOffer[];
+  /** A test environment and what its core reaches (its switchboard); null in live and env0. */
+  place?: Place | null;
 };
 
 

@@ -5,7 +5,8 @@
 	//   signedOut - what a signed-out visitor sees. Left out: off to HiroLeague's sign-in (an app). The HiroLeague
 	//               core, where people sign in, gives its sign-in form here.
 	//   topBar    - a bar across the top of the page, beside the menu (left out: none; the menu holds everything)
-	//   banners   - lines above every page (the server is starting, the connection dropped)
+	//   banners   - lines above every page (the server is starting, the connection dropped), under the kit's own
+	//               line that says a test environment and what it reaches (place-banner.svelte)
 	//   overlays  - what floats over every page (a chat window, toasts)
 	//   noPages   - what someone signed in sees when their role has no page here (the HiroLeague core shows its
 	//               apps to a role that doesn't open its settings). Left out: the first page says it isn't theirs.
@@ -33,6 +34,7 @@
 	import AppSwitcher from './app-switcher.svelte';
 	import NoAccess from './no-access.svelte';
 	import NotYours from './not-yours.svelte';
+	import PlaceBanner from './place-banner.svelte';
 	import { isWidth, SIDEBAR_DEFAULT } from './sidebar-width';
 	import ToHiroLeague from './to-hiroleague.svelte'; // Phase 8: signing in is HiroLeague's
 
@@ -110,6 +112,8 @@
 			<!-- On phones the menu (with its app switcher) is hidden: the switcher is in this bar too -->
 			<AppSwitcher class="ml-auto md:hidden" />
 		</header>
+		<!-- A test environment says so, and what it reaches of the real house (place-banner.svelte) -->
+		<PlaceBanner />
 		{@render banners?.()}
 		<!-- min-w-0: let wide tables scroll inside their box instead of widening the page -->
 		<main class={cn('min-w-0 flex-1 p-4 md:p-6', mainClass)}>

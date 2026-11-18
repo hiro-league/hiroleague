@@ -2,6 +2,7 @@
 // is where people sign in, so "who is there" comes from its own session (lib/runtime/admin-session), told here
 // in the kit's words.
 import { ApiError } from '$kit/api/client';
+import type { Place } from '$kit/components/place';
 import { adminSession } from '$lib/runtime/admin-session.svelte';
 import { signOut as apiSignOut } from '$lib/api/auth';
 
@@ -19,6 +20,7 @@ export type Me = {
   access: Record<string, Access>;
   rights?: string[];
   reason?: string;
+  place?: Place | null;
 };
 
 /** Ask the server who is signed in. Nobody: the kit hears "401" and the shell shows the sign-in form. */
@@ -37,7 +39,8 @@ export async function getMe(): Promise<Me> {
     owner: false,
     // the admin's one right today: a role either opens HiroLeague's settings (every page) or signs in for the
     // apps only (no page: the layout shows it the apps)
-    access: adminSession.canOpenSettings ? { settings: 'use' } : {}
+    access: adminSession.canOpenSettings ? { settings: 'use' } : {},
+    place: adminSession.place
   };
 }
 

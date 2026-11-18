@@ -57,3 +57,11 @@ def test_a_file_that_cant_be_read_opens_nothing(tmp_path):
 def test_the_summary_says_every_systems_mode(tmp_path):
     s = board(tmp_path, {"ha": "read", "ai": "real"}).summary()
     assert (s["place"], s["preset"], s["modes"]["ha"], s["modes"]["ai"], s["modes"]["dhcp"]) == ("env2", "safe", "read", "real", "off")
+
+
+def test_a_page_gets_the_systems_its_app_reaches_and_live_gets_none(tmp_path):
+    p = board(tmp_path, {"ha": "read", "ai": "fake", "tv": "read"}).page(["tv", "ai", "ha"])
+    assert (p["place"], p["preset"]) == ("env2", "safe")
+    assert p["systems"] == [{"id": "ha", "name": "Home Assistant", "mode": "read"},
+                            {"id": "ai", "name": "AI", "mode": "fake"}, {"id": "tv", "name": "TVs", "mode": "read"}]
+    assert sb.read({}).page(["ha"]) is None

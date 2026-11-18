@@ -54,6 +54,7 @@ def test_api_needs_a_sign_in_but_the_page_and_auth_dont(client: TestClient) -> N
         "can_open_settings": False,
         "anyone_signs_in": True,
         "sign_in_offers": [],
+        "place": None,  # the tests name no switchboard: as live
     }
 
 

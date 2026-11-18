@@ -7,22 +7,22 @@
 name = "Safe"
 about = "Reads the real house; nothing written, sent or paid"
 builtin = true
-modes = { ha = "read", frigate = "read", mqtt = "read", ai = "fake", voices = "fake", whatsapp = "fake", talker = "fake", adguard = "off", dhcp = "off" }
+modes = { ha = "read", frigate = "read", mqtt = "read", ai = "fake", voices = "fake", whatsapp = "fake", talker = "fake", adguard = "off", dhcp = "off", tv = "read" }
 
 [[preset]]
 name = "AI"
 about = "Safe, with real AI and voices"
 builtin = true
-modes = { ha = "read", frigate = "read", mqtt = "read", ai = "real", voices = "real", whatsapp = "fake", talker = "fake", adguard = "off", dhcp = "off" }
+modes = { ha = "read", frigate = "read", mqtt = "read", ai = "real", voices = "real", whatsapp = "fake", talker = "fake", adguard = "off", dhcp = "off", tv = "read" }
 
 [[preset]]
 name = "Offline"
 about = "Reaches nothing real: fakes where there are any"
 builtin = true
-modes = { ha = "fake", frigate = "off", mqtt = "off", ai = "fake", voices = "fake", whatsapp = "fake", talker = "fake", adguard = "off", dhcp = "off" }
+modes = { ha = "fake", frigate = "off", mqtt = "off", ai = "fake", voices = "fake", whatsapp = "fake", talker = "fake", adguard = "off", dhcp = "off", tv = "off" }
 
 [[preset]]
 name = "Full real"
 about = "Everything real, as env0: only on Michel's say"
 builtin = true
-modes = { ha = "real", frigate = "real", mqtt = "read", ai = "real", voices = "real", whatsapp = "real", talker = "real", adguard = "real", dhcp = "real" }
+modes = { ha = "real", frigate = "real", mqtt = "read", ai = "real", voices = "real", whatsapp = "real", talker = "real", adguard = "real", dhcp = "real", tv = "real" }

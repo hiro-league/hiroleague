@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -38,6 +39,7 @@ SYSTEMS: dict[str, tuple[str, tuple[str, ...]]] = {
     "talker": ("Talker", (REAL, FAKE, OFF)),
     "adguard": ("AdGuard", (REAL, READ, OFF)),
     "dhcp": ("DHCP", (REAL, OFF)),
+    "tv": ("TVs", (REAL, READ, OFF)),  # the LAN's Chromecasts: read finds them; Cast and Stop are writes
 }
 
 
@@ -86,6 +88,16 @@ class Switchboard:
         return {"place": self.place, "preset": self.preset, "problem": self.problem,
                 "modes": {s: self.mode(s) for s in SYSTEMS}}
 
+    def page(self, systems: Iterable[str]) -> dict | None:
+        """For the banner on every page of a test environment: the place, its preset, and the mode of each system the
+        asker names (the ones its app reaches), in the switchboard's order. None in live and env0: no banner."""
+        if self.live:
+            return None
+        named = set(systems)
+        return {"place": self.place, "preset": self.preset, "problem": self.problem,
+                "systems": [{"id": s, "name": name, "mode": self.mode(s)} for s, (name, _) in SYSTEMS.items()
+                            if s in named]}
+
 
 def read(environ: dict[str, str] | None = None) -> Switchboard:
     """The switchboard the environment names (HIRO_SWITCHBOARD); everything real when it names none."""
@@ -122,3 +134,7 @@ def check(system: str, *, write: bool = False, fakes: bool = False) -> str:
 
 def summary() -> dict | None:
     return board().summary()
+
+
+def page(systems: Iterable[str]) -> dict | None:
+    return board().page(systems)

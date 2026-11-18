@@ -13,6 +13,9 @@ before a call, so the rule is in one place per client and a page can't forget it
 In live and env0 no switchboard is named, everything is real, and `gate` does nothing. A refused call raises
 `Unavailable` (503) with words for the person: the system, its mode and the place. A client that starts a connection
 of its own (HA's websocket, MQTT) asks `reaches(system)` first and doesn't start when it is False.
+
+An app declares the systems it reaches (`Extension(systems=...)`); the contract's test holds each one it reaches
+itself to a `gate` call, and `page()` gives their modes to the banner on every page (/api/me's `place`).
 """
 
 from __future__ import annotations
@@ -20,6 +23,10 @@ from __future__ import annotations
 from hiro_commons import switchboard as _board
 
 from .errors import Unavailable
+
+# Reached through the core, which checks them once for every app (its request handlers): an app declares them, and
+# needs no gate of its own
+THROUGH_CORE = frozenset({"ai", "voices", "whatsapp"})
 
 REAL, READ, FAKE, OFF = _board.REAL, _board.READ, _board.FAKE, _board.OFF
 
@@ -51,3 +58,11 @@ def writes(system: str) -> bool:
 def summary() -> dict | None:
     """The place, its preset and each system's mode, for a status route; None in live and env0."""
     return _board.summary()
+
+
+def page() -> dict | None:
+    """For the banner on every page: the place, its preset and the mode of each system this app declares; None in
+    live and env0 (no banner)."""
+    from .extension import ext
+
+    return _board.page(ext().systems)

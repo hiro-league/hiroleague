@@ -33,6 +33,7 @@ from hirocli.admin_svelte.result_payload import api_failure
 from fastapi.responses import JSONResponse, RedirectResponse
 from hiro_channel_sdk.constants import METHOD_SIGN_IN_FINISH, METHOD_SIGN_IN_START
 from hiro_channel_sdk.extension import ExtensionRequestError
+from hiro_commons import switchboard
 from hiro_commons.log import Logger
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
@@ -190,6 +191,9 @@ async def who_am_i(request: Request) -> Any:
             "can_open_settings": bool(role and role.admin),
             "anyone_signs_in": anyone,
             "sign_in_offers": offers,
+            # A test environment and what its core reaches (its switchboard), for the banner on every page; None in
+            # live and env0. The core's own three: the apps' other systems are theirs.
+            "place": switchboard.page(("ai", "voices", "whatsapp")),
         }
 
 

@@ -6,6 +6,7 @@
  * the sign-in page back through `sign-in-signal`.
  */
 import { errorMessage } from '$kit/api/client';
+import type { Place } from '$kit/components/place';
 import {
   getAuthMe,
   signIn as apiSignIn,
@@ -26,6 +27,8 @@ function createAdminSession() {
   let canOpenSettings = $state(false);
   let roleName = $state<string | null>(null);
   let offers = $state<SignInOffer[]>([]);
+  // A test environment and what its core reaches, for the kit's banner; null in live and env0
+  let place = $state<Place | null>(null);
   let error = $state<string | null>(null);
 
   async function check() {
@@ -36,6 +39,7 @@ function createAdminSession() {
       canOpenSettings = me.can_open_settings;
       roleName = me.role_name;
       offers = me.sign_in_offers ?? [];
+      place = me.place ?? null;
       state = me.signed_in ? 'signed-in' : 'signed-out';
       error = null;
     } catch (err) {
@@ -96,6 +100,9 @@ function createAdminSession() {
     },
     get roleName() {
       return roleName;
+    },
+    get place() {
+      return place;
     },
     get offers() {
       return offers;

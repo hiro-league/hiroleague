@@ -20,10 +20,10 @@ from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import RedirectResponse
 from hiro_channel_sdk import ExtensionRequestError
 from hiro_channel_sdk.constants import AUTH_ERROR_INVALID_CODE, METHOD_AUTH_CODE
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlmodel import Session, col, select
 
-from .. import family, identity
+from .. import family, identity, switchboard
 from ..db import get_session, run_db
 from ..errors import Invalid, AppError, NotAllowed, NotFound, NotSignedIn, OutsideError, Unavailable, failed
 from ..extension import ext
@@ -91,6 +91,27 @@ async def owner(request: Request) -> Caller:
 # ---- who is asking
 
 
+class PlaceSystem(BaseModel):
+    id: str  # the switchboard's name for it ("ha")
+    name: str  # for people ("Home Assistant")
+    mode: Literal["real", "read", "fake", "off"]
+
+
+class PlaceOut(BaseModel):
+    """A test environment and what it reaches of the outside systems this app uses (its switchboard): the banner on
+    every page there."""
+
+    place: str  # "env2"
+    preset: str  # "Safe"
+    problem: str = ""  # the switchboard couldn't be read: every system is off
+    systems: list[PlaceSystem] = []
+
+
+def _place() -> PlaceOut | None:
+    here = switchboard.page()
+    return PlaceOut.model_validate(here) if here else None
+
+
 class MeOut(BaseModel):
     id: str  # the core person's id ("" for someone the other way in names, not linked to one yet)
     name: str
@@ -102,6 +123,7 @@ class MeOut(BaseModel):
     access: dict[str, Literal["no", "see", "use"]]  # every feature's level (from the rights: "use" = any beyond See)
     rights: list[str] = []  # the exact rights ("<feature>.<right>"); the routes check these
     reason: str = ""  # why they wait, for people ("" = waiting for a role)
+    place: PlaceOut | None = Field(default_factory=_place)  # None in live and env0: everything is real there
 
 
 def seen(session: Session, c: Caller) -> AppUser:

@@ -166,6 +166,34 @@ class AppContract:
 
         assert 20000 <= asyncio.run(through_asyncio()) < 40000
 
+    # --- the outside systems it reaches ---
+
+    def test_every_outside_system_it_reaches_is_declared_and_gated(self):
+        """A test environment's switchboard holds only where a client asks it (hiro-docs workflow.md, "The
+        switchboard"). So: every system the app declares (`Extension(systems=...)`) is one the switchboard knows; each
+        one it reaches itself has a `switchboard.gate("<system>", ...)` call in its code (the core checks AI, voices
+        and WhatsApp for every app); and the code asks the switchboard about no system the app doesn't declare."""
+        import re
+
+        from hiro_commons.switchboard import SYSTEMS
+
+        from . import identity
+        from .extension import ext
+        from .switchboard import THROUGH_CORE
+
+        declared = set(ext().systems)
+        assert declared - set(SYSTEMS) == set(), f"not systems of the switchboard (it has: {', '.join(SYSTEMS)})"
+        asks = re.compile(r"switchboard\.(gate|reaches|writes|mode)\(\s*[\"'](\w+)[\"']")
+        gated: set[str] = set()
+        asked: set[str] = set()
+        for path in identity.app().package.rglob("*.py"):
+            for how, system in asks.findall(path.read_text(encoding="utf-8")):
+                asked.add(system)
+                if how == "gate":
+                    gated.add(system)
+        assert declared - THROUGH_CORE - gated == set(),             "declared in Extension(systems=...), but no client calls switchboard.gate for it"
+        assert asked - declared == set(), "the code asks the switchboard about these: declare them in Extension(systems=...)"
+
     # --- the port it serves on ---
 
     def test_it_declares_the_port_it_listens_on(self):

@@ -72,6 +72,10 @@ class Extension:
     # people's links to someone gone from the list)
     family_tidy: Callable[[Any, set[str], Any], list[str]] | None = None
     auth: bool = True  # False: sign-in off (AUTH=off, a dev copy), everyone is the owner
+    # The outside systems its work reaches, by the switchboard's names (hiro_commons.switchboard.SYSTEMS: "ha",
+    # "frigate", "ai"...): the ones it reaches itself, each behind `switchboard.gate` in its client (the contract's
+    # test), and the ones it reaches through the core. The banner on a test environment's pages says their modes.
+    systems: Sequence[str] = ()
     outputs: bool = True  # False: nothing is sent or spoken (OUTPUTS=off, a dev copy): whatsapp.py logs it instead
     # Where each role's rights were copied from once, when this app took a feature over from another (Phase 9b, 9c:
     # "home"), and that feature's name for the log line ("System health"). None: nothing to copy.
