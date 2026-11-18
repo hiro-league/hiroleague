@@ -33,6 +33,7 @@ from pydantic import BaseModel, ConfigDict
 
 from . import identity
 from . import calls
+from . import switchboard
 from .errors import Invalid, OutsideError, translate
 from .extension import ext
 from .hiroleague import link
@@ -148,6 +149,15 @@ async def status() -> WhatsAppStatus:
     return WhatsAppStatus(state=state, account=account, note=note, outputs=ext().outputs)
 
 
+def _held() -> str:
+    """Why nothing is sent here ("" when it is): OUTPUTS=off, or this place's switchboard has WhatsApp fake or off (a
+    test environment: the message is logged instead, which is WhatsApp's fake)."""
+    if not ext().outputs:
+        return "OUTPUTS=off"
+    mode = switchboard.mode("whatsapp")
+    return "" if mode == switchboard.REAL else f"WhatsApp is {mode} here (the switchboard)"
+
+
 async def check(numbers: list[str]) -> list[dict[str, Any]]:
     """Which numbers have WhatsApp: [{"query", "on_whatsapp", "jid"}], in the order asked."""
     if len(numbers) > WHATSAPP_CHECK_MAX:
@@ -165,8 +175,8 @@ async def send(to: str, text: str | None = None, *, image: bytes | None = None,
     image: a JPEG, with `text` as its caption. voice: an OGG/Opus clip (see tts.audio), sent as a voice
     note; voice_seconds and waveform (64 bytes, 0..100) are what WhatsApp shows on it.
     """
-    if not ext().outputs:
-        log.info("OUTPUTS=off, not sending WhatsApp to %s: %s%s", to, text or "",
+    if why := _held():
+        log.info("%s, not sending WhatsApp to %s: %s%s", why, to, text or "",
                  " [+image]" if image else f" [+voice note {voice_seconds:.1f} s]" if voice else "")
         return False
     params: dict[str, Any] = {"to": to}
@@ -192,8 +202,8 @@ async def notify(core_person_id: str, name: str, text: str, *, character: bool) 
 
     character: Hiro's character writes it in its own words from `text`; else `text` goes as it is."""
     style = NOTIFY_STYLE_CHARACTER if character else NOTIFY_STYLE_EXACT
-    if not ext().outputs:
-        log.info("OUTPUTS=off, not asking Hiro to tell %s (%s): %s", name, style, text)
+    if why := _held():
+        log.info("%s, not asking Hiro to tell %s (%s): %s", why, name, style, text)
         return False
     params = {"to": [{"person": core_person_id}], "medium": NOTIFY_MEDIUM_WHATSAPP, "text": text, "style": style}
     answer = await _ask(METHOD_NOTIFY, params, NOTIFY_TIMEOUT, sends=True)
