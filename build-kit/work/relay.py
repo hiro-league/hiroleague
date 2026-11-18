@@ -5,6 +5,10 @@ every few seconds for what is waiting (GET /api/work/asks/next, with the Work ke
 
     up <env> [servers]     hiro-work up <env> [servers]
     down <env> [servers]   hiro-work down <env> [servers]
+    refresh                hiro-work refresh-data --now          (env0: a new live copy, applied)
+    fetch                  hiro-work refresh-data                (a new live copy, env0 unchanged)
+    apply <stamp>          hiro-work refresh-data --apply <stamp>
+    data <env> <source>    hiro-work data <env> <source>         (env1..env5: env0, vanilla, live, live:<stamp>)
 
 in a tab of the environment's own window (hiro-envN), so its output shows there; the servers' events then reach the
 card. Work › Hiro-Audit's Run audit is the one other ask:
@@ -18,7 +22,9 @@ refused and logged. One helper at a time (C:\hiro\run\relay.pid). Its log is C:\
 Every minute it also says which repos each environment has changed (hiro_work.changed_repos): a "changes" event for
 each environment whose list differs from the last one said (all of them when it starts), so the card can dim a claim
 nothing has changed yet. The same event says what the environment holds that no task there owns
-(hiro_work.leftovers: uncommitted files, a stray branch, commits off the trunk), shown at the card's foot.
+(hiro_work.leftovers: uncommitted files, a stray branch, commits off the trunk), shown at the card's foot, and where
+its data came from (data.read_source: the card's data row); env0's also lists the live copies on the PC
+(data.live_copy_list: its Data menu).
 
 Every 10 minutes it looks at env0's data folders for what no copy list covers (data.survey): a "copy-lists" event,
 with each listed item's size, when that differs from the last one said and at least every hour, shown in Work › Sweep
@@ -65,6 +71,33 @@ class Refused(Exception):
     pass
 
 
+def check_data(ask: dict) -> tuple[str, int, list[str]]:
+    """A Data menu's ask: (verb, the environment whose window runs it, hiro-work's arguments)."""
+    verb = ask.get("verb")
+    if verb == "refresh":
+        return verb, 0, ["refresh-data", "--now"]
+    if verb == "fetch":
+        return verb, 0, ["refresh-data"]
+    if verb == "apply":
+        stamp = ask.get("stamp")
+        try:
+            hw.data.stamp_time(str(stamp))
+        except ValueError:
+            raise Refused(f"no live copy {stamp!r}") from None
+        return verb, 0, ["refresh-data", "--apply", str(stamp)]
+    env, source = ask.get("env"), str(ask.get("source") or "")
+    if not isinstance(env, int) or not 1 <= env <= 5:
+        raise Refused(f"no environment {env!r} for data (env1 to env5)")
+    try:
+        hw.data.parse_source(source)
+    except ValueError as exc:
+        raise Refused(str(exc)) from None
+    return verb, env, ["data", str(env), source]
+
+
+DATA_VERBS = ("refresh", "fetch", "apply", "data")
+
+
 def check(ask: dict) -> tuple[str, int, list[str]]:
     """The command an ask is for: (verb, env, servers). Anything but a known up or down is refused."""
     verb, env, names = ask.get("verb"), ask.get("env"), ask.get("servers") or []
@@ -105,15 +138,20 @@ def run(ask: dict) -> bool:
     if ask.get("verb") == "audit":
         return run_audit()  # an audit ask carries nothing else: whatever else it holds is ignored
     try:
-        verb, env, names = check(ask)
+        if ask.get("verb") in DATA_VERBS:
+            verb, env, args = check_data(ask)
+            title = f"hiro-work {' '.join(args[:2])}"
+        else:
+            verb, env, names = check(ask)
+            args = [verb, str(env), *names]
+            title = f"hiro-work {verb}" + (f" {','.join(names)}" if names else "")
     except Refused as exc:
         log(f"refused: {exc}")
         return False
-    log(f"runs: hiro-work {verb} {env} {' '.join(names)}".rstrip())
-    title = f"hiro-work {verb}" + (f" {','.join(names)}" if names else "")
+    log(f"runs: hiro-work {' '.join(args)}")
     # A tab of the environment's own window: the command's output stays there a minute, then the tab closes
     wt = [shutil.which("wt.exe") or "wt.exe", "-w", f"hiro-env{env}", "new-tab", "--title", title, "cmd", "/c",
-          str(LAUNCHER), verb, str(env), *names, "&", "timeout", "/t", "60"]
+          str(LAUNCHER), *args, "&", "timeout", "/t", "60"]
     subprocess.Popen(wt, creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
     return True
 
@@ -133,7 +171,10 @@ def changes(said: dict[int, dict]) -> dict[int, dict]:
     for env in hw.ENVS:
         if env and not (hw.env_dir(env) / "hiroleague" / ".git").exists():
             continue  # not made yet: an event would make it look made
-        now[env] = {"repos": hw.changed_repos(env, tasks), "leftovers": hw.leftovers(env, tasks)}
+        now[env] = {"repos": hw.changed_repos(env, tasks), "leftovers": hw.leftovers(env, tasks),
+                    "data": hw.data.read_source(hw, env)}
+        if env == 0:
+            now[env]["live_copies"] = hw.data.live_copy_list(hw)
         if said.get(env) != now[env]:
             hw.event(task=None, env=env, step="changes", phase="end", ok=True, **now[env])
     return now

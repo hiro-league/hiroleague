@@ -555,6 +555,7 @@ def apply(hw: ModuleType, src: Path, lists: Lists) -> None:
                     shutil.move(str(f), str(keep.with_name(keep.name + suffix)))
             tmp.rename(target)
     text = report(meta, {}, after, backs) + "\n\nFiles:\n" + "\n".join(copy_files(hw, archive, lists))
+    write_source(hw, 0, "live", stamp=src.name, live_at=stamp_time(src.name))
     (archive / "report.txt").write_text(f"Live copy {src.name} into env0\n{text}\n", encoding="utf-8")
     hw.say(text)
     hw.say(f"\nenv0's databases before the refresh: {archive} (put them back by moving them in, servers stopped).")
@@ -566,8 +567,9 @@ def apply(hw: ModuleType, src: Path, lists: Lists) -> None:
 
 
 def cmd_refresh_data(a, hw: ModuleType) -> None:
-    """hiro-work refresh-data [--apply STAMP|latest] [--files]: fetch a live copy and show the plan; --apply puts it
-    in env0; --files copies only the folders the lists fetch (the pictures), env0's servers down."""
+    """hiro-work refresh-data [--apply STAMP|latest] [--now] [--files]: fetch a live copy and show the plan; --apply
+    puts it in env0; --now fetches and applies in one go; --files copies only the folders the lists fetch (the
+    pictures), env0's servers down."""
     lists = load(hw.env_dir(0))
     if getattr(a, "files", False):
         if [n for n, s in hw.servers(0).items() if hw.listening(s.port)]:
@@ -577,6 +579,9 @@ def cmd_refresh_data(a, hw: ModuleType) -> None:
             hw.say(line)
         if archive.exists():
             hw.say(f"env0's folders before: {archive}")
+        return
+    if getattr(a, "now", False):  # Refresh from live: a new copy, then into env0, in one go
+        apply(hw, fetch(hw, lists), lists)
         return
     if a.apply:
         src = latest(hw) if a.apply == "latest" else live_copies(hw) / a.apply
@@ -712,3 +717,125 @@ def cmd_copy_list(a, hw: ModuleType) -> None:
     hw.say("\nNot in a copy list (copied nowhere until it is listed):")
     for line in said_drift(report_drift(hw, lists)):
         hw.say(line)
+
+
+# ------------------------------------------------------------------------- each environment's data source
+
+SOURCE_FILE = "source.json"  # in an environment's data folder: where its data came from, and when
+SOURCES = ("env0", "vanilla", "live")  # what a task's environment starts from (live: a live copy, by its stamp)
+FRESH_FOR_S = 3600  # a live copy younger than this is used as it is; an older one is fetched again first
+STAMP = "%Y-%m-%d_%H%M"
+
+
+def stamp_time(stamp: str) -> str:
+    """A live copy's stamp (its folder's name) as the ISO time it was fetched."""
+    return datetime.strptime(stamp, STAMP).astimezone().isoformat(timespec="seconds")
+
+
+def parse_source(text: str) -> tuple[str, str | None]:
+    """"env0", "vanilla", "live" (the latest live copy, fetched again when older than an hour) or "live:<stamp>"."""
+    source, _, stamp = text.partition(":")
+    if source not in SOURCES or (stamp and source != "live"):
+        raise ValueError(f"no data source {text!r}: env0, vanilla, live or live:<stamp>")
+    if stamp:
+        stamp_time(stamp)  # a stamp that isn't one stops here
+    return source, stamp or None
+
+
+def write_source(hw: ModuleType, env: int, source: str, stamp: str | None = None,
+                 live_at: str | None = None) -> dict:
+    """Record where an environment's data came from: source (env0's "live" is a refresh from live), when it was made,
+    when it left live (None: vanilla), and the live copy's stamp. The PC's helper tells CodeHiro (relay.py)."""
+    rec = {"source": source, "made_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+           "live_at": live_at, "stamp": stamp}
+    path = hw.data_dir(env) / SOURCE_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(rec, indent=2), encoding="utf-8")
+    return rec
+
+
+def read_source(hw: ModuleType, env: int) -> dict | None:
+    """An environment's recorded data source; None when it has none. env0 before its first record: worked out from
+    the last refresh's report in the archive (its first line names the live copy)."""
+    path = hw.data_dir(env) / SOURCE_FILE
+    if path.exists():
+        with contextlib.suppress(OSError, ValueError):
+            return json.loads(path.read_text(encoding="utf-8"))
+    if env != 0:
+        return None
+    reports = sorted((hw.ROOT / "archive").glob("env0-before-refresh-*/report.txt"))
+    for report in reversed(reports):
+        m = re.match(r"Live copy (\S+) into env0", report.read_text(encoding="utf-8").splitlines()[0])
+        if m:
+            made = report.parent.name.removeprefix("env0-before-refresh-")[:15]
+            with contextlib.suppress(ValueError):
+                return {"source": "live", "made_at": stamp_time(made), "live_at": stamp_time(m.group(1)),
+                        "stamp": m.group(1)}
+    return None
+
+
+def describe_source(rec: dict | None) -> str:
+    """The work card's line about where the data came from."""
+    if not rec:
+        return "data: not recorded yet"
+    left = f", which left live {rec['live_at'][:16].replace('T', ' ')}" if rec.get("live_at") else ""
+    return {"env0": f"data: env0's copy{left}", "vanilla": "data: vanilla (a fresh install, no family data)",
+            "live": f"data: a live copy{left}"}.get(rec["source"], f"data: {rec['source']}")
+
+
+def live_copy_list(hw: ModuleType) -> list[dict]:
+    """The live copies on the PC, the newest first: stamp, when fetched, size, databases, rows, and whether env0 holds
+    it now (its recorded source)."""
+    held = (read_source(hw, 0) or {}).get("stamp")
+    out = []
+    if not live_copies(hw).exists():
+        return out
+    for d in sorted(live_copies(hw).iterdir(), reverse=True):
+        meta_file = d / "counts.json"
+        if not meta_file.exists():
+            continue
+        with contextlib.suppress(OSError, ValueError):
+            meta = json.loads(meta_file.read_text(encoding="utf-8"))
+            dbs = [m for m in meta.values() if not m.get("missing")]
+            out.append({"stamp": d.name, "fetched_at": stamp_time(d.name),
+                        "bytes": sum(p.stat().st_size for p in d.rglob("*") if p.is_file()),
+                        "databases": len(dbs), "rows": sum(sum(m.get("copy", {}).values()) for m in dbs),
+                        "in_env0": d.name == held})
+    return out
+
+
+def fresh_copy(hw: ModuleType, lists: Lists, stamp: str | None = None) -> Path:
+    """A live copy for an environment: the one named, else the latest when younger than an hour, else a new fetch."""
+    if stamp:
+        src = live_copies(hw) / stamp
+        if not (src / "counts.json").exists():
+            raise hw.Stop(f"No live copy '{stamp}' in {live_copies(hw)}.")
+        return src
+    src = latest(hw)
+    if src is not None and (datetime.now().astimezone() - datetime.fromisoformat(stamp_time(src.name))
+                            ).total_seconds() < FRESH_FOR_S:
+        return src
+    return fetch(hw, lists)
+
+
+def copy_live_into(hw: ModuleType, env: int, src: Path, lists: Lists) -> list[str]:
+    """A live copy's databases into an environment whose data was just copied from env0: each database is rebuilt
+    from the live copy with the environment's own per-place rows (env0's, just copied) put back, as an apply does in
+    env0. The files (pictures, keys) stay env0's. What it did, in words."""
+    meta = json.loads((src / "counts.json").read_text(encoding="utf-8"))
+    lines = []
+    for key, m in meta.items():
+        if m.get("missing"):
+            continue
+        group, path = key.split("/", 1)
+        if group not in lists:
+            continue
+        target = group_dir(hw.data_dir(env), group) / path
+        tmp = target.with_name(target.name + ".live")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        build(src / key, target if target.exists() else None, tmp, key, lists)
+        for suffix in ("", "-wal", "-shm"):
+            target.with_name(target.name + suffix).unlink(missing_ok=True)
+        tmp.rename(target)
+        lines.append(f"{key}: from live copy {src.name}")
+    return lines

@@ -7,6 +7,7 @@ import sqlite3
 import subprocess
 import sys
 from contextlib import closing
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -601,3 +602,97 @@ def test_a_lists_changes_are_said_and_what_widens_what_live_gives_is_marked():
         ("- setting tv_cast: no longer per place", True),
     ]
     assert all(w for _, w in copylist.changes(None, new) if _.startswith("+ ") and "from live copy" in _)
+
+
+# ----------------------------------------------------------------------------- each environment's data source
+
+
+class FakeHw:
+    """What data.py reads of hiro_work, rooted in a tmp folder."""
+
+    class Stop(Exception):
+        pass
+
+    def __init__(self, root):
+        self.ROOT = root
+
+    def data_dir(self, env):
+        return self.ROOT / "data" / f"env{env}"
+
+    def app_data(self, env, a):
+        return self.data_dir(env) / a.repo
+
+
+def test_a_data_source_is_env0_vanilla_live_or_a_live_copy_by_its_stamp():
+    assert data.parse_source("env0") == ("env0", None)
+    assert data.parse_source("vanilla") == ("vanilla", None)
+    assert data.parse_source("live:2026-11-16_0015") == ("live", "2026-11-16_0015")
+    for bad in ("prod", "vanilla:2026-11-16_0015", "live:yesterday"):
+        with pytest.raises(ValueError):
+            data.parse_source(bad)
+
+
+def test_an_environments_source_is_recorded_and_env0s_is_found_in_its_last_refresh(tmp_path):
+    hw = FakeHw(tmp_path)
+    assert data.read_source(hw, 2) is None
+    report = tmp_path / "archive" / "env0-before-refresh-2026-11-16_0030" / "report.txt"
+    report.parent.mkdir(parents=True)
+    report.write_text("Live copy 2026-11-16_0015 into env0\n...", encoding="utf-8")
+    env0 = data.read_source(hw, 0)
+    assert (env0["source"], env0["stamp"]) == ("live", "2026-11-16_0015")
+    assert env0["live_at"].startswith("2026-11-16T00:15") and env0["made_at"].startswith("2026-11-16T00:30")
+    rec = data.write_source(hw, 2, "env0", env0["stamp"], env0["live_at"])
+    assert data.read_source(hw, 2) == rec
+    assert data.describe_source(rec).startswith("data: env0's copy, which left live 2026-11-16 00:15")
+    assert data.describe_source(data.write_source(hw, 3, "vanilla")) == "data: vanilla (a fresh install, no family data)"
+
+
+def live_copy(root, stamp, rows=3):
+    d = root / "data" / "live-copies" / stamp
+    db(d / "homehiro" / "homehiro.db", SETTING + "create table person(id integer, name text);"
+       + "".join(f"insert into person values ({i}, 'p{i}');" for i in range(rows)))
+    (d / "counts.json").write_text(json.dumps({
+        "homehiro/homehiro.db": {"live": {"person": rows, "setting": 0}, "copy": {"person": rows, "setting": 0},
+                                 "scrubbed": {}, "check": "ok", "alembic": None, "bytes": 1},
+        "core/db/data.db": {"missing": True}}), encoding="utf-8")
+    return d
+
+
+def test_the_live_copies_on_the_pc_say_their_size_rows_and_which_env0_holds(tmp_path):
+    hw = FakeHw(tmp_path)
+    live_copy(tmp_path, "2026-11-15_2300", rows=2)
+    live_copy(tmp_path, "2026-11-16_0015", rows=3)
+    data.write_source(hw, 0, "live", "2026-11-16_0015", data.stamp_time("2026-11-16_0015"))
+    copies = data.live_copy_list(hw)
+    assert [(c["stamp"], c["databases"], c["rows"], c["in_env0"]) for c in copies] == [
+        ("2026-11-16_0015", 1, 3, True), ("2026-11-15_2300", 1, 2, False)]
+    assert copies[0]["bytes"] > 0
+
+
+def test_a_live_copy_younger_than_an_hour_is_used_and_an_older_one_fetched_again(tmp_path, lists, monkeypatch):
+    hw = FakeHw(tmp_path)
+    now = data.datetime.now()
+    fresh = live_copy(tmp_path, (now - timedelta(minutes=10)).strftime(data.STAMP))
+    assert data.fresh_copy(hw, lists) == fresh
+    old_stamp = (now - timedelta(hours=3)).strftime(data.STAMP)
+    import shutil
+    shutil.rmtree(fresh)
+    old = live_copy(tmp_path, old_stamp)
+    fetched = []
+    monkeypatch.setattr(data, "fetch", lambda hw_, lists_: fetched.append(1) or tmp_path / "new")
+    assert data.fresh_copy(hw, lists) == tmp_path / "new" and fetched == [1]
+    assert data.fresh_copy(hw, lists, old_stamp) == old  # named: used as it is
+    with pytest.raises(FakeHw.Stop):
+        data.fresh_copy(hw, lists, "2020-01-01_0000")
+
+
+def test_a_live_copys_databases_take_an_environments_place_with_its_own_per_place_rows(tmp_path, lists):
+    hw = FakeHw(tmp_path)
+    src = live_copy(tmp_path, "2026-11-16_0015", rows=5)
+    target = db(tmp_path / "data" / "env2" / "homehiro" / "homehiro.db", SETTING
+                + "insert into setting values ('ha_token','env0-token'),('status_home_tz','tz');"
+                + "create table person(id integer, name text); insert into person values (9,'env0');")
+    lines = data.copy_live_into(hw, 2, src, lists)
+    assert lines == ["homehiro/homehiro.db: from live copy 2026-11-16_0015"]
+    assert rows(target, "select count(*) from person") == [(5,)]  # live's rows
+    assert rows(target, "select key from setting") == [("ha_token",)]  # env0's own per-place row kept

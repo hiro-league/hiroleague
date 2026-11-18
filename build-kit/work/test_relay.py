@@ -45,6 +45,8 @@ def test_changes_are_said_for_made_environments_only_when_they_differ(tmp_path, 
     left = {0: [], 2: []}
     monkeypatch.setattr(relay.hw, "changed_repos", lambda env, tasks: found[env])
     monkeypatch.setattr(relay.hw, "leftovers", lambda env, tasks: left[env])
+    monkeypatch.setattr(relay.hw.data, "read_source", lambda hw, env: None)
+    monkeypatch.setattr(relay.hw.data, "live_copy_list", lambda hw: [])
     sent = []
     monkeypatch.setattr(relay.hw, "event", lambda **e: sent.append((e["env"], e["step"], e["repos"], e["leftovers"])))
     said = relay.changes({})
@@ -81,6 +83,28 @@ def test_env0s_unlisted_files_are_said_when_they_change_and_its_sizes_every_hour
     clock[0] += 3600
     relay.drift(said, at)
     assert len(sent) == 1  # the hour's sizes
+
+
+@pytest.mark.parametrize("ask, want", [
+    ({"verb": "refresh"}, ("refresh", 0, ["refresh-data", "--now"])),
+    ({"verb": "fetch", "env": 3}, ("fetch", 0, ["refresh-data"])),  # always env0's: a stray env is ignored
+    ({"verb": "apply", "stamp": "2026-11-16_0015"}, ("apply", 0, ["refresh-data", "--apply", "2026-11-16_0015"])),
+    ({"verb": "data", "env": 2, "source": "vanilla"}, ("data", 2, ["data", "2", "vanilla"])),
+    ({"verb": "data", "env": 1, "source": "live:2026-11-16_0015"}, ("data", 1, ["data", "1", "live:2026-11-16_0015"])),
+])
+def test_a_data_menus_ask_becomes_its_hiro_work_command(ask, want):
+    assert relay.check_data(ask) == want
+
+
+@pytest.mark.parametrize("ask", [
+    {"verb": "apply", "stamp": "; rm -rf"},
+    {"verb": "data", "env": 0, "source": "vanilla"},  # env0's data comes from live only
+    {"verb": "data", "env": 2, "source": "prod"},
+    {"verb": "data", "env": 2, "source": "env0 & calc"},
+])
+def test_a_data_ask_out_of_bounds_is_refused(ask):
+    with pytest.raises(relay.Refused):
+        relay.check_data(ask)
 
 
 def test_it_asks_codehiro_beside_the_events_it_sends():

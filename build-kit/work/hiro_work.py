@@ -18,6 +18,7 @@ dev/main and env0 is brought up to them. Until then its commits stay on its bran
     hiro-work review <task>                  the task waits for Michel's review (until its next step)
     hiro-work real <task> [--reads] [--ai]   env1..5: which real systems the task's copy reads (data.py)
     hiro-work refresh-data [--apply STAMP] [--files]   live -> env0: a scrubbed live copy, then env0 (data.py)
+    hiro-work data <env> <source>            env1..5: its data from env0, vanilla or a live copy (data.py)
     hiro-work copy-list [--check]   every repo's copy list (data.toml): what a copy holds, and how (data.py)
     hiro-work train [repo ...] [--dry-run]   the deploy train: push and deploy, when Michel says (train.py)
     hiro-work audit latest | RUN | list      the doc audit's runs, and start / report to record one (audit.py)
@@ -303,6 +304,8 @@ class Task:
     part_of: str = ""
     # What it does, in a sentence: the Work area shows it under its name
     about: str = ""
+    # Where its environment's data comes from (data.SOURCES): env0's copy, vanilla, live or live:<stamp>
+    data: str = "env0"
     created: str = ""
     updated: str = ""
 
@@ -638,12 +641,18 @@ def remove_tree(path: Path) -> None:
     shutil.rmtree(path, onexc=writable_then_retry)
 
 
-def refresh_data(env: int, task: str | None = None) -> None:
-    """envN's data from env0's, as each repo's copy list says (workflow.md, Data and real systems): the databases
-    copied, the pictures hard-linked, the rest left out. Removing the old folder first removes only its links: env0's
-    pictures stay."""
+def refresh_data(env: int, task: str | None = None, source: str = "env0") -> None:
+    """envN's data, from where its task says (workflow.md, Data and real systems; data.SOURCES):
+    - env0 (the default): env0's, as each repo's copy list says: the databases copied, the pictures hard-linked, the
+      rest left out. Removing the old folder first removes only its links: env0's pictures stay.
+    - live (or live:<stamp>): the same, then the databases rebuilt from a live copy (the latest when younger than an
+      hour, else a new fetch), with the environment's per-place rows put back, as an apply does in env0.
+    - vanilla: a fresh install: empty folders, the core's settings at their defaults; each app makes its database at
+      its first start, and `up` pairs it and points it at the core.
+    The source is recorded in the data folder (data.write_source), which the PC's helper tells CodeHiro."""
     if env == 0:
         return
+    kind, stamp = data.parse_source(source)
     lists = copy_lists()
     for group in [*APPS, data.CORE]:
         if group == data.CORE:
@@ -654,10 +663,26 @@ def refresh_data(env: int, task: str | None = None) -> None:
             if dst.exists():
                 remove_tree(dst)
             dst.mkdir(parents=True)
+            if kind == "vanilla":
+                if group == data.CORE:
+                    (dst / "config.json").write_text("{}", encoding="utf-8")  # the defaults; configure sets ports
+                continue
             for line in data.copy_group(src, dst, group, lists):
                 say(f"  {line}")
+    if kind == "live":
+        with step(task, env, "data copy", "live copy"):
+            copy = data.fresh_copy(sys.modules[__name__], lists, stamp)
+            for line in data.copy_live_into(sys.modules[__name__], env, copy, lists):
+                say(f"  {line}")
+        rec = data.write_source(sys.modules[__name__], env, "live", copy.name, data.stamp_time(copy.name))
+    elif kind == "vanilla":
+        rec = data.write_source(sys.modules[__name__], env, "vanilla")
+    else:
+        env0 = data.read_source(sys.modules[__name__], 0) or {}
+        rec = data.write_source(sys.modules[__name__], env, "env0", env0.get("stamp"), env0.get("live_at"))
     write_env_dev(env)
     configure(env, task)
+    say(f"  {data.describe_source(rec)}")
 
 
 def fresh_base(repo: str, task: str | None) -> str:
@@ -709,7 +734,7 @@ def cmd_start(a) -> None:
         task = Task(id=a.task, title=a.title or a.task, env=env, repos=repos,
                     real=[k for k, on in ((data.READS, not a.no_real_reads), (data.WRITES, a.real_writes),
                                           (data.AI, a.real_ai)) if on],
-                    part_of=part_of_name(a.part_of), about=(a.about or "").strip(),
+                    part_of=part_of_name(a.part_of), about=(a.about or "").strip(), data=a.data,
                     created=datetime.now().astimezone().isoformat(timespec="seconds"))
         save(task)  # the claim holds from here
     event(task=task.id, env=env, step="task", phase="start", repos=repos, title=task.title,
@@ -728,7 +753,7 @@ def cmd_start(a) -> None:
                 else:
                     git(d, "switch", "-q", "--detach", base)
         install_all(env, REPOS, task.id)
-        refresh_data(env, task.id)
+        refresh_data(env, task.id, task.data)
         save(task)
     except BaseException:
         with locked():
@@ -860,6 +885,7 @@ def card(task: Task) -> None:
     if task.env:
         say(f"  branch {task.branch} | data {data_dir(task.env)} | ports {min(p.values())}-{min(p.values()) + appfile.BLOCK - 1}")
         say(f"  {data.describe(task.real)}")
+        say(f"  {data.describe_source(data.read_source(sys.modules[__name__], task.env))}")
 
 
 def cmd_configure(a) -> None:
@@ -891,8 +917,30 @@ def cmd_real(a) -> None:
     with locked():
         task.real = [k for k, on in ((data.READS, a.reads), (data.WRITES, a.writes), (data.AI, a.ai)) if on]
         save(task)
-    refresh_data(task.env, task.id)
+    refresh_data(task.env, task.id, task.data)
     card(task)
+
+
+def cmd_data(a) -> None:
+    """hiro-work data <env> <source>: an environment's data again, from env0, vanilla or a live copy (servers down);
+    the task working there keeps that source for its later copies (resume, real)."""
+    try:
+        data.parse_source(a.source)
+    except ValueError as exc:
+        raise Stop(str(exc)) from exc
+    if not a.env:
+        raise Stop("env0's data comes from live: hiro-work refresh-data --now.")
+    if not (env_dir(a.env) / "hiroleague" / ".git").exists():
+        raise Stop(f"env{a.env} isn't made yet (hiro-work init {a.env}).")
+    up = [n for n, s in servers(a.env).items() if listening(s.port)]
+    if up:
+        raise Stop(f"env{a.env}'s servers are up ({', '.join(up)}): hiro-work down {a.env} first.")
+    held = next((t for t in load_tasks() if t.state == "working" and t.env == a.env), None)
+    if held:
+        with locked():
+            held.data = a.source
+            save(held)
+    refresh_data(a.env, held.id if held else None, a.source)
 
 
 def kit_changed(env: int, task: Task) -> bool:
@@ -1097,7 +1145,7 @@ def cmd_resume(a) -> None:
         else:
             git(d, "switch", "-q", "--detach", main_of(repo))
     install_all(env, REPOS, task.id)
-    refresh_data(env, task.id)
+    refresh_data(env, task.id, task.data)
     if a.part_of is not None:
         with locked():
             task.part_of = part_of_name(a.part_of)
@@ -1265,6 +1313,10 @@ def cmd_up(a) -> None:
         return
     starting = {s.name for s in chosen}
     configure_apps(env, [x for x in appfile.APPS if f"{x.repo}-api" in starting])
+    # An app with no database yet (a vanilla environment, its first start) can't be pointed at the core before it
+    # starts: it reads the core's address once, at start (the kit's link). It starts, makes its database, gets the
+    # addresses, and starts again (first_start)
+    fresh = [x for x in appfile.APPS if f"{x.repo}-api" in starting and not (app_data(env, x) / x.settings_db).exists()]
     # An app starting without a key this core knows is paired first, while it isn't running: the core starts (or
     # runs) first, then each such app pairs (pair_apps.py), then the apps start and connect with their keys
     unpaired = [x for x in appfile.APPS if f"{x.repo}-api" in starting and not paired(env, x)]
@@ -1289,11 +1341,42 @@ def cmd_up(a) -> None:
         while waiting and time.monotonic() < deadline:
             time.sleep(1)
             waiting = [s for s in waiting if not listening(s.port)]
+    if fresh and not waiting:
+        first_start(env, fresh, a.wait)
     for s in chosen:
         mark = "up  " if s not in waiting else "NOT UP"
         say(f"  {mark} {s.name:16} http://127.0.0.1:{s.port}   log: {LOGS / f'env{env}' / f'{s.name}.log'}")
     if waiting:
         raise Stop("Some servers didn't answer in time: read their logs (or their tabs in the hiro-env window).")
+
+
+def first_start(env: int, apps: list[appfile.App], wait: int) -> None:
+    """Apps that just made their database at their first start: once it has its settings table, point them at this
+    environment (configure_apps) and start their APIs again, so they connect to its core."""
+    deadline = time.monotonic() + wait
+    ready: list[appfile.App] = []
+    with step(None, env, "first start", servers=[f"{x.repo}-api" for x in apps]):
+        for x in apps:
+            db = app_data(env, x) / x.settings_db
+            while time.monotonic() < deadline:
+                if db.exists():
+                    with contextlib.suppress(sqlite3.Error), contextlib.closing(sqlite3.connect(db)) as con:
+                        if con.execute("select 1 from sqlite_master where name = 'setting'").fetchone():
+                            ready.append(x)
+                            break
+                time.sleep(1)
+            else:
+                say(f"  {x.title} made no database in time: it starts with no core address (hiro-work up again)")
+        if not ready:
+            return
+        configure_apps(env, ready)
+        names = [f"{x.repo}-api" for x in ready]
+        servers_down(env, names)
+        again = [servers(env)[n] for n in names]
+        open_tabs(env, again)
+        while [s for s in again if not listening(s.port)] and time.monotonic() < deadline + wait:
+            time.sleep(1)
+        say(f"  started again with this core's address: {', '.join(x.title for x in ready)}")
 
 
 def pids_listening(port_list: list[int]) -> set[int]:
@@ -1448,6 +1531,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--real-writes", action="store_true",
                    help="env1..5: keep the logins that write (TrainHiro's Frigate, NetHiro's AdGuard rules)")
     s.add_argument("--real-ai", action="store_true", help="env1..5: keep the copied AI providers")
+    s.add_argument("--data", default="env0", metavar="SOURCE",
+                   help="where its data comes from: env0 (default), vanilla (a fresh install), live or live:<stamp>")
     for verb in ("park", "review"):
         sub.add_parser(verb).add_argument("task")
     sub.add_parser("sync", help="merge the latest dev/main into the task's branches, without landing").add_argument(
@@ -1493,9 +1578,14 @@ def main(argv: list[str] | None = None) -> int:
     rl.set_defaults(func=cmd_real)
     rd = sub.add_parser("refresh-data", help="live -> env0: fetch a scrubbed live copy; --apply puts it in env0")
     rd.add_argument("--apply", metavar="STAMP", help="a copy in C:\\hiro\\data\\live-copies, or 'latest'")
+    rd.add_argument("--now", action="store_true", help="fetch a new copy and put it in env0, in one go")
     rd.add_argument("--files", action="store_true",
                     help="only the folders the copy lists fetch (the uploads the databases point at)")
     rd.set_defaults(func=lambda a: data.cmd_refresh_data(a, sys.modules[__name__]))
+    dt = sub.add_parser("data", help="env1..5: its data again from env0, vanilla or a live copy (servers down)")
+    dt.add_argument("env", type=int, choices=list(ENVS))
+    dt.add_argument("source", help="env0, vanilla, live (the latest copy, fetched again when an hour old) or live:<stamp>")
+    dt.set_defaults(func=cmd_data)
     cl = sub.add_parser("copy-list", help="every repo's copy list (data.toml): what a copy holds, and how")
     cl.add_argument("--check", action="store_true", help="also name what env0's and live's data folders hold that no "
                     "list covers")
