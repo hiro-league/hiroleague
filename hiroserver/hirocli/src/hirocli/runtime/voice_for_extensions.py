@@ -27,8 +27,9 @@ from hiro_channel_sdk.constants import (
 from hiro_commons.log import Logger
 
 from ..domain.people import get_person
-from ..services import voice
-from ..services.voice.kit import MAX_CHARS
+from ..services import fakes, voice
+from ..services.voice.engine import encode
+from ..services.voice.kit import MAX_CHARS, Speech
 from .ai_for_extensions import _caller_name
 from .request_handler import EXTENSIONS_ONLY, RequestContext, RequestRefused, gate
 
@@ -38,11 +39,29 @@ MAX_LABEL = 80
 
 
 async def handle_voice_speak(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
-    gate("voices", VOICE_ERROR_FAILED)  # a test environment's switchboard
+    mode = gate("voices", VOICE_ERROR_FAILED, fakes=True)  # a test environment's switchboard
     name = await _caller_name(ctx)
     text, use, profile_id, person_id, label = _params(params)
     if person_id and await asyncio.to_thread(get_person, ctx.workspace_path, person_id) is None:
         raise RequestRefused(VOICE_ERROR_INVALID, f"There's no person {person_id!r} in the family list.")
+    if mode == "fake":
+        # The stand-in (services/fakes.py): a soft tone as long as the words would take, encoded as a real clip is,
+        # so players and voice notes work. No provider, nothing paid, not counted.
+        pcm, rate, seconds = fakes.tone(text)
+        clip = await encode(Speech(pcm, rate, seconds, 0.0, True))
+        log.info(f"✅ Voice from the stand-in — {name} · {use or 'own pick'}", seconds=round(seconds, 1))
+        return {
+            "ogg_b64": base64.b64encode(clip.ogg).decode("ascii"),
+            "seconds": clip.seconds,
+            "waveform_b64": base64.b64encode(clip.waveform).decode("ascii"),
+            "cached": False,
+            "cost": 0.0,
+            "profile_id": fakes.PROVIDER,
+            "profile_name": fakes.PROFILE_NAME,
+            "provider": fakes.PROVIDER,
+            "model": fakes.MODEL,
+            "voice": fakes.MODEL,
+        }
     prefs = ctx.server_ctx.preferences.current
     use_key = f"{name}:{use}" if use else None
     try:

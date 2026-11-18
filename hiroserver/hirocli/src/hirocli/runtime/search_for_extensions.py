@@ -32,6 +32,7 @@ from ..domain.preferences import (
     resolve_knowledge_embedder_model,
     resolve_knowledge_reranker_profile,
 )
+from ..services import fakes
 from ..services import search_profiles as search
 from .ai_for_extensions import _caller_name
 from .request_handler import EXTENSIONS_ONLY, RequestContext, RequestRefused, gate
@@ -73,10 +74,21 @@ def _use_and_profile(params: dict[str, Any], name: str) -> tuple[str | None, str
 
 
 async def handle_ai_embed(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
-    gate("ai", AI_ERROR_FAILED)  # embeddings and reranking are AI: a test environment's switchboard decides
+    # embeddings and reranking are AI: a test environment's switchboard decides
+    mode = gate("ai", AI_ERROR_FAILED, fakes=True)
     name = await _caller_name(ctx)
     use_key, profile_id = _use_and_profile(params, name)
     texts = _texts(params, "texts", search.MAX_TEXTS)
+    if mode == "fake":
+        # The stand-in (services/fakes.py): each text's own repeatable vector, sized as the picked profile's model
+        # makes them, so it fits an index that model filled. No profile picked: the default size.
+        picked = ctx.server_ctx.preferences.current.embedding
+        pid = profile_id or (picked.uses.get(use_key) if use_key else None) or ""
+        model = picked.profiles[pid].model if pid in picked.profiles else ""
+        dims = fakes.dims_of(model)
+        log.info(f"✅ Embedded by the stand-in — {name} · {use_key or 'own pick'}", texts=len(texts), dimensions=dims)
+        return asdict(search.Embedded([fakes.vector(t, dims) for t in texts], dims, fakes.MODEL, fakes.PROVIDER,
+                                      fakes.PROFILE_NAME, 0))
     try:
         pid, profile = search.pick_embedding(ctx.server_ctx.preferences.current, use_key=use_key, profile_id=profile_id)
         out = await asyncio.to_thread(search.embed, ctx.workspace_path, pid, profile, texts)
@@ -88,7 +100,7 @@ async def handle_ai_embed(params: dict[str, Any], ctx: RequestContext) -> dict[s
 
 
 async def handle_ai_rerank(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
-    gate("ai", AI_ERROR_FAILED)
+    mode = gate("ai", AI_ERROR_FAILED, fakes=True)
     name = await _caller_name(ctx)
     use_key, profile_id = _use_and_profile(params, name)
     query = _text(params, "query", required=True)
@@ -96,6 +108,10 @@ async def handle_ai_rerank(params: dict[str, Any], ctx: RequestContext) -> dict[
     top_n = params.get("top_n")
     if top_n is not None and (not isinstance(top_n, int) or isinstance(top_n, bool) or top_n < 1):
         raise RequestRefused(AI_ERROR_INVALID, "top_n must be a whole number of 1 or more.")
+    if mode == "fake":  # the stand-in: by the words each document shares with the query
+        log.info(f"✅ Reranked by the stand-in — {name} · {use_key or 'own pick'}", documents=len(documents))
+        return asdict(search.Reranked(fakes.ranked(query, documents, top_n), fakes.MODEL, fakes.PROVIDER,
+                                      fakes.PROFILE_NAME, 0))
     try:
         pid, profile = search.pick_rerank(ctx.server_ctx.preferences.current, use_key=use_key, profile_id=profile_id)
         out = await asyncio.to_thread(search.rerank, ctx.workspace_path, pid, profile, query, documents, top_n)

@@ -32,5 +32,6 @@ def test_a_system_off_or_fake_is_refused_with_the_methods_code_and_the_place(boa
         gate("ai", "failed")
     assert off.value.code == "failed" and "AI is off in env2" in off.value.message
     with pytest.raises(RequestRefused, match="Voices is fake in env2"):
-        gate("voices", "failed")
+        gate("voices", "failed")  # a handler with no stand-in
+    assert gate("voices", "failed", fakes=True) == "fake"  # one with a stand-in answers from it
     gate("whatsapp", "whatsapp_failed")  # real: goes on
