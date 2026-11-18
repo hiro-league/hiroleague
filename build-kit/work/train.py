@@ -517,6 +517,18 @@ def report(out: Out, task: str, results: list[Result], started: float) -> bool:
     return ok
 
 
+def live_drift(out: Out) -> None:
+    """After the deploys: what live's data folders hold that no copy list covers (data.drift), said here and in a
+    "copy-lists" event for Work › Sweep and Work › Data. Never a failure of the train: only a note."""
+    try:
+        found = hw.data.report_drift(hw, hw.data.load(hw.env_dir(0)), ("live",))
+    except Exception as e:  # noqa: BLE001 - a note, never the train's outcome (a list can't be read, ssh is down)
+        out(f"Copy lists not compared with live: {e}")
+        return
+    out("Copy lists, live's data folders: " + ("every file is listed." if not found else "not listed (copied nowhere "
+        "until it is): " + "; ".join(f"{f['group']}: {', '.join(f['names'])}" for f in found)))
+
+
 # ---------------------------------------------------------------------------------------------- the command
 
 LOCK = hw.RUN / "train.lock"
@@ -726,6 +738,7 @@ def cmd_train(a) -> None:
                 out("")
                 results = run_train(out, task, facts, plan)
                 ok = report(out, task, results, started)
+                live_drift(out)
             finally:
                 hw.event(task=task, env=0, step="task", phase="end", ok=ok,
                          seconds=round(time.monotonic() - started, 1))

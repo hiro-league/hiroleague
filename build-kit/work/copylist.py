@@ -258,3 +258,27 @@ def unlisted(lst: CopyList, names: list[str]) -> list[str]:
         if lst.item(base) is None and lst.item(name) is None:
             out.append(name)
     return out
+
+
+def main(argv: list[str]) -> int:
+    """`python copylist.py <repo folder>`: read and check that repo's copy list, as hiro-work will (each repo's
+    ./scripts/check.sh runs it, through the check engine, when its data.toml changes)."""
+    if len(argv) != 1:
+        print("usage: python copylist.py <repo folder>")
+        return 2
+    repo = Path(argv[0]).resolve()
+    group = CORE if repo.name == CORE_REPO else repo.name
+    try:
+        lst = load(repo.parent, group)
+    except ListError as exc:
+        print(f"copy list: {exc}")
+        return 1
+    print(f"copy list: {repo.name}/{FILE} reads: {len(lst.items)} item(s), {len(lst.settings)} setting(s), "
+          f"{len(lst.switches)} switch(es), {len(lst.env)} env line(s)")
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(main(sys.argv[1:]))

@@ -20,6 +20,10 @@ each environment whose list differs from the last one said (all of them when it 
 nothing has changed yet. The same event says what the environment holds that no task there owns
 (hiro_work.leftovers: uncommitted files, a stray branch, commits off the trunk), shown at the card's foot.
 
+Every 10 minutes it looks at env0's data folders for what no copy list covers (data.drift): a "copy-lists" event when
+that differs from the last one said, shown in Work › Sweep and Work › Data. The lists are read again each time, so a
+land's new lists count at once.
+
     pythonw relay.py              run (what the Startup shortcut starts)
     python relay.py --install     a shortcut in this Windows user's Startup folder ("Hiro League work relay": starts it
                                   at logon, no admin needed; Settings, Apps, Startup can switch it off), started now too
@@ -50,6 +54,7 @@ PID = hw.RUN / "relay.pid"
 URL = ship.URL.rsplit("/events", 1)[0] + "/asks/next"  # http://reports.local/api/work/asks/next
 EVERY_S = 3
 CHANGES_EVERY_S = 60  # how often each environment's changed repos are looked at
+DRIFT_EVERY_S = 600  # how often env0's data folders are compared with the copy lists
 NAME = "Hiro League work relay"
 SHORTCUT = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup" / (
     NAME + ".lnk")
@@ -133,6 +138,16 @@ def changes(said: dict[int, dict]) -> dict[int, dict]:
     return now
 
 
+def drift(said: list[dict] | None) -> list[dict]:
+    """env0's files no copy list covers, and a "copy-lists" event when that differs from what was said."""
+    lists = hw.data.load(hw.env_dir(0))
+    now = hw.data.drift(hw, lists, ("env0",))
+    if now != said:
+        hw.event(task=None, env=None, step="copy-lists", phase="end", ok=True, place="env0",
+                 unlisted=[{"group": f["group"], "names": f["names"]} for f in now])
+    return now
+
+
 def serve() -> int:
     import train  # the lock's process check (alive), shared with the deploy train
 
@@ -145,7 +160,8 @@ def serve() -> int:
     log(f"started (process {os.getpid()}), asking {URL}")
     down = False
     said: dict[int, dict] = {}
-    looked = 0.0
+    said_drift: list[dict] | None = None
+    looked = drifted = 0.0
     while True:
         if time.monotonic() - looked >= CHANGES_EVERY_S:
             looked = time.monotonic()
@@ -153,6 +169,12 @@ def serve() -> int:
                 said = changes(said)
             except (OSError, hw.Stop, ValueError) as exc:  # a repo git can't read now: said, and tried next minute
                 log(f"changed repos not read: {exc}")
+        if time.monotonic() - drifted >= DRIFT_EVERY_S:
+            drifted = time.monotonic()
+            try:
+                said_drift = drift(said_drift)
+            except (OSError, ValueError) as exc:  # a list hiro-work can't read (ListError is one): said, tried later
+                log(f"copy lists not compared: {exc}")
         try:
             key = ship.KEY_FILE.read_text(encoding="utf-8").strip()
             for ask in fetch(key):

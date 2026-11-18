@@ -25,6 +25,10 @@
 # A part can leave a folder out of what it reads: "-<path>" (or "-@hiroleague:<path>") after the path it sits under, e.g.
 # "@hiroleague:ui-kit/src/lib -@hiroleague:ui-kit/src/lib/memory" (an app's frontend, when no page imports memory/).
 #
+# Every repo with a copy list (data.toml: what a copy of its data holds, hiro-docs standards/workflow.md) gets one more
+# part, "copy list", queued here: build-kit/work/copylist.py reads and checks it, as hiro-work will, so a list hiro-work
+# can't read fails at the commit, not at a later start.
+#
 # A repo can name lanes that must run alone (CHECK_SOLO_LANES, set before check_done): the core's tests, whose
 # onnxruntime sends a phantom Ctrl-C to the whole console that kills a Node check running beside them.
 #
@@ -292,3 +296,9 @@ check_done() {
     echo "check: all passed"
     exit 0
 }
+
+# The copy list's part (above): queued for every repo that has one, before the repo's own parts
+if [[ -r "${REPO_ROOT}/data.toml" ]]; then
+    COPYLIST_PY="$(command -v python || command -v python3)"  # Windows' python3 is the Store's stub
+    part "copy list: data.toml" "data.toml @hiroleague:build-kit/work/copylist.py"         "${COPYLIST_PY}" "${HIROLEAGUE}/build-kit/work/copylist.py" "${REPO_ROOT}"
+fi

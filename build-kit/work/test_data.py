@@ -525,3 +525,31 @@ def test_a_change_in_an_environment_replaces_its_link_and_leaves_env0s_file(tmp_
     tmp.write_bytes(b"task")
     tmp.replace(env / "files" / "a.jpg")
     assert (env / "files" / "a.jpg").read_bytes() == b"task" and (env0 / "files" / "a.jpg").read_bytes() == b"env0"
+
+
+def test_what_no_list_covers_is_found_in_env0_and_live_and_told_to_codehiro(tmp_path, lists, monkeypatch):
+    (tmp_path / "env0" / "homehiro" / "tts-cache").mkdir(parents=True)
+    (tmp_path / "env0" / "homehiro" / "people").mkdir()
+    sent = []
+
+    class Hw:
+        @staticmethod
+        def data_dir(env):
+            return tmp_path / "env0"
+
+        @staticmethod
+        def app_data(env, a):
+            return tmp_path / "env0" / a.repo
+
+        @staticmethod
+        def event(**e):
+            sent.append(e)
+
+    monkeypatch.setattr(data, "live_listing", lambda lst, group: ["new-uploads"] if group == "studyhiro" else [])
+    found = data.report_drift(Hw, lists)
+    assert found == [{"group": "homehiro", "place": "env0", "names": ["tts-cache"]},
+                     {"group": "studyhiro", "place": "live", "names": ["new-uploads"]}]
+    assert [(e["step"], e["place"], e["unlisted"]) for e in sent] == [
+        ("copy-lists", "env0", [{"group": "homehiro", "names": ["tts-cache"]}]),
+        ("copy-lists", "live", [{"group": "studyhiro", "names": ["new-uploads"]}])]
+    assert data.said_drift([]) == ["  nothing: every file in the data folders looked at is listed."]

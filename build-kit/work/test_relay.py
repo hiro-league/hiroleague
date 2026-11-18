@@ -59,6 +59,22 @@ def test_changes_are_said_for_made_environments_only_when_they_differ(tmp_path, 
     assert sent == [(2, "changes", ["homehiro"], [{"repo": "nethiro", "what": "1 uncommitted file"}])]
 
 
+def test_env0s_unlisted_files_are_said_only_when_they_change(monkeypatch):
+    found = [{"group": "homehiro", "place": "env0", "names": ["tts-cache"]}]
+    monkeypatch.setattr(relay.hw.data, "load", lambda root: {})
+    monkeypatch.setattr(relay.hw.data, "drift", lambda hw, lists, places: list(found))
+    sent = []
+    monkeypatch.setattr(relay.hw, "event", lambda **e: sent.append((e["step"], e["place"], e["unlisted"])))
+    said = relay.drift(None)
+    assert sent == [("copy-lists", "env0", [{"group": "homehiro", "names": ["tts-cache"]}])]
+    sent.clear()
+    said = relay.drift(said)
+    assert sent == []  # as it was said
+    found.clear()
+    relay.drift(said)
+    assert sent == [("copy-lists", "env0", [])]  # listed now: said, so Sweep clears it
+
+
 def test_it_asks_codehiro_beside_the_events_it_sends():
     assert relay.URL.endswith("/api/work/asks/next")
 

@@ -626,20 +626,44 @@ def live_listing(lst: CopyList, group: str) -> list[str]:
     return sorted(names)
 
 
+PLACES = ("env0", "live")
+
+
+def drift(hw: ModuleType, lists: Lists, places: tuple[str, ...] = PLACES) -> list[dict]:
+    """What env0's or live's data folders hold that no copy list covers (copied nowhere until it is listed):
+    [{group, place, names}], groups with nothing unlisted left out."""
+    out = []
+    for group, lst in lists.items():
+        for place in places:
+            names = listing(env0_group(hw, group), group) if place == "env0" else live_listing(lst, group)
+            left = copylist.unlisted(lst, names)
+            if left:
+                out.append({"group": group, "place": place, "names": left})
+    return out
+
+
+def report_drift(hw: ModuleType, lists: Lists, places: tuple[str, ...] = PLACES) -> list[dict]:
+    """drift(), and a "copy-lists" event per place looked at: CodeHiro's Work › Sweep and Work › Data show the latest
+    of each (run by copy-list --check, the PC's helper for env0, the deploy train for live)."""
+    found = drift(hw, lists, places)
+    for place in places:
+        hw.event(task=None, env=None, step="copy-lists", phase="end", ok=True, place=place,
+                 unlisted=[{"group": f["group"], "names": f["names"]} for f in found if f["place"] == place])
+    return found
+
+
+def said_drift(found: list[dict]) -> list[str]:
+    return [f"  {f['group']} in {f['place']}: {', '.join(f['names'])}" for f in found] or [
+        "  nothing: every file in the data folders looked at is listed."]
+
+
 def cmd_copy_list(a, hw: ModuleType) -> None:
     """hiro-work copy-list [--check]: every copy list; --check also names what env0's and live's data folders hold that
-    no list covers."""
+    no list covers, and tells CodeHiro."""
     lists = load(hw.env_dir(0))
     hw.say(show(lists))
     if not a.check:
         return
     hw.say("\nNot in a copy list (copied nowhere until it is listed):")
-    found = False
-    for group, lst in lists.items():
-        for place, names in (("env0", listing(env0_group(hw, group), group)), ("live", live_listing(lst, group))):
-            left = copylist.unlisted(lst, names)
-            if left:
-                found = True
-                hw.say(f"  {group} in {place}: {', '.join(left)}")
-    if not found:
-        hw.say("  nothing: every file in env0's and live's data folders is listed.")
+    for line in said_drift(report_drift(hw, lists)):
+        hw.say(line)
