@@ -706,3 +706,104 @@ def test_a_live_copy_from_before_the_lists_is_refused_for_an_environment_too(tmp
     with pytest.raises(FakeHw.Stop, match="no copy list names"):
         data.copy_live_into(hw, 2, src, lists)
     assert not (tmp_path / "data" / "env2" / "core").exists()  # nothing was written
+
+
+# ----------------------------------------------------------------------------- the PC's dev secrets
+
+SECRET_LISTS = {
+    "core": CORE_LIST.replace("LIVE", "~/x") + '''
+[[secret]]
+name = "openai_api_key"
+what = "OpenAI's key"
+when = "ai"
+env = "OPENAI_API_KEY"
+why = "AI"
+[[secret]]
+name = "plan_codex"
+what = "Codex's sign-in"
+folder = "plans/codex"
+why = "never copied"
+''',
+    "homehiro": APP_LISTS["homehiro"].replace("LIVE", "~/x") + '''
+[[secret]]
+name = "ha_token"
+what = "HA's token"
+when = "reads"
+setting = "ha_token"
+why = "HA"
+[[secret]]
+name = "mqtt_password"
+what = "MQTT"
+when = "reads"
+setting = "mqtt_password"
+why = "MQTT"
+''',
+}
+
+
+@pytest.fixture
+def secret_lists(tmp_path, monkeypatch):
+    root = tmp_path / "repos"
+    for group, text in SECRET_LISTS.items():
+        repo = "hiroleague" if group == "core" else group
+        (root / repo).mkdir(parents=True)
+        (root / repo / "data.toml").write_text(text, "utf-8")
+    text = APP_LISTS["homehiro"].replace("LIVE", "~/x")
+    (root / "homehiro" / "data.toml").write_text(SECRET_LISTS["homehiro"].replace(
+        '[[setting]]\nkey = "tv_cast"', '[[setting]]\nkey = "mqtt_password"\nneeds = "reads"\nwhy = "MQTT"\n[[setting]]\nkey = "tv_cast"'), "utf-8")
+    monkeypatch.setattr(data, "APPS", ["homehiro"])
+    return data.load(root)
+
+
+@pytest.mark.parametrize("bad, says", [
+    ('[[secret]]\nname = "k"\nwhat = "w"\nwhy = "w"\n', "one of setting, env or folder"),
+    ('[[secret]]\nname = "k"\nwhat = "w"\nwhy = "w"\nwhen = "ai"\nfolder = "plans/x"\n', "never given"),
+    ('[[secret]]\nname = "K-1"\nwhat = "w"\nwhy = "w"\nenv = "X"\n', "lower case"),
+    ('[[secret]]\nname = "k"\nwhat = "w"\nwhy = "w"\nwhen = "sometimes"\nenv = "X"\n', "when"),
+])
+def test_a_wrong_secret_line_is_refused(bad, says):
+    head = 'live = "~/x"\n[[item]]\npath = "a"\nkind = "folder"\nlive = "own"\nenvs = "none"\nwhy = "w"\n'
+    with pytest.raises(copylist.ListError, match=says):
+        copylist.parse(head + bad, "homehiro")
+
+
+def test_a_secret_in_a_setting_that_isnt_per_place_is_refused(tmp_path):
+    (tmp_path / "hiroleague").mkdir()
+    (tmp_path / "hiroleague" / "data.toml").write_text(CORE_LIST.replace("LIVE", "~/x"), "utf-8")
+    (tmp_path / "homehiro").mkdir()
+    (tmp_path / "homehiro" / "data.toml").write_text(
+        'live = "~/h"\n[[item]]\npath = "a.db"\nkind = "database"\nlive = "copy"\nenvs = "copy"\nwhy = "w"\n'
+        '[[secret]]\nname = "pin"\nwhat = "a pin"\nwhen = "reads"\nsetting = "door_pin"\nwhy = "w"\n', "utf-8")
+    with pytest.raises(copylist.ListError, match="isn't per-place"):
+        copylist.load_all(tmp_path, ["homehiro"])
+
+
+def test_the_store_is_filled_once_from_env0_and_the_pc_never_from_a_folder(tmp_path, secret_lists):
+    hw = FakeHw(tmp_path)
+    db(tmp_path / "data" / "env0" / "homehiro" / "homehiro.db", SETTING
+       + "insert into setting values ('ha_token','env0-token'),('mqtt_password','env0-mqtt');")
+    took = data.fill_store(hw, secret_lists, {"OPENAI_API_KEY": "pc-key"})
+    assert sorted(took) == ["ha_token", "mqtt_password", "openai_api_key"]
+    assert data.read_store(hw) == {"ha_token": "env0-token", "mqtt_password": "env0-mqtt", "openai_api_key": "pc-key"}
+    assert data.fill_store(hw, secret_lists, {"OPENAI_API_KEY": "another"}) == []  # what it has, it keeps
+    assert data.secret_states(hw, secret_lists) == {
+        "openai_api_key": "set", "plan_codex": "never", "ha_token": "set", "mqtt_password": "set"}
+
+
+def test_an_environment_gets_a_secret_only_while_it_asks_for_its_system_and_a_missing_one_is_named(
+        tmp_path, secret_lists):
+    env = tmp_path / "env2"
+    copy = db(env / "homehiro" / "homehiro.db", SETTING
+              + "insert into setting values ('ha_token','env0-token'),('mqtt_password','env0-mqtt'),('a','1');")
+    did, missing = data.give_secrets(env, [data.READS], secret_lists, {"ha_token": "dev-token"})
+    assert dict(rows(copy, "select key, value from setting")) == {"a": "1", "ha_token": "dev-token"}  # env0's gone
+    assert missing == ["mqtt_password"] and json.loads((env / "source.json").read_text())["missing_secrets"] == missing
+    assert "homehiro: 1 secret(s) from the PC's store" in did
+    did, missing = data.give_secrets(env, [], secret_lists, {"ha_token": "dev-token"})
+    assert dict(rows(copy, "select key, value from setting")) == {"a": "1"} and missing == []  # reads off: none
+
+
+def test_a_cores_ai_keys_come_from_the_store_only_with_real_ai(secret_lists):
+    environ = {"OPENAI_API_KEY": "pc-key", "PATH": "p"}
+    assert data.core_env(environ, [], secret_lists, {"openai_api_key": "dev-key"}) == {"OPENAI_API_KEY": ""}
+    assert data.core_env(environ, [data.AI], secret_lists, {"openai_api_key": "dev-key"}) == {"OPENAI_API_KEY": "dev-key"}

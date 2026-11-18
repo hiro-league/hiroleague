@@ -19,6 +19,7 @@ dev/main and env0 is brought up to them. Until then its commits stay on its bran
     hiro-work real <task> [--reads] [--ai]   env1..5: which real systems the task's copy reads (data.py)
     hiro-work refresh-data [--apply STAMP] [--files]   live -> env0: a scrubbed live copy, then env0 (data.py)
     hiro-work data <env> <source>            env1..5: its data from env0, vanilla or a live copy (data.py)
+    hiro-work secret list | fill | set <name>  the PC's dev secrets, by name; set asks for the value (data.py)
     hiro-work copy-list [--check]   every repo's copy list (data.toml): what a copy holds, and how (data.py)
     hiro-work train [repo ...] [--dry-run]   the deploy train: push and deploy, when Michel says (train.py)
     hiro-work audit latest | RUN | list      the doc audit's runs, and start / report to record one (audit.py)
@@ -594,7 +595,8 @@ def configure(env: int, task: str | None = None) -> None:
                     cwd=repo_dir(env, "hiroleague") / "hiroserver")
             # Real systems off unless the task asks, as the copy lists say (the core's turns the WhatsApp channel
             # off: two clients on one account break it): run on every configure, the copy may be fresh
-            for line in data.make_safe(data_dir(env), real_of(env), copy_lists()):
+            for line in data.make_safe(data_dir(env), real_of(env), copy_lists(),
+                                       data.read_store(sys.modules[__name__])):
                 say(f"  {line}")
         write_launch(env)
 
@@ -1184,7 +1186,8 @@ def servers(env: int) -> dict[str, Server]:
                           p["core-ui"], {"HIRO_ADMIN_ORIGIN": f"http://127.0.0.1:{p['core-admin']}"}),
     }
     if env:  # the provider keys in the PC's environment, blanked unless the task asks for AI (data.py)
-        out["core"].env.update(data.core_env(dict(os.environ), real_of(env), copy_lists()))
+        out["core"].env.update(data.core_env(dict(os.environ), real_of(env), copy_lists(),
+                                             data.read_store(sys.modules[__name__])))
     for a in appfile.APPS:  # each app as apps.toml says
         api, ui, repo = p[f"{a.repo}-api"], p[f"{a.repo}-ui"], here / a.repo
         fill = {"port": str(api), "data": str(app_data(env, a)), "repo": "{repo}"}  # {repo} stays for the app
@@ -1582,6 +1585,10 @@ def main(argv: list[str] | None = None) -> int:
     rd.add_argument("--files", action="store_true",
                     help="only the folders the copy lists fetch (the uploads the databases point at)")
     rd.set_defaults(func=lambda a: data.cmd_refresh_data(a, sys.modules[__name__]))
+    sc = sub.add_parser("secret", help="the PC's dev secrets, by name: list, fill (from env0 and the PC), set <name>")
+    sc.add_argument("what", choices=["list", "fill", "set"])
+    sc.add_argument("name", nargs="?", default="")
+    sc.set_defaults(func=lambda a: data.cmd_secret(a, sys.modules[__name__]))
     dt = sub.add_parser("data", help="env1..5: its data again from env0, vanilla or a live copy (servers down)")
     dt.add_argument("env", type=int, choices=list(ENVS))
     dt.add_argument("source", help="env0, vanilla, live (the latest copy, fetched again when an hour old) or live:<stamp>")

@@ -23,8 +23,9 @@ Every minute it also says which repos each environment has changed (hiro_work.ch
 each environment whose list differs from the last one said (all of them when it starts), so the card can dim a claim
 nothing has changed yet. The same event says what the environment holds that no task there owns
 (hiro_work.leftovers: uncommitted files, a stray branch, commits off the trunk), shown at the card's foot, and where
-its data came from (data.read_source: the card's data row); env0's also lists the live copies on the PC
-(data.live_copy_list: its Data menu).
+its data came from (data.read_source: the card's data row, with any secret its task needs that the PC's store lacks);
+env0's also lists the live copies on the PC (data.live_copy_list: its Data menu) and each dev secret's state, by name
+only (data.secret_states: Work › Data's Secrets).
 
 Every 10 minutes it looks at env0's data folders for what no copy list covers (data.survey): a "copy-lists" event,
 with each listed item's size, when that differs from the last one said and at least every hour, shown in Work › Sweep
@@ -38,6 +39,7 @@ and Work › Data. The lists are read again each time, so a land's new lists cou
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -175,6 +177,9 @@ def changes(said: dict[int, dict]) -> dict[int, dict]:
                     "data": hw.data.read_source(hw, env)}
         if env == 0:
             now[env]["live_copies"] = hw.data.live_copy_list(hw)
+            # Each dev secret's state, by name only (set, missing, never): Work › Data's Secrets
+            with contextlib.suppress(hw.data.copylist.ListError, OSError, ValueError):
+                now[env]["secrets"] = hw.data.secret_states(hw, hw.data.load(hw.env_dir(0)))
         if said.get(env) != now[env]:
             hw.event(task=None, env=env, step="changes", phase="end", ok=True, **now[env])
     return now

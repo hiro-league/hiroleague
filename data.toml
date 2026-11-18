@@ -183,5 +183,59 @@ why = "the WhatsApp channel off: two clients on one account break it"
 [[env]]
 match = "(API_KEY|API_TOKEN)$"
 value = ""
-unless = "ai"
-why = "provider keys in the PC's environment (GEMINI_API_KEY, OPENAI_API_KEY...) blanked"
+why = "the PC's own provider keys (GEMINI_API_KEY, OPENAI_API_KEY...) blanked: with real AI, the keys come from the PC's store (the secrets below)"
+
+# Secrets the copies need: kept in the PC's dev store (C:\hiro\secrets\dev, hiro-work secret), never copied from env0.
+# An env1..env5 core gets an AI key only while its task has real AI; the PC's own *_API_KEY variables are blanked there.
+[[secret]]
+name = "openai_api_key"
+what = "OpenAI's API key"
+when = "ai"
+env = "OPENAI_API_KEY"
+why = "AI asks and chats through OpenAI's profiles"
+
+[[secret]]
+name = "google_api_key"
+what = "Google's API key (Gemini)"
+when = "ai"
+env = "GOOGLE_API_KEY"
+why = "AI asks and chats through Google's profiles"
+
+[[secret]]
+name = "deepseek_api_key"
+what = "DeepSeek's API key"
+when = "ai"
+env = "DEEPSEEK_API_KEY"
+why = "AI asks and chats through DeepSeek's profiles"
+
+[[secret]]
+name = "cohere_api_key"
+what = "Cohere's API key"
+when = "ai"
+env = "COHERE_API_KEY"
+why = "reranking for memory and the knowledge base"
+
+[[secret]]
+name = "voyage_api_key"
+what = "Voyage's API key"
+when = "ai"
+env = "VOYAGE_API_KEY"
+why = "embeddings for memory and the knowledge base"
+
+[[secret]]
+name = "plan_claude_code"
+what = "Claude Code's sign-in (a plan tool)"
+folder = "plans/claude_code"
+why = "a sign-in that refreshes itself: a second copy would sign env0's out, so it is never copied"
+
+[[secret]]
+name = "plan_codex"
+what = "Codex's sign-in (a plan tool)"
+folder = "plans/codex"
+why = "a sign-in that refreshes itself: a second copy would sign env0's out, so it is never copied"
+
+[[secret]]
+name = "whatsapp_session"
+what = "the WhatsApp session"
+folder = "channels"
+why = "two clients on one account break it: never copied (a test environment links its own device)"

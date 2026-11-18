@@ -67,8 +67,9 @@ def _tables(con: sqlite3.Connection) -> set[str]:
     return {r[0] for r in con.execute("select name from sqlite_master where type = 'table'")}
 
 
-def make_safe(data: Path, real: list[str], lists: Lists) -> list[str]:
-    """Turn real systems off in an env1..env5 copy (its data folder), as the lists say: what it did, in words."""
+def make_safe(data: Path, real: list[str], lists: Lists, store: dict[str, str] | None = None) -> list[str]:
+    """Turn real systems off in an env1..env5 copy (its data folder), as the lists say, then give it the secrets of
+    the systems its task asked for from the PC's store (give_secrets): what it did, in words."""
     did: list[str] = []
     for group, lst in lists.items():
         base = group_dir(data, group)
@@ -107,6 +108,8 @@ def make_safe(data: Path, real: list[str], lists: Lists) -> list[str]:
                     path.write_text(json.dumps(doc, indent=2), encoding="utf-8")
                     count = f"{len(before)} " if isinstance(before, (list, dict)) else ""
                     did.append(f"{group}: {sw.path}'s {count}{sw.key} left out ({sw.why})")
+    if store is not None:
+        did += give_secrets(data, real, lists, store)[0]
     return did
 
 
@@ -119,9 +122,11 @@ def env_overrides(app: str, real: list[str], lists: Lists) -> dict[str, str | No
     return {e.name: (None if e.drop else e.value) for e in lst.env if e.name and e.applies(real)}
 
 
-def core_env(environ: dict[str, str], real: list[str], lists: Lists) -> dict[str, str]:
+def core_env(environ: dict[str, str], real: list[str], lists: Lists,
+             store: dict[str, str] | None = None) -> dict[str, str]:
     """Extra environment for an env1..env5 core: the variables the core's list matches (provider keys in the PC's
-    environment) blanked; an empty value removes the variable in the server's PowerShell runner."""
+    environment) blanked, an empty value removing the variable in the server's PowerShell runner; then, while the task
+    has real AI, the AI keys from the PC's store (the core's env secrets)."""
     out: dict[str, str] = {}
     for e in lists[CORE].env:
         if not e.applies(real):
@@ -130,6 +135,9 @@ def core_env(environ: dict[str, str], real: list[str], lists: Lists) -> dict[str
             out.update({k: ("" if e.drop else e.value or "") for k in environ if re.search(e.match, k)})
         elif e.name:
             out[e.name] = "" if e.drop else e.value or ""
+    for x in lists[CORE].secrets:  # the store's keys, set above, win over the blanking
+        if x.env and x.when and x.when in real and store and x.name in store:
+            out[x.env] = store[x.name]
     return out
 
 
@@ -852,3 +860,152 @@ def copy_live_into(hw: ModuleType, env: int, src: Path, lists: Lists) -> list[st
         tmp.rename(target)
         lines.append(f"{key}: from live copy {src.name}")
     return lines
+
+
+# ------------------------------------------------------------------------- the PC's dev secrets
+
+def store_path(hw: ModuleType) -> Path:
+    """The PC's dev secrets: one JSON file of name -> value, out of git (C:\\hiro\\secrets\\dev); never printed."""
+    return hw.ROOT / "secrets" / "dev" / "secrets.json"
+
+
+def read_store(hw: ModuleType) -> dict[str, str]:
+    path = store_path(hw)
+    if not path.exists():
+        return {}
+    return {str(k): str(v) for k, v in json.loads(path.read_text(encoding="utf-8")).items()}
+
+
+def write_store(hw: ModuleType, store: dict[str, str]) -> None:
+    path = store_path(hw)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(dict(sorted(store.items())), indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def secrets_of(lists: Lists) -> dict[str, list[tuple[str, copylist.Secret]]]:
+    """Each secret's name, and the groups that use it (one name may serve two apps: HomeHiro's and NetHiro's HA
+    token)."""
+    out: dict[str, list[tuple[str, copylist.Secret]]] = {}
+    for group, lst in lists.items():
+        for x in lst.secrets:
+            out.setdefault(x.name, []).append((group, x))
+    return out
+
+
+def fill_store(hw: ModuleType, lists: Lists, environ: dict[str, str]) -> list[str]:
+    """The store's first fill: each secret it lacks, from env0's settings (a setting secret) or the PC's environment
+    (an env secret). A folder secret is never taken. The names it took, never the values."""
+    store = read_store(hw)
+    took = []
+    for name, uses in secrets_of(lists).items():
+        if name in store:
+            continue
+        for group, x in uses:
+            value = None
+            if x.env:
+                value = environ.get(x.env)
+            elif x.setting and group != CORE:
+                db = env0_group(hw, group) / settings_db(group)
+                if db.exists():
+                    with contextlib.closing(sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True)) as con:
+                        if "setting" in _tables(con):
+                            row = con.execute("select value from setting where key = ?", (x.setting,)).fetchone()
+                            value = row[0] if row else None
+            if value:
+                store[name] = value
+                took.append(name)
+                break
+    if took:
+        write_store(hw, store)
+    return took
+
+
+def give_secrets(data: Path, real: list[str], lists: Lists, store: dict[str, str]) -> tuple[list[str], list[str]]:
+    """An env1..env5 copy's secrets: a secret's setting row is always taken out of the copy (env0's value never
+    stays), and put back from the store only while the task has its real system. (what it did, in words; the names
+    the store lacks for a system the task asked for, which then stays off)."""
+    did: list[str] = []
+    missing: list[str] = []
+    for group, lst in lists.items():
+        given = 0
+        for x in lst.secrets:
+            wanted = x.when is not None and x.when in real
+            if wanted and x.name not in store and x.name not in missing:
+                missing.append(x.name)
+            if not x.setting or group == CORE:
+                continue
+            db = group_dir(data, group) / settings_db(group)
+            if not db.exists():
+                continue
+            with contextlib.closing(sqlite3.connect(db)) as con, con:
+                if "setting" not in _tables(con):
+                    continue
+                con.execute("delete from setting where key = ?", (x.setting,))
+                if wanted and x.name in store:
+                    con.execute("insert into setting(key, value) values (?, ?)", (x.setting, store[x.name]))
+                    given += 1
+        if given:
+            did.append(f"{group}: {given} secret(s) from the PC's store")
+    if missing:
+        did.append(f"! not in the PC's store, so their systems stay off: {', '.join(missing)} "
+                   "(hiro-work secret set <name>)")
+    record_missing(data, missing)
+    return did, missing
+
+
+def record_missing(data: Path, missing: list[str]) -> None:
+    """The missing secrets, beside the environment's data source (source.json), for its card."""
+    path = data / SOURCE_FILE
+    rec = {}
+    if path.exists():
+        with contextlib.suppress(OSError, ValueError):
+            rec = json.loads(path.read_text(encoding="utf-8"))
+    if rec.get("missing_secrets", []) == missing and path.exists():
+        return
+    rec["missing_secrets"] = missing
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(rec, indent=2), encoding="utf-8")
+
+
+def secret_states(hw: ModuleType, lists: Lists) -> dict[str, str]:
+    """Each secret's state, by name: set (the store holds it), missing (a copy may need it, the store lacks it) or
+    never (never given to a copy). Names only."""
+    store = read_store(hw)
+    out = {}
+    for name, uses in secrets_of(lists).items():
+        given = any(x.when for _, x in uses)
+        out[name] = "never" if not given else "set" if name in store else "missing"
+    return out
+
+
+def cmd_secret(a, hw: ModuleType) -> None:
+    """hiro-work secret list | fill | set <name>: the PC's dev secrets, by name only (workflow.md, "Data and real
+    systems"). fill takes what the store lacks from env0's settings and the PC's environment; set asks for one value,
+    typed, never on the command line."""
+    import getpass
+
+    lists = load(hw.env_dir(0))
+    known = secrets_of(lists)
+    if a.what == "fill":
+        took = fill_store(hw, lists, dict(os.environ))
+        hw.say("Took from env0 and the PC: " + (", ".join(took) or "nothing (the store has all it can take)"))
+    elif a.what == "set":
+        if a.name not in known:
+            raise hw.Stop(f"No secret {a.name!r} in any copy list: {', '.join(sorted(known))}.")
+        if not any(x.when for _, x in known[a.name]):
+            raise hw.Stop(f"{a.name} is never given to a copy: nothing to set.")
+        value = getpass.getpass(f"{a.name} ({known[a.name][0][1].what}), not shown: ").strip()
+        if not value:
+            raise hw.Stop("Nothing typed: the store is unchanged.")
+        store = read_store(hw)
+        store[a.name] = value
+        write_store(hw, store)
+        hw.say(f"{a.name} is in the store. It reaches an environment at its next copy (start, resume, real, data).")
+    states = secret_states(hw, lists)
+    hw.say(f"\nThe PC's dev secrets ({store_path(hw).parent}), names only:")
+    for name, uses in known.items():
+        x = uses[0][1]
+        when = f"with real {x.when}" if x.when else "never given"
+        hw.say(f"  {name:20} {states[name]:8} {when:18} {', '.join(g for g, _ in uses)}: {x.what}")

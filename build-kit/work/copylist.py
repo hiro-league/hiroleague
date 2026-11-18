@@ -33,6 +33,14 @@ A list is a TOML file at the repo's root. The core's (the HiroLeague repo's) des
     unless = "reads"                     # optional: reads | writes | ai; absent = always
     why = "..."
 
+    [[secret]]                           # a secret the copies need, kept in the PC's dev store, never copied from env0
+    name = "ha_token"                    # its name in the store (hiro-work secret set <name>)
+    what = "Home Assistant's token"
+    when = "reads"                       # given to env1..env5 only while the task has that real system; absent: never
+    setting = "ha_token"                 # where it goes: a setting row (a per-place one), or env = "<VARIABLE>" (the
+                                         # core's server), or folder = "<path>" (never given: named, not copied)
+    why = "..."
+
     [[env]]                              # an .env.dev line in env1..env5 (the core: its server's environment)
     name = "TALKER_KEY"                  # or match = "<regex>" for every variable it matches
     drop = true                          # or value = "..."
@@ -114,6 +122,17 @@ class EnvLine:
 
 
 @dataclass(frozen=True)
+class Secret:
+    name: str
+    what: str
+    why: str
+    when: str | None = None  # None: never given to a copy
+    setting: str | None = None
+    env: str | None = None
+    folder: str | None = None
+
+
+@dataclass(frozen=True)
 class EveryApp:
     place_key_pattern: str = ""
     place_keys: tuple[str, ...] = ()
@@ -128,6 +147,7 @@ class CopyList:
     switches: tuple[Switch, ...] = ()
     env: tuple[EnvLine, ...] = ()
     every_app: EveryApp | None = None  # the core's list only
+    secrets: tuple[Secret, ...] = ()
 
     def item(self, name: str) -> Item | None:
         """The item a top-level name (or a path, for the core's db/ files) falls under: an exact path first."""
@@ -160,7 +180,7 @@ def parse(text: str, group: str, name: str = FILE) -> CopyList:
         doc = tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
         raise ListError(f"{name}: {exc}") from exc
-    top = {"live", "item", "setting", "switch", "env"} | ({"every_app"} if group == CORE else set())
+    top = {"live", "item", "setting", "switch", "env", "secret"} | ({"every_app"} if group == CORE else set())
     _fields(doc, name, {"live", "item"}, top)
     items = []
     for n, d in enumerate(doc["item"], 1):
@@ -229,6 +249,24 @@ def parse(text: str, group: str, name: str = FILE) -> CopyList:
             raise ListError(f"{where}: listed twice")
         env.append(EnvLine(d["why"], d.get("name"), d.get("match"), d.get("value"), bool(d.get("drop")),
                            d.get("unless")))
+    secrets = []
+    for n, d in enumerate(doc.get("secret", []), 1):
+        where = f"{name}, secret {n} ({d.get('name', '?')})"
+        _fields(d, where, {"name", "what", "why"}, {"when", "setting", "env", "folder"})
+        places = [k for k in ("setting", "env", "folder") if k in d]
+        if len(places) != 1:
+            raise ListError(f"{where}: one of setting, env or folder")
+        if "when" in d:
+            _one_of(d["when"], REAL, where + ", when")
+            if "folder" in d:
+                raise ListError(f"{where}: a folder is never given to a copy (a sign-in that refreshes itself, a "
+                                "session): no when")
+        if not re.fullmatch(r"[a-z0-9_]+", d["name"]):
+            raise ListError(f"{where}: a name is lower case letters, digits and _")
+        if any(x.name == d["name"] for x in secrets):
+            raise ListError(f"{where}: listed twice")
+        secrets.append(Secret(d["name"], d["what"], d["why"], d.get("when"), d.get("setting"), d.get("env"),
+                              d.get("folder")))
     every = None
     if group == CORE:
         e = doc.get("every_app")
@@ -236,7 +274,8 @@ def parse(text: str, group: str, name: str = FILE) -> CopyList:
             raise ListError(f"{name}: the core's list holds [every_app]")
         _fields(e, f"{name}, every_app", {"place_key_pattern", "place_keys"}, set())
         every = EveryApp(e["place_key_pattern"], tuple(e["place_keys"]))
-    return CopyList(group, doc["live"], tuple(items), tuple(settings), tuple(switches), tuple(env), every)
+    return CopyList(group, doc["live"], tuple(items), tuple(settings), tuple(switches), tuple(env), every,
+                    tuple(secrets))
 
 
 def repo_of(group: str) -> str:
@@ -262,7 +301,13 @@ def load_all(root: Path, apps: list[str]) -> dict[str, CopyList]:
 
 def refuse_covered(lst: CopyList, every: EveryApp) -> None:
     """An app's setting line the core's list already covers: the kit's keys, or the pattern (unless it says `needs`,
-    which the pattern doesn't)."""
+    which the pattern doesn't). And a secret that goes in a setting must go in a per-place one: never copied from
+    live, whatever the store holds."""
+    for x in lst.secrets:
+        if x.setting and not (x.setting in every.place_keys or re.search(every.place_key_pattern, x.setting)
+                              or any(s.key == x.setting for s in lst.settings)):
+            raise ListError(f"{repo_of(lst.group)}/{FILE}, secret {x.name}: its setting {x.setting} isn't per-place: "
+                            "list it as a [[setting]] first")
     for s in lst.settings:
         if s.key in every.place_keys or (s.needs is None and re.search(every.place_key_pattern, s.key)):
             raise ListError(f"{repo_of(lst.group)}/{FILE}, setting {s.key}: the core's list already makes it "

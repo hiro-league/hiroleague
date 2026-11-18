@@ -47,6 +47,8 @@ def test_changes_are_said_for_made_environments_only_when_they_differ(tmp_path, 
     monkeypatch.setattr(relay.hw, "leftovers", lambda env, tasks: left[env])
     monkeypatch.setattr(relay.hw.data, "read_source", lambda hw, env: None)
     monkeypatch.setattr(relay.hw.data, "live_copy_list", lambda hw: [])
+    monkeypatch.setattr(relay.hw.data, "secret_states", lambda hw, lists: {})
+    monkeypatch.setattr(relay.hw.data, "load", lambda root: {})
     sent = []
     monkeypatch.setattr(relay.hw, "event", lambda **e: sent.append((e["env"], e["step"], e["repos"], e["leftovers"])))
     said = relay.changes({})
