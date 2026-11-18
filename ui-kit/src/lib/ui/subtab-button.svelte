@@ -1,12 +1,15 @@
 <script lang="ts">
   /**
-   * Single underline tab inside `<Subtabs>`. Also used directly for
-   * dynamic subtabs (Graph runs open-run inspectors with a close affordance).
+   * Single underline tab inside `<Subtabs>`.
+   * UI kit, step 7d: a shadcn-svelte Tabs trigger (so it lives inside Subtabs' Tabs): `value` is its tab's id, and
+   * the picked one is the one whose value Subtabs holds.
    */
   import type { Snippet } from 'svelte';
+  import * as Tabs from '$kit/components/ui/tabs/index.js';
   import { subtabClass } from './subtab-class';
 
   type Props = {
+    value: string;
     label: string;
     /** Optional count shown after the label in a subtle muted color, e.g. Corpus (302). */
     count?: number;
@@ -14,7 +17,6 @@
     countText?: string;
     /** Override the count span classes (e.g. an accent color); defaults to the muted style. */
     countClass?: string;
-    active: boolean;
     disabled?: boolean;
     ariaControls?: string;
     ariaLabel?: string;
@@ -27,11 +29,11 @@
   };
 
   let {
+    value,
     label,
     count,
     countText,
     countClass = 'ml-1 font-normal text-muted-foreground/70',
-    active,
     disabled = false,
     ariaControls,
     ariaLabel,
@@ -43,21 +45,18 @@
   }: Props = $props();
 </script>
 
-<button
-  type="button"
+<Tabs.Trigger
+  {value}
   id={htmlId}
-  class={subtabClass(active, className)}
-  role="tab"
-  aria-selected={active}
+  class={subtabClass(className)}
   aria-controls={ariaControls}
   aria-label={ariaLabel}
   {title}
   {disabled}
-  tabindex={disabled ? -1 : 0}
   {onclick}
 >
   {#if children}{@render children()}{:else}{label}{#if countText != null}<span
         class={countClass}>({countText})</span
       >{:else if count != null}<span class={countClass}>({count})</span
       >{/if}{/if}
-</button>
+</Tabs.Trigger>
