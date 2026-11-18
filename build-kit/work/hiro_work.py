@@ -1059,13 +1059,19 @@ def land_steps(task: Task, env: int) -> dict[str, list[str]]:
             if out.returncode != 0:
                 failed.append(f"{repo} (log: {log})")
                 outcome.fail(f"check.sh failed (log: {log})")
-    # Every copy list as it will be in env0: a wrong one would stop every later start, so it is refused here
+    # Every copy list as it will be in env0: a wrong one would stop every later start, so it is refused here. Read by
+    # the environment's own copylist.py, as each commit's check does: a fix, since the trunk's parser refused a list
+    # format the task itself brings ([[secret]] lines, Nov 18, 2026)
     with step(task.id, env, "copy lists") as outcome:
-        try:
-            data.load(env_dir(env))
-        except data.copylist.ListError as exc:
-            failed.append(f"a copy list: {exc}")
-            outcome.fail(str(exc))
+        parser = repo_dir(env, "hiroleague") / "build-kit" / "work" / "copylist.py"
+        for repo in REPOS:
+            if not (repo_dir(env, repo) / data.copylist.FILE).exists():
+                continue
+            out = subprocess.run([sys.executable, str(parser), str(repo_dir(env, repo))], capture_output=True,
+                                 text=True, encoding="utf-8", errors="replace")
+            if out.returncode != 0:
+                failed.append(f"a copy list: {(out.stdout + out.stderr).strip()[-300:]}")
+                outcome.fail(out.stdout.strip()[-300:])
     if failed:
         raise Stop("Checks failed: " + "; ".join(failed) + ". Fix, commit, land again.")
     # 3. dev/main moves to the branch; env0's checkouts follow (a fast-forward)
