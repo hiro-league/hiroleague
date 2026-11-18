@@ -135,7 +135,8 @@ def core_env(environ: dict[str, str], real: list[str], lists: Lists) -> dict[str
 def link_pictures(src: Path, dst: Path, app: str, lists: Lists) -> list[str]:
     """An env1..env5 app folder gets env0's folders its list links (`envs = "link"`) as hard links: same drive, so
     instant and no extra space. A file a task adds stays in its environment and deleting one there removes only its
-    link; editing one in place would change env0's too (these apps write a picture once)."""
+    link. A change there replaces only its link too: the apps write through the backend kit's `files`, which writes a
+    new file and renames it over the old one, never into it."""
     lines = []
     lst = lists.get(app)
     for item in lst.folders("envs", "link") if lst else []:
@@ -457,7 +458,10 @@ def prune(hw: ModuleType) -> list[str]:
     return [p.name for p in old]
 
 
-def live_file_count(folder: str) -> int:
+def live_file_count(folder: str) -> int | None:
+    """The files in a live folder, or None when Simone has no such folder (nothing uploaded there yet)."""
+    if ssh(["test", "-d", folder, "&&", "echo", "yes", "||", "echo", "no"], timeout=60).strip() != "yes":
+        return None
     return int(ssh(["find", folder, "-type", "f"], timeout=120).count("\n"))
 
 
@@ -471,11 +475,14 @@ def copy_files(hw: ModuleType, archive: Path, lists: Lists) -> list[str]:
             folder = item.path
             target = env0_group(hw, group) / folder
             stage = env0_group(hw, group) / f".{folder}.refresh"
+            live = live_file_count(f"{lst.live}/{folder}")
+            if live is None:
+                lines.append(f"{group}/{folder}: not on Simone, env0's left as it is")
+                continue
             if stage.exists():
                 shutil.rmtree(stage)
             stage.mkdir(parents=True)
             with hw.step(None, 0, "files", f"{group}/{folder}"):
-                live = live_file_count(f"{lst.live}/{folder}")
                 sender = subprocess.Popen(["ssh", "-o", "BatchMode=yes", LIVE_HOST, "tar", "-C", lst.live,
                                            "-cf", "-", folder], stdout=subprocess.PIPE)
                 # Windows' own tar (bsdtar): Git's GNU tar reads "C:" in a path as a remote host

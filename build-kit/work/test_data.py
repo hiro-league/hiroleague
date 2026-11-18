@@ -487,3 +487,41 @@ def test_a_live_copy_from_before_the_lists_is_refused_before_anything_changes(tm
 
     with pytest.raises(Hw.Stop, match="fetch a new copy"):
         data.apply(Hw, src, lists)
+
+
+def test_a_folder_simone_doesnt_have_yet_is_skipped_and_env0s_stays(tmp_path, lists, monkeypatch):
+    asked = []
+
+    def ssh(args, **_):
+        asked.append(args)
+        return "no\n"  # nothing uploaded on live yet
+
+    monkeypatch.setattr(data, "ssh", ssh)
+
+    class Hw:
+        @staticmethod
+        def data_dir(env):
+            return tmp_path / "env0"
+
+        @staticmethod
+        def app_data(env, a):
+            return tmp_path / "env0" / a.repo
+
+    (tmp_path / "env0" / "studyhiro" / "files").mkdir(parents=True)
+    (tmp_path / "env0" / "studyhiro" / "files" / "mine.jpg").write_bytes(b"m")
+    lines = data.copy_files(Hw, tmp_path / "archive", lists)
+    assert "studyhiro/files: not on Simone, env0's left as it is" in lines
+    assert (tmp_path / "env0" / "studyhiro" / "files" / "mine.jpg").read_bytes() == b"m"
+    assert not (tmp_path / "archive").exists() and all(a[0] == "test" for a in asked)
+
+
+def test_a_change_in_an_environment_replaces_its_link_and_leaves_env0s_file(tmp_path, lists):
+    env0, env = tmp_path / "env0" / "studyhiro", tmp_path / "env1" / "studyhiro"
+    (env0 / "files").mkdir(parents=True)
+    (env0 / "files" / "a.jpg").write_bytes(b"env0")
+    data.link_pictures(env0, env, "studyhiro", lists)
+    # As the backend kit's files.write_bytes does: a new file renamed over the old one
+    tmp = env / "files" / ".a.jpg.tmp"
+    tmp.write_bytes(b"task")
+    tmp.replace(env / "files" / "a.jpg")
+    assert (env / "files" / "a.jpg").read_bytes() == b"task" and (env0 / "files" / "a.jpg").read_bytes() == b"env0"

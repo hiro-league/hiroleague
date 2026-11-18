@@ -1493,7 +1493,8 @@ def main(argv: list[str] | None = None) -> int:
     rl.set_defaults(func=cmd_real)
     rd = sub.add_parser("refresh-data", help="live -> env0: fetch a scrubbed live copy; --apply puts it in env0")
     rd.add_argument("--apply", metavar="STAMP", help="a copy in C:\\hiro\\data\\live-copies, or 'latest'")
-    rd.add_argument("--files", action="store_true", help="only the picture folders (avatars, StudyHiro's files)")
+    rd.add_argument("--files", action="store_true",
+                    help="only the folders the copy lists fetch (the uploads the databases point at)")
     rd.set_defaults(func=lambda a: data.cmd_refresh_data(a, sys.modules[__name__]))
     cl = sub.add_parser("copy-list", help="every repo's copy list (data.toml): what a copy holds, and how")
     cl.add_argument("--check", action="store_true", help="also name what env0's and live's data folders hold that no "
