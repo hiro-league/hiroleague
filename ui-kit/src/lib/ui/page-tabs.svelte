@@ -1,6 +1,8 @@
 <script lang="ts" module>
 	import type { Component } from 'svelte';
 
+	export type CountTone = 'neutral' | 'primary' | 'ok' | 'warn' | 'error';
+
 	/** One tab of a page. With `href` it is a real link (it can be opened in a new tab or copied); else picking it
 	 * calls `onchange`. `kind` is only read for its meaning by the app that wrote the list. */
 	export type PageTab<T extends string = string> = {
@@ -12,6 +14,8 @@
 		kind?: 'pane' | 'route';
 		disabled?: boolean;
 		count?: number | string;
+		/** The count's colour: neutral by default; a status tone when the number means something to act on. */
+		countTone?: CountTone;
 		title?: string;
 		ariaLabel?: string;
 		htmlId?: string;
@@ -21,8 +25,8 @@
 
 <script lang="ts" generics="T extends string">
 	// A page's tabs from a list, in the page header: the pill strip (the page's main tabs) or the underlined strip
-	// (tabs inside a tab). It adds what a list of tabs needs: a tab that is a link, a count beside a name, and a place
-	// after the tabs for one more of the page's own (an open record's tab).
+	// (tabs inside a tab). It adds what a list of tabs needs: a tab that is a link, a count beside a name (a small round
+	// badge, in its tone), and a place after the tabs for one more of the page's own (an open record's tab).
 	// UI kit, step 7d: built on shadcn-svelte's Tabs (its list and triggers: the arrow keys move between tabs, Enter
 	// or a click picks one); a tab with `href` is still a link. Tabs size to their words, not to equal widths.
 	import type { Snippet } from 'svelte';
@@ -45,7 +49,22 @@
 		'flex-none px-2',
 		variant === 'default' && 'dark:data-active:border-primary/60 dark:data-active:bg-primary/30'
 	);
+	// Dark: a stronger fill and light words, since the faint tint and the tone's own text sank into the dark track
+	const COUNT: Record<CountTone, string> = {
+		neutral: 'bg-foreground/10 text-foreground/70 dark:bg-foreground/25 dark:text-foreground',
+		primary: 'bg-primary/15 text-primary dark:bg-primary/60 dark:text-foreground',
+		ok: 'bg-success/15 text-success dark:bg-success/30 dark:text-foreground',
+		warn: 'bg-warning/15 text-warning dark:bg-warning/30 dark:text-warning',
+		error: 'bg-destructive/15 text-destructive dark:bg-destructive/45 dark:text-foreground'
+	};
 </script>
+
+{#snippet count(t: PageTab<T>)}
+	{#if t.count !== undefined}<span
+			class={cn('inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-none font-semibold tabular-nums', COUNT[t.countTone ?? 'neutral'])}
+			>{t.count}</span
+		>{/if}
+{/snippet}
 
 <Tabs.Root value={value} onValueChange={(v) => v !== value && onchange?.(v as T)} activationMode="manual" class="w-fit max-w-full gap-0">
 	<Tabs.List {variant} aria-label={label} class={cn('max-w-full', className)}>
@@ -54,11 +73,11 @@
 				{#snippet child({ props })}
 					{#if t.href}
 						<a {...props} href={t.disabled ? undefined : t.href}
-							>{#if t.icon}<t.icon />{/if}{t.label}{#if t.count !== undefined}<span class="text-xs text-muted-foreground tabular-nums">({t.count})</span>{/if}</a
+							>{#if t.icon}<t.icon />{/if}{t.label}{@render count(t)}</a
 						>
 					{:else}
 						<button {...props}
-							>{#if t.icon}<t.icon />{/if}{t.label}{#if t.count !== undefined}<span class="text-xs text-muted-foreground tabular-nums">({t.count})</span>{/if}</button
+							>{#if t.icon}<t.icon />{/if}{t.label}{@render count(t)}</button
 						>
 					{/if}
 				{/snippet}

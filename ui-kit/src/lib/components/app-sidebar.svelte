@@ -23,6 +23,7 @@
 	import MenuRow, { MENU_ROW_HOVER } from './menu-row.svelte';
 	import SidebarResize from './sidebar-resize.svelte';
 	import AppSwitcher from './app-switcher.svelte';
+	import EnvBadge from './env-badge.svelte';
 
 	interface Props {
 		width: number; // the menu's width in pixels
@@ -63,9 +64,13 @@
 						<a href={resolve('/')} {...props}>
 							<APP.icon />
 							<span class="brand-text-gradient font-semibold">{APP.name}</span>
+							<!-- Which environment this is: E0 to E5, or live (env-badge.svelte) -->
+							<EnvBadge />
 						</a>
 					{/snippet}
 				</Sidebar.MenuButton>
+				<!-- Collapsed to icons the name is hidden: the badge stays, alone. -->
+				<span class="hidden group-data-[collapsible=icon]:flex"><EnvBadge /></span>
 				<!-- Every app the person may open, to move between them (app-switcher.svelte) -->
 				<AppSwitcher />
 				<Sidebar.Trigger
