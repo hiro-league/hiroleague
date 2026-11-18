@@ -60,3 +60,31 @@ def test_who_is_asking_says_the_place_and_live_says_none(board, monkeypatch):
     assert me().place.place == "env3" and me().place.systems[0].name == "Home Assistant"
     monkeypatch.setattr(commons, "_board", commons.read({}))
     assert me().place is None
+
+
+def test_as_a_person_every_request_is_theirs_and_off_is_the_owner(tmp_path, monkeypatch):
+    import asyncio
+    import json as _json
+
+    from starlette.requests import Request
+
+    from hiro_extension_kit import testing
+    from hiro_extension_kit.auth import api
+
+    def named(sign_in):
+        path = tmp_path / "switchboard.json"
+        path.write_text(_json.dumps({"place": "env3", "preset": "Safe", "modes": {}, "sign_in": sign_in}), encoding="utf-8")
+        monkeypatch.setattr(commons, "_board", commons.read({commons.ENV: str(path)}))
+
+    request = Request({"type": "http", "headers": []})
+    testing.auth(monkeypatch, True)  # the app's own sign-in is on: only the switchboard decides
+    named({"mode": "as", "person": "p7", "name": "Mark"})
+    c = asyncio.run(api.caller(request))
+    assert (c.user_id, c.name, c.way) == ("p7", "Mark", "web")
+    assert switchboard.page()["sign_in"] == "as" and switchboard.page()["sign_in_as"] == "Mark"
+    named({"mode": "off"})
+    assert asyncio.run(api.caller(request)).way == "dev"
+    named({"mode": "on"})
+    with pytest.raises(errors.NotSignedIn):
+        asyncio.run(api.caller(request))
+    monkeypatch.setattr(commons, "_board", None)

@@ -58,3 +58,16 @@ def test_a_combination_is_saved_as_a_preset_used_and_removed(presets):
     assert [p["name"] for p in sw.presets(presets)] == ["Safe", "AI", "Offline", "Full real"]
     with pytest.raises(sw.SwitchError, match="built in"):
         sw.remove_preset("Safe", presets)
+
+
+def test_the_file_says_sign_in_and_as_nobody_is_on(tmp_path, presets):
+    people = [{"id": "p1", "name": "Mark", "role": "Kid"}, {"id": "p2", "name": "Maro", "role": "Adult"},
+              {"id": "p3", "name": "Mark", "role": "Kid"}]
+    assert sw.find_person(people, "maro")["id"] == "p2" and sw.find_person(people, "p3")["id"] == "p3"
+    assert sw.find_person(people, "Mark") is None and sw.find_person(people, "Nobody") is None  # two Marks; none
+    assert sw.write(tmp_path, 2, "Safe", path=presets)["sign_in"] == {"mode": "on"}
+    rec = sw.write(tmp_path, 2, "Safe", path=presets, sign_in=sw.sign_in("as", people[1]))
+    assert sw.read(tmp_path)["sign_in"] == {"mode": "as", "person": "p2", "name": "Maro"} == rec["sign_in"]
+    assert sw.describe_sign_in(rec) == "sign-in off (everyone is Maro)"
+    assert sw.sign_in("as", None) == {"mode": "on"} and sw.sign_in("off") == {"mode": "off"}
+    assert sw.describe_sign_in(None) == "sign-in on"

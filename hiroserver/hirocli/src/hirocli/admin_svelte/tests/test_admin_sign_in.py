@@ -88,3 +88,37 @@ def test_too_many_wrong_passwords_wait(client: TestClient) -> None:
         client.post("/api/auth/sign-in", json={"sign_in": "michel", "password": "wrong horse"})
     blocked = client.post("/api/auth/sign-in", json={"sign_in": "michel", "password": "correct horse"})
     assert blocked.status_code == 429
+
+
+# ---- a test environment's quick sign-in (its switchboard): no sign-in screen
+
+
+def _named_board(tmp_path: Path, monkeypatch, sign_in: dict) -> None:
+    import json
+
+    from hiro_commons import switchboard
+
+    path = tmp_path / "switchboard.json"
+    path.write_text(json.dumps({"place": "env2", "preset": "Safe", "modes": {}, "sign_in": sign_in}), encoding="utf-8")
+    monkeypatch.setattr(switchboard, "_board", switchboard.read({switchboard.ENV: str(path)}))
+
+
+def test_with_sign_in_off_in_a_test_environment_everyone_is_the_owner(client: TestClient, tmp_path, monkeypatch) -> None:
+    _named_board(tmp_path, monkeypatch, {"mode": "off"})
+    me = client.get("/api/auth/me").json()
+    assert me["signed_in"] is True and me["person"]["name"] == "Michel" and me["can_open_settings"] is True
+    assert client.get("/api/secret").status_code == 200  # no cookie, no sign-in screen
+
+
+def test_as_a_person_everyone_is_them_with_their_role(client: TestClient, tmp_path, monkeypatch) -> None:
+    kid = add_person(tmp_path, name="Mark", role_id="kid")
+    _named_board(tmp_path, monkeypatch, {"mode": "as", "person": kid.person_id, "name": "Mark"})
+    me = client.get("/api/auth/me").json()
+    assert me["person"]["name"] == "Mark" and me["can_open_settings"] is False
+    assert client.get("/api/secret").status_code == 403  # a kid's role doesn't open the settings
+
+
+def test_as_someone_not_in_the_family_list_people_sign_in(client: TestClient, tmp_path, monkeypatch) -> None:
+    _named_board(tmp_path, monkeypatch, {"mode": "as", "person": "gone", "name": "Gone"})
+    assert client.get("/api/auth/me").json()["signed_in"] is False
+    assert client.get("/api/secret").status_code == 401

@@ -101,6 +101,16 @@ def real_of(modes: dict[str, str]) -> list[str]:
     return out
 
 
+def describe_sign_in(rec: dict | None) -> str:
+    """The work card's words for an environment's sign-in."""
+    s = (rec or {}).get("sign_in") or SIGN_IN_ON
+    if s.get("mode") == board.OFF:
+        return "sign-in off (everyone is the owner)"
+    if s.get("mode") == board.AS:
+        return f"sign-in off (everyone is {s.get('name') or s.get('person')})"
+    return "sign-in on"
+
+
 def app_env(modes: dict[str, str]) -> dict[str, str]:
     """The apps' own older switches, worked out from the modes until every send goes through a gate: OUTPUTS (on only
     when something that sends is real: the gates then decide each) and HA_AUTO_WRITES (on only with Home Assistant
@@ -109,11 +119,32 @@ def app_env(modes: dict[str, str]) -> dict[str, str]:
     return {"OUTPUTS": "on" if sends else "off", "HA_AUTO_WRITES": "on" if modes.get("ha") == board.REAL else "off"}
 
 
+SIGN_IN_ON: dict = {"mode": board.ON}
+
+
+def sign_in(mode: str, person: dict | None = None) -> dict:
+    """The file's `sign_in`: on, off, or as one person ({"id", "name"} of the environment's family list). "as" with
+    nobody is on: never looser than asked."""
+    if mode == board.OFF:
+        return {"mode": board.OFF}
+    if mode == board.AS and person:
+        return {"mode": board.AS, "person": person["id"], "name": person["name"]}
+    return dict(SIGN_IN_ON)
+
+
+def find_person(people: list[dict], asked: str) -> dict | None:
+    """The person `asked` names in a family list ([{"id", "name", "role"}]): by id, else by name (any case), when
+    exactly one has it."""
+    by_id = [p for p in people if p["id"] == asked]
+    named = by_id or [p for p in people if p["name"].lower() == asked.strip().lower()]
+    return named[0] if len(named) == 1 else None
+
+
 def write(data_dir: Path, env: int, preset_name: str, changes: dict[str, str] | None = None,
-          path: Path = PRESETS) -> dict:
-    """An environment's switchboard file, from its preset and changes: the record written."""
+          path: Path = PRESETS, sign_in: dict | None = None) -> dict:
+    """An environment's switchboard file, from its preset, its changes and its sign-in: the record written."""
     rec = {"place": f"env{env}", "preset": preset(preset_name, path)["name"], "changes": dict(changes or {}),
-           "modes": resolve(preset_name, changes, path)}
+           "modes": resolve(preset_name, changes, path), "sign_in": sign_in or dict(SIGN_IN_ON)}
     data_dir.mkdir(parents=True, exist_ok=True)
     (data_dir / FILE).write_text(json.dumps(rec, indent=2), encoding="utf-8")
     return rec

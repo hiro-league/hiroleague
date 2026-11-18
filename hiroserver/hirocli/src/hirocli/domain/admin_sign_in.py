@@ -20,10 +20,11 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from hiro_commons import switchboard
 from hiro_commons.timestamps import utc_iso
 
 from .db import db_path, ensure_db
-from .people import PeopleError, Person, get_person, set_sign_in, sign_in_hash
+from .people import OWNER_ROLE, PeopleError, Person, get_person, list_people, set_sign_in, sign_in_hash
 
 PASSWORD_MIN = 8
 SESSION_DAYS = 90  # Phase 8: HiroLeague and HomeHiro both keep a browser signed in 90 days (was 30)
@@ -114,12 +115,28 @@ def start_session(workspace_path: Path, person_id: str) -> tuple[str, datetime]:
     return token, expires
 
 
+def quick_person(workspace_path: Path) -> Person | None:
+    """Who everyone is where a test environment's switchboard turns the sign-in screen off (hiro-docs workflow.md,
+    "The switchboard"): the owner with sign-in off, or the person it names. None with sign-in on, and always in live
+    and env0 (they name no switchboard), and when that person isn't in the family list: people then sign in."""
+    asked = switchboard.sign_in()
+    if not asked.quick:
+        return None
+    if asked.mode == switchboard.AS:
+        return get_person(workspace_path, asked.person)
+    return next((p for p in list_people(workspace_path) if p.role_id == OWNER_ROLE), None)
+
+
 def session_person(workspace_path: Path, token: str | None) -> Person | None:
-    """Who the session belongs to, while it lasts and they are still in the family list.
+    """Who the session belongs to, while it lasts and they are still in the family list. Where a test environment's
+    sign-in is off, everyone is `quick_person`, with or without a session.
 
     Not "while they have a name and password": someone signed in with an extension's offered way (Home Assistant's
     login) has none, and their session must count. What ends a session is done where it happens: signing out, a new
     password, a cleared sign-in and a removed person each delete theirs (``people.py``)."""
+    quick = quick_person(workspace_path)
+    if quick is not None:
+        return quick
     if not token:
         return None
     with _connect(workspace_path) as conn:

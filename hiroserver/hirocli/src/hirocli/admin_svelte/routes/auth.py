@@ -139,9 +139,8 @@ def _role_opens_settings(workspace_path: Path, role_id: str) -> bool:
 
 async def signed_in_person(request: Request) -> Any:
     """The person this request's session belongs to, or None."""
+    # Asked even with no cookie: where a test environment's sign-in is off, everyone is one person (quick_person)
     token = request.cookies.get(cookie_name(request))
-    if not token:
-        return None
     return await run_in_threadpool(session_person, _workspace_path(request), token)
 
 
@@ -161,7 +160,7 @@ class RequireSignIn:
         path = scope.get("path", "") if scope.get("type") == "http" else ""
         if path.startswith("/api/") and not path.startswith(AUTH_PREFIX):
             token = Request(scope).cookies.get(self.cookie)
-            person = await run_in_threadpool(session_person, self.workspace_path, token) if token else None
+            person = await run_in_threadpool(session_person, self.workspace_path, token)
             if person is None:
                 denied = api_failure("Sign in to the admin first.", 401)
                 await denied(scope, receive, send)

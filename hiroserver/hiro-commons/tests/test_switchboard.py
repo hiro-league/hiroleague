@@ -65,3 +65,15 @@ def test_a_page_gets_the_systems_its_app_reaches_and_live_gets_none(tmp_path):
     assert p["systems"] == [{"id": "ha", "name": "Home Assistant", "mode": "read"},
                             {"id": "ai", "name": "AI", "mode": "fake"}, {"id": "tv", "name": "TVs", "mode": "read"}]
     assert sb.read({}).page(["ha"]) is None
+
+
+def test_sign_in_is_on_unless_the_file_says_off_or_names_a_person(tmp_path):
+    assert sb.read({}).sign_in.mode == "on" and not sb.read({}).sign_in.quick
+    assert board(tmp_path, {}).sign_in.mode == "on"
+    assert board(tmp_path, {}, sign_in={"mode": "off"}).sign_in.quick
+    named = board(tmp_path, {}, sign_in={"mode": "as", "person": "p7", "name": "Mark"})
+    assert (named.sign_in.mode, named.sign_in.person, named.sign_in.name) == ("as", "p7", "Mark")
+    assert named.page([])["sign_in"] == "as" and named.page([])["sign_in_as"] == "Mark"
+    # "as" nobody, or anything unreadable, is on: never looser than asked
+    assert board(tmp_path, {}, sign_in={"mode": "as"}).sign_in.mode == "on"
+    assert board(tmp_path, {}, sign_in="off").sign_in.mode == "on"

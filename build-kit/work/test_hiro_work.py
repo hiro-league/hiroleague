@@ -500,6 +500,37 @@ def test_env1_to_5_sign_in_as_env0_does_with_sends_and_has_automatic_writes_off(
     assert hw.switches.app_env(hw.switches.resolve("Full real")) == {"OUTPUTS": "on", "HA_AUTO_WRITES": "on"}
 
 
+def test_sign_in_follows_the_task_and_finds_the_person_in_the_environments_own_list(tmp_path, monkeypatch):
+    monkeypatch.setattr(hw, "TASKS", tmp_path)
+    monkeypatch.setattr(hw, "ROOT", tmp_path / "root")
+    monkeypatch.setattr(hw, "people_of", lambda env: [{"id": "p2", "name": "Maro", "role": "Adult"}])
+    assert hw.sign_in_of(2) == {"mode": "on"} and hw.sign_in_env(2) == {"AUTH": None}  # no task, no file
+    hw.save(hw.Task(id="t", title="t", env=2, repos=["homehiro"], sign_in="off"))
+    assert hw.sign_in_env(2) == {"AUTH": "off"} and hw.write_board(2)["sign_in"] == {"mode": "off"}
+    hw.save(hw.Task(id="t", title="t", env=2, repos=["homehiro"], sign_in="as", sign_in_as="maro"))
+    # as a person: the apps' sign-in stays on, and the core says who everyone is
+    assert hw.sign_in_env(2) == {"AUTH": None}
+    assert hw.write_board(2)["sign_in"] == {"mode": "as", "person": "p2", "name": "Maro"}
+    hw.save(hw.Task(id="t", title="t", env=2, repos=["homehiro"], sign_in="as", sign_in_as="Nobody"))
+    assert hw.write_board(2)["sign_in"] == {"mode": "on"}  # nobody found: never looser than asked
+
+
+def test_an_environments_family_list_is_names_and_roles_only(tmp_path, monkeypatch):
+    import sqlite3
+
+    monkeypatch.setattr(hw, "ROOT", tmp_path)
+    assert hw.people_of(2) == []  # no core database yet
+    db = hw.data_dir(2) / "core" / "default" / "db" / "workspace.db"
+    db.parent.mkdir(parents=True)
+    con = sqlite3.connect(db)
+    con.executescript("create table roles(role_id, name); create table people(person_id, name, role_id, whatsapp);"
+                      "insert into roles values('kid','Kid'); insert into people values('p1','Mark','kid','+20100');"
+                      "insert into people values('p0','Ana',null,null);")
+    con.commit()
+    con.close()
+    assert hw.people_of(2) == [{"id": "p0", "name": "Ana", "role": ""}, {"id": "p1", "name": "Mark", "role": "Kid"}]
+
+
 def test_an_environment_no_task_holds_reads_as_a_default_task_does(tmp_path, monkeypatch):
     monkeypatch.setattr(hw, "TASKS", tmp_path)
     assert hw.real_of(0) == []  # env0 is real already

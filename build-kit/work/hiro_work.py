@@ -304,6 +304,11 @@ class Task:
     # In env1..env5: its switchboard (switches.py): a preset, and the systems changed from it ({"ai": "real"})
     preset: str = switches.DEFAULT
     switches: dict[str, str] = field(default_factory=dict)
+    # Its sign-in there, for interactive use: "on" (as live), "off" (everyone is the owner) or "as" one person of the
+    # family list (`sign_in_as`: their id or name, as asked; found in the environment's own list when the file is
+    # written)
+    sign_in: str = "on"
+    sign_in_as: str = ""
     # What bigger work it is a piece of ("Work-flow plan"): CodeHiro names it "<part_of> › <title>" and groups by it
     part_of: str = ""
     # What it does, in a sentence: the Work area shows it under its name
@@ -519,10 +524,47 @@ def install_all(env: int, repos: list[str], task: str | None = None) -> None:
         install(env, repo, task)
 
 
-# Sign-in on, as in env0 (an AUTH line of env0's is dropped), so users and roles can be tried in every environment.
-# Sends and HA's automatic writes follow the environment's switchboard (switches.app_env), which every server reads
-# (HIRO_SWITCHBOARD)
+# Sign-in follows the environment's switchboard: an AUTH line of env0's is dropped (sign-in on, so users and roles
+# can be tried), and AUTH=off is written only where the task asked for sign-in off (sign_in_env). Sends and HA's
+# automatic writes follow the switchboard too (switches.app_env), which every server reads (HIRO_SWITCHBOARD)
 ENV_DEV_FORCED = {"AUTH": None}
+
+
+def people_of(env: int) -> list[dict]:
+    """envN's family list, from its core's own database: [{"id", "name", "role"}] (the role's name; "" for none).
+    Empty when the core has no database yet."""
+    db = data_dir(env) / "core" / "default" / "db" / "workspace.db"
+    if not db.exists():
+        return []
+    con = sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True)
+    try:
+        rows = con.execute("select p.person_id, p.name, coalesce(r.name, '') from people p "
+                           "left join roles r on r.role_id = p.role_id order by p.name").fetchall()
+    except sqlite3.Error:
+        return []
+    finally:
+        con.close()
+    return [{"id": r[0], "name": r[1], "role": r[2]} for r in rows]
+
+
+def sign_in_of(env: int) -> dict:
+    """envN's sign-in, as asked: its working task's (the person found in the environment's own family list; nobody
+    found: on, and said); an environment no task holds keeps what its file says."""
+    held = next((t for t in load_tasks() if t.state == "working" and t.env == env), None)
+    if not held:
+        return (switches.read(data_dir(env)) or {}).get("sign_in") or dict(switches.SIGN_IN_ON)
+    if held.sign_in != switches.board.AS:
+        return switches.sign_in(held.sign_in)
+    person = switches.find_person(people_of(env), held.sign_in_as)
+    if person is None:
+        say(f"  ! nobody in env{env}'s family list is {held.sign_in_as!r} (or more than one is): sign-in stays on")
+    return switches.sign_in(switches.board.AS, person)
+
+
+def sign_in_env(env: int) -> dict[str, str | None]:
+    """The apps' AUTH line in envN: off only where sign-in is off there (everyone is the owner); else none, so
+    sign-in is on and the core says who everyone is."""
+    return {"AUTH": "off" if sign_in_of(env)["mode"] == switches.board.OFF else None}
 
 
 def write_env_dev(env: int) -> None:
@@ -535,7 +577,7 @@ def write_env_dev(env: int) -> None:
         if not src.exists():  # an app with no .env.dev (Code reports) takes its settings from up (apps.toml api_env)
             continue
         lines = src.read_text(encoding="utf-8").splitlines()
-        forced = {**ENV_DEV_FORCED, **board, "DATA_DIR": (data_dir(env) / app).as_posix(),
+        forced = {**ENV_DEV_FORCED, **sign_in_env(env), **board, "DATA_DIR": (data_dir(env) / app).as_posix(),
                   **data.env_overrides(app, real, copy_lists())}
         keep = [ln for ln in lines if ln.split("=", 1)[0].strip() not in forced]
         keep += [f"{k}={v}" for k, v in forced.items() if v is not None]
@@ -564,11 +606,12 @@ def modes_of(env: int) -> dict[str, str]:
 def write_board(env: int) -> dict:
     """envN's switchboard file, from what was asked; its servers read it at start."""
     name, changes = board_of(env)
+    who = sign_in_of(env)
     try:
-        return switches.write(data_dir(env), env, name, changes)
+        return switches.write(data_dir(env), env, name, changes, sign_in=who)
     except switches.SwitchError as exc:
         say(f"  ! {exc}: {switches.DEFAULT} instead")
-        return switches.write(data_dir(env), env, switches.DEFAULT)
+        return switches.write(data_dir(env), env, switches.DEFAULT, sign_in=who)
 
 
 def real_of(env: int) -> list[str]:
@@ -769,6 +812,7 @@ def cmd_start(a) -> None:
         env = pick_env(tasks, a.env)
         task = Task(id=a.task, title=a.title or a.task, env=env, repos=repos,
                     preset=switches.preset(a.preset)["name"], switches=switches.parse_sets(a.set or []),
+                    sign_in="as" if a.as_person else "off" if a.quick_sign_in else "on", sign_in_as=a.as_person or "",
                     part_of=part_of_name(a.part_of), about=(a.about or "").strip(), data=a.data,
                     created=datetime.now().astimezone().isoformat(timespec="seconds"))
         save(task)  # the claim holds from here
@@ -919,7 +963,8 @@ def card(task: Task) -> None:
         say(f"  {task.about}")
     if task.env:
         say(f"  branch {task.branch} | data {data_dir(task.env)} | ports {min(p.values())}-{min(p.values()) + appfile.BLOCK - 1}")
-        say(f"  {switches.describe(switches.read(data_dir(task.env)))} | sign-in on")
+        rec = switches.read(data_dir(task.env))
+        say(f"  {switches.describe(rec)} | {switches.describe_sign_in(rec)}")
         say(f"  {data.describe_source(data.read_source(sys.modules[__name__], task.env))}")
 
 
@@ -942,15 +987,22 @@ def cmd_configure(a) -> None:
 
 
 def cmd_switch(a) -> None:
-    """hiro-work switch <env> [--preset NAME] [--set system=mode ...]: what envN reaches of each outside system. With
-    nothing to change it only shows. Else its servers must be down: the switchboard is written, the data copied again
+    """hiro-work switch <env> [--preset NAME] [--set system=mode ...] [--sign-in on|off | --as PERSON]: what envN
+    reaches of each outside system, and its sign-in (off: everyone is the owner; --as: everyone is that person of its
+    family list). With nothing to change it only shows. Else its servers must be down: the switchboard is written, the data copied again
     (what a copy keeps of logins and keys follows it), and the task working there keeps the choice."""
     env = a.env
     if not env:
         raise Stop("env0 is Michel's own: its settings decide what it reaches.")
-    if not a.preset and not a.set:
+    if a.sign_in and a.as_person:
+        raise Stop("--sign-in or --as, not both.")
+    who = ("as", a.as_person) if a.as_person else (a.sign_in, "") if a.sign_in else None
+    if who and who[0] == "as" and switches.find_person(people_of(env), who[1]) is None:
+        raise Stop(f"Nobody in env{env}'s family list is {who[1]!r} (or more than one is). Its people: "
+                   + (", ".join(f"{p['name']} ({p['role'] or 'no role'})" for p in people_of(env)) or "none") + ".")
+    if not a.preset and not a.set and not who:
         rec = switches.read(data_dir(env))
-        say(f"env{env}: {switches.describe(rec)}")
+        say(f"env{env}: {switches.describe(rec)} | {switches.describe_sign_in(rec)}")
         for system, (name, _modes) in switches.SYSTEMS.items():
             say(f"  {name:22} {(rec or {}).get('modes', {}).get(system, '-')}")
         return
@@ -973,9 +1025,14 @@ def cmd_switch(a) -> None:
     if held:
         with locked():
             held.preset, held.switches = name, changes
+            if who:
+                held.sign_in, held.sign_in_as = who
             save(held)
     else:
-        switches.write(data_dir(env), env, name, changes)
+        kept = (switches.read(data_dir(env)) or {}).get("sign_in")
+        if who:
+            kept = switches.sign_in(who[0], switches.find_person(people_of(env), who[1]))
+        switches.write(data_dir(env), env, name, changes, sign_in=kept)
     opened = set(real_of(env)) - before
     if opened:
         # A system that was closed opens: its addresses and logins were taken out of the copy, so the data is copied
@@ -987,8 +1044,9 @@ def cmd_switch(a) -> None:
         board = write_board(env)
         write_env_dev(env)
         configure(env, held.id if held else None)
-        say(f"env{env}: {switches.describe(board)}")
-    event(task=held.id if held else None, env=env, step="switch", phase="end", ok=True, preset=name, changes=changes)
+        say(f"env{env}: {switches.describe(board)} | {switches.describe_sign_in(board)}")
+    event(task=held.id if held else None, env=env, step="switch", phase="end", ok=True, preset=name, changes=changes,
+          sign_in=sign_in_of(env)["mode"])
     if up:
         cmd_up(type("A", (), {"env": env, "servers": up, "wait": 120})())
 
@@ -1631,6 +1689,10 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--preset", default=switches.DEFAULT,
                    help="env1..5: its switchboard's preset (hiro-work preset list); Safe when not said")
     s.add_argument("--set", action="append", metavar="SYSTEM=MODE", help="one system changed from the preset: ai=real")
+    s.add_argument("--quick-sign-in", action="store_true",
+                   help="env1..5, for interactive use: no sign-in screen, everyone is the owner")
+    s.add_argument("--as", dest="as_person", metavar="PERSON",
+                   help="env1..5, for interactive use: no sign-in screen, everyone is this person of the family list")
     s.add_argument("--data", default="env0", metavar="SOURCE",
                    help="where its data comes from: env0 (default), vanilla (a fresh install), live or live:<stamp>")
     for verb in ("park", "review"):
@@ -1674,6 +1736,9 @@ def main(argv: list[str] | None = None) -> int:
     sw.add_argument("env", type=int, choices=list(ENVS))
     sw.add_argument("--preset", help="a preset's name (hiro-work preset list)")
     sw.add_argument("--set", action="append", metavar="SYSTEM=MODE", help="one system's mode, like ai=real (repeat)")
+    sw.add_argument("--sign-in", choices=["on", "off"], help="on: as live; off: no sign-in screen, everyone is the owner")
+    sw.add_argument("--as", dest="as_person", metavar="PERSON",
+                    help="no sign-in screen: everyone is this person of its family list (a name or an id)")
     sw.add_argument("--restart", action="store_true", help="stop its servers that are up, and start them again after")
     sw.set_defaults(func=cmd_switch)
     pr = sub.add_parser("preset", help="the switchboard's presets: list, save <name> --from <env>, remove <name>")

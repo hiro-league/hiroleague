@@ -9,6 +9,9 @@ export type Place = {
 	preset: string; // "Safe"
 	problem?: string; // the switchboard couldn't be read: every system is off
 	systems?: { id: string; name: string; mode: PlaceMode }[];
+	/** off: no sign-in screen, everyone is the owner; as: everyone is one person (sign_in_as). */
+	sign_in?: 'on' | 'off' | 'as';
+	sign_in_as?: string;
 };
 
 /** A mode in the banner's words. */
@@ -32,4 +35,11 @@ export function placeOf(me: unknown): Place | null {
 export function inBannerOrder(place: Place): NonNullable<Place['systems']> {
 	const systems = place.systems ?? [];
 	return [...systems.filter((s) => s.mode === 'real'), ...systems.filter((s) => s.mode !== 'real')];
+}
+
+/** Who everyone is where the sign-in screen is off, in the banner's words; null with sign-in on. */
+export function everyoneIs(place: Place): string | null {
+	if (place.sign_in === 'off') return 'No sign-in: everyone is the owner';
+	if (place.sign_in === 'as') return `No sign-in: everyone is ${place.sign_in_as || 'one person'}`;
+	return null;
 }

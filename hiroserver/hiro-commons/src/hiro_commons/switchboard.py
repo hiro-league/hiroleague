@@ -14,6 +14,12 @@ broken file never opens a real system.
     from hiro_commons import switchboard
     switchboard.check("ha", write=True)      # raises Refused unless Home Assistant is real
     switchboard.mode("ai")                    # "real" | "read" | "fake" | "off"
+
+The same file says the environment's sign-in, for interactive use (`sign_in`): "on" (as live: people sign in), "off"
+(no sign-in screen: everyone is the owner) or "as" a person of the family list (no sign-in screen: everyone is that
+person, with their role). The core and the backend kit read it; live and env0 name no file, so sign-in is theirs.
+
+    switchboard.sign_in()                     # SignIn(mode="as", person="<id>", name="Mark")
 """
 
 from __future__ import annotations
@@ -43,6 +49,35 @@ SYSTEMS: dict[str, tuple[str, tuple[str, ...]]] = {
 }
 
 
+ON, AS = "on", "as"  # sign-in's modes, with OFF
+
+
+@dataclass(frozen=True)
+class SignIn:
+    """A test environment's sign-in: "on", "off" (everyone is the owner) or "as" one person of the family list."""
+
+    mode: str = ON
+    person: str = ""  # "as": the core person's id
+    name: str = ""  # "as": their name, for the banner
+
+    @property
+    def quick(self) -> bool:
+        """No sign-in screen here."""
+        return self.mode in (OFF, AS)
+
+
+def sign_in_of(raw: object) -> SignIn:
+    """The file's `sign_in` as a SignIn; anything unreadable, or "as" with nobody named, is on (never looser)."""
+    if not isinstance(raw, dict):
+        return SignIn()
+    mode, person = str(raw.get("mode") or ON), str(raw.get("person") or "")
+    if mode == OFF:
+        return SignIn(OFF)
+    if mode == AS and person:
+        return SignIn(AS, person, str(raw.get("name") or ""))
+    return SignIn()
+
+
 class Refused(Exception):
     """A system this place may not reach that way. The message is for people: it names the system, its mode and the
     place."""
@@ -66,6 +101,7 @@ class Switchboard:
     preset: str = ""
     modes: dict[str, str] = field(default_factory=dict)
     problem: str = ""  # the file couldn't be read: everything is off
+    sign_in: SignIn = field(default_factory=SignIn)  # live and env0: never read (their own sign-in decides)
 
     def mode(self, system: str) -> str:
         if self.live:
@@ -95,6 +131,7 @@ class Switchboard:
             return None
         named = set(systems)
         return {"place": self.place, "preset": self.preset, "problem": self.problem,
+                "sign_in": self.sign_in.mode, "sign_in_as": self.sign_in.name,
                 "systems": [{"id": s, "name": name, "mode": self.mode(s)} for s, (name, _) in SYSTEMS.items()
                             if s in named]}
 
@@ -107,7 +144,8 @@ def read(environ: dict[str, str] | None = None) -> Switchboard:
     try:
         doc = json.loads(Path(path).read_text(encoding="utf-8"))
         modes = {str(k): str(v) for k, v in dict(doc["modes"]).items()}
-        return Switchboard(False, str(doc.get("place") or "this environment"), str(doc.get("preset") or ""), modes)
+        return Switchboard(False, str(doc.get("place") or "this environment"), str(doc.get("preset") or ""), modes,
+                           sign_in=sign_in_of(doc.get("sign_in")))
     except (OSError, ValueError, KeyError, TypeError) as exc:
         return Switchboard(False, "this environment", problem=f"{path} can't be read ({type(exc).__name__}): "
                                                                "every outside system is off")
@@ -138,3 +176,8 @@ def summary() -> dict | None:
 
 def page(systems: Iterable[str]) -> dict | None:
     return board().page(systems)
+
+
+def sign_in() -> SignIn:
+    """This place's sign-in: on in live and env0 (no file), else what the environment's file says."""
+    return board().sign_in

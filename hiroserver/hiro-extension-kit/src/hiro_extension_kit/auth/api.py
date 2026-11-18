@@ -61,8 +61,13 @@ def not_linked(name: str) -> str:
 
 async def caller(request: Request) -> Caller:
     """Who sent this request: signed in here (the session cookie), the app's other way in (HomeHiro: HA's add-on,
-    mapped to the core person through its links; user_id "" when not linked), or sign-in off."""
-    c = caller_of(request.headers, ext().auth)
+    mapped to the core person through its links; user_id "" when not linked), or sign-in off. In a test environment
+    whose switchboard turns the sign-in screen off, everyone is the owner, or the one person it names (with their
+    role, from the family list, as if they had signed in)."""
+    quick = switchboard.sign_in()
+    if quick.mode == "as":
+        return Caller(quick.person, quick.name or quick.person, "web", device_of(request.headers.get("user-agent", "")))
+    c = caller_of(request.headers, ext().auth and not quick.quick)
     if c is not None:
         return c
     other = ext().other_way
@@ -104,6 +109,8 @@ class PlaceOut(BaseModel):
     place: str  # "env2"
     preset: str  # "Safe"
     problem: str = ""  # the switchboard couldn't be read: every system is off
+    sign_in: Literal["on", "off", "as"] = "on"  # off: no sign-in screen, everyone is the owner; as: everyone is one person
+    sign_in_as: str = ""  # "as": that person's name
     systems: list[PlaceSystem] = []
 
 

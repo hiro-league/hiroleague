@@ -66,3 +66,9 @@ def page() -> dict | None:
     from .extension import ext
 
     return _board.page(ext().systems)
+
+
+def sign_in() -> _board.SignIn:
+    """This place's sign-in: on in live and env0; in a test environment what its switchboard says (off: everyone is
+    the owner; as: everyone is the one person it names)."""
+    return _board.sign_in()

@@ -111,7 +111,17 @@ def check_data(ask: dict) -> tuple[str, int, list[str]]:
         env = ask.get("env")
         if not isinstance(env, int) or not 1 <= env <= 5:
             raise Refused(f"no environment {env!r} to switch (env1 to env5)")
-        return verb, env, ["switch", str(env), "--preset", base, *[x for s in sets for x in ("--set", s)], "--restart"]
+        # Its sign-in, when the ask says one: on, off, or as a person of its family list (their id; hiro-work finds them)
+        who: list[str] = []
+        mode, person = ask.get("sign_in"), str(ask.get("person") or "")
+        if mode in ("on", "off"):
+            who = ["--sign-in", mode]
+        elif mode == "as" and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", person):
+            who = ["--as", person]
+        elif mode is not None:
+            raise Refused(f"no sign-in {mode!r} {person!r} (on, off, or as a person's id)")
+        return verb, env, ["switch", str(env), "--preset", base, *[x for s in sets for x in ("--set", s)], *who,
+                           "--restart"]
     env, source = ask.get("env"), str(ask.get("source") or "")
     if not isinstance(env, int) or not 1 <= env <= 5:
         raise Refused(f"no environment {env!r} for data (env1 to env5)")
@@ -201,7 +211,9 @@ def changes(said: dict[int, dict]) -> dict[int, dict]:
         now[env] = {"repos": hw.changed_repos(env, tasks), "leftovers": hw.leftovers(env, tasks),
                     "data": hw.data.read_source(hw, env),
                     # What it reaches of each outside system: its preset, its changes and every mode (switches.py)
-                    "switchboard": hw.switches.read(hw.data_dir(env)) if env else None}
+                    "switchboard": hw.switches.read(hw.data_dir(env)) if env else None,
+                    # Its family list, names and roles only, for the card's "everyone is ..." picker
+                    "people": hw.people_of(env) if env else []}
         if env == 0:
             now[env]["live_copies"] = hw.data.live_copy_list(hw)
             # The presets and the systems (their names and the modes each can take), for the cards' dialog
