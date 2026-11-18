@@ -696,3 +696,13 @@ def test_a_live_copys_databases_take_an_environments_place_with_its_own_per_plac
     assert lines == ["homehiro/homehiro.db: from live copy 2026-11-16_0015"]
     assert rows(target, "select count(*) from person") == [(5,)]  # live's rows
     assert rows(target, "select key from setting") == [("ha_token",)]  # env0's own per-place row kept
+
+
+def test_a_live_copy_from_before_the_lists_is_refused_for_an_environment_too(tmp_path, lists):
+    hw = FakeHw(tmp_path)
+    src = tmp_path / "data" / "live-copies" / "2026-11-16_0015"
+    src.mkdir(parents=True)
+    (src / "counts.json").write_text(json.dumps({"core/workspace.db": {"live": {}, "copy": {}}}), encoding="utf-8")
+    with pytest.raises(FakeHw.Stop, match="no copy list names"):
+        data.copy_live_into(hw, 2, src, lists)
+    assert not (tmp_path / "data" / "env2" / "core").exists()  # nothing was written

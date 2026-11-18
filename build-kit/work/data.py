@@ -507,14 +507,25 @@ def copy_files(hw: ModuleType, archive: Path, lists: Lists) -> list[str]:
     return lines
 
 
+def unknown_keys(meta: dict, lists: Lists) -> list[str]:
+    """A live copy's databases that no copy list names as a database (a copy from before the lists named the core's
+    without their db/ folder)."""
+    out = []
+    for key in meta:
+        group, _, path = key.partition("/")
+        item = lists[group].item(path) if group in lists else None
+        if item is None or item.kind != "database":
+            out.append(key)
+    return out
+
+
 def apply(hw: ModuleType, src: Path, lists: Lists) -> None:
     """Put a live copy into env0: servers stopped, env0's databases moved to the archive, the copies in their place
     with env0's own settings, servers started again, row counts reported."""
     meta = json.loads((src / "counts.json").read_text(encoding="utf-8"))
     # Live copies from before the copy lists name the core's databases without their db/ folder; no shim for them,
     # the code is young: fetch a new copy instead (working-rules.md, "No backward compatibility")
-    unknown = [k for k in meta if k.split("/", 1)[0] not in lists
-               or lists[k.split("/", 1)[0]].item(k.split("/", 1)[1]) is None]
+    unknown = unknown_keys(meta, lists)
     if unknown:
         raise hw.Stop(f"{src.name} holds {', '.join(unknown)}, which no copy list names: fetch a new copy "
                       "(hiro-work refresh-data). Nothing was changed.")
@@ -823,13 +834,15 @@ def copy_live_into(hw: ModuleType, env: int, src: Path, lists: Lists) -> list[st
     from the live copy with the environment's own per-place rows (env0's, just copied) put back, as an apply does in
     env0. The files (pictures, keys) stay env0's. What it did, in words."""
     meta = json.loads((src / "counts.json").read_text(encoding="utf-8"))
+    unknown = unknown_keys(meta, lists)
+    if unknown:
+        raise hw.Stop(f"{src.name} holds {', '.join(unknown)}, which no copy list names: use a newer copy (hiro-work "
+                      "data <env> live fetches one). Nothing was changed.")
     lines = []
     for key, m in meta.items():
         if m.get("missing"):
             continue
         group, path = key.split("/", 1)
-        if group not in lists:
-            continue
         target = group_dir(hw.data_dir(env), group) / path
         tmp = target.with_name(target.name + ".live")
         target.parent.mkdir(parents=True, exist_ok=True)
