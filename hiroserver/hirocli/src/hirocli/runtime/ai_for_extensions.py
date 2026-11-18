@@ -19,7 +19,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from hiro_channel_sdk.constants import AI_ERROR_INVALID, METHOD_AI_ASK, METHOD_AI_CHAT, METHOD_AI_PROFILES
+from hiro_channel_sdk.constants import AI_ERROR_FAILED, AI_ERROR_INVALID, METHOD_AI_ASK, METHOD_AI_CHAT, METHOD_AI_PROFILES
 from hiro_commons.log import Logger
 
 from ..domain.credential_store import CredentialStore
@@ -29,7 +29,7 @@ from ..domain.workspace import workspace_id_for_path
 from ..services.ai_ask import AskError, extension_use_map, get_ask_runner, profile_rows
 from ..services.ai_ask.folders import check_folder
 from ..services.ai_ask.params import ask_request_from_params, chat_request_from_params
-from .request_handler import EXTENSIONS_ONLY, RequestContext, RequestRefused
+from .request_handler import EXTENSIONS_ONLY, RequestContext, RequestRefused, gate
 
 log = Logger.get("AI.ASK")
 
@@ -59,6 +59,7 @@ async def _checked_folder(folder: str, name: str, use: str, ctx: RequestContext)
 
 
 async def handle_ai_ask(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
+    gate("ai", AI_ERROR_FAILED)  # a test environment's switchboard: asked for every app, here
     name = await _caller_name(ctx)
     use = params.get("use")
     if not isinstance(use, str) or not use.strip():
@@ -78,6 +79,7 @@ async def handle_ai_ask(params: dict[str, Any], ctx: RequestContext) -> dict[str
 
 
 async def handle_ai_chat(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
+    gate("ai", AI_ERROR_FAILED)
     name = await _caller_name(ctx)
     use = params.get("use")
     if not isinstance(use, str) or not use.strip():

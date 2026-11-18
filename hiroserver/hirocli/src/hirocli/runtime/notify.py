@@ -28,12 +28,13 @@ from hiro_channel_sdk.constants import (
     NOTIFY_STYLE_CHARACTER,
     NOTIFY_STYLE_EXACT,
     WHATSAPP_CALL_SEND,
+    WHATSAPP_ERROR_FAILED,
 )
 from hiro_commons.log import Logger
 
 from ..domain.people import get_person
 from .channel_manager import ChannelCallError
-from .request_handler import EXTENSIONS_ONLY, RequestContext, RequestRefused
+from .request_handler import EXTENSIONS_ONLY, RequestContext, RequestRefused, gate
 from .whatsapp_for_extensions import (
     SEND_TIMEOUT_S,
     WHATSAPP_CHANNEL,
@@ -175,6 +176,7 @@ async def notify(
 
 async def handle_notify(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
     """The ``notify`` extension request (contract in hiro_channel_sdk.constants)."""
+    gate("whatsapp", WHATSAPP_ERROR_FAILED)  # a test environment's switchboard
     try:
         recipients = await asyncio.to_thread(parse_recipients, params.get("to"), Path(ctx.server_ctx.workspace_path))
         results = await notify(

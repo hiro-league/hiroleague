@@ -16,6 +16,7 @@ from dataclasses import asdict
 from typing import Any
 
 from hiro_channel_sdk.constants import (
+    AI_ERROR_FAILED,
     AI_ERROR_INVALID,
     METHOD_AI_EMBED,
     METHOD_AI_RERANK,
@@ -33,7 +34,7 @@ from ..domain.preferences import (
 )
 from ..services import search_profiles as search
 from .ai_for_extensions import _caller_name
-from .request_handler import EXTENSIONS_ONLY, RequestContext, RequestRefused
+from .request_handler import EXTENSIONS_ONLY, RequestContext, RequestRefused, gate
 
 log = Logger.get("AI.SEARCH")
 
@@ -72,6 +73,7 @@ def _use_and_profile(params: dict[str, Any], name: str) -> tuple[str | None, str
 
 
 async def handle_ai_embed(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
+    gate("ai", AI_ERROR_FAILED)  # embeddings and reranking are AI: a test environment's switchboard decides
     name = await _caller_name(ctx)
     use_key, profile_id = _use_and_profile(params, name)
     texts = _texts(params, "texts", search.MAX_TEXTS)
@@ -86,6 +88,7 @@ async def handle_ai_embed(params: dict[str, Any], ctx: RequestContext) -> dict[s
 
 
 async def handle_ai_rerank(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
+    gate("ai", AI_ERROR_FAILED)
     name = await _caller_name(ctx)
     use_key, profile_id = _use_and_profile(params, name)
     query = _text(params, "query", required=True)

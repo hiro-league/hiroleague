@@ -38,7 +38,7 @@ from hiro_channel_sdk.constants import (
 from hiro_commons.log import Logger
 
 from .channel_manager import ChannelCallError
-from .request_handler import EXTENSIONS_ONLY, RequestContext, RequestRefused
+from .request_handler import EXTENSIONS_ONLY, RequestContext, RequestRefused, gate
 
 if TYPE_CHECKING:
     from .server_context import ServerContext
@@ -153,6 +153,7 @@ async def record_for_owner(server_ctx: ServerContext, params: dict[str, Any], se
 
 
 async def handle_whatsapp_send(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
+    gate("whatsapp", WHATSAPP_ERROR_FAILED)  # a test environment's switchboard
     send = _validated_send(params)
     server_ctx = ctx.server_ctx
     sender = sender_label(ctx)
@@ -175,6 +176,7 @@ async def handle_whatsapp_send(params: dict[str, Any], ctx: RequestContext) -> d
 
 
 async def handle_whatsapp_check(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
+    gate("whatsapp", WHATSAPP_ERROR_FAILED)
     raw = params.get("numbers")
     if not isinstance(raw, list):
         raise RequestRefused("invalid_params", "numbers must be a list")

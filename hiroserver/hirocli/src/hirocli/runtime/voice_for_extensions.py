@@ -30,7 +30,7 @@ from ..domain.people import get_person
 from ..services import voice
 from ..services.voice.kit import MAX_CHARS
 from .ai_for_extensions import _caller_name
-from .request_handler import EXTENSIONS_ONLY, RequestContext, RequestRefused
+from .request_handler import EXTENSIONS_ONLY, RequestContext, RequestRefused, gate
 
 log = Logger.get("VOICE")
 
@@ -38,6 +38,7 @@ MAX_LABEL = 80
 
 
 async def handle_voice_speak(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
+    gate("voices", VOICE_ERROR_FAILED)  # a test environment's switchboard
     name = await _caller_name(ctx)
     text, use, profile_id, person_id, label = _params(params)
     if person_id and await asyncio.to_thread(get_person, ctx.workspace_path, person_id) is None:
