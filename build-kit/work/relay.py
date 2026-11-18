@@ -20,9 +20,9 @@ each environment whose list differs from the last one said (all of them when it 
 nothing has changed yet. The same event says what the environment holds that no task there owns
 (hiro_work.leftovers: uncommitted files, a stray branch, commits off the trunk), shown at the card's foot.
 
-Every 10 minutes it looks at env0's data folders for what no copy list covers (data.drift): a "copy-lists" event when
-that differs from the last one said, shown in Work › Sweep and Work › Data. The lists are read again each time, so a
-land's new lists count at once.
+Every 10 minutes it looks at env0's data folders for what no copy list covers (data.survey): a "copy-lists" event,
+with each listed item's size, when that differs from the last one said and at least every hour, shown in Work › Sweep
+and Work › Data. The lists are read again each time, so a land's new lists count at once.
 
     pythonw relay.py              run (what the Startup shortcut starts)
     python relay.py --install     a shortcut in this Windows user's Startup folder ("Hiro League work relay": starts it
@@ -55,6 +55,7 @@ URL = ship.URL.rsplit("/events", 1)[0] + "/asks/next"  # http://reports.local/ap
 EVERY_S = 3
 CHANGES_EVERY_S = 60  # how often each environment's changed repos are looked at
 DRIFT_EVERY_S = 600  # how often env0's data folders are compared with the copy lists
+SIZES_EVERY_S = 3600  # how often env0's sizes are said when nothing else changed
 NAME = "Hiro League work relay"
 SHORTCUT = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup" / (
     NAME + ".lnk")
@@ -138,14 +139,16 @@ def changes(said: dict[int, dict]) -> dict[int, dict]:
     return now
 
 
-def drift(said: list[dict] | None) -> list[dict]:
-    """env0's files no copy list covers, and a "copy-lists" event when that differs from what was said."""
+def drift(said: list[dict] | None, said_at: float) -> tuple[list[dict], float]:
+    """env0's files no copy list covers; a "copy-lists" event, measured, when that differs from what was said or the
+    last one is an hour old. (what is said now, when it was said)"""
     lists = hw.data.load(hw.env_dir(0))
-    now = hw.data.drift(hw, lists, ("env0",))
-    if now != said:
-        hw.event(task=None, env=None, step="copy-lists", phase="end", ok=True, place="env0",
-                 unlisted=[{"group": f["group"], "names": f["names"]} for f in now])
-    return now
+    now = hw.data.survey(hw, lists, "env0", measure=False)["unlisted"]
+    if now != said or time.monotonic() - said_at >= SIZES_EVERY_S:
+        measured = hw.data.survey(hw, lists, "env0")
+        hw.event(task=None, env=None, step="copy-lists", phase="end", ok=True, place="env0", **measured)
+        return measured["unlisted"], time.monotonic()
+    return now, said_at
 
 
 def serve() -> int:
@@ -161,7 +164,7 @@ def serve() -> int:
     down = False
     said: dict[int, dict] = {}
     said_drift: list[dict] | None = None
-    looked = drifted = 0.0
+    looked = drifted = said_drift_at = 0.0
     while True:
         if time.monotonic() - looked >= CHANGES_EVERY_S:
             looked = time.monotonic()
@@ -172,7 +175,7 @@ def serve() -> int:
         if time.monotonic() - drifted >= DRIFT_EVERY_S:
             drifted = time.monotonic()
             try:
-                said_drift = drift(said_drift)
+                said_drift, said_drift_at = drift(said_drift, said_drift_at)
             except (OSError, ValueError) as exc:  # a list hiro-work can't read (ListError is one): said, tried later
                 log(f"copy lists not compared: {exc}")
         try:

@@ -247,6 +247,12 @@ def test_the_cores_own_copy_list_reads_and_says_why_for_every_item():
      '[[env]]\nname = "X"\nwhy = "w"\n', "value or drop"),
     ('[[item]]\npath = "a"\nkind = "folder"\nlive = "own"\nenvs = "none"\nwhy = "w"\n'
      '[[setting]]\nkey = "k"\nneeds = "ai"\nwhy = "w"\n', "needs"),
+    ('[[item]]\npath = "a"\nkind = "folder"\nlive = "own"\nenvs = "none"\nwhy = "w"\n'
+     '[[item]]\npath = "a"\nkind = "folder"\nlive = "own"\nenvs = "none"\nwhy = "again"\n', "listed twice"),
+    ('[[item]]\npath = "a"\nkind = "folder"\nlive = "own"\nenvs = "none"\nwhy = "w"\n'
+     '[[setting]]\nkey = "k"\nwhy = "w"\n[[setting]]\nkey = "k"\nwhy = "again"\n', "listed twice"),
+    ('[[item]]\npath = "a"\nkind = "folder"\nlive = "own"\nenvs = "none"\nwhy = "w"\n'
+     '[[env]]\nname = "X"\ndrop = true\nwhy = "w"\n[[env]]\nname = "X"\nvalue = "1"\nwhy = "again"\n', "listed twice"),
 ])
 def test_a_wrong_copy_list_stops_with_the_file_and_the_reason(bad, says):
     with pytest.raises(copylist.ListError, match=says):
@@ -545,11 +551,32 @@ def test_what_no_list_covers_is_found_in_env0_and_live_and_told_to_codehiro(tmp_
         def event(**e):
             sent.append(e)
 
-    monkeypatch.setattr(data, "live_listing", lambda lst, group: ["new-uploads"] if group == "studyhiro" else [])
+    monkeypatch.setattr(data, "live_listing", lambda lst, group: ["new-uploads", "studyhiro.db"] if group == "studyhiro" else [])
+    monkeypatch.setattr(data, "live_bytes", lambda lst, names: {n: 7 for n in names})
+    (tmp_path / "env0" / "homehiro" / "people" / "a.jpg").write_bytes(b"12345")
     found = data.report_drift(Hw, lists)
     assert found == [{"group": "homehiro", "place": "env0", "names": ["tts-cache"]},
                      {"group": "studyhiro", "place": "live", "names": ["new-uploads"]}]
+    assert sent[0]["sizes"]["homehiro"] == {"people": 5} and sent[1]["sizes"]["studyhiro"] == {"studyhiro.db": 7}
     assert [(e["step"], e["place"], e["unlisted"]) for e in sent] == [
         ("copy-lists", "env0", [{"group": "homehiro", "names": ["tts-cache"]}]),
         ("copy-lists", "live", [{"group": "studyhiro", "names": ["new-uploads"]}])]
     assert data.said_drift([]) == ["  nothing: every file in the data folders looked at is listed."]
+
+
+def test_an_apps_setting_the_cores_list_already_covers_is_refused(tmp_path):
+    (tmp_path / "hiroleague").mkdir()
+    (tmp_path / "hiroleague" / "data.toml").write_text(CORE_LIST, "utf-8")
+    (tmp_path / "homehiro").mkdir()
+    item = '[[item]]\npath = "a.db"\nkind = "database"\nlive = "copy"\nenvs = "copy"\nwhy = "w"\n'
+    for key, extra, says in (("hiroleague_url", "", "already makes it per-place"),  # the kit's key
+                             ("tv_key", "", "already makes it per-place"),  # the pattern's (_key$)
+                             ("ha_url", 'needs = "reads"\n', None)):  # the pattern's, but needs says more
+        (tmp_path / "homehiro" / "data.toml").write_text(
+            f'live = "~/h"\n{item}[[setting]]\nkey = "{key}"\n{extra}why = "w"\n', "utf-8")
+        if says:
+            with pytest.raises(copylist.ListError, match=says):
+                copylist.load_all(tmp_path, ["homehiro"])
+            assert copylist.main([str(tmp_path / "homehiro")]) == 1  # the commit's check says so too
+        else:
+            assert copylist.load_all(tmp_path, ["homehiro"])["homehiro"].settings[0].needs == "reads"

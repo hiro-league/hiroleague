@@ -59,20 +59,28 @@ def test_changes_are_said_for_made_environments_only_when_they_differ(tmp_path, 
     assert sent == [(2, "changes", ["homehiro"], [{"repo": "nethiro", "what": "1 uncommitted file"}])]
 
 
-def test_env0s_unlisted_files_are_said_only_when_they_change(monkeypatch):
-    found = [{"group": "homehiro", "place": "env0", "names": ["tts-cache"]}]
+def test_env0s_unlisted_files_are_said_when_they_change_and_its_sizes_every_hour(monkeypatch):
+    found = [{"group": "homehiro", "names": ["tts-cache"]}]
     monkeypatch.setattr(relay.hw.data, "load", lambda root: {})
-    monkeypatch.setattr(relay.hw.data, "drift", lambda hw, lists, places: list(found))
+    monkeypatch.setattr(relay.hw.data, "survey", lambda hw, lists, place, measure=True: {
+        "unlisted": list(found), **({"sizes": {"homehiro": {"homehiro.db": 5}}} if measure else {})})
+    clock = [10_000.0]
+    monkeypatch.setattr(relay.time, "monotonic", lambda: clock[0])
     sent = []
-    monkeypatch.setattr(relay.hw, "event", lambda **e: sent.append((e["step"], e["place"], e["unlisted"])))
-    said = relay.drift(None)
-    assert sent == [("copy-lists", "env0", [{"group": "homehiro", "names": ["tts-cache"]}])]
+    monkeypatch.setattr(relay.hw, "event", lambda **e: sent.append((e["step"], e["place"], e["unlisted"], e["sizes"])))
+    said, at = relay.drift(None, 0.0)
+    assert sent == [("copy-lists", "env0", [{"group": "homehiro", "names": ["tts-cache"]}], {"homehiro": {"homehiro.db": 5}})]
     sent.clear()
-    said = relay.drift(said)
-    assert sent == []  # as it was said
+    clock[0] += 600
+    said, at = relay.drift(said, at)
+    assert sent == []  # as it was said, and not an hour yet
     found.clear()
-    relay.drift(said)
-    assert sent == [("copy-lists", "env0", [])]  # listed now: said, so Sweep clears it
+    said, at = relay.drift(said, at)
+    assert [e[2] for e in sent] == [[]]  # listed now: said, so Sweep clears it
+    sent.clear()
+    clock[0] += 3600
+    relay.drift(said, at)
+    assert len(sent) == 1  # the hour's sizes
 
 
 def test_it_asks_codehiro_beside_the_events_it_sends():

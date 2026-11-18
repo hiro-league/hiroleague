@@ -27,6 +27,7 @@ import contextlib
 import json
 import os
 import re
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -629,26 +630,70 @@ def live_listing(lst: CopyList, group: str) -> list[str]:
 PLACES = ("env0", "live")
 
 
-def drift(hw: ModuleType, lists: Lists, places: tuple[str, ...] = PLACES) -> list[dict]:
-    """What env0's or live's data folders hold that no copy list covers (copied nowhere until it is listed):
-    [{group, place, names}], groups with nothing unlisted left out."""
-    out = []
+def tree_bytes(path: Path) -> int:
+    """A file's or folder's size on disk, in bytes (a hard-linked file counts in each folder that has it)."""
+    if path.is_file():
+        return path.stat().st_size
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for f in files:
+            with contextlib.suppress(OSError):  # a file that went while it was counted
+                total += os.stat(os.path.join(root, f)).st_size
+    return total
+
+
+def live_bytes(lst: CopyList, names: list[str]) -> dict[str, int]:
+    """Each name's size in a live data folder, in bytes (du on Simone, one call)."""
+    if not names:
+        return {}
+    # The live folder as live_listing names it (a ~ path of the lists' own, so the remote shell expands it)
+    out = ssh(["cd", lst.live, "&&", "du", "-sb", "--",
+               *[shlex.quote(n) for n in names]], timeout=600)
+    sizes = {}
+    for line in out.splitlines():
+        size, _, name = line.partition("	")
+        if size.isdigit():
+            sizes[name] = int(size)
+    return sizes
+
+
+def survey(hw: ModuleType, lists: Lists, place: str, measure: bool = True) -> dict:
+    """One place's data folders (env0's or live's) against the copy lists: what no list covers (`unlisted`, copied
+    nowhere until it is listed: [{group, names}]) and, when measured, each listed item's size there (`sizes`:
+    {group: {path: bytes}}, a pattern's files added up)."""
+    unlisted, sizes = [], {}
     for group, lst in lists.items():
-        for place in places:
-            names = listing(env0_group(hw, group), group) if place == "env0" else live_listing(lst, group)
-            left = copylist.unlisted(lst, names)
-            if left:
-                out.append({"group": group, "place": place, "names": left})
-    return out
+        folder = env0_group(hw, group)
+        names = listing(folder, group) if place == "env0" else live_listing(lst, group)
+        left = copylist.unlisted(lst, names)
+        if left:
+            unlisted.append({"group": group, "names": left})
+        if not measure:
+            continue
+        measured = ({n: tree_bytes(folder / n) for n in names} if place == "env0" else live_bytes(lst, names))
+        per: dict[str, int] = {}
+        for name, size in measured.items():
+            item = lst.item(re.sub(r"-(wal|shm|journal)$", "", name)) or lst.item(name)
+            if item:
+                per[item.path] = per.get(item.path, 0) + size
+        sizes[group] = per
+    return {"unlisted": unlisted, "sizes": sizes}
+
+
+def drift(hw: ModuleType, lists: Lists, places: tuple[str, ...] = PLACES) -> list[dict]:
+    """What env0's or live's data folders hold that no copy list covers: [{group, place, names}], unmeasured."""
+    return [{**u, "place": place} for place in places for u in survey(hw, lists, place, measure=False)["unlisted"]]
 
 
 def report_drift(hw: ModuleType, lists: Lists, places: tuple[str, ...] = PLACES) -> list[dict]:
-    """drift(), and a "copy-lists" event per place looked at: CodeHiro's Work › Sweep and Work › Data show the latest
-    of each (run by copy-list --check, the PC's helper for env0, the deploy train for live)."""
-    found = drift(hw, lists, places)
+    """Each place surveyed and measured, and a "copy-lists" event per place: CodeHiro's Work › Sweep and Work › Data
+    show the latest of each (run by copy-list --check, the PC's helper for env0, the deploy train for live). What no
+    list covers, as drift() says it."""
+    found = []
     for place in places:
-        hw.event(task=None, env=None, step="copy-lists", phase="end", ok=True, place=place,
-                 unlisted=[{"group": f["group"], "names": f["names"]} for f in found if f["place"] == place])
+        s = survey(hw, lists, place)
+        hw.event(task=None, env=None, step="copy-lists", phase="end", ok=True, place=place, **s)
+        found += [{**u, "place": place} for u in s["unlisted"]]
     return found
 
 

@@ -189,6 +189,8 @@ def parse(text: str, group: str, name: str = FILE) -> CopyList:
         _fields(d, where, {"key", "why"}, {"needs"})
         if "needs" in d:
             _one_of(d["needs"], ("reads", "writes"), where + ", needs")
+        if any(x.key == d["key"] for x in settings):
+            raise ListError(f"{where}: listed twice")
         settings.append(Setting(d["key"], d["why"], d.get("needs")))
     switches = []
     for n, d in enumerate(doc.get("switch", []), 1):
@@ -203,6 +205,9 @@ def parse(text: str, group: str, name: str = FILE) -> CopyList:
             raise ListError(f"{where}: a JSON file's switch names a key")
         if "unless" in d:
             _one_of(d["unless"], REAL, where + ", unless")
+        if any((x.path, x.table, x.column, x.key) == (d["path"], d.get("table"), d.get("column"), d.get("key"))
+               for x in switches):
+            raise ListError(f"{where}: listed twice")
         switches.append(Switch(d["path"], d["why"], d["value"], d.get("unless"), d.get("table"), d.get("column"),
                                d.get("key")))
     env = []
@@ -220,6 +225,8 @@ def parse(text: str, group: str, name: str = FILE) -> CopyList:
                 raise ListError(f"{where}: match isn't a pattern: {exc}") from exc
         if "unless" in d:
             _one_of(d["unless"], REAL, where + ", unless")
+        if any((x.name, x.match) == (d.get("name"), d.get("match")) for x in env):
+            raise ListError(f"{where}: listed twice")
         env.append(EnvLine(d["why"], d.get("name"), d.get("match"), d.get("value"), bool(d.get("drop")),
                            d.get("unless")))
     every = None
@@ -245,8 +252,21 @@ def load(root: Path, group: str) -> CopyList:
 
 
 def load_all(root: Path, apps: list[str]) -> dict[str, CopyList]:
-    """The core's list, then each app's, in apps.toml's order."""
-    return {g: load(root, g) for g in [CORE, *apps]}
+    """The core's list, then each app's, in apps.toml's order; an app's setting the core's list already covers (the
+    kit's keys, or the pattern, for a setting with no `needs`) is refused: one line per thing."""
+    lists = {g: load(root, g) for g in [CORE, *apps]}
+    for g in apps:
+        refuse_covered(lists[g], lists[CORE].every_app)
+    return lists
+
+
+def refuse_covered(lst: CopyList, every: EveryApp) -> None:
+    """An app's setting line the core's list already covers: the kit's keys, or the pattern (unless it says `needs`,
+    which the pattern doesn't)."""
+    for s in lst.settings:
+        if s.key in every.place_keys or (s.needs is None and re.search(every.place_key_pattern, s.key)):
+            raise ListError(f"{repo_of(lst.group)}/{FILE}, setting {s.key}: the core's list already makes it "
+                            "per-place (every_app): drop the line")
 
 
 def unlisted(lst: CopyList, names: list[str]) -> list[str]:
@@ -270,6 +290,8 @@ def main(argv: list[str]) -> int:
     group = CORE if repo.name == CORE_REPO else repo.name
     try:
         lst = load(repo.parent, group)
+        if group != CORE and (repo.parent / CORE_REPO / FILE).exists():  # beside the core: what it already covers
+            refuse_covered(lst, load(repo.parent, CORE).every_app)
     except ListError as exc:
         print(f"copy list: {exc}")
         return 1
