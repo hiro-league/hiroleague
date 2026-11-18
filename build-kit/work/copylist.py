@@ -280,6 +280,36 @@ def unlisted(lst: CopyList, names: list[str]) -> list[str]:
     return out
 
 
+def changes(old: CopyList | None, new: CopyList) -> list[tuple[str, bool]]:
+    """What changed from one version of a list to the next, in words, each with whether it widens what live gives the
+    copies (something now fetched from live, a setting no longer per-place): Michel's to approve (workflow.md). A list
+    with no old version is new: each item it fetches from live widens."""
+    out: list[tuple[str, bool]] = []
+    before = {i.path: i for i in old.items} if old else {}
+    for i in new.items:
+        was = before.pop(i.path, None)
+        if was is None:
+            out.append((f"+ {i.path}: from live {i.live}, to env1-env5 {i.envs}", i.live == "copy"))
+        elif (was.live, was.envs, was.place_tables) != (i.live, i.envs, i.place_tables):
+            moves = []
+            if was.live != i.live:
+                moves.append(f"from live {was.live} -> {i.live}")
+            if was.envs != i.envs:
+                moves.append(f"to env1-env5 {was.envs} -> {i.envs}")
+            if was.place_tables != i.place_tables:
+                moves.append(f"per-place tables {', '.join(was.place_tables) or 'none'} -> "
+                             f"{', '.join(i.place_tables) or 'none'}")
+            widens = (was.live == "own" and i.live == "copy") or bool(set(was.place_tables) - set(i.place_tables))
+            out.append((f"~ {i.path}: {'; '.join(moves)}", widens))
+    out += [(f"- {p}", False) for p in before]
+    keys = {s.key for s in old.settings} if old else set()
+    for s in new.settings:
+        if s.key not in keys:
+            out.append((f"+ setting {s.key}: per place", False))
+    out += [(f"- setting {k}: no longer per place", True) for k in sorted(keys - {s.key for s in new.settings})]
+    return out
+
+
 def main(argv: list[str]) -> int:
     """`python copylist.py <repo folder>`: read and check that repo's copy list, as hiro-work will (each repo's
     ./scripts/check.sh runs it, through the check engine, when its data.toml changes)."""

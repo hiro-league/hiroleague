@@ -326,6 +326,8 @@ def show(out: Out, facts: list[Facts], plan: Plan) -> None:
             out("    ...")
         if not (f.github_lacks or f.live_lacks or plan.stops.get(f.repo)):
             out("  up to date")
+        for line in copy_list_changes(f):
+            out(line)
     out("")
     out("Plan:")
     out("  1. push to GitHub, side by side: " + (", ".join(plan.push) or "nothing"))
@@ -337,6 +339,40 @@ def show(out: Out, facts: list[Facts], plan: Plan) -> None:
     if kit:
         out(f"  note: the core's kits changed ({kit} file(s)); {', '.join(left)} get them at their next deploy, "
             "or now with `ssh simone 'cd ~/<app> && ./deploy.sh'`")
+
+
+def copy_list_changes(f: Facts) -> list[str]:
+    """How the repo's copy list (data.toml: what a test environment's copy of its data holds) changes from what runs
+    live to what ships, in words; a change that widens what live gives the copies is marked as Michel's to approve
+    (workflow.md, "Data and real systems")."""
+    if f.repo not in DEPLOY or not f.live_lacks:
+        return []
+    d = hw.repo_dir(0, f.repo)
+    group = hw.data.copylist.CORE if f.repo == hw.data.copylist.CORE_REPO else f.repo
+
+    def at(rev: str | None) -> hw.data.copylist.CopyList | None:
+        if rev is None:
+            return None
+        text = hw.git(d, "show", f"{rev}:{hw.data.copylist.FILE}", check=False)
+        return hw.data.copylist.parse(text, group) if text else None
+
+    try:
+        new, old = at(f.head), at(f.live)
+    except hw.data.copylist.ListError as e:
+        return [f"  copy list: can't be read ({e})"]
+    if new is None:
+        return []
+    found = hw.data.copylist.changes(old, new)
+    if not found:
+        return []
+    widens = sum(w for _, w in found)
+    head = f"new, {len(new.items)} item(s)" if old is None else f"{len(found)} change(s)"
+    lines = [f"  copy list {head}" + (f", {widens} widening what live gives the copies (Michel's OK)" if widens else "")]
+    shown = [(t, w) for t, w in found if w] if old is None else found  # a new list: only what live now gives
+    lines += [f"    {text}{'   <- widens' if w else ''}" for text, w in shown[:20]]
+    if len(shown) > 20:
+        lines.append("    ...")
+    return lines
 
 
 def core_kit_changes(facts: list[Facts]) -> int:

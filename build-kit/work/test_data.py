@@ -580,3 +580,24 @@ def test_an_apps_setting_the_cores_list_already_covers_is_refused(tmp_path):
             assert copylist.main([str(tmp_path / "homehiro")]) == 1  # the commit's check says so too
         else:
             assert copylist.load_all(tmp_path, ["homehiro"])["homehiro"].settings[0].needs == "reads"
+
+
+def test_a_lists_changes_are_said_and_what_widens_what_live_gives_is_marked():
+    head = 'live = "~/h"\n[every_app]\nplace_key_pattern = "_url$"\nplace_keys = []\n'
+    old = copylist.parse(head + '[[item]]\npath = "a.db"\nkind = "database"\nlive = "copy"\nenvs = "copy"\n'
+                         'place_tables = ["websession"]\nwhy = "w"\n[[item]]\npath = "sounds"\nkind = "folder"\n'
+                         'live = "own"\nenvs = "none"\nwhy = "w"\n[[item]]\npath = "old"\nkind = "folder"\nlive = "own"\n'
+                         'envs = "none"\nwhy = "w"\n[[setting]]\nkey = "tv_cast"\nwhy = "w"\n', copylist.CORE)
+    new = copylist.parse(head + '[[item]]\npath = "a.db"\nkind = "database"\nlive = "copy"\nenvs = "copy"\nwhy = "w"\n'
+                         '[[item]]\npath = "sounds"\nkind = "folder"\nlive = "copy"\nenvs = "link"\nwhy = "w"\n'
+                         '[[item]]\npath = "memos"\nkind = "folder"\nlive = "copy"\nenvs = "link"\nwhy = "w"\n'
+                         '[[setting]]\nkey = "memo_state"\nwhy = "w"\n', copylist.CORE)
+    assert copylist.changes(old, new) == [
+        ("~ a.db: per-place tables websession -> none", True),  # sessions would now come from live
+        ("~ sounds: from live own -> copy; to env1-env5 none -> link", True),
+        ("+ memos: from live copy, to env1-env5 link", True),
+        ("- old", False),
+        ("+ setting memo_state: per place", False),
+        ("- setting tv_cast: no longer per place", True),
+    ]
+    assert all(w for _, w in copylist.changes(None, new) if _.startswith("+ ") and "from live copy" in _)
