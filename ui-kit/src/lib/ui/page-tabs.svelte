@@ -10,6 +10,9 @@
 		label: string;
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any -- any icon component (lucide's, or an app's own)
 		icon?: Component<any>;
+		/** A colour (any CSS colour) shown as a small dot before the label: what the tab stands for has a known colour
+		 * (an app's, a project's). */
+		dot?: string;
 		href?: string;
 		kind?: 'pane' | 'route';
 		disabled?: boolean;
@@ -26,7 +29,8 @@
 <script lang="ts" generics="T extends string">
 	// A page's tabs from a list, in the page header: the pill strip (the page's main tabs) or the underlined strip
 	// (tabs inside a tab). It adds what a list of tabs needs: a tab that is a link, a count beside a name (a small round
-	// badge, in its tone), and a place after the tabs for one more of the page's own (an open record's tab).
+	// badge, in its tone), a dot in a known colour before a name (an app's), and a place after the tabs for one more of
+	// the page's own (an open record's tab).
 	// UI kit, step 7d: built on shadcn-svelte's Tabs (its list and triggers: the arrow keys move between tabs, Enter
 	// or a click picks one); a tab with `href` is still a link. Tabs size to their words, not to equal widths.
 	import type { Snippet } from 'svelte';
@@ -59,6 +63,10 @@
 	};
 </script>
 
+{#snippet dot(t: { dot?: string })}
+	{#if t.dot}<span class="size-2 shrink-0 rounded-full" style:background={t.dot} aria-hidden="true"></span>{/if}
+{/snippet}
+
 {#snippet count(t: PageTab<T>)}
 	{#if t.count !== undefined}<span
 			class={cn('inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-none font-semibold tabular-nums', COUNT[t.countTone ?? 'neutral'])}
@@ -73,11 +81,11 @@
 				{#snippet child({ props })}
 					{#if t.href}
 						<a {...props} href={t.disabled ? undefined : t.href}
-							>{#if t.icon}<t.icon />{/if}{t.label}{@render count(t)}</a
+							>{#if t.icon}<t.icon />{/if}{@render dot(t)}{t.label}{@render count(t)}</a
 						>
 					{:else}
 						<button {...props}
-							>{#if t.icon}<t.icon />{/if}{t.label}{@render count(t)}</button
+							>{#if t.icon}<t.icon />{/if}{@render dot(t)}{t.label}{@render count(t)}</button
 						>
 					{/if}
 				{/snippet}
