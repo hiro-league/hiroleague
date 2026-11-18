@@ -964,26 +964,46 @@ def cmd_switch(a) -> None:
     except switches.SwitchError as exc:
         raise Stop(str(exc)) from exc
     up = [n for n, s in servers(env).items() if listening(s.port)]
-    if up:
-        raise Stop(f"env{env}'s servers are up ({', '.join(up)}): hiro-work down {env} first.")
+    if up and not a.restart:
+        raise Stop(f"env{env}'s servers are up ({', '.join(up)}): hiro-work down {env} first, or --restart.")
     held = next((t for t in load_tasks() if t.state == "working" and t.env == env), None)
+    before = set(real_of(env))
+    if up:
+        servers_down(env, up)
     if held:
         with locked():
             held.preset, held.switches = name, changes
             save(held)
     else:
         switches.write(data_dir(env), env, name, changes)
-    refresh_data(env, held.id if held else None, held.data if held else "env0")
+    opened = set(real_of(env)) - before
+    if opened:
+        # A system that was closed opens: its addresses and logins were taken out of the copy, so the data is copied
+        # again from its source (what the task made there goes)
+        say(f"env{env}: {', '.join(sorted(opened))} open now, so its data is copied again.")
+        refresh_data(env, held.id if held else None, held.data if held else "env0")
+    else:
+        # Nothing opens: the data stays; the file, the apps' lines and what is turned off follow
+        board = write_board(env)
+        write_env_dev(env)
+        configure(env, held.id if held else None)
+        say(f"env{env}: {switches.describe(board)}")
     event(task=held.id if held else None, env=env, step="switch", phase="end", ok=True, preset=name, changes=changes)
+    if up:
+        cmd_up(type("A", (), {"env": env, "servers": up, "wait": 120})())
 
 
 def cmd_preset(a) -> None:
     """hiro-work preset list | save <name> --from <env> | remove <name>: the switchboard's presets (presets.toml)."""
     try:
         if a.what == "save":
-            if not a.from_env:
-                raise Stop("Say which environment's switchboard to save: --from <env>.")
-            switches.save_preset(a.name, modes_of(a.from_env), a.about or "")
+            if a.from_env:
+                modes = modes_of(a.from_env)
+            elif a.preset:
+                modes = switches.resolve(a.preset, switches.parse_sets(a.set or []))
+            else:
+                raise Stop("Say what to save: --from <env> (its switchboard), or --preset <name> with --set changes.")
+            switches.save_preset(a.name, modes, a.about or "")
             say(f"Saved {a.name!r}: hiro-work start --preset \"{a.name}\", or switch <env> --preset \"{a.name}\".")
         elif a.what == "remove":
             switches.remove_preset(a.name)
@@ -1654,11 +1674,14 @@ def main(argv: list[str] | None = None) -> int:
     sw.add_argument("env", type=int, choices=list(ENVS))
     sw.add_argument("--preset", help="a preset's name (hiro-work preset list)")
     sw.add_argument("--set", action="append", metavar="SYSTEM=MODE", help="one system's mode, like ai=real (repeat)")
+    sw.add_argument("--restart", action="store_true", help="stop its servers that are up, and start them again after")
     sw.set_defaults(func=cmd_switch)
     pr = sub.add_parser("preset", help="the switchboard's presets: list, save <name> --from <env>, remove <name>")
     pr.add_argument("what", choices=["list", "save", "remove"])
     pr.add_argument("name", nargs="?", default="")
     pr.add_argument("--from", dest="from_env", type=int, choices=[1, 2, 3, 4, 5])
+    pr.add_argument("--preset", help="save: the preset it starts from")
+    pr.add_argument("--set", action="append", metavar="SYSTEM=MODE", help="save: a system changed from --preset")
     pr.add_argument("--about", help="what it is for, in a few words")
     pr.set_defaults(func=cmd_preset)
     rd = sub.add_parser("refresh-data", help="live -> env0: fetch a scrubbed live copy; --apply puts it in env0")

@@ -93,6 +93,10 @@ def test_env0s_unlisted_files_are_said_when_they_change_and_its_sizes_every_hour
     ({"verb": "apply", "stamp": "2026-11-16_0015"}, ("apply", 0, ["refresh-data", "--apply", "2026-11-16_0015"])),
     ({"verb": "data", "env": 2, "source": "vanilla"}, ("data", 2, ["data", "2", "vanilla"])),
     ({"verb": "data", "env": 1, "source": "live:2026-11-16_0015"}, ("data", 1, ["data", "1", "live:2026-11-16_0015"])),
+    ({"verb": "switch", "env": 2, "preset": "ai", "changes": {"ha": "real"}},
+     ("switch", 2, ["switch", "2", "--preset", "AI", "--set", "ha=real", "--restart"])),
+    ({"verb": "preset-save", "name": "HA real", "preset": "Safe", "changes": {"ha": "real"}},
+     ("preset-save", 0, ["preset", "save", "HA real", "--preset", "Safe", "--set", "ha=real"])),
 ])
 def test_a_data_menus_ask_becomes_its_hiro_work_command(ask, want):
     assert relay.check_data(ask) == want
@@ -103,6 +107,11 @@ def test_a_data_menus_ask_becomes_its_hiro_work_command(ask, want):
     {"verb": "data", "env": 0, "source": "vanilla"},  # env0's data comes from live only
     {"verb": "data", "env": 2, "source": "prod"},
     {"verb": "data", "env": 2, "source": "env0 & calc"},
+    {"verb": "switch", "env": 0, "preset": "Safe"},  # env0 is Michel's own
+    {"verb": "switch", "env": 2, "preset": "Nope"},
+    {"verb": "switch", "env": 2, "preset": "Safe", "changes": {"mqtt": "real"}},  # a mode MQTT can't take
+    {"verb": "preset-save", "name": "x\" & calc", "preset": "Safe"},
+    {"verb": "preset-remove", "name": "Safe & calc"},
 ])
 def test_a_data_ask_out_of_bounds_is_refused(ask):
     with pytest.raises(relay.Refused):

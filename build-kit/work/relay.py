@@ -9,6 +9,9 @@ every few seconds for what is waiting (GET /api/work/asks/next, with the Work ke
     fetch                  hiro-work refresh-data                (a new live copy, env0 unchanged)
     apply <stamp>          hiro-work refresh-data --apply <stamp>
     data <env> <source>    hiro-work data <env> <source>         (env1..env5: env0, vanilla, live, live:<stamp>)
+    switch <env> ...       hiro-work switch <env> --preset <name> [--set system=mode ...] --restart
+    preset-save <name>     hiro-work preset save <name> --preset <name> [--set ...]
+    preset-remove <name>   hiro-work preset remove <name>
 
 in a tab of the environment's own window (hiro-envN), so its output shows there; the servers' events then reach the
 card. Work › Hiro-Audit's Run audit is the one other ask:
@@ -42,6 +45,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -87,6 +91,27 @@ def check_data(ask: dict) -> tuple[str, int, list[str]]:
         except ValueError:
             raise Refused(f"no live copy {stamp!r}") from None
         return verb, 0, ["refresh-data", "--apply", str(stamp)]
+    if verb in ("switch", "preset-save", "preset-remove"):
+        sw = hw.switches
+        name, preset = str(ask.get("name") or ""), str(ask.get("preset") or "")
+        changes = ask.get("changes") or {}
+        try:
+            if not isinstance(changes, dict):
+                raise sw.SwitchError("changes aren't systems and modes")
+            sets = [f"{k}={v}" for k, v in sw.check_modes({str(k): str(v) for k, v in changes.items()}, "changes").items()]
+            if verb == "preset-remove":
+                return verb, 0, ["preset", "remove", sw.preset(name)["name"]]
+            base = sw.preset(preset)["name"]
+            if verb == "preset-save":
+                if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ,+_-]{0,23}", name):
+                    raise sw.SwitchError(f"not a preset's name: {name!r}")
+                return verb, 0, ["preset", "save", name, "--preset", base, *[x for s in sets for x in ("--set", s)]]
+        except sw.SwitchError as exc:
+            raise Refused(str(exc)) from None
+        env = ask.get("env")
+        if not isinstance(env, int) or not 1 <= env <= 5:
+            raise Refused(f"no environment {env!r} to switch (env1 to env5)")
+        return verb, env, ["switch", str(env), "--preset", base, *[x for s in sets for x in ("--set", s)], "--restart"]
     env, source = ask.get("env"), str(ask.get("source") or "")
     if not isinstance(env, int) or not 1 <= env <= 5:
         raise Refused(f"no environment {env!r} for data (env1 to env5)")
@@ -97,7 +122,7 @@ def check_data(ask: dict) -> tuple[str, int, list[str]]:
     return verb, env, ["data", str(env), source]
 
 
-DATA_VERBS = ("refresh", "fetch", "apply", "data")
+DATA_VERBS = ("refresh", "fetch", "apply", "data", "switch", "preset-save", "preset-remove")
 
 
 def check(ask: dict) -> tuple[str, int, list[str]]:
@@ -174,9 +199,15 @@ def changes(said: dict[int, dict]) -> dict[int, dict]:
         if env and not (hw.env_dir(env) / "hiroleague" / ".git").exists():
             continue  # not made yet: an event would make it look made
         now[env] = {"repos": hw.changed_repos(env, tasks), "leftovers": hw.leftovers(env, tasks),
-                    "data": hw.data.read_source(hw, env)}
+                    "data": hw.data.read_source(hw, env),
+                    # What it reaches of each outside system: its preset, its changes and every mode (switches.py)
+                    "switchboard": hw.switches.read(hw.data_dir(env)) if env else None}
         if env == 0:
             now[env]["live_copies"] = hw.data.live_copy_list(hw)
+            # The presets and the systems (their names and the modes each can take), for the cards' dialog
+            with contextlib.suppress(hw.switches.SwitchError, OSError, ValueError):
+                now[env]["presets"] = hw.switches.presets()
+                now[env]["systems"] = {k: {"name": n, "modes": list(m)} for k, (n, m) in hw.switches.SYSTEMS.items()}
             # Each dev secret's state, by name only (set, missing, never): Work › Data's Secrets
             with contextlib.suppress(hw.data.copylist.ListError, OSError, ValueError):
                 now[env]["secrets"] = hw.data.secret_states(hw, hw.data.load(hw.env_dir(0)))
