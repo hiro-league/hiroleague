@@ -1,0 +1,28 @@
+# The switchboard's presets: what a test environment reaches of each outside system (hiro-docs standards/workflow.md,
+# "Data and real systems"). hiro-work start --preset <name>; hiro-work switch <env> --preset <name> [--set ai=real].
+# The systems and the modes each can take are the core's hiro_commons/switchboard.py (real, read, fake, off).
+# Michel's own presets are saved below by `hiro-work preset save <name> --from <env>` (or the Work area's dialog).
+
+[[preset]]
+name = "Safe"
+about = "Reads the real house; nothing written, sent or paid"
+builtin = true
+modes = { ha = "read", frigate = "read", mqtt = "read", ai = "fake", voices = "fake", whatsapp = "fake", talker = "fake", adguard = "off", dhcp = "off" }
+
+[[preset]]
+name = "AI"
+about = "Safe, with real AI and voices"
+builtin = true
+modes = { ha = "read", frigate = "read", mqtt = "read", ai = "real", voices = "real", whatsapp = "fake", talker = "fake", adguard = "off", dhcp = "off" }
+
+[[preset]]
+name = "Offline"
+about = "Reaches nothing real: fakes where there are any"
+builtin = true
+modes = { ha = "fake", frigate = "off", mqtt = "off", ai = "fake", voices = "fake", whatsapp = "fake", talker = "fake", adguard = "off", dhcp = "off" }
+
+[[preset]]
+name = "Full real"
+about = "Everything real, as env0: only on Michel's say"
+builtin = true
+modes = { ha = "real", frigate = "real", mqtt = "read", ai = "real", voices = "real", whatsapp = "real", talker = "real", adguard = "real", dhcp = "real" }

@@ -16,7 +16,8 @@ dev/main and env0 is brought up to them. Until then its commits stay on its bran
     hiro-work init <env>                     make (or repair) an environment: worktrees, installs, settings
     hiro-work sweep                          what is left behind (report only)
     hiro-work review <task>                  the task waits for Michel's review (until its next step)
-    hiro-work real <task> [--reads] [--ai]   env1..5: which real systems the task's copy reads (data.py)
+    hiro-work switch <env> [--preset NAME] [--set ai=real]   env1..5: what it reaches of each system (switches.py)
+    hiro-work preset list | save <name> --from <env> | remove <name>   the switchboard's presets
     hiro-work refresh-data [--apply STAMP] [--files]   live -> env0: a scrubbed live copy, then env0 (data.py)
     hiro-work data <env> <source>            env1..5: its data from env0, vanilla or a live copy (data.py)
     hiro-work secret list | fill | set <name>  the PC's dev secrets, by name; set asks for the value (data.py)
@@ -48,6 +49,7 @@ from pathlib import Path
 import apps as appfile
 import data
 import ship
+import switches
 
 ROOT = Path(os.environ.get("HIRO_ROOT", r"C:\hiro"))
 TASKS = ROOT / "tasks"
@@ -299,8 +301,9 @@ class Task:
     repos: list[str]
     state: str = "working"  # working | parked | done
     base: dict[str, str] = field(default_factory=dict)
-    # In env1..env5: the real systems its copy may reach ("reads", "ai"); none by default (data.py)
-    real: list[str] = field(default_factory=list)
+    # In env1..env5: its switchboard (switches.py): a preset, and the systems changed from it ({"ai": "real"})
+    preset: str = switches.DEFAULT
+    switches: dict[str, str] = field(default_factory=dict)
     # What bigger work it is a piece of ("Work-flow plan"): CodeHiro names it "<part_of> › <title>" and groups by it
     part_of: str = ""
     # What it does, in a sentence: the Work area shows it under its name
@@ -516,33 +519,62 @@ def install_all(env: int, repos: list[str], task: str | None = None) -> None:
         install(env, repo, task)
 
 
-# Sends and HA's automatic writes off; sign-in on, as in env0 (an AUTH line of env0's is dropped), so users and
-# roles can be tried in every environment
-ENV_DEV_FORCED = {"OUTPUTS": "off", "HA_AUTO_WRITES": "off", "AUTH": None}
+# Sign-in on, as in env0 (an AUTH line of env0's is dropped), so users and roles can be tried in every environment.
+# Sends and HA's automatic writes follow the environment's switchboard (switches.app_env), which every server reads
+# (HIRO_SWITCHBOARD)
+ENV_DEV_FORCED = {"AUTH": None}
 
 
 def write_env_dev(env: int) -> None:
     """Each app's .env.dev in envN: env0's, with this environment's data folder, no sends or HA's automatic writes,
     sign-in on; real systems as the task asks (data.env_overrides: None drops env0's line)."""
     real = real_of(env)
+    board = {switches.ENV: (data_dir(env) / switches.FILE).as_posix(), **switches.app_env(modes_of(env))}
     for app in APPS:
         src = repo_dir(0, app) / ".env.dev"
         if not src.exists():  # an app with no .env.dev (Code reports) takes its settings from up (apps.toml api_env)
             continue
         lines = src.read_text(encoding="utf-8").splitlines()
-        forced = {**ENV_DEV_FORCED, "DATA_DIR": (data_dir(env) / app).as_posix(),
+        forced = {**ENV_DEV_FORCED, **board, "DATA_DIR": (data_dir(env) / app).as_posix(),
                   **data.env_overrides(app, real, copy_lists())}
         keep = [ln for ln in lines if ln.split("=", 1)[0].strip() not in forced]
         keep += [f"{k}={v}" for k, v in forced.items() if v is not None]
         (repo_dir(env, app) / ".env.dev").write_text("\n".join(keep) + "\n", encoding="utf-8")
 
 
+def board_of(env: int) -> tuple[str, dict[str, str]]:
+    """envN's switchboard, as asked: its working task's preset and changes; an environment no task holds keeps what
+    its file says (a switch made from its card), else the default preset."""
+    held = next((t for t in load_tasks() if t.state == "working" and t.env == env), None)
+    if held:
+        return held.preset, dict(held.switches)
+    rec = switches.read(data_dir(env)) or {}
+    return rec.get("preset") or switches.DEFAULT, dict(rec.get("changes") or {})
+
+
+def modes_of(env: int) -> dict[str, str]:
+    """Each outside system's mode in envN (switches.py); a preset that is gone falls back to the default."""
+    name, changes = board_of(env)
+    try:
+        return switches.resolve(name, changes)
+    except switches.SwitchError:
+        return switches.resolve(switches.DEFAULT)
+
+
+def write_board(env: int) -> dict:
+    """envN's switchboard file, from what was asked; its servers read it at start."""
+    name, changes = board_of(env)
+    try:
+        return switches.write(data_dir(env), env, name, changes)
+    except switches.SwitchError as exc:
+        say(f"  ! {exc}: {switches.DEFAULT} instead")
+        return switches.write(data_dir(env), env, switches.DEFAULT)
+
+
 def real_of(env: int) -> list[str]:
-    """The real systems the task working in envN asked for (data.py); an environment no task holds gets the default
-    (its servers started from its card read as a task's do); none for env0, which is real already."""
-    if not env:
-        return []
-    return next((t.real for t in load_tasks() if t.state == "working" and t.env == env), list(data.DEFAULT_REAL))
+    """What envN's copy keeps of the real systems, in the copy lists' words (reads, writes, ai), worked out from its
+    switchboard; none for env0, which is real already."""
+    return switches.real_of(modes_of(env)) if env else []
 
 
 def set_setting(db: Path, key: str, value: str) -> None:
@@ -682,9 +714,11 @@ def refresh_data(env: int, task: str | None = None, source: str = "env0") -> Non
     else:
         env0 = data.read_source(sys.modules[__name__], 0) or {}
         rec = data.write_source(sys.modules[__name__], env, "env0", env0.get("stamp"), env0.get("live_at"))
+    board = write_board(env)
     write_env_dev(env)
     configure(env, task)
     say(f"  {data.describe_source(rec)}")
+    say(f"  {switches.describe(board)}")
 
 
 def fresh_base(repo: str, task: str | None) -> str:
@@ -734,8 +768,7 @@ def cmd_start(a) -> None:
                        "of its own lands and ships alone: ask Michel, then start again with --own-branch.")
         env = pick_env(tasks, a.env)
         task = Task(id=a.task, title=a.title or a.task, env=env, repos=repos,
-                    real=[k for k, on in ((data.READS, not a.no_real_reads), (data.WRITES, a.real_writes),
-                                          (data.AI, a.real_ai)) if on],
+                    preset=switches.preset(a.preset)["name"], switches=switches.parse_sets(a.set or []),
                     part_of=part_of_name(a.part_of), about=(a.about or "").strip(), data=a.data,
                     created=datetime.now().astimezone().isoformat(timespec="seconds"))
         save(task)  # the claim holds from here
@@ -886,13 +919,13 @@ def card(task: Task) -> None:
         say(f"  {task.about}")
     if task.env:
         say(f"  branch {task.branch} | data {data_dir(task.env)} | ports {min(p.values())}-{min(p.values()) + appfile.BLOCK - 1}")
-        say(f"  {data.describe(task.real)}")
+        say(f"  {switches.describe(switches.read(data_dir(task.env)))} | sign-in on")
         say(f"  {data.describe_source(data.read_source(sys.modules[__name__], task.env))}")
 
 
 def cmd_configure(a) -> None:
     """Point an environment at its ports; with --data, a free env1..env5 gets env0's data again first (its switches
-    as data.DEFAULT_REAL), as a task's start would copy it."""
+    as it has them), as a task's start would copy it."""
     if not a.data:
         configure(a.env)
         return
@@ -900,27 +933,66 @@ def cmd_configure(a) -> None:
         raise Stop("env0's data is Michel's own: refresh-data brings live's into it.")
     held = [t.id for t in load_tasks() if t.state == "working" and t.env == a.env]
     if held:
-        raise Stop(f"env{a.env} is {held[0]}'s: hiro-work real {held[0]} copies its data again.")
+        raise Stop(f"env{a.env} is {held[0]}'s: hiro-work data {a.env} env0 copies its data again.")
     up = [n for n, s in servers(a.env).items() if listening(s.port)]
     if up:
         raise Stop(f"env{a.env}'s servers are up ({', '.join(up)}): hiro-work down {a.env} first.")
     refresh_data(a.env)
-    say(f"env{a.env}: {data.describe(real_of(a.env))}")
+    say(f"env{a.env}: {switches.describe(switches.read(data_dir(a.env)))}")
 
 
-def cmd_real(a) -> None:
-    """Change which real systems a task's copy reaches: the data is copied again from env0 (servers down)."""
-    task = get(a.task)
-    if not task.env:
-        raise Stop(f"Task {task.id} is parked: resume it first (its data is copied again then).")
-    up = [n for n, s in servers(task.env).items() if listening(s.port)]
+def cmd_switch(a) -> None:
+    """hiro-work switch <env> [--preset NAME] [--set system=mode ...]: what envN reaches of each outside system. With
+    nothing to change it only shows. Else its servers must be down: the switchboard is written, the data copied again
+    (what a copy keeps of logins and keys follows it), and the task working there keeps the choice."""
+    env = a.env
+    if not env:
+        raise Stop("env0 is Michel's own: its settings decide what it reaches.")
+    if not a.preset and not a.set:
+        rec = switches.read(data_dir(env))
+        say(f"env{env}: {switches.describe(rec)}")
+        for system, (name, _modes) in switches.SYSTEMS.items():
+            say(f"  {name:22} {(rec or {}).get('modes', {}).get(system, '-')}")
+        return
+    name, changes = board_of(env)
+    try:
+        if a.preset:  # a new preset starts clean: the old changes belonged to the old one
+            name, changes = switches.preset(a.preset)["name"], {}
+        changes = {**changes, **switches.parse_sets(a.set or [])}
+        base = switches.preset(name)["modes"]
+        changes = {k: v for k, v in changes.items() if base[k] != v}
+    except switches.SwitchError as exc:
+        raise Stop(str(exc)) from exc
+    up = [n for n, s in servers(env).items() if listening(s.port)]
     if up:
-        raise Stop(f"env{task.env}'s servers are up ({', '.join(up)}): hiro-work down {task.env} first.")
-    with locked():
-        task.real = [k for k, on in ((data.READS, a.reads), (data.WRITES, a.writes), (data.AI, a.ai)) if on]
-        save(task)
-    refresh_data(task.env, task.id, task.data)
-    card(task)
+        raise Stop(f"env{env}'s servers are up ({', '.join(up)}): hiro-work down {env} first.")
+    held = next((t for t in load_tasks() if t.state == "working" and t.env == env), None)
+    if held:
+        with locked():
+            held.preset, held.switches = name, changes
+            save(held)
+    else:
+        switches.write(data_dir(env), env, name, changes)
+    refresh_data(env, held.id if held else None, held.data if held else "env0")
+    event(task=held.id if held else None, env=env, step="switch", phase="end", ok=True, preset=name, changes=changes)
+
+
+def cmd_preset(a) -> None:
+    """hiro-work preset list | save <name> --from <env> | remove <name>: the switchboard's presets (presets.toml)."""
+    try:
+        if a.what == "save":
+            if not a.from_env:
+                raise Stop("Say which environment's switchboard to save: --from <env>.")
+            switches.save_preset(a.name, modes_of(a.from_env), a.about or "")
+            say(f"Saved {a.name!r}: hiro-work start --preset \"{a.name}\", or switch <env> --preset \"{a.name}\".")
+        elif a.what == "remove":
+            switches.remove_preset(a.name)
+            say(f"Removed {a.name!r}.")
+    except switches.SwitchError as exc:
+        raise Stop(str(exc)) from exc
+    for p in switches.presets():
+        real = [switches.SYSTEMS[k][0] for k, m in p["modes"].items() if m == "real"]
+        say(f"  {p['name']:24} {'built in' if p['builtin'] else 'yours':9} real: {', '.join(real) or 'nothing'}")
 
 
 def cmd_data(a) -> None:
@@ -1192,6 +1264,7 @@ def servers(env: int) -> dict[str, Server]:
                           p["core-ui"], {"HIRO_ADMIN_ORIGIN": f"http://127.0.0.1:{p['core-admin']}"}),
     }
     if env:  # the provider keys in the PC's environment, blanked unless the task asks for AI (data.py)
+        out["core"].env[switches.ENV] = str(data_dir(env) / switches.FILE)
         out["core"].env.update(data.core_env(dict(os.environ), real_of(env), copy_lists(),
                                              data.read_store(sys.modules[__name__])))
     for a in appfile.APPS:  # each app as apps.toml says
@@ -1535,11 +1608,9 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--own-branch", action="store_true",
                    help="a piece of open work that lands and ships alone, on Michel's say (else it joins that task)")
     s.add_argument("--about", help="what it does, in a sentence (the Work area shows it under its name)")
-    s.add_argument("--no-real-reads", action="store_true",
-                   help="env1..5: read no real system (HA, Frigate, MQTT, health checks), which they do by default")
-    s.add_argument("--real-writes", action="store_true",
-                   help="env1..5: keep the logins that write (TrainHiro's Frigate, NetHiro's AdGuard rules)")
-    s.add_argument("--real-ai", action="store_true", help="env1..5: keep the copied AI providers")
+    s.add_argument("--preset", default=switches.DEFAULT,
+                   help="env1..5: its switchboard's preset (hiro-work preset list); Safe when not said")
+    s.add_argument("--set", action="append", metavar="SYSTEM=MODE", help="one system changed from the preset: ai=real")
     s.add_argument("--data", default="env0", metavar="SOURCE",
                    help="where its data comes from: env0 (default), vanilla (a fresh install), live or live:<stamp>")
     for verb in ("park", "review"):
@@ -1579,12 +1650,17 @@ def main(argv: list[str] | None = None) -> int:
     ins.add_argument("repos", nargs="*")
     sub.add_parser("status")
     sub.add_parser("sweep")
-    rl = sub.add_parser("real", help="env1..5: which real systems a task's copy reaches (copies the data again)")
-    rl.add_argument("task")
-    rl.add_argument("--reads", action="store_true")
-    rl.add_argument("--writes", action="store_true")
-    rl.add_argument("--ai", action="store_true")
-    rl.set_defaults(func=cmd_real)
+    sw = sub.add_parser("switch", help="env1..5: what it reaches of each outside system (its servers down to change)")
+    sw.add_argument("env", type=int, choices=list(ENVS))
+    sw.add_argument("--preset", help="a preset's name (hiro-work preset list)")
+    sw.add_argument("--set", action="append", metavar="SYSTEM=MODE", help="one system's mode, like ai=real (repeat)")
+    sw.set_defaults(func=cmd_switch)
+    pr = sub.add_parser("preset", help="the switchboard's presets: list, save <name> --from <env>, remove <name>")
+    pr.add_argument("what", choices=["list", "save", "remove"])
+    pr.add_argument("name", nargs="?", default="")
+    pr.add_argument("--from", dest="from_env", type=int, choices=[1, 2, 3, 4, 5])
+    pr.add_argument("--about", help="what it is for, in a few words")
+    pr.set_defaults(func=cmd_preset)
     rd = sub.add_parser("refresh-data", help="live -> env0: fetch a scrubbed live copy; --apply puts it in env0")
     rd.add_argument("--apply", metavar="STAMP", help="a copy in C:\\hiro\\data\\live-copies, or 'latest'")
     rd.add_argument("--now", action="store_true", help="fetch a new copy and put it in env0, in one go")

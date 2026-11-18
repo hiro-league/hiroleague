@@ -63,7 +63,7 @@ def test_a_step_of_open_work_joins_it_unless_michel_gives_it_its_own_branch(tmp_
     assert [t.id for t in hw.same_work("Other plan", tasks)] == ["old"]  # a parked piece counts
     assert hw.same_work("New work", tasks) == [] and hw.same_work("", tasks) == []
     args = dict(task="step2", repos="nethiro", kit=False, title=None, env=None, part_of="plan", about=None,
-                no_real_reads=False, real_writes=False, real_ai=False, own_branch=False)
+                preset="Safe", set=None, data="env0", own_branch=False)
     with pytest.raises(hw.Stop, match="guard.py join"):
         hw.cmd_start(hw.argparse.Namespace(**args))
     assert not hw.task_path("step2").exists()  # refused before any claim
@@ -495,15 +495,21 @@ def test_claim_adds_a_free_repo_and_refuses_one_held(tmp_path, monkeypatch):
 
 def test_env1_to_5_sign_in_as_env0_does_with_sends_and_has_automatic_writes_off():
     # AUTH None: env0's line (if any) is dropped and nothing is written, so the apps' sign-in is on and roles apply
-    assert hw.ENV_DEV_FORCED == {"OUTPUTS": "off", "HA_AUTO_WRITES": "off", "AUTH": None}
+    assert hw.ENV_DEV_FORCED == {"AUTH": None}
+    assert hw.switches.app_env(hw.switches.resolve("Safe")) == {"OUTPUTS": "off", "HA_AUTO_WRITES": "off"}
+    assert hw.switches.app_env(hw.switches.resolve("Full real")) == {"OUTPUTS": "on", "HA_AUTO_WRITES": "on"}
 
 
 def test_an_environment_no_task_holds_reads_as_a_default_task_does(tmp_path, monkeypatch):
     monkeypatch.setattr(hw, "TASKS", tmp_path)
     assert hw.real_of(0) == []  # env0 is real already
-    assert hw.real_of(2) == [hw.data.READS]
-    hw.save(hw.Task(id="t", title="t", env=2, repos=["homehiro"], real=[hw.data.READS, hw.data.AI]))
+    monkeypatch.setattr(hw, "ROOT", tmp_path / "root")
+    assert hw.real_of(2) == [hw.data.READS]  # no task, no file: the Safe preset
+    hw.save(hw.Task(id="t", title="t", env=2, repos=["homehiro"], preset="Safe", switches={"ai": "real"}))
     assert hw.real_of(2) == [hw.data.READS, hw.data.AI]
+    assert hw.write_board(2)["modes"]["ai"] == "real" and hw.switches.read(hw.data_dir(2))["changes"] == {"ai": "real"}
+    hw.save(hw.Task(id="t", title="t", env=2, repos=["homehiro"], preset="Gone", switches={}))
+    assert hw.modes_of(2) == hw.switches.resolve("Safe")  # a preset that is gone: the default
 
 
 def test_land_and_train_ignore_the_console_ctrl_c(monkeypatch):
