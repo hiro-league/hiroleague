@@ -475,6 +475,20 @@ def test_a_commit_needs_a_task_that_reserves_its_repo(tmp_path, monkeypatch):
     hw.cmd_fresh(type("A", (), {"path": str(tmp_path / "elsewhere")})())  # not an environment's repo
 
 
+def test_start_fetches_env0s_repos_side_by_side_as_one_timed_step(tmp_path, monkeypatch):
+    read = _events(tmp_path, monkeypatch)
+    monkeypatch.setattr(hw, "ROOT", tmp_path)
+    for repo in ("codehiro", "nethiro"):
+        origin = _repo(tmp_path / "origins" / repo, "one")
+        hw.git(tmp_path, "clone", "-q", str(origin), str(tmp_path / "env0" / repo))
+        hw.git(origin, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "two")
+    hw.fetch_all(["codehiro", "nethiro", "studyhiro"], "t", 2)  # studyhiro has no checkout: its fetch fails quietly
+    for repo in ("codehiro", "nethiro"):  # both fetched: origin's new commit is known, main itself untouched
+        assert hw.git(tmp_path / "env0" / repo, "rev-list", "--count", "main..origin/main") == "1"
+    steps = [e["step"] for e in read()]
+    assert steps == ["fetch", "fetch"] and read()[-1]["ok"] is True  # one step, not one per repo
+
+
 def test_reserve_adds_a_free_repo_and_refuses_one_held(tmp_path, monkeypatch):
     read = _events(tmp_path, monkeypatch)
     monkeypatch.setattr(hw, "ROOT", tmp_path)

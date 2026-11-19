@@ -42,6 +42,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -764,10 +765,19 @@ def refresh_data(env: int, task: str | None = None, source: str = "env0") -> Non
     say(f"  {switches.describe(board)}")
 
 
-def fresh_base(repo: str, task: str | None) -> str:
-    """A repo's base for a new branch: env0's dev/main, first brought up to GitHub when it can fast-forward."""
+def fetch_all(repos: list[str], task: str | None, env: int | None) -> None:
+    """`git fetch origin` in env0's repos, side by side: one after another they took about 1.4 s each, most of a
+    start's time. A fetch that fails changes nothing here: fresh_base then uses env0's dev/main as it is."""
+    with step(task, env, "fetch"), ThreadPoolExecutor(max_workers=len(repos) or 1) as pool:
+        list(pool.map(lambda r: git(repo_dir(0, r), "fetch", "-q", "origin", check=False), repos))
+
+
+def fresh_base(repo: str, task: str | None, fetch: bool = True) -> str:
+    """A repo's base for a new branch: env0's dev/main, first brought up to GitHub when it can fast-forward.
+    ``fetch=False`` when fetch_all has just fetched it."""
     d = repo_dir(0, repo)
-    git(d, "fetch", "-q", "origin", check=False)
+    if fetch:
+        git(d, "fetch", "-q", "origin", check=False)
     main = main_of(repo)
     behind = int(git(d, "rev-list", "--count", f"{main}..origin/{main}", check=False) or 0)
     if behind:
@@ -820,8 +830,9 @@ def cmd_start(a) -> None:
           **({"part_of": task.part_of} if task.part_of else {}), **({"about": task.about} if task.about else {}))
     try:
         init_env(env, task.id)
+        fetch_all(REPOS, task.id, env)
         for repo in REPOS:
-            base = fresh_base(repo, task.id)
+            base = fresh_base(repo, task.id, fetch=False)
             d = repo_dir(env, repo)
             if dirty(d):
                 raise Stop(f"env{env}'s {repo} has uncommitted files: it isn't free (hiro-work sweep).")

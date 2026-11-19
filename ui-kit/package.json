@@ -27,8 +27,8 @@
 		"dev": "vite dev",
 		"build": "vite build",
 		"prepare": "svelte-kit sync || echo ''",
-		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && eslint . && vitest run",
-		"lint": "eslint .",
+		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && eslint . --concurrency 2 && vitest run",
+		"lint": "eslint . --concurrency 2",
 		"test": "vitest run"
 	},
 	"devDependencies": {

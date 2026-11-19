@@ -102,9 +102,9 @@ write(
 				build: 'npm run kit && vite build',
 				preview: 'vite preview',
 				prepare: "node ../../hiroleague/ui-kit/scripts/kit-sync.mjs && svelte-kit sync || echo ''",
-				check: 'npm run kit && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && eslint . && vitest run',
+				check: 'npm run kit && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && eslint . --concurrency 2 && vitest run',
 				'check:watch': 'svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch',
-				lint: 'eslint .',
+				lint: 'eslint . --concurrency 2',
 				test: 'npm run kit && vitest run',
 				'test:watch': 'vitest'
 			},
