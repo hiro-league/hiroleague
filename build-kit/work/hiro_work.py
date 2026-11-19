@@ -314,7 +314,7 @@ class Task:
     title: str
     env: int | None
     repos: list[str]
-    state: str = "working"  # working | paused | done
+    state: str = "working"  # working | paused | done (merged) | cancelled (ended unmerged: hiro-work reopen)
     base: dict[str, str] = field(default_factory=dict)
     # In env1..env5: its switchboard (switches.py): a preset, and the systems changed from it ({"ai": "real"})
     preset: str = switches.DEFAULT
@@ -336,6 +336,15 @@ class Task:
     @property
     def branch(self) -> str:
         return f"task/{self.id}"
+
+
+# A task that ended: merged (done), or cancelled. Its record moves to tasks/done; only a cancelled one can be reopened.
+ENDED = ("done", "cancelled")
+
+
+def cancelled_branch(task_id: str) -> str:
+    """Where a cancelled task's work is kept, in each repo that has commits of its own (hiro-work reopen takes it back)."""
+    return f"cancelled/{task_id}"
 
 
 def task_path(task_id: str) -> Path:
@@ -364,7 +373,7 @@ def load_tasks() -> list[Task]:
 def save(task: Task) -> None:
     task.updated = datetime.now().astimezone().isoformat(timespec="seconds")
     data = record(task)
-    if task.state == "done":
+    if task.state in ENDED:
         (TASKS / "done").mkdir(parents=True, exist_ok=True)
         task_path(task.id).unlink(missing_ok=True)
         (TASKS / "done" / f"{task.id}.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -1346,6 +1355,96 @@ def cmd_install(a) -> None:
     say(f"env{a.env}'s packages are installed.")
 
 
+def open_ids(*states: str) -> set[str]:
+    """The ids of the open tasks in these states."""
+    return {t.id for t in load_tasks() if t.state in states}
+
+
+def follow_plans(task_id: str, to: str, when: tuple[str, ...], others: set[str]) -> None:
+    """CodeHiro's copy of each plan naming the task follows what happened to it (plan.follow), then says so: the plan
+    doc is the session's to update, since hiro-work can't edit a Claude Doc."""
+    import plan
+
+    for line in plan.follow(task_id, to, when, others - {task_id}):
+        say(line)
+
+
+def can_cancel(task: Task) -> None:
+    """Stop before anything moves: a working task's uncommitted files would be lost."""
+    if task.state not in ("working", "paused"):
+        raise Stop(f"Task {task.id} isn't open: only a working or paused task can be cancelled.")
+    for repo in task.repos if task.env else []:
+        if dirty(repo_dir(task.env, repo)):
+            raise Stop(f"env{task.env}'s {repo} has uncommitted files: commit them on {task.branch} (they are kept "
+                       f"with it) or discard them, then cancel again.")
+
+
+def cancel_task(task: Task) -> None:
+    """End an open task without merging it: its servers stop, its environment is free, and each repo's branch with
+    commits of its own is kept as cancelled/<task> (one with none is removed: nothing to keep). Its record moves to
+    tasks/done as cancelled; hiro-work reopen takes it back."""
+    can_cancel(task)
+    env = task.env
+    if env:
+        with step(task.id, env, "servers down"):
+            servers_down(env)
+    kept = []
+    for repo in task.repos:
+        d = repo_dir(env or 0, repo)
+        if env:
+            git(d, "switch", "-q", "--detach", main_of(repo))
+        if not git(d, "rev-parse", "--verify", "-q", task.branch, check=False):
+            continue
+        if git(d, "rev-list", "--count", f"{main_of(repo)}..{task.branch}") == "0":
+            git(d, "branch", "-q", "-D", task.branch)
+        else:
+            # -M: a task cancelled before, reopened and cancelled again replaces its older copy (an ancestor of this one)
+            git(d, "branch", "-q", "-M", task.branch, cancelled_branch(task.id))
+            kept.append(repo)
+    with locked():
+        task.state, task.env = "cancelled", None
+        save(task)
+    event(task=task.id, env=env, step="task", phase="end", ok=True, merged=False, cancelled=True)
+    where = f"; env{env} is free" if env else ""
+    work = (f"its work is kept on {cancelled_branch(task.id)} in {', '.join(kept)}" if kept
+            else "it had no commits of its own")
+    say(f"Task {task.id} cancelled{where}: {work}. hiro-work reopen {task.id} takes it back.")
+
+
+def cmd_cancel(a) -> None:
+    """A task given up: it ends unmerged. A plan phase it worked on goes back to Next (no other open task works on it):
+    the plan goes on."""
+    task = get(a.task)
+    cancel_task(task)
+    follow_plans(task.id, "next", ("working", "review", "paused"), open_ids("working", "paused"))
+
+
+def cmd_reopen(a) -> None:
+    """A cancelled task taken back: its branches come back from cancelled/<task> (or start again from main where it had
+    no commits), then it resumes in a free environment. A merged task can't be reopened: start a new one."""
+    done = TASKS / "done" / f"{a.task}.json"
+    if task_path(a.task).exists():
+        raise Stop(f"Task {a.task} is open already.")
+    if not done.exists():
+        raise Stop(f"No task '{a.task}' has ended.")
+    task = task_from(json.loads(done.read_text(encoding="utf-8")))
+    if task.state != "cancelled":
+        raise Stop(f"Task {task.id} was merged: it can't be reopened. Start a new task for more work.")
+    for repo in task.repos:
+        d = repo_dir(0, repo)
+        if git(d, "rev-parse", "--verify", "-q", cancelled_branch(task.id), check=False):
+            git(d, "branch", "-q", "-m", cancelled_branch(task.id), task.branch)
+        elif not git(d, "rev-parse", "--verify", "-q", task.branch, check=False):
+            git(d, "branch", "-q", task.branch, main_of(repo))
+    with locked():
+        task.state, task.env = "paused", None
+        save(task)
+        done.unlink(missing_ok=True)
+    event(task=task.id, env=None, step="reopened", phase="end", ok=True)
+    follow_plans(task.id, "working", ("next",), set())
+    cmd_resume(argparse.Namespace(task=task.id, env=a.env, part_of=None))
+
+
 def cmd_pause(a) -> None:
     task = get(a.task)
     if not task.env:
@@ -1364,6 +1463,7 @@ def cmd_pause(a) -> None:
         save(task)
     event(task=task.id, env=env, step="paused", phase="end", ok=True)
     say(f"Task {task.id} paused on {task.branch}; env{env} is free.")
+    follow_plans(task.id, "paused", ("working", "review"), open_ids("working"))
 
 
 def cmd_resume(a) -> None:
@@ -1396,6 +1496,7 @@ def cmd_resume(a) -> None:
             save(task)
     event(task=task.id, env=env, step="resumed", phase="end", ok=True,
           **({"part_of": task.part_of} if a.part_of is not None else {}))
+    follow_plans(task.id, "working", ("paused",), set())
     card(task)
 
 
@@ -1796,6 +1897,11 @@ def main(argv: list[str] | None = None) -> int:
     ds.add_argument("task")
     ds.add_argument("--about", help="what it does, in a sentence; \"\" clears it")
     ds.add_argument("--part-of", help="the bigger work it is a piece of; \"\" makes it a task of its own")
+    cn = sub.add_parser("cancel", help="end an open task unmerged; its work is kept on cancelled/<task>")
+    cn.add_argument("task")
+    ro = sub.add_parser("reopen", help="take a cancelled task back, in a free environment")
+    ro.add_argument("task")
+    ro.add_argument("--env", type=int, choices=[e for e in ENVS if e])
     r = sub.add_parser("resume")
     r.add_argument("task")
     r.add_argument("--env", type=int, choices=[e for e in ENVS if e])
@@ -1869,7 +1975,7 @@ def main(argv: list[str] | None = None) -> int:
         if getattr(a, "func", None):
             return a.func(a) or 0
         {"start": cmd_start, "sync": cmd_sync, "merge": cmd_merge, "pause": cmd_pause,
-         "resume": cmd_resume, "status": cmd_status, "sweep": cmd_sweep, "up": cmd_up, "down": cmd_down,
+         "resume": cmd_resume, "cancel": cmd_cancel, "reopen": cmd_reopen, "status": cmd_status, "sweep": cmd_sweep, "up": cmd_up, "down": cmd_down,
          "review": cmd_review, "describe": cmd_describe, "reserve": cmd_reserve, "fresh": cmd_fresh,
          "configure": cmd_configure, "install": cmd_install, "init": lambda a: init_env(a.env),
          "deploy": deploy.cmd_deploy}[a.cmd](a)

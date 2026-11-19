@@ -3,12 +3,20 @@ r"""hiro-work plan: a plan's phases and their states, sent to CodeHiro's Work ar
 A plan lives in a Claude Doc (hiro-docs standards/plans.md), which CodeHiro can't read. So whenever the plan's phases
 change, the session sends them, through the same outbox as every step (C:\hiro\logs\events.jsonl, sent by ship.py):
 
-    hiro-work plan send FILE      the plan as it stands now, from a JSON file (below): one event, the whole plan
+    hiro-work plan send FILE [--remove PHASE]...
+                                  the plan as it stands now, from a JSON file (below): one event, the whole plan
     hiro-work plan list           every plan sent: its phases live, and when it was last sent
     hiro-work plan show NAME      a plan as last sent
+    hiro-work plan close NAME     the plan stops here: its open tasks are cancelled, its phases not done yet too
 
 Each send is the whole plan, never a change to it: CodeHiro shows the latest, and works out what changed between two
-sends. A plan belongs to tasks by its name: every task started with ``--part-of "<name>"`` shows it, and so does each
+sends. A send never drops by accident a phase that is live, merged or has tasks: one the last send had and this one
+leaves out (a rename or a split leaves one out too) is refused unless named with --remove.
+
+A plan ends when every phase is live or cancelled. Its phases follow its tasks (hiro-work pause, resume, cancel and
+reopen send it again): a task paused puts its phase in paused, resumed back in working; a task cancelled puts it back
+in next, since the work is still to do, and the plan goes on. Only closing the plan cancels its phases; one live stays
+live. A closed plan opens again with a send that has a phase not live or cancelled. A plan belongs to tasks by its name: every task started with ``--part-of "<name>"`` shows it, and so does each
 task the file names. The file:
 
     {"name": "Chores board",                        the work's name, as tasks say it in --part-of
@@ -18,7 +26,8 @@ task the file names. The file:
      "needs_michel": "Answer Q2",                   optional: what waits on Michel
      "side_by_side": "Phases 3 and 4",              optional: what can run at the same time
      "phases": [{"name": "Mockup of the board",     in the plan's order
-                 "state": "live",                   live | check | merged | working | review | next | waits | todo
+                 "state": "live",                   live | check | merged | working | review | paused | next | waits |
+                                                    todo | cancelled
                  "says": "",                        optional: the state in the plan's words ("Waits on Q2")
                  "needs": "1, Q2",                  optional: what it needs first
                  "tasks": ["chores-mockup"]}]}      optional: the tasks that work on this phase, by id
@@ -41,8 +50,16 @@ from audit import when
 STEP = "plan-sent"
 # A phase's states, as plans.md's key names them: live, live with a check left, merged and not deployed, being
 # worked on, in review, next, waits on a decision, not started
-STATES = ("live", "check", "merged", "working", "review", "next", "waits", "todo")
+STATES = ("live", "check", "merged", "working", "review", "paused", "next", "waits", "todo", "cancelled")
 SHIPPED = ("live", "check")
+# A phase in one of these is finished: the plan ends when all are
+FINAL = (*SHIPPED, "cancelled")
+# A phase in one of these holds work a send must not drop by accident (it has tasks too)
+KEPT = (*SHIPPED, "merged")
+# How a phase's state reads in hiro-work's own lines
+SAYS = {"next": "Next", "paused": "Paused", "working": "Being worked on", "cancelled": "Cancelled"}
+# The plan's fields a send carries, besides its phases
+FIELDS = ("doc", "about", "tasks", "needs_michel", "side_by_side")
 MAX_PHASES = 12
 MAX_WORDS = 200
 TASK_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -136,6 +153,78 @@ def read_log(path: Path) -> list[dict]:
     return out
 
 
+def latest(name: str) -> dict | None:
+    """The plan as last sent, by its name."""
+    return next((p for p in plans(read_log(hw.EVENTS)) if str(p["plan"]).casefold() == name.casefold()), None)
+
+
+def guard(old: dict | None, new: dict, removing: list[str]) -> None:
+    """Stop a send that leaves out a phase the last send had that is live, merged or has tasks, unless --remove names
+    it: its work and history would leave CodeHiro's page by accident."""
+    if not old:
+        return
+    kept = {str(p["name"]).casefold() for p in new["phases"]} | {r.casefold() for r in removing}
+    lost = [p for p in old.get("phases") or [] if isinstance(p, dict) and str(p.get("name", "")).casefold() not in kept
+            and (p.get("state") in KEPT or p.get("tasks"))]
+    if lost:
+        named = ", ".join(f'"{p["name"]}" ({p["state"]}' + (f", tasks {', '.join(p['tasks'])})" if p.get("tasks") else ")")
+                          for p in lost)
+        flags = " ".join(f'--remove "{p["name"]}"' for p in lost)
+        raise hw.Stop(f"Plan {new['plan']}: this send leaves out {named}. A send never drops a live, merged or worked-on "
+                      f"phase by accident. If you mean it (renamed, split, moved), send it again with {flags}.")
+
+
+def resend(old: dict, phases: list[dict]) -> None:
+    """The plan sent again with new phases, the rest as last sent."""
+    hw.event(task=None, env=None, step=STEP, phase="end", ok=True, plan=old["plan"],
+             **{k: old.get(k) or ("" if k != "tasks" else []) for k in FIELDS}, phases=phases)
+
+
+def follow(task_id: str, to: str, when: tuple[str, ...], others: set[str]) -> list[str]:
+    """CodeHiro's copy of each plan naming the task follows it: each phase the task works on whose state is in
+    ``when``, and that no other task in ``others`` (the open ones) works on, moves to ``to``, its own words cleared.
+    Returns one line per plan that moved, telling the session to update the plan doc."""
+    out = []
+    for plan in plans(read_log(hw.EVENTS)):
+        moved, phases = [], []
+        for i, ph in enumerate(plan["phases"], 1):
+            ph = dict(ph)
+            tasks = set(ph.get("tasks") or [])
+            if task_id in tasks and ph.get("state") in when and not (tasks - {task_id}) & others:
+                ph["state"], ph["says"] = to, ""
+                moved.append(f"phase {i} ({ph['name']})")
+            phases.append(ph)
+        if moved:
+            resend(plan, phases)
+            out.append(f"Plan {plan['plan']}: {', '.join(moved)} now {SAYS.get(to, to)} in CodeHiro. Update the plan doc "
+                       "to match.")
+    return out
+
+
+def cmd_close(a) -> None:
+    """The plan stops here: its open tasks are cancelled (none moves until each can be), its phases not finished are
+    cancelled; live ones stay live, merged ones wait for the deploy. It ends once all are live or cancelled."""
+    if not a.name:
+        raise hw.Stop("hiro-work plan close NAME")
+    plan = latest(a.name)
+    if not plan:
+        raise hw.Stop(f"No plan {a.name} (hiro-work plan list).")
+    named = set(plan.get("tasks") or []) | {t for ph in plan["phases"] for t in ph.get("tasks") or []}
+    tasks = [t for t in hw.load_tasks() if t.state in ("working", "paused")
+             and (t.id in named or t.part_of.casefold() == str(plan["plan"]).casefold())]
+    for t in tasks:
+        hw.can_cancel(t)
+    for t in tasks:
+        hw.cancel_task(t)
+    phases = [{**ph, "state": "cancelled", "says": ""} if ph.get("state") not in (*FINAL, "merged") else dict(ph)
+              for ph in plan["phases"]]
+    resend(plan, phases)
+    count = {s: sum(1 for ph in phases if ph["state"] in s) for s in (SHIPPED, ("cancelled",), ("merged",))}
+    waits = f", {count[('merged',)]} merged (it ends once they are live)" if count[("merged",)] else ""
+    hw.say(f"Plan {plan['plan']} closed: {count[SHIPPED]} live, {count[('cancelled',)]} cancelled{waits}. Update the "
+           "plan doc to match (a closed plan opens again with a send that has a phase still to do).")
+
+
 def shipped(plan: dict) -> str:
     done = sum(1 for p in plan["phases"] if p.get("state") in SHIPPED)
     return f"{done} of {len(plan['phases'])} phases live"
@@ -151,6 +240,7 @@ def cmd_send(a) -> None:
     except ValueError as exc:
         raise hw.Stop(f"{a.name} isn't JSON: {exc}.") from exc
     plan = checked(raw)
+    guard(latest(plan["plan"]), plan, a.remove or [])
     hw.event(task=None, env=None, step=STEP, phase="end", ok=True, **plan)
     hw.say(f"Plan {plan['plan']}: {shipped(plan)}, recorded. CodeHiro's Work area shows it once the sender delivers it.")
 
@@ -186,14 +276,18 @@ def cmd_plan(a) -> None:
         cmd_send(a)
     elif a.what in ("list", "show"):
         cmd_show(a)
+    elif a.what == "close":
+        cmd_close(a)
     else:
-        raise hw.Stop("hiro-work plan send FILE | list | show NAME")
+        raise hw.Stop("hiro-work plan send FILE | list | show NAME | close NAME")
 
 
 def add_parser(sub) -> None:
-    p = sub.add_parser("plan", help="a plan's phases, sent to CodeHiro: send FILE, list, show NAME",
+    p = sub.add_parser("plan", help="a plan's phases, sent to CodeHiro: send FILE, list, show NAME, close NAME",
                        formatter_class=argparse.RawDescriptionHelpFormatter,
                        description=__doc__.split("\n\n", 1)[1].rsplit("\n\n", 1)[0])
-    p.add_argument("what", help="send, list or show")
-    p.add_argument("name", nargs="?", help="send: the plan's JSON file; show: the plan's name")
+    p.add_argument("what", help="send, list, show or close")
+    p.add_argument("name", nargs="?", help="send: the plan's JSON file; show, close: the plan's name")
+    p.add_argument("--remove", action="append", metavar="PHASE",
+                   help="send: a phase the last send had that this one leaves out on purpose (once per phase)")
     p.set_defaults(func=cmd_plan)
