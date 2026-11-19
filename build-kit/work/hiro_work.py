@@ -1860,6 +1860,8 @@ def main(argv: list[str] | None = None) -> int:
     deploy.add_parser(sub)
     import audit
     audit.add_parser(sub)
+    import plan
+    plan.add_parser(sub)
     a = p.parse_args(argv)
     if a.cmd in LONG_COMMANDS:
         ignore_console_interrupt()
