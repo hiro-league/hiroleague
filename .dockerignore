@@ -1,0 +1,7 @@
+# The apps' images read this checkout as the build context "hiroleague" (the UI kit, the SDK, the kits, the build
+# kit). What a check or an install writes here stays out: the core's deploy rewrites ui-kit/node_modules and
+# ui-kit/.svelte-kit at every run, and a copied UI kit that looks new makes every app's npm ci run again (14 of 14
+# app deploys with a core deploy reinstalled their packages). The apps take only the kit's sources and
+# scripts/kit-sync.mjs, which uses Node's own modules.
+**/node_modules
+**/.svelte-kit
