@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import contextvars
 import hashlib
 import json
 import os
@@ -41,6 +42,7 @@ import signal
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -129,23 +131,29 @@ def say(msg: str) -> None:
 
 
 _shipping = False  # this process has started the sender (ship.py) once
+_event_lock = threading.Lock()
 
 
 def event(**fields) -> None:
     global _shipping
     LOGS.mkdir(parents=True, exist_ok=True)
     fields = {"at": datetime.now().astimezone().isoformat(timespec="seconds"), **fields}
-    with open(EVENTS, "a", encoding="utf-8") as f:
-        f.write(json.dumps(fields) + "\n")
-    # The log is the outbox: the sender posts the new lines to CodeHiro. Only the real log is sent (a test's isn't).
-    if not _shipping and EVENTS == ship.EVENTS:
-        _shipping = True
-        ship.kick()
+    # Through the log's lock: a merge's checks run side by side, and their engines write beside this process. This
+    # process's threads take turns first: on Windows a locked file is tried again only after a whole second
+    with _event_lock:
+        ship.append(EVENTS, fields)
+        # The log is the outbox: the sender posts the new lines to CodeHiro. Only the real log is sent (a test's
+        # isn't).
+        if not _shipping and EVENTS == ship.EVENTS:
+            _shipping = True
+            ship.kick()
 
 
 TAIL_LINES = 100  # a failed step's last lines of log, sent with its end (CodeHiro can't read the PC's files)
 TAIL_CHARS = 20_000
-_open_steps: list[str] = []  # the steps running now in this process, the innermost last: a new one runs inside it
+# The steps open around the code running now, the innermost last: a new one runs inside it. A context variable, so
+# a merge's checks running side by side in threads (each started in a copy of the merge's context) each have their own
+_open_steps: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar("open_steps", default=())
 
 
 def tail(log: Path | None) -> str | None:
@@ -168,6 +176,11 @@ class Outcome:
         self.error = error
 
 
+def side_by_side() -> bool:
+    """Steps run side by side in threads (a merge's checks); the main thread's run one at a time."""
+    return threading.current_thread() is not threading.main_thread()
+
+
 @contextlib.contextmanager
 def step(task: str | None, env: int | None, name: str, repo: str | None = None, log: Path | None = None,
          **more):
@@ -177,10 +190,10 @@ def step(task: str | None, env: int | None, name: str, repo: str | None = None, 
     label = f"{name}" + (f" [{repo}]" if repo else "")
     say(f"> {label}")
     where = {"task": task, "env": env, "repo": repo, "step": name}
-    if _open_steps:
-        where["parent"] = _open_steps[-1]
+    if opened := _open_steps.get():
+        where["parent"] = opened[-1]
     event(**where, phase="start", **({"log": str(log)} if log else {}), **more)
-    _open_steps.append(name)
+    token = _open_steps.set((*opened, name))
     t = time.monotonic()
     outcome = Outcome()
     try:
@@ -191,14 +204,15 @@ def step(task: str | None, env: int | None, name: str, repo: str | None = None, 
         say(f"x {label} failed after {s} s")
         raise
     finally:
-        _open_steps.pop()
+        _open_steps.reset(token)
     s = round(time.monotonic() - t, 1)
     if outcome.error:
         event(**where, phase="end", ok=False, seconds=s, error=outcome.error[:300], tail=tail(log), **more)
         say(f"x {label} failed after {s} s")
         return
     event(**where, phase="end", ok=True, seconds=s, **more)
-    say(f"  done in {s} s")
+    # The step's name when steps run side by side (a merge's checks), so each "done" says whose it is
+    say(f"  done in {s} s" + (f" ({label})" if side_by_side() else ""))
 
 
 COMMITS_MAX = 2000  # one event's commits, at most
@@ -1202,24 +1216,13 @@ def merge_steps(task: Task, env: int) -> dict[str, list[str]]:
         servers_down(env)
     # 1. Bring each branch up to GitHub and to env0's dev/main
     merge_latest(task, env)
-    # 2. The checks, one repo at a time (each already uses every core)
+    # 2. The checks: installs first, then the core's alone and two apps' at a time (check_repos)
     to_check = [r for r in task.repos if (repo_dir(env, r) / "scripts" / "check.sh").exists()]
     if kit_changed(env, task):
         to_check += [r for r in KIT_READERS if r not in to_check]
-    failed = []
     for repo in to_check:
         install(env, repo, task.id)
-        # An app beside a changed kit: its parts name the core files they read (@hiroleague:...), so the check runs
-        # exactly the parts the kit change reaches
-        log = LOGS / "check" / f"{task.id}-{repo}.log"
-        with step(task.id, env, "check", repo, log=log) as outcome:
-            out = subprocess.run([bash(), "-lc", "./scripts/check.sh"], cwd=repo_dir(env, repo),
-                                 capture_output=True, text=True, encoding="utf-8", errors="replace")
-            log.parent.mkdir(parents=True, exist_ok=True)
-            log.write_text(out.stdout + out.stderr, encoding="utf-8")
-            if out.returncode != 0:
-                failed.append(f"{repo} (log: {log})")
-                outcome.fail(f"check.sh failed (log: {log})")
+    failed = check_repos(task, env, to_check)
     # Every copy list as it will be in env0: a wrong one would stop every later start, so it is refused here. Read by
     # the environment's own copylist.py, as each commit's check does: a fix, since main's parser refused a list
     # format the task itself brings ([[secret]] lines, Nov 18, 2026)
@@ -1247,6 +1250,78 @@ def merge_steps(task: Task, env: int) -> dict[str, list[str]]:
             if held := install(0, repo, task.id, spare_servers=True):
                 waiting[repo] = held
     return waiting
+
+
+# Repos' checks side by side in a merge, the second starting only while the PC has MERGE_MIN_FREE_GB free. Measured on
+# Nov 19, 2026 (--all, env2): HomeHiro 68 s and StudyHiro 80 s one after another, 92 s side by side; side by side they
+# took 10.5 GB at their peak (alone 6 and 8 GB), so 12 GB leaves room when both start at once.
+MERGE_CHECKS = 2
+MERGE_MIN_FREE_GB = 12
+MERGE_POLL = 2  # seconds between looks for a free slot
+
+
+def runs_alone(env: int, repo: str) -> bool:
+    """A repo whose check names lanes that must run alone (CHECK_SOLO_LANES: the core's tests, whose onnxruntime sends
+    a phantom Ctrl-C to the whole console that kills a Node check beside them) runs alone in a merge too."""
+    return "CHECK_SOLO_LANES" in (repo_dir(env, repo) / "scripts" / "check.sh").read_text(encoding="utf-8")
+
+
+def free_gb() -> float:
+    """The PC's free memory in GB (what can be used without paging); unknown: plenty."""
+    if os.name == "nt":
+        import ctypes
+
+        class MemoryStatus(ctypes.Structure):
+            _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong),
+                        *[(n, ctypes.c_ulonglong) for n in ("total", "avail", "total_page", "avail_page",
+                                                             "total_virtual", "avail_virtual", "avail_extended")]]
+
+        status = MemoryStatus()
+        status.length = ctypes.sizeof(status)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            return status.avail / 1024 ** 3
+        return float("inf")
+    with contextlib.suppress(OSError, ValueError, StopIteration):
+        with open("/proc/meminfo", encoding="utf-8") as f:
+            return int(next(x for x in f if x.startswith("MemAvailable:")).split()[1]) / 1024 ** 2
+    return float("inf")
+
+
+def check_repo(task: Task, env: int, repo: str, failed: list[str]) -> None:
+    """One repo's check.sh as a step of the merge, its output in a log; a failure is added to ``failed``. An app beside
+    a changed kit: its parts name the core files they read (@hiroleague:...), so the check runs exactly the parts the
+    kit change reaches."""
+    log = LOGS / "check" / f"{task.id}-{repo}.log"
+    with step(task.id, env, "check", repo, log=log) as outcome:
+        out = subprocess.run([bash(), "-lc", "./scripts/check.sh"], cwd=repo_dir(env, repo),
+                             capture_output=True, text=True, encoding="utf-8", errors="replace")
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.write_text(out.stdout + out.stderr, encoding="utf-8")
+        if out.returncode != 0:
+            failed.append(f"{repo} (log: {log})")
+            outcome.fail(f"check.sh failed (log: {log})")
+
+
+def check_repos(task: Task, env: int, repos: list[str]) -> list[str]:
+    """The merge's checks; returns the failed ones. A repo that must run alone (the core) runs first, by itself; the
+    others two at a time, the second starting only while MERGE_MIN_FREE_GB are free (each check already runs two lanes
+    and uses every core). Why: a kit change checks every app, and one after another that took 13 merges 93 min."""
+    failed: list[str] = []
+    alone = [r for r in repos if runs_alone(env, r)]
+    for repo in alone:
+        check_repo(task, env, repo, failed)
+    with ThreadPoolExecutor(MERGE_CHECKS) as pool:
+        started = []
+        for repo in (r for r in repos if r not in alone):
+            while running := [f for f in started if not f.done()]:
+                if len(running) < MERGE_CHECKS and free_gb() >= MERGE_MIN_FREE_GB:
+                    break
+                time.sleep(MERGE_POLL)
+            # In a copy of this context: the check is a step inside the merge
+            started.append(pool.submit(contextvars.copy_context().run, check_repo, task, env, repo, failed))
+        for f in started:
+            f.result()  # a check that raised (not failed: raised) raises here
+    return failed
 
 
 def waiting_installs_note(waiting: dict[str, list[str]]) -> str:

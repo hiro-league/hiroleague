@@ -1,6 +1,8 @@
 """hiro-work's choices: the ports of an environment, what a task reserves, where a new task goes."""
 
 import json
+import threading
+import time
 
 import pytest
 
@@ -130,6 +132,45 @@ def test_a_step_inside_another_names_it_as_its_parent(tmp_path, monkeypatch):
     assert "parent" not in by[("merge", "start")]
     assert by[("check", "start")]["parent"] == "merge" and by[("check", "end")]["parent"] == "merge"
     assert "parent" not in by[("after", "start")]
+
+
+def _checks_side_by_side(tmp_path, monkeypatch, free: float):
+    """check_repos over the core and three apps, each check a short sleep; returns (the order the checks started in,
+    the most that ran at once, the events)."""
+    read = _events(tmp_path, monkeypatch)
+    lock, now, most, started = threading.Lock(), [0], [0], []
+
+    def check_repo(task, env, repo, failed):
+        with hw.step(task.id, env, "check", repo):
+            with lock:
+                started.append(repo)
+                now[0] += 1
+                most[0] = max(most[0], now[0])
+            time.sleep(0.2)
+            with lock:
+                now[0] -= 1
+
+    monkeypatch.setattr(hw, "check_repo", check_repo)
+    monkeypatch.setattr(hw, "runs_alone", lambda env, repo: repo == "hiroleague")
+    monkeypatch.setattr(hw, "free_gb", lambda: free)
+    monkeypatch.setattr(hw, "MERGE_POLL", 0.02)
+    t = hw.Task(id="t", title="t", env=1, repos=["hiroleague"])
+    with hw.step("t", 1, "merge"):
+        assert hw.check_repos(t, 1, ["homehiro", "hiroleague", "nethiro", "codehiro"]) == []
+    return started, most[0], read()
+
+
+def test_a_merges_checks_run_the_core_alone_then_two_apps_at_a_time(tmp_path, monkeypatch):
+    started, most, events = _checks_side_by_side(tmp_path, monkeypatch, free=32.0)
+    assert started[0] == "hiroleague" and sorted(started[1:]) == ["codehiro", "homehiro", "nethiro"]
+    assert most == 2
+    checks = [e for e in events if e["step"] == "check"]
+    assert len(checks) == 8 and all(e["parent"] == "merge" for e in checks)  # each thread's step is the merge's
+
+
+def test_a_merges_second_check_waits_for_free_memory(tmp_path, monkeypatch):
+    _, most, _ = _checks_side_by_side(tmp_path, monkeypatch, free=hw.MERGE_MIN_FREE_GB - 1)
+    assert most == 1
 
 
 def test_a_step_can_fail_without_stopping_and_carries_its_logs_last_lines(tmp_path, monkeypatch):
