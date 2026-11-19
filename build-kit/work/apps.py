@@ -1,4 +1,4 @@
-"""The Hiro League apps, read from apps.toml beside this file: the one place hiro-work, the deploy train and the data
+"""The Hiro League apps, read from apps.toml beside this file: the one place hiro-work, the deploy and the data
 copies learn about an app. A new app adds its row there (hiro-docs standards/new-extension.md).
 
 Each environment's block of ports is 7N00-7N49 (env N): the core has 00 (admin API), 01 (extension socket), 02 (admin

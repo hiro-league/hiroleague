@@ -16,7 +16,7 @@
 			'inline-flex h-4.5 shrink-0 items-center rounded-full border px-1.5 text-[10px] leading-none font-semibold tabular-nums',
 			env.n === 0 ? 'border-border bg-muted text-muted-foreground' : CAT.chip[env.n]
 		]}
-		title={env.n === 0 ? 'Environment 0: the trunk, your own dev' : `Environment ${env.n}: a task's dev copy`}
+		title={env.n === 0 ? 'Environment 0: main, your own dev' : `Environment ${env.n}: a task's dev copy`}
 	>
 		E{env.n}
 	</span>

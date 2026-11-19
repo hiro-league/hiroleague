@@ -1,4 +1,4 @@
-"""hiro-work's choices: the ports of an environment, what a task claims, where a new task goes."""
+"""hiro-work's choices: the ports of an environment, what a task reserves, where a new task goes."""
 
 import json
 
@@ -20,7 +20,7 @@ def test_each_environment_owns_17_consecutive_ports():
     assert sorted(hw.ports(3).values()) == list(range(7300, 7317))
 
 
-def test_claims_keep_the_core_first_and_a_kit_change_claims_the_apps():
+def test_reserves_keep_the_core_first_and_a_kit_change_reserves_the_apps():
     assert hw.expand(["homehiro", "hiroleague"], kit=False) == ["hiroleague", "homehiro"]
     assert hw.expand(["hiroleague"], kit=True) == ["hiroleague", "homehiro", "nethiro", "trainhiro", "studyhiro",
                                                     "codehiro", "evalhiro"]
@@ -30,7 +30,7 @@ def test_claims_keep_the_core_first_and_a_kit_change_claims_the_apps():
 
 def test_a_task_never_works_in_env0_the_trunk():
     assert hw.pick_env([], None) == 1
-    with pytest.raises(hw.Stop, match="trunk"):
+    with pytest.raises(hw.Stop, match="main"):
         hw.pick_env([], 0)
 
 
@@ -39,8 +39,8 @@ def test_a_task_goes_to_the_first_free_environment():
     assert hw.pick_env(tasks, None) == 2
 
 
-def test_parked_tasks_hold_no_environment():
-    tasks = [task("a", None, ["homehiro"], state="parked")]
+def test_paused_tasks_hold_no_environment():
+    tasks = [task("a", None, ["homehiro"], state="paused")]
     assert hw.pick_env(tasks, None) == 1
 
 
@@ -54,19 +54,19 @@ def test_a_step_of_open_work_joins_it_unless_michel_gives_it_its_own_branch(tmp_
     monkeypatch.setattr(hw, "TASKS", tmp_path)
     plan = hw.Task(id="plan", title="Memory plan", env=1, repos=["hiroleague"])
     step1 = hw.Task(id="step1", title="Step 1", env=2, repos=["evalhiro"], part_of="Memory plan")
-    parked = hw.Task(id="old", title="Old", env=None, repos=["homehiro"], state="parked", part_of="Other plan")
-    for t in (plan, step1, parked):
+    paused = hw.Task(id="old", title="Old", env=None, repos=["homehiro"], state="paused", part_of="Other plan")
+    for t in (plan, step1, paused):
         hw.save(t)
     tasks = hw.load_tasks()
     assert [t.id for t in hw.same_work("plan", tasks)] == ["plan", "step1"]  # by id: the task and its pieces
     assert [t.id for t in hw.same_work("Memory plan", tasks)] == ["plan", "step1"]  # by name
-    assert [t.id for t in hw.same_work("Other plan", tasks)] == ["old"]  # a parked piece counts
+    assert [t.id for t in hw.same_work("Other plan", tasks)] == ["old"]  # a paused piece counts
     assert hw.same_work("New work", tasks) == [] and hw.same_work("", tasks) == []
     args = dict(task="step2", repos="nethiro", kit=False, title=None, env=None, part_of="plan", about=None,
                 preset="Safe", set=None, data="env0", own_branch=False)
     with pytest.raises(hw.Stop, match="guard.py join"):
         hw.cmd_start(hw.argparse.Namespace(**args))
-    assert not hw.task_path("step2").exists()  # refused before any claim
+    assert not hw.task_path("step2").exists()  # refused before any reserve
 
 
 def test_a_task_record_from_a_newer_hiro_work_is_read_and_its_new_fields_kept(tmp_path, monkeypatch):
@@ -121,14 +121,14 @@ def _events(tmp_path, monkeypatch):
 
 def test_a_step_inside_another_names_it_as_its_parent(tmp_path, monkeypatch):
     read = _events(tmp_path, monkeypatch)
-    with hw.step("t", 1, "land"):
+    with hw.step("t", 1, "merge"):
         with hw.step("t", 1, "check", "codehiro"):
             pass
     with hw.step("t", 1, "after"):
         pass
     by = {(e["step"], e["phase"]): e for e in read()}
-    assert "parent" not in by[("land", "start")]
-    assert by[("check", "start")]["parent"] == "land" and by[("check", "end")]["parent"] == "land"
+    assert "parent" not in by[("merge", "start")]
+    assert by[("check", "start")]["parent"] == "merge" and by[("check", "end")]["parent"] == "merge"
     assert "parent" not in by[("after", "start")]
 
 
@@ -151,14 +151,14 @@ def test_servers_up_names_its_servers_on_both_events(tmp_path, monkeypatch):
     assert [e["servers"] for e in read()] == [["core", "core-ui"], ["core", "core-ui"]]
 
 
-def test_review_marks_a_working_task_and_refuses_a_parked_one(tmp_path, monkeypatch):
+def test_review_marks_a_working_task_and_refuses_a_paused_one(tmp_path, monkeypatch):
     read = _events(tmp_path, monkeypatch)
     monkeypatch.setattr(hw, "TASKS", tmp_path / "tasks")
     hw.TASKS.mkdir()
     hw.save(task("t", 1, ["codehiro"]))
     hw.cmd_review(type("A", (), {"task": "t"})())
     assert read()[-1] == {**read()[-1], "task": "t", "env": 1, "step": "review", "phase": "start"}
-    hw.save(task("p", None, ["codehiro"], state="parked"))
+    hw.save(task("p", None, ["codehiro"], state="paused"))
     with pytest.raises(hw.Stop):
         hw.cmd_review(type("A", (), {"task": "p"})())
 
@@ -168,7 +168,7 @@ def test_sweep_leaves_out_branches_in_use():
     assert hw.merged_left(listing, "dev") == ["task/old"]
 
 
-def test_a_land_records_the_commits_it_added(tmp_path, monkeypatch):
+def test_a_merge_records_the_commits_it_added(tmp_path, monkeypatch):
     read = _events(tmp_path, monkeypatch)
     repo = tmp_path / "env0" / "codehiro"
     repo.mkdir(parents=True)
@@ -180,14 +180,14 @@ def test_a_land_records_the_commits_it_added(tmp_path, monkeypatch):
     run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "three")
     after = run("rev-parse", "HEAD")
     monkeypatch.setattr(hw, "repo_dir", lambda env, r: tmp_path / f"env{env}" / r)
-    hw.record_commits("t", 1, "codehiro", before, after, "land")
-    hw.record_commits("t", 1, "codehiro", after, after, "land")  # nothing new: no event
+    hw.record_commits("t", 1, "codehiro", before, after, "merge")
+    hw.record_commits("t", 1, "codehiro", after, after, "merge")  # nothing new: no event
     [e] = read()
-    assert (e["step"], e["how"], e["from"], e["to"], len(e["commits"])) == ("commits", "land", before, after, 2)
+    assert (e["step"], e["how"], e["from"], e["to"], len(e["commits"])) == ("commits", "merge", before, after, 2)
     assert e["commits"][0] == after
 
 
-def test_a_land_merges_env0_into_a_new_app_that_has_no_github_repo_yet(tmp_path, monkeypatch):
+def test_a_merge_merges_env0_into_a_new_app_that_has_no_github_repo_yet(tmp_path, monkeypatch):
     _events(tmp_path, monkeypatch)
     for who in ("AUTHOR", "COMMITTER"):  # the merge commit needs a name: the core's deploy has no git identity
         monkeypatch.setenv(f"GIT_{who}_NAME", "t")
@@ -201,14 +201,14 @@ def test_a_land_merges_env0_into_a_new_app_that_has_no_github_repo_yet(tmp_path,
     run("checkout", "-q", "-b", "task/t")
     commit("pages")
     run("checkout", "-q", "main")
-    commit("landed by another task")
+    commit("merged by another task")
     run("checkout", "-q", "task/t")
     monkeypatch.setattr(hw, "repo_dir", lambda env, r: tmp_path / f"env{env}" / r)
     hw.merge_latest(hw.Task(id="t", title="t", env=1, repos=["evalhiro"]), 1)  # no origin: only main is merged
     assert run("merge-base", "--is-ancestor", "main", "HEAD") == ""  # raised if main weren't in the branch
 
 
-def test_sync_brings_the_trunk_into_a_tasks_branch_without_landing(tmp_path, monkeypatch):
+def test_sync_brings_the_trunk_into_a_tasks_branch_without_merging(tmp_path, monkeypatch):
     read = _events(tmp_path, monkeypatch)
     monkeypatch.setattr(hw, "TASKS", tmp_path / "tasks")
     hw.TASKS.mkdir()
@@ -223,16 +223,16 @@ def test_sync_brings_the_trunk_into_a_tasks_branch_without_landing(tmp_path, mon
     run("checkout", "-q", "-b", "task/t")
     run("commit", "-q", "--allow-empty", "-m", "phase 1")
     run("checkout", "-q", "main")
-    run("commit", "-q", "--allow-empty", "-m", "landed by another task")
+    run("commit", "-q", "--allow-empty", "-m", "merged by another task")
     run("checkout", "-q", "task/t")
     hw.save(task("t", 1, ["evalhiro"]))
     hw.cmd_sync(hw.argparse.Namespace(task="t"))
     assert run("merge-base", "--is-ancestor", "main", "HEAD") == ""  # raised if main weren't in the branch
-    assert run("branch", "--show-current") == "task/t" and hw.get("t").state == "working"  # not landed
+    assert run("branch", "--show-current") == "task/t" and hw.get("t").state == "working"  # not merged
     assert [e["step"] for e in read() if e["phase"] == "end"][-1] == "sync"
 
 
-def test_a_land_stops_the_environments_servers_before_it_installs_anything(tmp_path, monkeypatch):
+def test_a_merge_stops_the_environments_servers_before_it_installs_anything(tmp_path, monkeypatch):
     _events(tmp_path, monkeypatch)
     order = []
 
@@ -252,7 +252,7 @@ def test_a_land_stops_the_environments_servers_before_it_installs_anything(tmp_p
     monkeypatch.setattr(hw, "kit_changed", lambda env, task: False)
     monkeypatch.setattr(hw, "install", install)
     with pytest.raises(Installing):
-        hw.land_steps(hw.Task(id="t", title="t", env=1, repos=["codehiro"]), 1)
+        hw.merge_steps(hw.Task(id="t", title="t", env=1, repos=["codehiro"]), 1)
     assert order == [("down", 1), ("merge", 1), ("install", 1, "codehiro")]  # only env1's servers; never env0's
 
 
@@ -282,7 +282,7 @@ def test_an_install_runs_when_the_servers_are_down_or_not_spared(tmp_path, monke
     assert hw.install(0, "homehiro", force=True, spare_servers=True) == []
     assert len(calls) == 1 and calls[0][:2] == ["npm.cmd", "ci"]
     calls = _node_repo(tmp_path, monkeypatch, {hw.ports(0)["homehiro-ui"]})
-    hw.install(0, "homehiro", force=True)  # envN installs run after land stopped the servers
+    hw.install(0, "homehiro", force=True)  # envN installs run after merge stopped the servers
     assert len(calls) == 1
 
 
@@ -378,7 +378,7 @@ def test_an_app_is_paired_only_when_this_core_knows_its_key(tmp_path, monkeypatc
 def test_overlaps_name_tasks_on_the_same_repos_or_the_kit_beside_an_app():
     me = task("me", 1, ["codehiro"])
     others = [me, task("same", 0, ["codehiro", "hiro-docs"]), task("kit", 2, ["hiroleague"]),
-              task("apart", 3, ["aicam"]), task("parked", None, ["codehiro"], state="parked")]
+              task("apart", 3, ["aicam"]), task("paused", None, ["codehiro"], state="paused")]
     lines = hw.overlaps(me, others)
     assert len(lines) == 2
     assert lines[0].startswith("codehiro: also changed by same (env0")
@@ -423,14 +423,14 @@ def test_a_command_opens_no_console_window(monkeypatch):
     assert seen["creationflags"] == getattr(hw.subprocess, "CREATE_NO_WINDOW", 0)
 
 
-def test_changed_repos_are_a_claims_new_work_or_any_uncommitted_files(tmp_path, monkeypatch):
+def test_changed_repos_are_a_reserves_new_work_or_any_uncommitted_files(tmp_path, monkeypatch):
     monkeypatch.setattr(hw, "ROOT", tmp_path)
     monkeypatch.setattr(hw, "REPOS", ["hiroleague", "codehiro", "nethiro", "homehiro"])
     for repo in ("hiroleague", "codehiro", "nethiro"):
         _repo(tmp_path / "env1" / repo, "one")
     t = task("t", 1, ["hiroleague", "codehiro"])
     t.base = {r: hw.git(tmp_path / "env1" / r, "rev-parse", "HEAD") for r in t.repos}
-    assert hw.changed_repos(1, [t]) == []  # claimed, nothing new; homehiro isn't there
+    assert hw.changed_repos(1, [t]) == []  # reserved, nothing new; homehiro isn't there
     (tmp_path / "env1" / "codehiro" / "edit.txt").write_text("mine", encoding="utf-8")
     (tmp_path / "env1" / "nethiro" / "stray.txt").write_text("someone's", encoding="utf-8")
     hw.git(tmp_path / "env1" / "hiroleague", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q",
@@ -456,26 +456,26 @@ def test_leftovers_are_what_no_task_there_owns(tmp_path, monkeypatch):
         {"repo": "codehiro", "what": "1 uncommitted file"},
         {"repo": "nethiro", "what": "on branch task/old, 1 commit not on main"},
     ]  # homehiro is behind main: how a free environment sits until the next start, nothing left behind
-    # With a task there, its claims are its own and only another repo's uncommitted files are left over
+    # With a task there, its reserves are its own and only another repo's uncommitted files are left over
     t = task("t", 1, ["codehiro", "nethiro"])
     (tmp_path / "env1" / "hiroleague" / "edit.txt").write_text("x", encoding="utf-8")
     assert hw.leftovers(1, [t]) == [{"repo": "hiroleague", "what": "1 uncommitted file"}]
 
 
-def test_a_commit_needs_a_task_that_claims_its_repo(tmp_path, monkeypatch):
+def test_a_commit_needs_a_task_that_reserves_its_repo(tmp_path, monkeypatch):
     monkeypatch.setattr(hw, "ROOT", tmp_path)
     monkeypatch.setattr(hw, "TASKS", tmp_path / "tasks")
     hw.TASKS.mkdir()
     folder = tmp_path / "env1" / "homehiro" / "backend"
     folder.mkdir(parents=True)
-    with pytest.raises(hw.Stop, match="claim <task> homehiro"):
+    with pytest.raises(hw.Stop, match="reserve <task> homehiro"):
         hw.cmd_fresh(type("A", (), {"path": str(folder)})())
     hw.save(task("t", 1, ["homehiro"]))
-    hw.cmd_fresh(type("A", (), {"path": str(folder)})())  # claimed: the commit goes on
+    hw.cmd_fresh(type("A", (), {"path": str(folder)})())  # reserved: the commit goes on
     hw.cmd_fresh(type("A", (), {"path": str(tmp_path / "elsewhere")})())  # not an environment's repo
 
 
-def test_claim_adds_a_free_repo_and_refuses_one_held(tmp_path, monkeypatch):
+def test_reserve_adds_a_free_repo_and_refuses_one_held(tmp_path, monkeypatch):
     read = _events(tmp_path, monkeypatch)
     monkeypatch.setattr(hw, "ROOT", tmp_path)
     monkeypatch.setattr(hw, "TASKS", tmp_path / "tasks")
@@ -484,13 +484,13 @@ def test_claim_adds_a_free_repo_and_refuses_one_held(tmp_path, monkeypatch):
     monkeypatch.setattr(hw, "fresh_base", lambda repo, task: hw.git(docs, "rev-parse", "HEAD"))
     hw.save(task("t", 1, ["codehiro"]))
     hw.save(task("other", 1, ["nethiro"]))
-    hw.cmd_claim(type("A", (), {"task": "t", "repos": "hiro-docs", "kit": False})())
+    hw.cmd_reserve(type("A", (), {"task": "t", "repos": "hiro-docs", "kit": False})())
     t = hw.get("t")
     assert t.repos == ["codehiro", "hiro-docs"] and t.base["hiro-docs"]
-    assert hw.git(docs, "branch", "--show-current") == "task/t"  # the claimed repo is on the task's branch
-    assert read()[-1]["step"] == "claim"
+    assert hw.git(docs, "branch", "--show-current") == "task/t"  # the reserved repo is on the task's branch
+    assert read()[-1]["step"] == "reserve"
     with pytest.raises(hw.Stop, match="nethiro by other"):
-        hw.cmd_claim(type("A", (), {"task": "t", "repos": "nethiro", "kit": False})())
+        hw.cmd_reserve(type("A", (), {"task": "t", "repos": "nethiro", "kit": False})())
 
 
 def test_env1_to_5_sign_in_as_env0_does_with_sends_and_has_automatic_writes_off():
@@ -543,15 +543,15 @@ def test_an_environment_no_task_holds_reads_as_a_default_task_does(tmp_path, mon
     assert hw.modes_of(2) == hw.switches.resolve("Safe")  # a preset that is gone: the default
 
 
-def test_land_and_train_ignore_the_console_ctrl_c(monkeypatch):
-    # onnxruntime's phantom Ctrl-C once killed a land inside subprocess.run(check.sh)
+def test_merge_and_deploy_ignore_the_console_ctrl_c(monkeypatch):
+    # onnxruntime's phantom Ctrl-C once killed a merge inside subprocess.run(check.sh)
     import signal
 
     before = signal.getsignal(signal.SIGINT)
     seen = {}
-    monkeypatch.setattr(hw, "cmd_land", lambda a: seen.setdefault("handler", signal.getsignal(signal.SIGINT)))
+    monkeypatch.setattr(hw, "cmd_merge", lambda a: seen.setdefault("handler", signal.getsignal(signal.SIGINT)))
     try:
-        assert hw.main(["land", "some-task"]) == 0
+        assert hw.main(["merge", "some-task"]) == 0
         assert seen["handler"] == signal.SIG_IGN
         signal.raise_signal(signal.SIGINT)  # dropped: no KeyboardInterrupt
     finally:

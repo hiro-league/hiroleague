@@ -3,7 +3,7 @@
 # Runs the repo's one check, ./scripts/check.sh, before every commit. Parts that already passed on these files are
 # skipped, so a checked change commits in seconds and an unchecked one can't commit. A repo without a check.sh
 # (aicam, hiro-docs) commits as before. `git commit --no-verify` skips it: only for a commit Michel asked for that way
-# (hiro-work park uses it for its WIP commit).
+# (hiro-work pause uses it for its WIP commit).
 
 top=$(git rev-parse --show-toplevel) || exit 1
 common=$(git rev-parse --git-common-dir) || exit 1
@@ -14,12 +14,12 @@ if [ -x "$own" ]; then
     "$own" "$@" || exit $?
 fi
 
-# A commit belongs to a task that claims this repo in its environment; other open tasks on the same repos are named,
+# A commit belongs to a task that reserves this repo in its environment; other open tasks on the same repos are named,
 # and an environment's other repos move up to env0's before the check reads them (hiro-work fresh).
 work="$(cd "$(dirname "$0")/.." && pwd)/work/hiro_work.py"
 if [ -f "$work" ]; then
     if ! python "$work" fresh "$top" >&2; then
-        echo "Commit stopped: no task claims this repo (above)." >&2
+        echo "Commit stopped: no task reserves this repo (above)." >&2
         exit 1
     fi
 fi

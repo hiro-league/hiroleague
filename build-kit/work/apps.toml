@@ -1,4 +1,4 @@
-# The Hiro League apps, one [[app]] each: what hiro-work, the deploy train and the data copies know about an app.
+# The Hiro League apps, one [[app]] each: what hiro-work, the deploy and the data copies know about an app.
 # A new app adds its row here (hiro-docs standards/new-extension.md) and nothing else in build-kit/work.
 #
 #   repo         its repo's folder name (C:\hiro\envN\<repo>, ~/<repo> on Simone)
@@ -15,7 +15,7 @@
 #                env1 to env5 always C:\hiro\data\envN\<repo>
 #   settings_db  its database with the `setting` table, in its data folder
 #   site_key     the setting that holds its own address (where the one sign-in sends people back)
-#   live_port    its port on Simone (127.0.0.1), where the train checks /api/health
+#   live_port    its port on Simone (127.0.0.1), where the deploy checks /api/health
 #   copy_data    whether an environment's data starts as a copy of env0's: its databases and its key (hiroleague/),
 #                and its pictures as hard links (data.py); other folders (mirrors, reports, caches) are left out
 

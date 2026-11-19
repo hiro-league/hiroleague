@@ -1,11 +1,11 @@
-"""The deploy train's choices: what lacks what, what stops it, the order (the core first, the rest side by side)."""
+"""The deploy's choices: what lacks what, what stops it, the order (the core first, the rest side by side)."""
 
 from datetime import datetime
 
 import pytest
 
 import hiro_work as hw
-import train as tr
+import deploy as tr
 
 
 def facts(repo, github=(), live=(), **kw):
@@ -55,13 +55,13 @@ def test_nothing_new_anywhere_is_an_empty_plan():
     ({"live_dirty": 2}, "uncommitted"),
     ({"error": "GitHub couldn't be read: x"}, "couldn't be read"),
 ])
-def test_anything_but_a_fast_forward_stops_the_train(kw, words):
+def test_anything_but_a_fast_forward_stops_the_deploy(kw, words):
     plan = tr.make_plan([facts("aicam", live=["a"], **kw), facts("homehiro", live=["b"])])
     assert list(plan.stops) == ["aicam"]
     assert words in plan.stops["aicam"][0]
 
 
-def test_a_train_covers_the_repos_named_in_the_standards_order_or_every_repo():
+def test_a_deploy_covers_the_repos_named_in_the_standards_order_or_every_repo():
     assert tr.choose([]) == hw.REPOS
     assert tr.choose(["nethiro", "hiroleague"]) == ["hiroleague", "nethiro"]
     with pytest.raises(hw.Stop):
@@ -107,18 +107,18 @@ def test_a_new_apps_empty_github_repo_lacks_every_commit(tmp_path, monkeypatch):
     assert tr.read_facts("evalhiro", {"evalhiro": "none"}).error.startswith("GitHub couldn't be read")
 
 
-def test_a_trains_task_is_named_by_its_time():
-    assert tr.task_id(datetime(2026, 11, 16, 14, 5, 9)) == "train-20261116-140509"
+def test_a_deploys_task_is_named_by_its_time():
+    assert tr.task_id(datetime(2026, 11, 16, 14, 5, 9)) == "deploy-20261116-140509"
 
 
 @pytest.fixture
-def train_files(tmp_path, monkeypatch):
-    """The train's log, events and lock in the test's own folder; a plan with one app; a deploy that takes 30 s."""
+def deploy_files(tmp_path, monkeypatch):
+    """The deploy's log, events and lock in the test's own folder; a plan with one app; a deploy that takes 30 s."""
     clock = {"now": 1000.0}
     monkeypatch.setattr(tr.time, "monotonic", lambda: clock["now"])
     monkeypatch.setattr(hw, "LOGS", tmp_path)
     monkeypatch.setattr(hw, "EVENTS", tmp_path / "events.jsonl")
-    monkeypatch.setattr(tr, "LOCK", tmp_path / "run" / "train.lock")
+    monkeypatch.setattr(tr, "LOCK", tmp_path / "run" / "deploy.lock")
     monkeypatch.setattr(tr, "gather", lambda repos: [])
     monkeypatch.setattr(tr, "make_plan", lambda facts: tr.Plan(push=["codehiro"], first=[], then=["codehiro"], stops={}))
     monkeypatch.setattr(tr, "show", lambda out, facts, plan: None)
@@ -127,13 +127,13 @@ def train_files(tmp_path, monkeypatch):
         clock["now"] += 30
         return []
 
-    monkeypatch.setattr(tr, "run_train", deploy)
+    monkeypatch.setattr(tr, "run_deploy", deploy)
     monkeypatch.setattr(tr, "report", lambda out, task, results, started: True)
     return tmp_path
 
 
 def run_here():
-    tr.cmd_train(type("A", (), {"repos": ["codehiro"], "dry_run": False, "here": True, "id": None, "stop": False,
+    tr.cmd_deploy(type("A", (), {"repos": ["codehiro"], "dry_run": False, "here": True, "id": None, "stop": False,
                                 "force": False})())
 
 
@@ -141,50 +141,50 @@ def ends(task):
     return [e for e in tr.events_of(task) if e["step"] == "task" and e["phase"] == "end"]
 
 
-def test_a_train_runs_without_asking_and_frees_its_lock(train_files, monkeypatch):
-    monkeypatch.setattr("builtins.input", lambda _q: pytest.fail("the train asked a question"))
-    monkeypatch.setattr(tr, "task_id", lambda now: "train-test")
+def test_a_deploy_runs_without_asking_and_frees_its_lock(deploy_files, monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _q: pytest.fail("the deploy asked a question"))
+    monkeypatch.setattr(tr, "task_id", lambda now: "deploy-test")
     run_here()
-    [end] = ends("train-test")
+    [end] = ends("deploy-test")
     assert (end["ok"], end["seconds"]) == (True, 30)
     assert not tr.LOCK.exists()
 
 
-def test_a_lock_whose_train_is_gone_is_taken_over_and_that_train_closed(train_files, monkeypatch):
-    monkeypatch.setattr(tr, "task_id", lambda now: "train-new")
-    hw.event(task="train-old", env=0, step="task", phase="start", kind="deploy")
-    hw.event(task="train-old", env=0, repo="codehiro", step="deploy", phase="start")
+def test_a_lock_whose_deploy_is_gone_is_taken_over_and_that_deploy_closed(deploy_files, monkeypatch):
+    monkeypatch.setattr(tr, "task_id", lambda now: "deploy-new")
+    hw.event(task="deploy-old", env=0, step="task", phase="start", kind="deploy")
+    hw.event(task="deploy-old", env=0, repo="codehiro", step="deploy", phase="start")
     tr.LOCK.parent.mkdir(parents=True)
-    tr.LOCK.write_text("999999 train-old", encoding="utf-8")
+    tr.LOCK.write_text("999999 deploy-old", encoding="utf-8")
     monkeypatch.setattr(tr, "alive", lambda pid: False)
     run_here()
-    [old] = ends("train-old")
+    [old] = ends("deploy-old")
     assert old["ok"] is False and "gone" in old["error"]
-    assert [e for e in tr.events_of("train-old") if e["step"] == "deploy" and e["phase"] == "end"]
-    assert ends("train-new")[0]["ok"] is True
+    assert [e for e in tr.events_of("deploy-old") if e["step"] == "deploy" and e["phase"] == "end"]
+    assert ends("deploy-new")[0]["ok"] is True
 
 
-def test_a_running_train_refuses_the_next_and_its_log_says_why(train_files, monkeypatch):
-    monkeypatch.setattr(tr, "task_id", lambda now: "train-next")
+def test_a_running_deploy_refuses_the_next_and_its_log_says_why(deploy_files, monkeypatch):
+    monkeypatch.setattr(tr, "task_id", lambda now: "deploy-next")
     tr.LOCK.parent.mkdir(parents=True)
-    tr.LOCK.write_text("4242 train-busy", encoding="utf-8")
+    tr.LOCK.write_text("4242 deploy-busy", encoding="utf-8")
     monkeypatch.setattr(tr, "alive", lambda pid: True)
-    with pytest.raises(hw.Stop, match="train-busy"):
+    with pytest.raises(hw.Stop, match="deploy-busy"):
         run_here()
-    assert tr.REFUSED in (train_files / "train" / "train-next.log").read_text(encoding="utf-8")
-    assert tr.LOCK.read_text(encoding="utf-8") == "4242 train-busy"  # not its lock to take
+    assert tr.REFUSED in (deploy_files / "deploy" / "deploy-next.log").read_text(encoding="utf-8")
+    assert tr.LOCK.read_text(encoding="utf-8") == "4242 deploy-busy"  # not its lock to take
 
 
-def test_stop_waits_out_a_push_unless_forced_and_closes_the_train(train_files, monkeypatch):
+def test_stop_waits_out_a_push_unless_forced_and_closes_the_deploy(deploy_files, monkeypatch):
     killed = []
     monkeypatch.setattr(tr.subprocess, "run", lambda cmd, **kw: killed.append(cmd))
     monkeypatch.setattr(tr, "alive", lambda pid: True)
-    hw.event(task="train-run", env=0, step="task", phase="start", kind="deploy")
-    hw.event(task="train-run", env=0, repo="codehiro", step="push github", phase="start")
+    hw.event(task="deploy-run", env=0, step="task", phase="start", kind="deploy")
+    hw.event(task="deploy-run", env=0, repo="codehiro", step="push github", phase="start")
     tr.LOCK.parent.mkdir(parents=True)
-    tr.LOCK.write_text("4242 train-run", encoding="utf-8")
+    tr.LOCK.write_text("4242 deploy-run", encoding="utf-8")
     with pytest.raises(hw.Stop, match="push github"):
         tr.cmd_stop(force=False)
-    assert not killed and not ends("train-run")
+    assert not killed and not ends("deploy-run")
     tr.cmd_stop(force=True)
-    assert killed and ends("train-run")[0]["ok"] is False and not tr.LOCK.exists()
+    assert killed and ends("deploy-run")[0]["ok"] is False and not tr.LOCK.exists()

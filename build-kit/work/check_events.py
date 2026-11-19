@@ -13,7 +13,7 @@ or result goes in an event.
 
 Each part is a step of its own, inside the repo's check (``parent: check``); a part that fails carries the last lines of
 its output (the engine's output files are gone once the check ends). The task and the environment come from the repo's
-folder: ``C:\hiro\env<N>\<repo>``, and the working task there that claims the repo (C:\hiro\tasks). Outside
+folder: ``C:\hiro\env<N>\<repo>``, and the working task there that reserves the repo (C:\hiro\tasks). Outside
 C:\hiro (Simone's nightly check, a container) it writes nothing. It never fails the check: any trouble is ignored.
 Standard library only.
 """
@@ -47,7 +47,7 @@ def where(folder: str) -> tuple[int, str] | None:
 
 
 def task_of(env: int, repo: str) -> str | None:
-    """The working task in *env* that claims *repo*, if any (a check run with no task, as Michel's in env0, has none)."""
+    """The working task in *env* that reserves *repo*, if any (a check run with no task, as Michel's in env0, has none)."""
     for p in sorted(TASKS.glob("*.json")):
         with contextlib.suppress(OSError, ValueError):
             t = json.loads(p.read_text(encoding="utf-8"))

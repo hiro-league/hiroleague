@@ -1,17 +1,17 @@
 r"""hiro-work: the environments every Hiro League task works in (hiro-docs standards/workflow.md).
 
-env0 (C:\hiro\env0) is the trunk: the main checkouts on dev/main, what the next deploy train ships, and Michel's dev
-servers on it. No task works there. Every task claims the repos it changes and works in one of env1..env5: the same
+env0 (C:\hiro\env0) is main: the main checkouts on dev/main, what the next deploy ships, and Michel's dev
+servers on it. No task works there. Every task reserves the repos it changes and works in one of env1..env5: the same
 repos as git worktrees, kept warm between tasks, each with its own data (C:\hiro\data\envN) and its own block of ports
-(7N00-7N49), its claimed repos on the branch task/<task>. A task lands when it should ship: its branches merge into
+(7N00-7N49), its reserved repos on the branch task/<task>. A task merges when it should ship: its branches merge into
 dev/main and env0 is brought up to them. Until then its commits stay on its branch.
 
-    hiro-work status                         environments, tasks, claims, servers
+    hiro-work status                         environments, tasks, reserved repos, servers
     hiro-work start <task> --repos a,b [--kit] [--title ...] [--about ...] [--part-of ...] [--own-branch] [--env N]
     hiro-work describe <task> [--about ...] [--part-of ...]   what it does / what it is part of, changed
-    hiro-work sync <task>                    merge the latest dev/main into the task's branch, without landing
-    hiro-work land <task>                    merge, check, update env0, free the environment
-    hiro-work park <task> / resume <task>    save the work on its branch and free the environment / take one back
+    hiro-work sync <task>                    bring the latest dev/main into the task's branch, without merging the task
+    hiro-work merge <task>                   bring the latest in, check, update env0, release the environment
+    hiro-work pause <task> / resume <task>   save the work on its branch and release the environment / take one back
     hiro-work up <env> [server ...] / down <env> [server ...]   servers, in Windows Terminal outside Claude
     hiro-work init <env>                     make (or repair) an environment: worktrees, installs, settings
     hiro-work sweep                          what is left behind (report only)
@@ -22,7 +22,7 @@ dev/main and env0 is brought up to them. Until then its commits stay on its bran
     hiro-work data <env> <source>            env1..5: its data from env0, vanilla or a live copy (data.py)
     hiro-work secret list | fill | set <name>  the PC's dev secrets, by name; set asks for the value (data.py)
     hiro-work copy-list [--check]   every repo's copy list (data.toml): what a copy holds, and how (data.py)
-    hiro-work train [repo ...] [--dry-run]   the deploy train: push and deploy, when Michel says (train.py)
+    hiro-work deploy [repo ...] [--dry-run]  the deploy: push and deploy, when Michel says (deploy.py)
     hiro-work audit latest | RUN | list      the doc audit's runs, and start / report to record one (audit.py)
 
 State lives in C:\hiro\tasks (one JSON file per task) and every step is logged to C:\hiro\logs\events.jsonl (with
@@ -57,11 +57,11 @@ LOGS = ROOT / "logs"
 EVENTS = LOGS / "events.jsonl"
 ENVS = range(0, 6)
 
-# The repos every environment holds, the core first (it lands first), the apps as apps.toml lists them.
+# The repos every environment holds, the core first (it merges first), the apps as apps.toml lists them.
 # hiroleague-website lives in env0 only.
 REPOS = ["hiroleague", *(a.repo for a in appfile.APPS), "aicam", "hiro-docs"]
 MAIN = {"hiroleague": "dev", "hiro-docs": "dev"}  # every other repo's main branch is main
-# The apps that read the core's kits, SDK and build kit (../hiroleague): a change there claims them too.
+# The apps that read the core's kits, SDK and build kit (../hiroleague): a change there reserves them too.
 KIT_READERS = [a.repo for a in appfile.APPS]
 KIT_PATHS = ["hiroserver/hiro-extension-kit", "hiroserver/hiro-channel-sdk", "hiroserver/hiro-commons",
              "ui-kit", "build-kit"]
@@ -78,7 +78,7 @@ _lists: data.Lists | None = None
 
 
 def copy_lists() -> data.Lists:
-    """Every repo's copy list (data.toml), read once from env0's repos, the trunk's (copylist.py)."""
+    """Every repo's copy list (data.toml), read once from env0's repos, main's (copylist.py)."""
     global _lists
     if _lists is None:
         try:
@@ -171,7 +171,7 @@ class Outcome:
 def step(task: str | None, env: int | None, name: str, repo: str | None = None, log: Path | None = None,
          **more):
     """One timed step: printed, and logged as a start and an end event. A step inside another names it as its
-    ``parent`` (land's own steps); ``log`` is its log file, whose last lines go with a failed end; ``more`` rides on
+    ``parent`` (merge's own steps); ``log`` is its log file, whose last lines go with a failed end; ``more`` rides on
     both events (the servers of servers up)."""
     label = f"{name}" + (f" [{repo}]" if repo else "")
     say(f"> {label}")
@@ -204,8 +204,8 @@ COMMITS_MAX = 2000  # one event's commits, at most
 
 
 def record_commits(task: str, env: int | None, repo: str, frm: str | None, to: str | None, how: str) -> None:
-    """The commits a task (or a deploy train) added to a repo, from..to in env0, as a Work event: CodeHiro's Deploys
-    shows the tasks whose work each train shipped. ``how``: land, deploy, push."""
+    """The commits a task (or a deploy) added to a repo, from..to in env0, as a Work event: CodeHiro's Deploys
+    shows the tasks whose work each deploy shipped. ``how``: merge, deploy, push."""
     if not frm or not to or frm == to:
         return
     shas = git(repo_dir(0, repo), "rev-list", f"{frm}..{to}", check=False).split()[:COMMITS_MAX]
@@ -244,8 +244,8 @@ def dirty(repo_path: Path) -> list[str]:
 
 
 def changed_repos(env: int, tasks: list[Task]) -> list[str]:
-    """The repos an environment has changed, for CodeHiro's environment card (relay.py posts it; the card dims a claim
-    that isn't here). A repo its task claims: uncommitted files, or commits since the task's base. Any other repo:
+    """The repos an environment has changed, for CodeHiro's environment card (relay.py posts it; the card dims a reserved
+    repo that isn't here). A repo its task reserves: uncommitted files, or commits since the task's base. Any other repo:
     uncommitted files."""
     task = next((t for t in tasks if t.env == env and t.state == "working"), None)
     out = []
@@ -265,9 +265,9 @@ def changed_repos(env: int, tasks: list[Task]) -> list[str]:
 
 def leftovers(env: int, tasks: list[Task]) -> list[dict[str, str]]:
     """What an environment holds that no task there owns, for the foot of CodeHiro's environment card (relay.py posts
-    it): a repo its task doesn't claim with uncommitted files, and in env1..env5 with no task, any repo that isn't as a
-    free environment's should be: on a branch of its own (not detached), or with commits its trunk lacks. Being behind
-    the trunk isn't one: a free environment stays where its last task left it, and the next start brings it up.
+    it): a repo its task doesn't reserve with uncommitted files, and in env1..env5 with no task, any repo that isn't as a
+    free environment's should be: on a branch of its own (not detached), or with commits main lacks. Being behind
+    main isn't one: a free environment stays where its last task left it, and the next start brings it up.
     One row per repo: ``{"repo", "what"}``, what is wrong in words."""
     task = next((t for t in tasks if t.env == env and t.state == "working"), None)
     out = []
@@ -299,7 +299,7 @@ class Task:
     title: str
     env: int | None
     repos: list[str]
-    state: str = "working"  # working | parked | done
+    state: str = "working"  # working | paused | done
     base: dict[str, str] = field(default_factory=dict)
     # In env1..env5: its switchboard (switches.py): a preset, and the systems changed from it ({"ai": "real"})
     preset: str = switches.DEFAULT
@@ -390,24 +390,24 @@ def locked():
 
 
 def expand(repos: list[str], kit: bool) -> list[str]:
-    """The claimed repos, the core first; a kit change also claims every app that reads the kits."""
+    """The reserved repos, the core first; a kit change also reserves every app that reads the kits."""
     unknown = [r for r in repos if r not in REPOS]
     if unknown:
         raise Stop(f"Unknown repo(s): {', '.join(unknown)}. Repos: {', '.join(REPOS)}.")
-    claimed = set(repos) | (set(KIT_READERS) | {"hiroleague"} if kit else set())
-    return [r for r in REPOS if r in claimed]
+    reserved = set(repos) | (set(KIT_READERS) | {"hiroleague"} if kit else set())
+    return [r for r in REPOS if r in reserved]
 
 
-def claims_in(env: int, tasks: list[Task]) -> dict[str, str]:
+def reserved_in(env: int, tasks: list[Task]) -> dict[str, str]:
     """repo -> the task holding it, in one environment."""
     return {r: t.id for t in tasks if t.state == "working" and t.env == env for r in t.repos}
 
 
 def pick_env(tasks: list[Task], wanted: int | None) -> int:
-    """The first free env1..env5, or the one asked for. env0 is the trunk: no task works there (workflow.md)."""
+    """The first free env1..env5, or the one asked for. env0 is main: no task works there (workflow.md)."""
     busy = {t.env for t in tasks if t.state == "working" and t.env is not None}
     if wanted == 0:
-        raise Stop("env0 is the trunk: no task works there. Leave out --env, or name a free env1 to env5.")
+        raise Stop("env0 is main: no task works there. Leave out --env, or name a free env1 to env5.")
     if wanted is not None:
         if wanted in busy:
             raise Stop(f"env{wanted} is busy.")
@@ -415,7 +415,7 @@ def pick_env(tasks: list[Task], wanted: int | None) -> int:
     for env in ENVS:
         if env and env not in busy:
             return env
-    raise Stop("Every environment is busy: land or park a task first (hiro-work status).")
+    raise Stop("Every environment is busy: merge or pause a task first (hiro-work status).")
 
 
 def same_work(part_of: str, tasks: list[Task]) -> list[Task]:
@@ -426,7 +426,7 @@ def same_work(part_of: str, tasks: list[Task]) -> list[Task]:
     if not value:
         return []
     name = part_of_name(value)
-    return [t for t in tasks if t.state in ("working", "parked") and (value == t.id or name in (t.title, t.part_of))]
+    return [t for t in tasks if t.state in ("working", "paused") and (value == t.id or name in (t.title, t.part_of))]
 
 
 # ------------------------------------------------------------------------------------------------- environments
@@ -773,7 +773,7 @@ def fresh_base(repo: str, task: str | None) -> str:
     if behind:
         branch = git(d, "branch", "--show-current")
         # A fast-forward that would touch someone's uncommitted edits is refused by git: env0's dev/main is then
-        # used as it is, and the branch catches up with GitHub when it lands.
+        # used as it is, and the branch catches up with GitHub when it merges.
         moved = branch == main and subprocess.run(
             ["git", "-C", str(d), "merge", "--ff-only", "-q", f"origin/{main}"], capture_output=True).returncode == 0
         if not moved:
@@ -804,18 +804,18 @@ def cmd_start(a) -> None:
         same = [] if a.own_branch else same_work(a.part_of or "", tasks)
         if same:
             raise Stop("Part of open work already: " + ", ".join(f"{t.id} ({t.title}, "
-                                                                 + (f"env{t.env}" if t.env else "parked") + ")"
+                                                                 + (f"env{t.env}" if t.env else "paused") + ")"
                                                                  for t in same)
                        + ". A step of it joins that task, on its branch: `python C:\\hiro\\env0\\hiro-docs\\standards"
-                       "\\tools\\guard.py join <task>` (and `hiro-work claim <task> <repo>` for one more repo). A branch "
-                       "of its own lands and ships alone: ask Michel, then start again with --own-branch.")
+                       "\\tools\\guard.py join <task>` (and `hiro-work reserve <task> <repo>` for one more repo). A branch "
+                       "of its own merges and ships alone: ask Michel, then start again with --own-branch.")
         env = pick_env(tasks, a.env)
         task = Task(id=a.task, title=a.title or a.task, env=env, repos=repos,
                     preset=switches.preset(a.preset)["name"], switches=switches.parse_sets(a.set or []),
                     sign_in="as" if a.as_person else "off" if a.quick_sign_in else "on", sign_in_as=a.as_person or "",
                     part_of=part_of_name(a.part_of), about=(a.about or "").strip(), data=a.data,
                     created=datetime.now().astimezone().isoformat(timespec="seconds"))
-        save(task)  # the claim holds from here
+        save(task)  # the reservation holds from here
     event(task=task.id, env=env, step="task", phase="start", repos=repos, title=task.title,
           **({"part_of": task.part_of} if task.part_of else {}), **({"about": task.about} if task.about else {}))
     try:
@@ -836,18 +836,18 @@ def cmd_start(a) -> None:
         save(task)
     except BaseException:
         with locked():
-            task_path(task.id).unlink(missing_ok=True)  # no half-made claim
+            task_path(task.id).unlink(missing_ok=True)  # no half-made reservation
         raise
     card(task)
     say_overlaps(task)
 
 
-# ----------------------------------------------------------------------------------- claims at every step (fresh)
+# ----------------------------------------------------------------------------------- reservations at every step (fresh)
 
 
 def overlaps(task: Task, tasks: list[Task] | None = None) -> list[str]:
     """Other open tasks that change what this one does: the same repos, or the core's kits beside an app that reads
-    them. Said at every solid step (start, each commit, sync, land), since another task can start at any time."""
+    them. Said at every solid step (start, each commit, sync, merge), since another task can start at any time."""
     out = []
     mine = set(task.repos)
     for other in tasks if tasks is not None else load_tasks():
@@ -865,13 +865,13 @@ def overlaps(task: Task, tasks: list[Task] | None = None) -> list[str]:
 
 def say_overlaps(task: Task) -> None:
     for line in overlaps(task):
-        say(f"  note: {line}. Whichever lands second merges the other's work first.")
+        say(f"  note: {line}. Whichever merges second merges the other's work first.")
 
 
 def bring_up_others(env: int, task: Task) -> list[str]:
-    """An environment's repos its task doesn't claim follow env0: each moves forward to env0's dev/main when it is
+    """An environment's repos its task doesn't reserve follow env0: each moves forward to env0's dev/main when it is
     clean and behind, so checks read today's core and kits (a kit changed in env0 meanwhile, as on Mon, Nov 16, 2026,
-    broke a land in env1). A repo with uncommitted files is left as it is, and said."""
+    broke a merge in env1). A repo with uncommitted files is left as it is, and said."""
     if not env:
         return []
     notes = []
@@ -896,7 +896,7 @@ def bring_up_others(env: int, task: Task) -> list[str]:
 
 
 def task_for_dir(path: Path) -> tuple[int, str, Task | None] | None:
-    """The environment, repo and working task that claims it, for a folder inside C:\\hiro\\envN\\<repo>."""
+    """The environment, repo and working task that reserves it, for a folder inside C:\\hiro\\envN\\<repo>."""
     try:
         rel = path.resolve().relative_to(ROOT.resolve())
     except ValueError:
@@ -910,22 +910,22 @@ def task_for_dir(path: Path) -> tuple[int, str, Task | None] | None:
 
 
 def cmd_fresh(a) -> None:
-    """The commit hook's step (build-kit/git-hooks/pre-commit): a commit belongs to a task that claims the repo here;
+    """The commit hook's step (build-kit/git-hooks/pre-commit): a commit belongs to a task that reserves the repo here;
     other tasks on the same repos are named; the environment's other repos follow env0 before the check runs."""
     found = task_for_dir(Path(a.path))
     if found is None:
         return  # not a Hiro environment's repo
     env, repo, task = found
     if task is None:
-        raise Stop(f"no task claims env{env}'s {repo}: a commit belongs to a task. Start one "
+        raise Stop(f"no task reserves env{env}'s {repo}: a commit belongs to a task. Start one "
                    f"(`C:\\hiro\\bin\\hiro-work.cmd start <task> --repos {repo}`), or add the repo to yours "
-                   f"(`C:\\hiro\\bin\\hiro-work.cmd claim <task> {repo}`).")
+                   f"(`C:\\hiro\\bin\\hiro-work.cmd reserve <task> {repo}`).")
     say_overlaps(task)
     for line in bring_up_others(env, task):
         say(f"  {line}")
 
 
-def cmd_claim(a) -> None:
+def cmd_reserve(a) -> None:
     """Add repos to an open task (a change turned out to reach one more repo), free in its environment."""
     with locked():
         task = get(a.task)
@@ -933,11 +933,11 @@ def cmd_claim(a) -> None:
             raise Stop(f"Task {task.id} isn't working in an environment (it is {task.state}).")
         new = [r for r in expand(a.repos.split(","), a.kit) if r not in task.repos]
         if not new:
-            say(f"Task {task.id} claims {', '.join(task.repos)} already.")
+            say(f"Task {task.id} reserves {', '.join(task.repos)} already.")
             return
-        held = {r: t for r, t in claims_in(task.env, load_tasks()).items() if r in new and t != task.id}
+        held = {r: t for r, t in reserved_in(task.env, load_tasks()).items() if r in new and t != task.id}
         if held:
-            raise Stop("Claimed already: " + ", ".join(f"{r} by {t}" for r, t in held.items()) + ".")
+            raise Stop("Reserved already: " + ", ".join(f"{r} by {t}" for r, t in held.items()) + ".")
         env = task.env
         for repo in new:
             d = repo_dir(env, repo)
@@ -948,17 +948,17 @@ def cmd_claim(a) -> None:
             task.base[repo] = base
             task.repos.append(repo)
         save(task)
-    event(task=task.id, env=task.env, step="claim", phase="end", ok=True, repos=new)
-    say(f"Task {task.id} now claims {', '.join(task.repos)}.")
+    event(task=task.id, env=task.env, step="reserve", phase="end", ok=True, repos=new)
+    say(f"Task {task.id} now reserves {', '.join(task.repos)}.")
     say_overlaps(task)
 
 
 def card(task: Task) -> None:
     p = ports(task.env) if task.env is not None else {}
-    where = env_dir(task.env) if task.env is not None else "(parked)"
+    where = env_dir(task.env) if task.env is not None else "(paused)"
     say("")
     say(f"Task {task.id}" + (f" (part of {task.part_of})" if task.part_of else "")
-        + f": env{task.env} | claims {', '.join(task.repos)} | {where}")
+        + f": env{task.env} | reserves {', '.join(task.repos)} | {where}")
     if task.about:
         say(f"  {task.about}")
     if task.env:
@@ -1103,21 +1103,21 @@ def kit_changed(env: int, task: Task) -> bool:
     return bool(changed)
 
 
-def cmd_land(a) -> None:
+def cmd_merge(a) -> None:
     task = get(a.task)
     env = task.env
     if not env:
-        raise Stop(f"Task {task.id} is parked: resume it first (hiro-work resume {task.id}).")
+        raise Stop(f"Task {task.id} is paused: resume it first (hiro-work resume {task.id}).")
     for repo in task.repos:
         if dirty(repo_dir(env, repo)):
             raise Stop(f"env{env}'s {repo} has uncommitted files: commit them on {task.branch} first.")
     say_overlaps(task)
-    # Landing is one step with its own inside (CodeHiro shows the task as landing while it runs)
-    with step(task.id, env, "land"):
+    # Merging is one step with its own inside (CodeHiro shows the task as merging while it runs)
+    with step(task.id, env, "merge"):
         for line in bring_up_others(env, task):
             say(f"  {line}")
-        waiting = land_steps(task, env)
-    # 4. Free the environment, keep it warm
+        waiting = merge_steps(task, env)
+    # 4. Release the environment, keep it warm
     for repo in task.repos:
         d = repo_dir(env, repo)
         git(d, "switch", "-q", "--detach", main_of(repo))
@@ -1127,21 +1127,21 @@ def cmd_land(a) -> None:
     with locked():
         task.state = "done"
         save(task)
-    event(task=task.id, env=env, step="task", phase="end", ok=True, landed=True)
-    say(f"Task {task.id} landed: {', '.join(task.repos)} in env0; env{env} is free. Not pushed: the deploy train "
+    event(task=task.id, env=env, step="task", phase="end", ok=True, merged=True)
+    say(f"Task {task.id} merged: {', '.join(task.repos)} in env0; env{env} is free. Not pushed: the deploy "
         "pushes.")
     if waiting:
         say(waiting_installs_note(waiting))
 
 
 def cmd_sync(a) -> None:
-    """Merge the latest dev/main (GitHub's, then env0's) into the task's branches without landing: a task that runs
-    for long stays close to the trunk, so its land merges little. Nothing is checked or shipped here; the commit's
-    hook checks the merge when the task next commits, and land checks everything."""
+    """Merge the latest dev/main (GitHub's, then env0's) into the task's branches without merging the task: a task that(
+)    runs for long stays close to main, so its merge brings in little. Nothing is checked or shipped here; the commit's
+    hook checks the merge when the task next commits, and the merge checks everything."""
     task = get(a.task)
     env = task.env
     if not env:
-        raise Stop(f"Task {task.id} is parked: resume it first (hiro-work resume {task.id}).")
+        raise Stop(f"Task {task.id} is paused: resume it first (hiro-work resume {task.id}).")
     for repo in task.repos:
         if dirty(repo_dir(env, repo)):
             raise Stop(f"env{env}'s {repo} has uncommitted files: commit them on {task.branch} first.")
@@ -1151,14 +1151,14 @@ def cmd_sync(a) -> None:
             say(f"  {line}")
         merge_latest(task, env, then="sync")
         held = sorted({n for r in REPOS for n in install(env, r, task.id, spare_servers=True)})
-    say(f"Task {task.id} is up to the trunk: {', '.join(task.repos)} merged on {task.branch}.")
+    say(f"Task {task.id} is up to main: {', '.join(task.repos)} merged on {task.branch}.")
     if held:
         names = " ".join(held)
         say(f"env{env}'s {', '.join(held)} run on packages that changed: hiro-work down {env} {names}, then "
             f"hiro-work install {env}, then hiro-work up {env} {names}.")
 
 
-def merge_latest(task: Task, env: int, then: str = "land") -> None:
+def merge_latest(task: Task, env: int, then: str = "merge") -> None:
     """Bring each of the task's branches up to GitHub and to env0's dev/main (``then``: the command to run again
     after a conflict is resolved)."""
     for repo in task.repos:
@@ -1166,7 +1166,7 @@ def merge_latest(task: Task, env: int, then: str = "land") -> None:
         with step(task.id, env, "merge latest", repo):
             git(d, "fetch", "-q", "origin", check=False)
             for ref in (f"origin/{main_of(repo)}", main_of(repo)):
-                # A new app has no GitHub repo until its first train: a ref that doesn't exist is nothing to merge
+                # A new app has no GitHub repo until its first deploy: a ref that doesn't exist is nothing to merge
                 # (merging it would fail and read as a conflict)
                 if not git(d, "rev-parse", "--verify", "-q", ref, check=False):
                     continue
@@ -1174,18 +1174,18 @@ def merge_latest(task: Task, env: int, then: str = "land") -> None:
                                      text=True)
                 if out.returncode != 0:
                     git(d, "merge", "--abort", check=False)
-                    # A fix: land merges origin/dev and then env0's dev. A resolve that merges only the first makes land
+                    # A fix: a merge brings in origin/dev and then env0's dev. A resolve that merges only the first makes the merge
                     # merge the second after the commit hook's check, so every part of the check runs twice
                     raise Stop(f"{repo}: merging {ref} into {task.branch} conflicts. Resolve it in {d}: merge both "
                                f"origin/{main_of(repo)} and {main_of(repo)} ({then} merges them in that order), "
                                f"then commit, then {then} again.")
 
 
-def land_steps(task: Task, env: int) -> dict[str, list[str]]:
-    """Stop the servers, merge the latest, check, then fast-forward env0 (cmd_land's own steps). Returns the env0
+def merge_steps(task: Task, env: int) -> dict[str, list[str]]:
+    """Stop the servers, merge the latest, check, then fast-forward env0 (cmd_merge's own steps). Returns the env0
     installs left waiting because env0's dev server runs on those packages: {repo: [server names]}."""
     # A fix: the task's own servers stop before any install. A running Vite holds node_modules' native .node files
-    # (lightningcss), and on Windows npm ci can't unlink them (EPERM), which failed the eval-app land on Nov 17, 2026.
+    # (lightningcss), and on Windows npm ci can't unlink them (EPERM), which failed the eval-app merge on Nov 17, 2026.
     # Only this environment's servers: env0's are Michel's and are never touched.
     with step(task.id, env, "servers down"):
         servers_down(env)
@@ -1210,7 +1210,7 @@ def land_steps(task: Task, env: int) -> dict[str, list[str]]:
                 failed.append(f"{repo} (log: {log})")
                 outcome.fail(f"check.sh failed (log: {log})")
     # Every copy list as it will be in env0: a wrong one would stop every later start, so it is refused here. Read by
-    # the environment's own copylist.py, as each commit's check does: a fix, since the trunk's parser refused a list
+    # the environment's own copylist.py, as each commit's check does: a fix, since main's parser refused a list
     # format the task itself brings ([[secret]] lines, Nov 18, 2026)
     with step(task.id, env, "copy lists") as outcome:
         parser = repo_dir(env, "hiroleague") / "build-kit" / "work" / "copylist.py"
@@ -1223,15 +1223,15 @@ def land_steps(task: Task, env: int) -> dict[str, list[str]]:
                 failed.append(f"a copy list: {(out.stdout + out.stderr).strip()[-300:]}")
                 outcome.fail(out.stdout.strip()[-300:])
     if failed:
-        raise Stop("Checks failed: " + "; ".join(failed) + ". Fix, commit, land again.")
+        raise Stop("Checks failed: " + "; ".join(failed) + ". Fix, commit, merge again.")
     # 3. dev/main moves to the branch; env0's checkouts follow (a fast-forward)
     waiting: dict[str, list[str]] = {}
     for repo in task.repos:
         with step(task.id, env, "fast-forward", repo):
             before = git(repo_dir(0, repo), "rev-parse", "HEAD")
             git(repo_dir(0, repo), "merge", "--ff-only", "-q", task.branch)
-            record_commits(task.id, env, repo, before, git(repo_dir(0, repo), "rev-parse", "HEAD"), "land")
-            # A fix: env0's servers are Michel's and land never stops them, and npm ci under a running Vite fails
+            record_commits(task.id, env, repo, before, git(repo_dir(0, repo), "rev-parse", "HEAD"), "merge")
+            # A fix: env0's servers are Michel's and merge never stops them, and npm ci under a running Vite fails
             # with EPERM after env0 has already moved. So that install waits (hiro-work install 0 <repo>).
             if held := install(0, repo, task.id, spare_servers=True):
                 waiting[repo] = held
@@ -1239,7 +1239,7 @@ def land_steps(task: Task, env: int) -> dict[str, list[str]]:
 
 
 def waiting_installs_note(waiting: dict[str, list[str]]) -> str:
-    """What to tell Michel when land left env0 installs waiting."""
+    """What to tell Michel when merge left env0 installs waiting."""
     lines = ["env0's packages changed under servers that are running, so their install waits:"]
     for repo, held in waiting.items():
         names = " ".join(held)
@@ -1260,32 +1260,32 @@ def cmd_install(a) -> None:
     say(f"env{a.env}'s packages are installed.")
 
 
-def cmd_park(a) -> None:
+def cmd_pause(a) -> None:
     task = get(a.task)
     if not task.env:
-        raise Stop(f"Task {task.id} is parked already.")
+        raise Stop(f"Task {task.id} is paused already.")
     env = task.env
     for repo in task.repos:
         d = repo_dir(env, repo)
         if dirty(d):
             git(d, "add", "-A")
-            git(d, "commit", "-q", "--no-verify", "-m", f"WIP (parked) {task.id}")
+            git(d, "commit", "-q", "--no-verify", "-m", f"WIP (paused) {task.id}")
         git(d, "switch", "-q", "--detach", main_of(repo))
     with step(task.id, env, "servers down"):
         servers_down(env)
     with locked():
-        task.state, task.env = "parked", None
+        task.state, task.env = "paused", None
         save(task)
-    event(task=task.id, env=env, step="parked", phase="end", ok=True)
-    say(f"Task {task.id} parked on {task.branch}; env{env} is free.")
+    event(task=task.id, env=env, step="paused", phase="end", ok=True)
+    say(f"Task {task.id} paused on {task.branch}; env{env} is free.")
 
 
 def cmd_resume(a) -> None:
     with locked():
         tasks = load_tasks()
         task = get(a.task)
-        if task.state != "parked":
-            raise Stop(f"Task {task.id} isn't parked.")
+        if task.state != "paused":
+            raise Stop(f"Task {task.id} isn't paused.")
         busy = {t.env for t in tasks if t.state == "working"}
         env = a.env or next((e for e in ENVS if e and e not in busy), None)
         if env is None:
@@ -1297,7 +1297,7 @@ def cmd_resume(a) -> None:
         d = repo_dir(env, repo)
         if repo in task.repos:
             git(d, "switch", "-q", task.branch)
-            if git(d, "log", "-1", "--format=%s").startswith("WIP (parked)"):
+            if git(d, "log", "-1", "--format=%s").startswith("WIP (paused)"):
                 git(d, "reset", "-q", "--soft", "HEAD~1")
                 git(d, "reset", "-q")
         else:
@@ -1360,7 +1360,7 @@ def servers(env: int) -> dict[str, Server]:
 
 def pick_servers(env: int, names: list[str]) -> list[Server]:
     """Names: a server ("homehiro-ui"), an app or "core" (both of its servers). None given: the core and the apps
-    the environment's task claims, or the core and every app when it has no task."""
+    the environment's task reserves, or the core and every app when it has no task."""
     every = servers(env)
     if not names:
         held = [t for t in load_tasks() if t.state == "working" and t.env == env]
@@ -1584,12 +1584,12 @@ def cmd_status(a) -> None:
     for env in ENVS:
         here = [t for t in tasks if t.env == env and t.state == "working"]
         up = [n for n, p in ports(env).items() if listening(p)]
-        what = "; ".join((f"{t.part_of} › " if t.part_of else "") + f"{t.id} ({', '.join(t.repos)})" for t in here)             or ("the trunk, Michel's dev" if env == 0 else "free")
+        what = "; ".join((f"{t.part_of} › " if t.part_of else "") + f"{t.id} ({', '.join(t.repos)})" for t in here)             or ("main, Michel's dev" if env == 0 else "free")
         exists = env == 0 or (env_dir(env) / "hiroleague" / ".git").exists()
         say(f"  env{env}  {'' if exists else '(not made yet) '}{what}" + (f"  | up: {', '.join(up)}" if up else ""))
-    parked = [t for t in tasks if t.state == "parked"]
-    if parked:
-        say("Parked: " + ", ".join(f"{t.id} ({t.updated[:10]})" for t in parked))
+    paused = [t for t in tasks if t.state == "paused"]
+    if paused:
+        say("Paused: " + ", ".join(f"{t.id} ({t.updated[:10]})" for t in paused))
 
 
 def merged_left(listing: str, main: str) -> list[str]:
@@ -1630,7 +1630,7 @@ def cmd_sweep(a) -> None:
             found("off-main", repo, f"env0 checkout is on '{branch}', not {main}", f"git -C {d} switch {main}")
     if not findings:
         say("  nothing")
-    # CodeHiro's Sweep shows the last report, beside the parked tasks and the servers left up it works out itself
+    # CodeHiro's Sweep shows the last report, beside the paused tasks and the servers left up it works out itself
     event(task=None, env=None, step="sweep", phase="end", ok=True, findings=findings)
 
 
@@ -1662,13 +1662,13 @@ def cmd_review(a) -> None:
 # ---------------------------------------------------------------------------------------------------------- main
 
 # Commands that run checks or deploys for minutes in a console
-LONG_COMMANDS = ("land", "train")
+LONG_COMMANDS = ("merge", "deploy")
 
 
 def ignore_console_interrupt() -> None:
     """A fix: onnxruntime, loaded by the core's tests, sends a phantom Ctrl-C to every process on the console. It killed
-    a land inside ``subprocess.run(check.sh)`` (KeyboardInterrupt), though check-engine.sh and run-tests.sh already
-    ignore it. A land or a train is stopped with Ctrl-Break, ``hiro-work train --stop`` or by closing the tab, as
+    a merge inside ``subprocess.run(check.sh)`` (KeyboardInterrupt), though check-engine.sh and run-tests.sh already
+    ignore it. A merge or a deploy is stopped with Ctrl-Break, ``hiro-work deploy --stop`` or by closing the tab, as
     scripts/run-tests.sh says."""
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
@@ -1679,12 +1679,12 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("start")
     s.add_argument("task")
     s.add_argument("--repos", required=True)
-    s.add_argument("--kit", action="store_true", help="a kit, SDK or build-kit change: also claims the apps")
+    s.add_argument("--kit", action="store_true", help="a kit, SDK or build-kit change: also reserves the apps")
     s.add_argument("--title")
     s.add_argument("--env", type=int, choices=list(ENVS))
     s.add_argument("--part-of", help="the bigger work it is a piece of: a name, or a task's id (its title is used)")
     s.add_argument("--own-branch", action="store_true",
-                   help="a piece of open work that lands and ships alone, on Michel's say (else it joins that task)")
+                   help="a piece of open work that merges and ships alone, on Michel's say (else it joins that task)")
     s.add_argument("--about", help="what it does, in a sentence (the Work area shows it under its name)")
     s.add_argument("--preset", default=switches.DEFAULT,
                    help="env1..5: its switchboard's preset (hiro-work preset list); Safe when not said")
@@ -1695,12 +1695,12 @@ def main(argv: list[str] | None = None) -> int:
                    help="env1..5, for interactive use: no sign-in screen, everyone is this person of the family list")
     s.add_argument("--data", default="env0", metavar="SOURCE",
                    help="where its data comes from: env0 (default), vanilla (a fresh install), live or live:<stamp>")
-    for verb in ("park", "review"):
+    for verb in ("pause", "review"):
         sub.add_parser(verb).add_argument("task")
-    sub.add_parser("sync", help="merge the latest dev/main into the task's branches, without landing").add_argument(
+    sub.add_parser("sync", help="bring the latest dev/main into the task's branches, without merging the task").add_argument(
         "task")
-    sub.add_parser("land", help="merge the latest, check, fast-forward env0, free the environment").add_argument("task")
-    cl = sub.add_parser("claim", help="add repos to an open task (free in its environment)")
+    sub.add_parser("merge", help="bring the latest in, check, fast-forward env0, release the environment").add_argument("task")
+    cl = sub.add_parser("reserve", help="add repos to an open task (free in its environment)")
     cl.add_argument("task")
     cl.add_argument("repos", help="comma-separated")
     cl.add_argument("--kit", action="store_true", help="a kit change: the apps that read it too")
@@ -1767,11 +1767,11 @@ def main(argv: list[str] | None = None) -> int:
     cl.add_argument("--check", action="store_true", help="also name what env0's and live's data folders hold that no "
                     "list covers")
     cl.set_defaults(func=lambda a: data.cmd_copy_list(a, sys.modules[__name__]))
-    # The deploy train lives in train.py, which imports this module: run as a script, this is __main__, so it is
-    # named hiro_work too, or train.py would load a second copy (and its Stop wouldn't be caught here)
+    # The deploy lives in deploy.py, which imports this module: run as a script, this is __main__, so it is
+    # named hiro_work too, or deploy.py would load a second copy (and its Stop wouldn't be caught here)
     sys.modules.setdefault("hiro_work", sys.modules[__name__])
-    import train
-    train.add_parser(sub)
+    import deploy
+    deploy.add_parser(sub)
     import audit
     audit.add_parser(sub)
     a = p.parse_args(argv)
@@ -1780,11 +1780,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if getattr(a, "func", None):
             return a.func(a) or 0
-        {"start": cmd_start, "sync": cmd_sync, "land": cmd_land, "park": cmd_park,
+        {"start": cmd_start, "sync": cmd_sync, "merge": cmd_merge, "pause": cmd_pause,
          "resume": cmd_resume, "status": cmd_status, "sweep": cmd_sweep, "up": cmd_up, "down": cmd_down,
-         "review": cmd_review, "describe": cmd_describe, "claim": cmd_claim, "fresh": cmd_fresh,
+         "review": cmd_review, "describe": cmd_describe, "reserve": cmd_reserve, "fresh": cmd_fresh,
          "configure": cmd_configure, "install": cmd_install, "init": lambda a: init_env(a.env),
-         "train": train.cmd_train}[a.cmd](a)
+         "deploy": deploy.cmd_deploy}[a.cmd](a)
     except Stop as e:
         say(f"\nStopped: {e}")
         return 1

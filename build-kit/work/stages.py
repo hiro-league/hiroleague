@@ -1,4 +1,4 @@
-"""A deploy's stages, read from its output as it streams, so the train times each one and CodeHiro's Work area shows
+"""A deploy's stages, read from its output as it streams, so the deploy times each one and CodeHiro's Work area shows
 what a deploy did (the checks and each of their parts, the image build and the tests in it, the migrations tried on a
 copy, the start) instead of one block.
 
@@ -11,7 +11,7 @@ It reads the lines the deploy scripts already print (git prints a hook's lines w
   "==> <part>" ... "passed in N s" or "FAILED in N s".
 
 A line it doesn't know changes nothing, so a new line in a deploy script only goes untimed until a row is added here.
-The stages are steps inside the train's "deploy" step (``parent: deploy``), named in plain words. A stage that ran tests
+The stages are steps inside the deploy's "deploy" step (``parent: deploy``), named in plain words. A stage that ran tests
 (a check part, the tests in an image's build) ends with how many it ran (``tests``), counted from what it printed as the
 check engine counts them on the PC (check_events.count_tests).
 """

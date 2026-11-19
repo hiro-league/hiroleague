@@ -23,16 +23,16 @@ answers it there. Only these pass, with an environment 0 to 5 and the server nam
 refused and logged. One helper at a time (C:\hiro\run\relay.pid). Its log is C:\hiro\logs\relay.log. Standard library only.
 
 Every minute it also says which repos each environment has changed (hiro_work.changed_repos): a "changes" event for
-each environment whose list differs from the last one said (all of them when it starts), so the card can dim a claim
+each environment whose list differs from the last one said (all of them when it starts), so the card can dim a reserved repo
 nothing has changed yet. The same event says what the environment holds that no task there owns
-(hiro_work.leftovers: uncommitted files, a stray branch, commits off the trunk), shown at the card's foot, and where
+(hiro_work.leftovers: uncommitted files, a stray branch, commits off main), shown at the card's foot, and where
 its data came from (data.read_source: the card's data row, with any secret its task needs that the PC's store lacks);
 env0's also lists the live copies on the PC (data.live_copy_list: its Data menu) and each dev secret's state, by name
 only (data.secret_states: Work › Data's Secrets).
 
 Every 10 minutes it looks at env0's data folders for what no copy list covers (data.survey): a "copy-lists" event,
 with each listed item's size, when that differs from the last one said and at least every hour, shown in Work › Sweep
-and Work › Data. The lists are read again each time, so a land's new lists count at once.
+and Work › Data. The lists are read again each time, so a merge's new lists count at once.
 
     pythonw relay.py              run (what the Startup shortcut starts)
     python relay.py --install     a shortcut in this Windows user's Startup folder ("Hiro League work relay": starts it
@@ -241,12 +241,12 @@ def drift(said: list[dict] | None, said_at: float) -> tuple[list[dict], float]:
 
 
 def serve() -> int:
-    import train  # the lock's process check (alive), shared with the deploy train
+    import deploy  # the lock's process check (alive), shared with the deploy
 
     PID.parent.mkdir(parents=True, exist_ok=True)
     if PID.exists():
         with_pid = PID.read_text(encoding="utf-8").strip()
-        if with_pid.isdigit() and int(with_pid) != os.getpid() and train.alive(int(with_pid)):
+        if with_pid.isdigit() and int(with_pid) != os.getpid() and deploy.alive(int(with_pid)):
             return 0  # one helper at a time
     PID.write_text(str(os.getpid()), encoding="utf-8")
     log(f"started (process {os.getpid()}), asking {URL}")

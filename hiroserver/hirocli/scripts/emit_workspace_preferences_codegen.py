@@ -14,7 +14,7 @@ from hirocli.domain.preferences_schema import (
 
 def write_lf(path, data) -> None:
     """newline="\n": LF on Windows too, like the node generators and .gitattributes (CRLF here left the generated files
-    listed as modified with an empty diff, and hiro-work land stopped on them)."""
+    listed as modified with an empty diff, and hiro-work merge stopped on them)."""
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8", newline="\n")
 
 

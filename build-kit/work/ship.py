@@ -1,6 +1,6 @@
 r"""ship: sends the scripts' new events to CodeHiro's Work area (hiro-docs standards/workflow.md, "Tracking").
 
-The log is the outbox. hiro-work, the deploy train and the check engine only add lines to C:\hiro\logs\events.jsonl;
+The log is the outbox. hiro-work, the deploy and the check engine only add lines to C:\hiro\logs\events.jsonl;
 this sender posts the lines it hasn't sent yet to CodeHiro (``POST /api/work/events``, the key in ``X-Work-Key``),
 from a position it keeps beside the log. Each line goes with its id, ``<source>:<file>:<position>`` (``<file>`` is a
 short hash of the log's first line, so a log made again never reuses an old id): CodeHiro keeps each id once, so a line

@@ -1,4 +1,4 @@
-"""check_events.py: a check part's start and end become Work events of the task that claims the repo there."""
+"""check_events.py: a check part's start and end become Work events of the task that reserves the repo there."""
 
 import json
 import threading
@@ -11,7 +11,7 @@ import ship
 
 @pytest.fixture
 def hiro(tmp_path, monkeypatch):
-    """A C:\\hiro of the test's own: one working task in env1 claiming codehiro, and its events log."""
+    """A C:\\hiro of the test's own: one working task in env1 reserving codehiro, and its events log."""
     monkeypatch.setattr(ce, "ROOT", tmp_path)
     monkeypatch.setattr(ce, "TASKS", tmp_path / "tasks")
     monkeypatch.setattr(ship, "EVENTS", tmp_path / "logs" / "events.jsonl")

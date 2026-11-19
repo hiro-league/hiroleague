@@ -41,7 +41,7 @@ def main(argv: list[str]) -> int:
         print(__doc__)
         return 2
     if mode == "--install" and not Path(HOOKS).is_dir():
-        print(f"{HOOKS} isn't there yet (env0's core is behind): land the change that adds it first.")
+        print(f"{HOOKS} isn't there yet (env0's core is behind): merge the change that adds it first.")
         return 1
     seen: set[str] = set()
     for env in range(6):

@@ -17,7 +17,7 @@ def test_a_known_ask_passes(ask, want):
 
 
 @pytest.mark.parametrize("ask", [
-    {"verb": "train", "env": 0}, {"verb": "up", "env": 6}, {"verb": "up", "env": "1"},
+    {"verb": "deploy", "env": 0}, {"verb": "up", "env": 6}, {"verb": "up", "env": "1"},
     {"verb": "up", "env": 1, "servers": ["nope"]}, {"verb": "up", "env": 1, "servers": ["core&calc"]},
     {"verb": "up", "env": 1, "servers": "core"}, {},
 ])
@@ -30,7 +30,7 @@ def test_a_refused_ask_runs_nothing_and_is_logged(tmp_path, monkeypatch):
     monkeypatch.setattr(relay, "LOG", tmp_path / "relay.log")
     started = []
     monkeypatch.setattr(relay.subprocess, "Popen", lambda *a, **k: started.append(a))
-    assert relay.run({"verb": "train", "env": 0}) is False and not started
+    assert relay.run({"verb": "deploy", "env": 0}) is False and not started
     assert "refused" in (tmp_path / "relay.log").read_text(encoding="utf-8")
     assert relay.run({"verb": "up", "env": 1, "servers": ["core"]}) is True
     [(cmd,)] = started

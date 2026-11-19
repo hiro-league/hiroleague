@@ -1,29 +1,29 @@
-r"""hiro-work train: the deploy train (hiro-docs standards/workflow.md, "The deploy train").
+r"""hiro-work deploy: the deploy (hiro-docs standards/workflow.md, "The deploy").
 
 One run, started when Michel says, ships everything committed since the last one:
 
-    hiro-work train [repo ...] [--dry-run]
-    hiro-work train --stop [--force]
+    hiro-work deploy [repo ...] [--dry-run]
+    hiro-work deploy --stop [--force]
 
 1. The plan: for each repo, what GitHub lacks (origin's branch..dev/main) and what live lacks (the server's
    commit..dev/main; aicam: ~/aicam's commit on Simone), shown before anything moves. A repo whose GitHub or server
-   has commits this PC lacks stops the whole train here: nothing is ever forced.
+   has commits this PC lacks stops the whole deploy here: nothing is ever forced.
 2. No question: the go is Michel's word in the session that starts it (building-and-releasing.md).
 3. Push: every repo with new commits to GitHub, side by side (a plain push, which git refuses unless it fast-forwards).
 4. Deploy: the core first when live lacks something (its own hook: `git push server dev:main`), then the apps and aicam
    side by side (`git push server main`; aicam: then `git -C ~/aicam pull --ff-only` on Simone, and which service may
-   need a restart: the train never restarts one). Each deploy's own safety (database copies, migration trials, going
+   need a restart: the deploy never restarts one). Each deploy's own safety (database copies, migration trials, going
    back by itself) is the hook's, untouched here. A failed core deploy stops the apps.
 5. Verify each (it answers; no new errors in its log since its deploy started), then one report.
 
-Without --dry-run, it runs in a tab of the one Windows Terminal window "hiro-train", which Michel watches; the call
-that opens it waits until the train has started, or says why it didn't (another train runs). A train that went live
-closes its tab after 5 minutes; a failed one stays. One train at a time: the lock (C:\hiro\run\train.lock) names its
-process and task, and a lock whose process is gone is taken over. `--stop` ends the running train cleanly (its events,
+Without --dry-run, it runs in a tab of the one Windows Terminal window "hiro-deploy", which Michel watches; the call
+that opens it waits until the deploy has started, or says why it didn't (another deploy runs). A deploy that went live
+closes its tab after 5 minutes; a failed one stays. One deploy at a time: the lock (C:\hiro\run\deploy.lock) names its
+process and task, and a lock whose process is gone is taken over. `--stop` ends the running deploy cleanly (its events,
 its lock); it refuses to cut off a push or a deploy unless --force.
 
-Every step is timed into C:\hiro\logs\events.jsonl (task "train-<time>", kind "deploy"), and the
-window's whole output is kept in C:\hiro\logs\train\<task>.log.
+Every step is timed into C:\hiro\logs\events.jsonl (task "deploy-<time>", kind "deploy"), and the
+window's whole output is kept in C:\hiro\logs\deploy\<task>.log.
 """
 
 from __future__ import annotations
@@ -97,7 +97,7 @@ class Facts:
 
 
 def problems(f: Facts) -> list[str]:
-    """Why a repo can't move. Any of these stops the whole train before anything moves: never forced."""
+    """Why a repo can't move. Any of these stops the whole deploy before anything moves: never forced."""
     out = []
     if f.error:
         out.append(f.error)
@@ -116,7 +116,7 @@ class Plan:
     push: list[str]                  # to GitHub, side by side
     first: list[str]                 # deployed alone, first (the core)
     then: list[str]                  # deployed side by side after it (apps, aicam)
-    stops: dict[str, list[str]]      # repo -> why the train can't go
+    stops: dict[str, list[str]]      # repo -> why the deploy can't go
 
     @property
     def deploys(self) -> list[str]:
@@ -128,7 +128,7 @@ class Plan:
 
 
 def choose(names: list[str]) -> list[str]:
-    """The repos a train covers, in the standard's order (the core first): the ones named, or every repo."""
+    """The repos a deploy covers, in the standard's order (the core first): the ones named, or every repo."""
     if not names:
         return list(hw.REPOS)
     unknown = [n for n in names if n not in hw.REPOS]
@@ -177,14 +177,14 @@ def iso(at: float) -> str:
 
 
 def task_id(now: datetime) -> str:
-    return "train-" + now.strftime("%Y%m%d-%H%M%S")
+    return "deploy-" + now.strftime("%Y%m%d-%H%M%S")
 
 
 # --------------------------------------------------------------------------------------------------- output
 
 
 class Out:
-    """Every line on screen and in the train's log, whole lines even from threads."""
+    """Every line on screen and in the deploy's log, whole lines even from threads."""
 
     def __init__(self, log: Path | None):
         self.log, self.lock = log, threading.Lock()
@@ -201,7 +201,7 @@ class Out:
 
 @contextlib.contextmanager
 def timed(out: Out, task: str, name: str, repo: str | None = None, log: Path | None = None):
-    """One timed step, as hiro-work's own (start and end events), printed through the train's output. ``log``: its
+    """One timed step, as hiro-work's own (start and end events), printed through the deploy's output. ``log``: its
     own log, whose last lines go with a failed end (CodeHiro's Work area shows them)."""
     label = name + (f" [{repo}]" if repo else "")
     out(f"> {label}")
@@ -266,8 +266,8 @@ def lacks(d: Path, since: str | None, head: str) -> list[str]:
 
 
 def empty_github(d: Path) -> bool:
-    """True when GitHub answers and holds no branch yet: a new app's repo, made empty before its first train, which
-    then lacks every commit (its fetch of main fails, which is no reason to stop the train)."""
+    """True when GitHub answers and holds no branch yet: a new app's repo, made empty before its first deploy, which
+    then lacks every commit (its fetch of main fails, which is no reason to stop the deploy)."""
     heads = subprocess.run(["git", "-C", str(d), "ls-remote", "--heads", "origin"], capture_output=True, text=True)
     return heads.returncode == 0 and not heads.stdout.strip()
 
@@ -390,7 +390,7 @@ def core_kit_changes(facts: list[Facts]) -> int:
 class Result:
     repo: str
     pushed: int = 0
-    deployed: bool | None = None     # None: not deployed by this train
+    deployed: bool | None = None     # None: not deployed by this deploy
     answers: bool | None = None
     errors: int = 0
     error_samples: list[str] = field(default_factory=list)
@@ -421,7 +421,7 @@ def stream(out: Out, args: list[str], cwd: Path | None, repo: str, log: Path,
 
 def push_github(out: Out, task: str, f: Facts, r: Result) -> None:
     main = hw.main_of(f.repo)
-    log = hw.LOGS / "train" / f"{task}-{f.repo}-github.log"
+    log = hw.LOGS / "deploy" / f"{task}-{f.repo}-github.log"
     with timed(out, task, "push github", f.repo, log):
         code, text = stream(out, ["git", "-C", str(hw.repo_dir(0, f.repo)), "push", "origin", f"{main}:{main}"],
                             None, f.repo, log)
@@ -435,7 +435,7 @@ def deploy(out: Out, task: str, f: Facts, r: Result) -> None:
     """The repo's own deploy (its hook on Simone), then the checks that it went live."""
     d, main = hw.repo_dir(0, f.repo), hw.main_of(f.repo)
     since = int(time.time()) - 5  # Simone's log lines from here on are this deploy's (clocks within seconds)
-    log = hw.LOGS / "train" / f"{task}-{f.repo}-deploy.log"
+    log = hw.LOGS / "deploy" / f"{task}-{f.repo}-deploy.log"
     # Its stages (the checks, the build and the tests in it, the migrations' trial, the start), timed inside "deploy"
     # as the deploy's own lines name them
     stages = Stages(f.repo, lambda at, **e: hw.event(task=task, env=0, repo=f.repo, parent="deploy", at=iso(at), **e))
@@ -501,7 +501,7 @@ def verify(out: Out, task: str, f: Facts, r: Result, since: int) -> None:
             raise hw.Stop(f"{r.errors} error line(s) in its log since the deploy started")
 
 
-def run_train(out: Out, task: str, facts: list[Facts], plan: Plan) -> list[Result]:
+def run_deploy(out: Out, task: str, facts: list[Facts], plan: Plan) -> list[Result]:
     by = {f.repo: f for f in facts}
     results = {f.repo: Result(f.repo) for f in facts if f.repo in plan.push or f.repo in plan.deploys}
 
@@ -530,7 +530,7 @@ def run_train(out: Out, task: str, facts: list[Facts], plan: Plan) -> list[Resul
 
 def report(out: Out, task: str, results: list[Result], started: float) -> bool:
     out("")
-    out(f"Deploy train {task}: {round(time.monotonic() - started)} s")
+    out(f"Deploy {task}: {round(time.monotonic() - started)} s")
     ok = True
     for r in results:
         parts = []
@@ -549,16 +549,16 @@ def report(out: Out, task: str, results: list[Result], started: float) -> bool:
         out("\n".join(f"    {n}" for n in r.notes))
         ok = ok and not r.failed and r.deployed is not False and r.answers is not False and not r.errors
     out("All went live and answer." if ok else "Not everything went live cleanly: read the lines above.")
-    out(f"Logs: {hw.LOGS / 'train'}")
+    out(f"Logs: {hw.LOGS / 'deploy'}")
     return ok
 
 
 def live_drift(out: Out) -> None:
     """After the deploys: what live's data folders hold that no copy list covers (data.drift), said here and in a
-    "copy-lists" event for Work › Sweep and Work › Data. Never a failure of the train: only a note."""
+    "copy-lists" event for Work › Sweep and Work › Data. Never a failure of the deploy: only a note."""
     try:
         found = hw.data.report_drift(hw, hw.data.load(hw.env_dir(0)), ("live",))
-    except Exception as e:  # noqa: BLE001 - a note, never the train's outcome (a list can't be read, ssh is down)
+    except Exception as e:  # noqa: BLE001 - a note, never the deploy's outcome (a list can't be read, ssh is down)
         out(f"Copy lists not compared with live: {e}")
         return
     out("Copy lists, live's data folders: " + ("every file is listed." if not found else "not listed (copied nowhere "
@@ -567,12 +567,12 @@ def live_drift(out: Out) -> None:
 
 # ---------------------------------------------------------------------------------------------- the command
 
-LOCK = hw.RUN / "train.lock"
-# How long the opening call waits for the window's train to say it started (or why it didn't)
+LOCK = hw.RUN / "deploy.lock"
+# How long the opening call waits for the window's deploy to say it started (or why it didn't)
 WINDOW_WAIT_S = 30
-# A train that went live leaves its tab open this long, then closes it; a failed one stays until closed
+# A deploy that went live leaves its tab open this long, then closes it; a failed one stays until closed
 CLOSE_AFTER_S = 300
-STARTED, REFUSED = "Deploy train ", "Stopped: "
+STARTED, REFUSED = "Deploy ", "Stopped: "
 # Steps that change GitHub or Simone: --stop refuses to cut one off unless --force
 MOVING_STEPS = ("push github", "deploy")
 
@@ -601,7 +601,7 @@ def alive(pid: int) -> bool:
 
 
 def lock_owner() -> tuple[int, str] | None:
-    """The train holding the lock: its process and its task id (None: no lock, or one that can't be read)."""
+    """The deploy holding the lock: its process and its task id (None: no lock, or one that can't be read)."""
     try:
         pid, _, task = LOCK.read_text(encoding="utf-8").strip().partition(" ")
         return int(pid), task
@@ -610,9 +610,9 @@ def lock_owner() -> tuple[int, str] | None:
 
 
 @contextlib.contextmanager
-def one_train(out: Out, task: str):
-    """One train at a time. The lock names its owner (process and task), so a lock whose train is gone (a window
-    closed, a process ended by hand) is taken over instead of refusing every train after it."""
+def one_deploy(out: Out, task: str):
+    """One deploy at a time. The lock names its owner (process and task), so a lock whose deploy is gone (a window
+    closed, a process ended by hand) is taken over instead of refusing every deploy after it."""
     LOCK.parent.mkdir(parents=True, exist_ok=True)
     for _ in range(2):
         try:
@@ -620,11 +620,11 @@ def one_train(out: Out, task: str):
         except FileExistsError:
             owner = lock_owner()
             if owner and alive(owner[0]):
-                raise hw.Stop(f"another deploy train is running ({owner[1]}, process {owner[0]}): one at a time. "
-                              "Wait for it, or end it with `hiro-work train --stop`.") from None
-            out(f"(Taking over the lock left by {owner[1] if owner else 'a train'}, whose process is gone.)")
+                raise hw.Stop(f"another deploy is running ({owner[1]}, process {owner[0]}): one at a time. "
+                              "Wait for it, or end it with `hiro-work deploy --stop`.") from None
+            out(f"(Taking over the lock left by {owner[1] if owner else 'a deploy'}, whose process is gone.)")
             if owner:
-                end_left(owner[1], "its process was gone; the next train took over its lock")
+                end_left(owner[1], "its process was gone; the next deploy took over its lock")
             LOCK.unlink(missing_ok=True)
             continue
         os.write(fd, f"{os.getpid()} {task}".encode())
@@ -654,7 +654,7 @@ def events_of(task: str) -> list[dict]:
 
 
 def open_steps(task: str) -> list[dict]:
-    """The steps a train started and hasn't ended (innermost last)."""
+    """The steps a deploy started and hasn't ended (innermost last)."""
     started: dict[tuple, dict] = {}
     for e in events_of(task):
         key = (e.get("step"), e.get("repo"))
@@ -666,7 +666,7 @@ def open_steps(task: str) -> list[dict]:
 
 
 def end_left(task: str, why: str) -> None:
-    """Close a train that ended without its own end event, so CodeHiro's Work area stops showing it running."""
+    """Close a deploy that ended without its own end event, so CodeHiro's Work area stops showing it running."""
     evs = events_of(task)
     if any(e.get("step") == "task" and e.get("phase") == "end" for e in evs):
         return
@@ -676,10 +676,10 @@ def end_left(task: str, why: str) -> None:
 
 
 def cmd_stop(force: bool) -> None:
-    """End the running train: its process, its open steps and its end event, its lock."""
+    """End the running deploy: its process, its open steps and its end event, its lock."""
     owner = lock_owner()
     if not owner:
-        hw.say("No deploy train is running.")
+        hw.say("No deploy is running.")
         return
     pid, task = owner
     moving = [e for e in open_steps(task) if e.get("step") in MOVING_STEPS]
@@ -689,37 +689,37 @@ def cmd_stop(force: bool) -> None:
                       "done; wait for it, or add --force.")
     if alive(pid):
         subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
-    end_left(task, "stopped by hand (hiro-work train --stop)")
+    end_left(task, "stopped by hand (hiro-work deploy --stop)")
     LOCK.unlink(missing_ok=True)
     hw.say(f"Stopped {task}" + (f" during {', '.join(e['step'] for e in open_steps(task))}" if moving else "") + ".")
 
 
 def open_window(a) -> None:
-    """The train runs in a tab of the one 'hiro-train' window, which Michel watches, outside Claude. This call waits
-    until that train has started, or says why it didn't, so nobody is told a train runs when it was refused."""
+    """The deploy runs in a tab of the one 'hiro-deploy' window, which Michel watches, outside Claude. This call waits
+    until that deploy has started, or says why it didn't, so nobody is told a deploy runs when it was refused."""
     task = task_id(datetime.now())
-    log = hw.LOGS / "train" / f"{task}.log"
-    args = [sys.executable, str(Path(hw.__file__).resolve()), "train", "--here", "--id", task, *a.repos]
-    # cmd /c: the tab ends with the train. Windows Terminal closes a tab whose program ended well and keeps one that
-    # failed, so a failed train stays on screen.
-    wt = [shutil.which("wt.exe") or "wt.exe", "-w", "hiro-train", "new-tab", "--title", f"deploy train {task[-6:]}",
+    log = hw.LOGS / "deploy" / f"{task}.log"
+    args = [sys.executable, str(Path(hw.__file__).resolve()), "deploy", "--here", "--id", task, *a.repos]
+    # cmd /c: the tab ends with the deploy. Windows Terminal closes a tab whose program ended well and keeps one that
+    # failed, so a failed deploy stays on screen.
+    wt = [shutil.which("wt.exe") or "wt.exe", "-w", "hiro-deploy", "new-tab", "--title", f"deploy {task[-6:]}",
           "cmd", "/c", *args]
     subprocess.Popen(wt, creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
     deadline = time.monotonic() + WINDOW_WAIT_S
     while time.monotonic() < deadline:
         text = log.read_text(encoding="utf-8") if log.exists() else ""
         if REFUSED in text:
-            raise hw.Stop(f"the train didn't start: {text.split(REFUSED, 1)[1].strip()}")
+            raise hw.Stop(f"the deploy didn't start: {text.split(REFUSED, 1)[1].strip()}")
         if f"{STARTED}{task}" in text:
-            hw.say(f"The deploy train {task} is running in the 'hiro-train' window. Its log: {log}")
+            hw.say(f"The deploy {task} is running in the 'hiro-deploy' window. Its log: {log}")
             return
         time.sleep(0.5)
-    raise hw.Stop(f"the 'hiro-train' window didn't start the train within {WINDOW_WAIT_S} s; look at that window "
+    raise hw.Stop(f"the 'hiro-deploy' window didn't start the deploy within {WINDOW_WAIT_S} s; look at that window "
                   f"(its log would be {log}).")
 
 
 def still_open(plan) -> list[str]:
-    """Open tasks still working on a repo this train ships: their work isn't in it until they land."""
+    """Open tasks still working on a repo this deploy ships: their work isn't in it until they merge."""
     shipping = set(plan.push) | set(plan.first) | set(plan.then)
     return [f"{t.id} (env{t.env}, {t.title}): {', '.join(sorted(shipping & set(t.repos)))}"
             for t in hw.load_tasks() if t.state == "working" and shipping & set(t.repos)]
@@ -728,10 +728,10 @@ def still_open(plan) -> list[str]:
 def show_open(out: Out, plan) -> None:
     lines = still_open(plan)
     if lines:
-        out("\nStill working, not in this train: " + "; ".join(lines))
+        out("\nStill working, not in this deploy: " + "; ".join(lines))
 
 
-def cmd_train(a) -> None:
+def cmd_deploy(a) -> None:
     if a.stop:
         cmd_stop(a.force)
         return
@@ -740,23 +740,23 @@ def cmd_train(a) -> None:
         open_window(a)
         return
     task = a.id or task_id(datetime.now())
-    out = Out(None if a.dry_run else hw.LOGS / "train" / f"{task}.log")
+    out = Out(None if a.dry_run else hw.LOGS / "deploy" / f"{task}.log")
     started = time.monotonic()
     if a.dry_run:
-        out(f"Deploy train (dry run: nothing moves): {', '.join(repos)}")
+        out(f"Deploy (dry run: nothing moves): {', '.join(repos)}")
         facts = gather(repos)
         plan = make_plan(facts)
         out("")
         show(out, facts, plan)
         show_open(out, plan)
         if plan.stops:
-            out("\nThe train would stop here: " + "; ".join(plan.stops))
+            out("\nThe deploy would stop here: " + "; ".join(plan.stops))
         return
-    # No question here: the go is Michel's word in the session that starts the train (workflow.md, step 8)
+    # No question here: the go is Michel's word in the session that starts the deploy (workflow.md, "The deploy")
     ok = False
     try:
-        with one_train(out, task):
-            hw.event(task=task, env=0, step="task", phase="start", kind="deploy", repos=repos, title="Deploy train")
+        with one_deploy(out, task):
+            hw.event(task=task, env=0, step="task", phase="start", kind="deploy", repos=repos, title="Deploy")
             try:
                 out(f"{STARTED}{task}: {', '.join(repos)}")
                 with timed(out, task, "plan"):
@@ -772,7 +772,7 @@ def cmd_train(a) -> None:
                     ok = True
                     return
                 out("")
-                results = run_train(out, task, facts, plan)
+                results = run_deploy(out, task, facts, plan)
                 ok = report(out, task, results, started)
                 live_drift(out)
             finally:
@@ -782,17 +782,17 @@ def cmd_train(a) -> None:
         out(f"\n{REFUSED}{e}")
         raise
     if not ok:
-        raise hw.Stop("the train finished with failures (above)")
+        raise hw.Stop("the deploy finished with failures (above)")
     if a.id:  # in its tab: leave the report up a while, then close the tab
         out(f"\nThis tab closes in {CLOSE_AFTER_S // 60} minutes.")
         time.sleep(CLOSE_AFTER_S)
 
 
 def add_parser(sub) -> None:
-    t = sub.add_parser("train", help="the deploy train: push and deploy what GitHub and live lack (when Michel says)")
+    t = sub.add_parser("deploy", help="the deploy: push and deploy what GitHub and live lack (when Michel says)")
     t.add_argument("repos", nargs="*", help="only these repos (none: every repo)")
     t.add_argument("--dry-run", action="store_true", help="show what lacks what and the plan; nothing moves")
-    t.add_argument("--stop", action="store_true", help="end the running train (its events and lock too)")
+    t.add_argument("--stop", action="store_true", help="end the running deploy (its events and lock too)")
     t.add_argument("--force", action="store_true", help="with --stop: even while it pushes or deploys")
     t.add_argument("--here", action="store_true", help=argparse.SUPPRESS)  # the window's own run
     t.add_argument("--id", help=argparse.SUPPRESS)  # the window's run: the task the opening call named

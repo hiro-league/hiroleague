@@ -47,7 +47,7 @@ Lists = dict[str, CopyList]
 
 
 def load(root: Path) -> Lists:
-    """Every copy list, from the repos under root (hiro-work: env0's, the trunk's)."""
+    """Every copy list, from the repos under root (hiro-work: env0's, main's)."""
     return copylist.load_all(root, APPS)
 
 
@@ -711,7 +711,7 @@ def drift(hw: ModuleType, lists: Lists, places: tuple[str, ...] = PLACES) -> lis
 
 def report_drift(hw: ModuleType, lists: Lists, places: tuple[str, ...] = PLACES) -> list[dict]:
     """Each place surveyed and measured, and a "copy-lists" event per place: CodeHiro's Work › Sweep and Work › Data
-    show the latest of each (run by copy-list --check, the PC's helper for env0, the deploy train for live). What no
+    show the latest of each (run by copy-list --check, the PC's helper for env0, the deploy for live). What no
     list covers, as drift() says it."""
     found = []
     for place in places:
