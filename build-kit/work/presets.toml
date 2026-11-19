@@ -19,7 +19,7 @@ modes = { ha = "read", frigate = "read", mqtt = "read", ai = "real", voices = "r
 name = "Offline"
 about = "Reaches nothing real: fakes where there are any"
 builtin = true
-modes = { ha = "fake", frigate = "off", mqtt = "off", ai = "fake", voices = "fake", whatsapp = "fake", talker = "fake", adguard = "off", dhcp = "off", tv = "off" }
+modes = { ha = "off", frigate = "off", mqtt = "off", ai = "fake", voices = "fake", whatsapp = "fake", talker = "fake", adguard = "off", dhcp = "off", tv = "off" }
 
 [[preset]]
 name = "Full real"

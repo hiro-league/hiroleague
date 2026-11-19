@@ -207,13 +207,14 @@ def _parse_request(msg: UnifiedMessage) -> tuple[str | None, dict[str, Any]]:
     return None, {}
 
 
-def gate(system: str, code: str, *, write: bool = True) -> None:
+def gate(system: str, code: str, *, write: bool = True, fakes: bool = False) -> str:
     """Refuse a request for an outside system this place may not reach that way (hiro_commons.switchboard: a test
-    environment's AI, voices or WhatsApp off, or fake with no stand-in yet), with the method's own error code and
-    words that name the system and the place. In live and env0 everything is real, and this does nothing."""
+    environment's AI, voices or WhatsApp off, or fake where the handler has no stand-in), with the method's own
+    error code and words that name the system and the place. Else the system's mode: a handler with a stand-in
+    (`fakes`) answers from it when the mode is "fake". In live and env0 everything is real."""
     from hiro_commons import switchboard
 
     try:
-        switchboard.check(system, write=write)
+        return switchboard.check(system, write=write, fakes=fakes)
     except switchboard.Refused as exc:
         raise RequestRefused(code, str(exc)) from exc

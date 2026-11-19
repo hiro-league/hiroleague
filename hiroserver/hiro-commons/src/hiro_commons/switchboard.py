@@ -4,7 +4,8 @@ way, once at start (a change restarts the servers: hiro-work writes the file and
 
     real   the real system, as live
     read   reads the real system; every write is refused
-    fake   a stand-in answers (where the caller has one; where it has none yet, refused as off)
+    fake   a stand-in answers, at no cost: the core's for AI and voices (canned answers, a soft tone); WhatsApp and
+           Talker are logged, not sent. A caller with no stand-in is refused as off
     off    not reached
 
 Where the file is: the environment variable HIRO_SWITCHBOARD (a path), set by hiro-work for env1 to env5. Not set
@@ -36,7 +37,7 @@ MODES = (REAL, READ, FAKE, OFF)
 # Each system, what people call it, and the modes it can take (a system with nothing to write has no read; one that
 # only listens has no real)
 SYSTEMS: dict[str, tuple[str, tuple[str, ...]]] = {
-    "ha": ("Home Assistant", (REAL, READ, FAKE, OFF)),
+    "ha": ("Home Assistant", (REAL, READ, OFF)),  # no fake: nothing stands in for the house yet
     "frigate": ("Frigate", (REAL, READ, OFF)),
     "mqtt": ("MQTT", (READ, OFF)),
     "ai": ("AI", (REAL, FAKE, OFF)),
