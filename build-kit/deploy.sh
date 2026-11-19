@@ -42,6 +42,20 @@ healthy() {
   return 1
 }
 
+# Removes the images no tag names any more. Docker runs one prune at a time on a host, and the apps deploy side by
+# side: refused because another app's prune is running is nothing to do (what that one leaves, the next deploy's prune
+# removes), so it must not fail a deploy that went live. Any other prune error is shown and fails as before.
+prune_images() {
+  local out
+  if out=$(docker image prune -f 2>&1); then return 0; fi
+  if [[ "$out" == *"a prune operation is already running"* ]]; then
+    echo "$APP: another deploy is removing unused images: left to it"
+    return 0
+  fi
+  echo "$out" >&2
+  return 1
+}
+
 had_previous=false
 if docker image inspect "$IMAGE" >/dev/null 2>&1; then
   docker tag "$IMAGE" "$PREVIOUS"
@@ -51,7 +65,7 @@ fi
 not_deployed() {
   echo "$APP: not deployed: $1"
   if $had_previous; then docker tag "$PREVIOUS" "$IMAGE"; fi
-  docker image prune -f >/dev/null  # the image refused
+  prune_images  # the image refused
   exit 1
 }
 
@@ -82,7 +96,7 @@ docker compose up -d
 if healthy "$patience"; then
   predeploy settled "$STAMP" \
     || echo "$APP: the copies of $STAMP only the trial needed (if any) weren't removed: remove them by hand from data/deploy-backups"
-  docker image prune -f >/dev/null  # the image before the previous one; <app>:previous stays
+  prune_images  # the image before the previous one; <app>:previous stays
   echo "$APP: deployed"
   exit 0
 fi
