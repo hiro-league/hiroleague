@@ -6,6 +6,10 @@
 
 	/** For the row's button: it keeps its hover colour while the pointer is on the shortcuts over it. */
 	export const MENU_ROW_HOVER = 'group-hover/menu-row:bg-sidebar-accent group-hover/menu-row:text-sidebar-accent-foreground';
+
+	/** For a titled group's list of rows: a little in from its heading, so the rows read as under it (not when the menu
+	 * is folded to icons, where there is no heading). An app's own part of the menu uses it too. */
+	export const MENU_INDENT = 'pl-2 group-data-[collapsible=icon]:pl-0';
 </script>
 
 <script lang="ts">

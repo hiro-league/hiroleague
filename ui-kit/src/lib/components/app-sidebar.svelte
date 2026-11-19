@@ -20,7 +20,7 @@
 	import { persisted } from '$kit/state/persisted.svelte';
 	import { tabLink } from '$kit/state/url-tab.svelte';
 	import { firstLeaf, menuFor, rowKey, rowShown, tabShown, type MenuPage, type MenuTab } from './menu';
-	import MenuRow, { MENU_ROW_HOVER } from './menu-row.svelte';
+	import MenuRow, { MENU_INDENT, MENU_ROW_HOVER } from './menu-row.svelte';
 	import SidebarResize from './sidebar-resize.svelte';
 	import AppSwitcher from './app-switcher.svelte';
 	import EnvBadge from './env-badge.svelte';
@@ -96,7 +96,7 @@
 						</button>
 					{/snippet}
 				</Sidebar.GroupLabel>{/if}
-				<Sidebar.Menu>
+				<Sidebar.Menu class={g.title ? MENU_INDENT : undefined}>
 					{#each g.pages.filter((p) => open || iconMenu || isShown(p)) as p (rowKey(p))}
 						{@render pageItem(p)}
 					{/each}
