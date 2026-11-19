@@ -11,8 +11,14 @@ export function areaOf(logger: string): string {
 	return AREAS.find(([p]) => logger === p || logger.startsWith(p + '.'))?.[1] ?? logger;
 }
 
-export const isProblem = (l: Level) => l !== 'INFO';
 export const isError = (l: Level) => l === 'ERROR' || l === 'CRITICAL';
+export const isProblem = (l: Level) => l === 'WARNING' || isError(l);
+
+/** A line's fields in one line of text: `url=ws://… · error=refused`. */
+export const fieldsText = (l: LogLine) =>
+	Object.entries(l.fields ?? {})
+		.map(([k, v]) => `${k}=${v}`)
+		.join(' · ');
 
 /** Lines that say the same thing, apart from numbers (ids, counts, seconds): shown once, with how often. */
 export type Group = { key: string; line: LogLine; count: number; first: string; last: string; lines: LogLine[] };

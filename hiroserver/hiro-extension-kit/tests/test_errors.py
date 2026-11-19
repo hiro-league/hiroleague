@@ -108,10 +108,12 @@ def test_unexpected_errors_are_a_500_that_names_the_request_and_a_busy_database_
     with caplog.at_level(logging.WARNING, "testapp.errors"):
         r = client.get("/bug")
         assert r.status_code == 500 and r.json()["detail"] == (
-            "TestApp hit an unexpected error (KeyError). The details are in testapp-errors.log.")
+            "TestApp hit an unexpected error (KeyError). The details are in its log (Logs page).")
         r = client.get("/locked")
         assert r.status_code == 503 and "database is busy" in r.json()["detail"]
     assert "GET /bug failed: KeyError" in caplog.text and "GET /locked: the database is busy" in caplog.text
+    # a crashed route's own line carries its traceback (it doesn't rely on uvicorn's)
+    assert any(r.exc_info for r in caplog.records if r.getMessage().startswith("GET /bug failed"))
 
 
 def test_a_failing_reaction_to_a_failure_does_not_end_the_retries(caplog):

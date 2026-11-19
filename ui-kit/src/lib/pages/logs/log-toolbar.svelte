@@ -12,7 +12,7 @@
 	let { pg }: { pg: LogsPage } = $props();
 
 	const views: { value: View; label: string; title: string }[] = [
-		{ value: 'problems', label: 'Problems', title: 'Warnings and errors (the *-errors.log files)' },
+		{ value: 'problems', label: 'Problems', title: 'Warnings and errors' },
 		{ value: 'all', label: 'Everything', title: 'Every line, INFO and up' }
 	];
 	const areaOptions = $derived([{ value: 'all', label: 'All areas' }, ...pg.areas.map((a) => ({ value: a, label: a }))]);

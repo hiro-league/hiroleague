@@ -3,8 +3,8 @@
 The kit is the same code in every app (HomeHiro, NetHiro, TrainHiro). What differs is told once, by the app, before
 anything else of the kit is imported (`hiro_extension_kit.setup(...)` in the app package's `__init__.py`):
 
-- `name`: the app's short name ("nethiro"). Its loggers are `<name>.<area>`, its log files `<name>.log` and
-  `<name>-errors.log`, its database `<name>.db`, and its Logs page's own source is `<name>`.
+- `name`: the app's short name ("nethiro"). Its loggers are `<name>.<area>`, its log files `<name>-<day>.jsonl`, its
+  database `<name>.db`, and its Logs page's own source is `<name>`.
 - `title`: the name people read ("NetHiro"), for messages.
 - `package`: the app's package folder (`.../src/nethiro`): its migrations are in `package/migrations`, and the
   watchdog reports the app's own frames of a stack.

@@ -1,13 +1,13 @@
 <script lang="ts">
-	// The lines, newest first. A line opens to its traceback (or the rest of its message), where it came
-	// from, and, for repeats, each time it happened.
+	// The lines, newest first. A line opens to its fields, its traceback, where it came from, and, for
+	// repeats, each time it happened.
 	import { Badge } from '$kit/components/ui/badge/index.js';
 	import { Button } from '$kit/components/ui/button/index.js';
 	import EmptyState from '$kit/ui/empty-state.svelte';
 	import { agoShort, dateTime, fullDateTime } from '$kit/format/time';
 	import { ChevronRight, Copy } from '@lucide/svelte';
 	import type { Level } from './api';
-	import { areaOf, isError, SOURCES, type Group } from './lines';
+	import { areaOf, fieldsText, isError, SOURCES, type Group } from './lines';
 	import type { LogsPage } from './logs-state.svelte';
 
 	let { pg }: { pg: LogsPage } = $props();
@@ -16,7 +16,7 @@
 		isError(l) ? 'bg-destructive/15 text-destructive' : l === 'WARNING' ? 'bg-warning/15 text-warning' : 'bg-muted text-muted-foreground';
 	const time = (iso: string) => dateTime(iso, { seconds: true, now: pg.now });
 	const copyText = (g: Group) =>
-		`${g.line.at} ${g.line.level} ${g.line.logger}: ${g.line.message}${g.line.detail ? '\n' + g.line.detail : ''}`;
+		`${g.line.at} ${g.line.level} ${g.line.logger}: ${g.line.message}${fieldsText(g.line) ? ' · ' + fieldsText(g.line) : ''}${g.line.detail ? '\n' + g.line.detail : ''}`;
 </script>
 
 {#if !pg.shown.length}
@@ -50,6 +50,14 @@
 							{#if g.count > 1}<span>{g.count} times, from {time(g.first)} to {time(g.last)}</span>{/if}
 							<Button size="xs" variant="outline" class="ml-auto" onclick={() => navigator.clipboard?.writeText(copyText(g))}><Copy /> Copy</Button>
 						</div>
+						{#if Object.keys(l.fields).length}
+							<dl class="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-0.5 font-mono">
+								{#each Object.entries(l.fields) as [name, value] (name)}
+									<dt class="text-muted-foreground">{name}</dt>
+									<dd class="min-w-0 break-words">{value}</dd>
+								{/each}
+							</dl>
+						{/if}
 						{#if l.detail}
 							<pre class="max-h-72 overflow-auto rounded border bg-background p-2 font-mono text-[11px] leading-4 whitespace-pre">{l.detail}</pre>
 						{/if}

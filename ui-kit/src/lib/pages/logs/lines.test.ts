@@ -9,7 +9,8 @@ const line = (id: string, at: string, message: string, logger = 'sample.gallery'
 	logger,
 	source: 'sample',
 	message,
-	detail: null
+	detail: null,
+	fields: {}
 });
 
 describe('areaOf', () => {

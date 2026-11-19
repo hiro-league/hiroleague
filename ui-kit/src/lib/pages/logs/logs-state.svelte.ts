@@ -3,7 +3,7 @@
 // the area, the search, repeats grouped.
 import { getLogs, type LogLine, type Source, type Span, type View } from './api';
 import { Resource } from '$kit/state/resource.svelte';
-import { areaOf, group, isError, isProblem, single, type Group } from './lines';
+import { areaOf, fieldsText, group, isError, isProblem, single, type Group } from './lines';
 
 export class LogsPage {
 	view = $state<View>('problems');
@@ -36,7 +36,7 @@ export class LogsPage {
 		const lines = this.lines.filter(
 			(l) =>
 				(this.area === 'all' || areaOf(l.logger) === this.area) &&
-				(!q || `${l.message}\n${l.detail ?? ''}\n${l.logger}`.toLowerCase().includes(q))
+				(!q || `${l.message}\n${l.detail ?? ''}\n${l.logger}\n${fieldsText(l)}`.toLowerCase().includes(q))
 		);
 		return this.grouped ? group(lines) : single(lines);
 	});

@@ -164,7 +164,7 @@ def install(app: FastAPI) -> None:
 
     async def expected_answer(request: Request, exc: Exception) -> JSONResponse:
         status = exc.status if isinstance(exc, AppError) else 500
-        if status >= 500:  # an outside system failed, or it's unavailable: worth a line in the errors log
+        if status >= 500:  # an outside system failed, or it's unavailable: worth a problem line in the log
             failed(log, f"{request.method} {request.url.path}", exc)
         return JSONResponse({"detail": str(exc) or type(exc).__name__}, status_code=status)
 
@@ -177,9 +177,9 @@ def install(app: FastAPI) -> None:
         return _unexpected_answer(exc)
 
     async def unexpected(request: Request, exc: Exception) -> JSONResponse:
-        # Starlette raises it again after this answer, so uvicorn logs the traceback ("Exception in ASGI
-        # application", in <app>-errors.log); this line says which request it was.
-        log.error("%s %s failed: %s: %s", request.method, request.url.path, type(exc).__name__, exc)
+        # A crashed route: which request it was, with its traceback (the logging plan's safety nets: it doesn't rely
+        # on uvicorn, which logs it again as "Exception in ASGI application" after Starlette raises it once more).
+        log.error("%s %s failed: %s: %s", request.method, request.url.path, type(exc).__name__, exc, exc_info=exc)
         return _unexpected_answer(exc)
 
     app.add_exception_handler(AppError, expected_answer)
@@ -190,4 +190,4 @@ def install(app: FastAPI) -> None:
 def _unexpected_answer(exc: Exception) -> JSONResponse:
     app = identity.app()
     return JSONResponse({"detail": f"{app.title} hit an unexpected error ({type(exc).__name__}). "
-                                   f"The details are in {app.name}-errors.log."}, status_code=500)
+                                   f"The details are in its log (Logs page)."}, status_code=500)

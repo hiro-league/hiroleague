@@ -15,6 +15,8 @@ from collections import defaultdict
 from collections.abc import Callable
 from typing import Any
 
+from hiro_commons import logging_foundation
+
 from . import identity
 from .errors import failed
 
@@ -24,9 +26,11 @@ _loop: asyncio.AbstractEventLoop | None = None
 
 
 def bind() -> None:
-    """Remember the running loop. Called once at startup, on the loop."""
+    """Remember the running loop, and have the logging foundation log every error of it nobody could catch (a task
+    that failed and was never awaited). Called once at startup, on the loop."""
     global _loop
     _loop = asyncio.get_running_loop()
+    logging_foundation.watch_loop(_loop)
 
 
 def on_loop(fn: Callable[..., Any], *args: Any) -> None:

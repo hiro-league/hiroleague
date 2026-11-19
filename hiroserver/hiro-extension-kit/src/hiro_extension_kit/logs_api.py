@@ -1,14 +1,15 @@
 """The Logs page: what the app did and what went wrong, read from the files in DATA_DIR/logs (logfiles.py).
 
 - `GET /api/logs`: the lines of a span (1 h / 24 h / 7 days), problems only or everything, of one source
-  or all, newest first. Grouping repeats, areas and search are the page's.
+  or all, newest first, each with its fields. Grouping repeats, areas and search are the page's.
 - `GET /api/logs/summary`: the Overview card (errors and warnings in 24 h, the newest problem).
-- `GET /api/logs/files`, `/api/logs/files/{name}`: the files, and one to download.
+- `GET /api/logs/files`, `/api/logs/files/{name}`: the files (one a day, and crash.log), and one to download.
 
 Open pages hear "logs" when the web app writes a line (at most every NOTIFY_EVERY seconds): the notifier
 is a handler that only notes it, and a worker that tells the pages.
 """
 
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Literal
@@ -22,7 +23,7 @@ from . import identity, logfiles
 from .errors import NotFound
 from .events import bus
 from .logfiles import Entry, Level, Source
-from .logs import KEEP, LOGGERS, ROTATE_BYTES
+from .logs import CRASH_FILE, KEEP_DAYS, LOGGERS
 from .timeline import slots
 
 log = identity.logger("logs")
@@ -39,13 +40,7 @@ else:
 LIMIT = 3000  # lines per answer at most (newest first): Everything over 7 days can be far more
 NOTIFY_EVERY = 3.0  # seconds
 
-# The files, what each holds, how big it gets before it rotates, and how many older copies are kept
-# (logs.py; crash.log never rotates).
-FILES = [
-    (f"{_NAME}-errors.log", "problems only (WARNING and up)", ROTATE_BYTES["errors"], KEEP),
-    (f"{_NAME}.log", "everything (INFO and up)", ROTATE_BYTES["all"], KEEP),
-    ("crash.log", "hard crashes in native code", 0, 0),
-]
+CRASH_WHAT = "hard crashes in native code"
 
 
 class LogLineOut(BaseModel):
@@ -55,7 +50,8 @@ class LogLineOut(BaseModel):
     logger: str
     source: Source
     message: str
-    detail: str | None  # the traceback, or the rest of the message
+    detail: str | None  # the traceback
+    fields: dict[str, str]  # the line's own fields (elapsed_ms, url, error...), as text
 
 
 class LogsOut(BaseModel):
@@ -79,10 +75,17 @@ class LogSummaryOut(BaseModel):
 class LogFileOut(BaseModel):
     name: str
     what: str
+    day: str | None  # the day a daily file holds (ISO date); None for crash.log
     size: int  # bytes
-    limit: int  # it rotates past this (0: never)
-    kept: int  # rotated copies there now
-    keep: int  # how many are kept at most
+
+
+class LogFilesOut(BaseModel):
+    files: list[LogFileOut]  # newest first, crash.log last
+    keep_days: int  # a daily file is kept this many days
+
+
+def _text(v: object) -> str:
+    return v if isinstance(v, str) else json.dumps(v, ensure_ascii=False, default=str)
 
 
 def _out(e: Entry) -> LogLineOut:
@@ -90,6 +93,7 @@ def _out(e: Entry) -> LogLineOut:
     return LogLineOut.model_validate({
         "id": f"{e.file}:{e.line}", "at": e.at.isoformat(), "level": e.level, "logger": e.logger,
         "source": e.source, "message": e.message, "detail": detail or None,
+        "fields": {k: _text(v) for k, v in e.fields.items()},
     })
 
 
@@ -117,20 +121,24 @@ def get_summary() -> LogSummaryOut:
     })
 
 
+def _size(path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
 @router.get("/files")
-def get_files() -> list[LogFileOut]:
-    out = []
-    for name, what, limit, keep in FILES:
-        path = logfiles.FOLDER / name
-        out.append(LogFileOut.model_validate({
-            "name": name, "what": what, "size": path.stat().st_size if path.exists() else 0, "limit": limit,
-            "kept": sum(path.with_name(f"{name}.{i}").exists() for i in range(1, keep + 1)), "keep": keep,
-        }))
-    return out
+def get_files() -> LogFilesOut:
+    out = [LogFileOut.model_validate({"name": path.name, "what": "the day's lines", "day": day.isoformat(), "size": _size(path)})
+           for day, path in logfiles.files(_NAME)]
+    crash = logfiles.FOLDER / CRASH_FILE
+    out.append(LogFileOut.model_validate({"name": CRASH_FILE, "what": CRASH_WHAT, "day": None, "size": _size(crash)}))
+    return LogFilesOut.model_validate({"files": out, "keep_days": KEEP_DAYS})
 
 
 def _downloadable() -> set[str]:
-    return {n for name, _what, _limit, keep in FILES for n in (name, *(f"{name}.{i}" for i in range(1, keep + 1)))}
+    return {path.name for _day, path in logfiles.files(_NAME)} | {CRASH_FILE}
 
 
 @router.get("/files/{name}")

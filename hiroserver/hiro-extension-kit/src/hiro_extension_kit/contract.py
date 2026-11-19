@@ -4,7 +4,9 @@ The kit's features are tested in the kit (hiro-extension-kit/tests). What only t
 the kit expects: its test setup is safe, its routes all have a rule and declare their answers, its frontend's types are
 fresh, its workers can run, its migrations match its models and lose nothing on a copy, it writes files only through
 the kit and logs to its data folder, and the kit's routes are there. Each app had these tests in its own copy; now its
-tests/test_contract.py is a few lines:
+tests/test_contract.py is a few lines. It also proves that nothing escapes the app's log: each safety net of the logging
+foundation catches its failure into the app's file (the self-test), the crashed-route handler is wired, the watchdog
+runs, and no broad `except` drops an error without a log line, a re-raise or `failed()`:
 
     from hiro_extension_kit.contract import AppContract
     from nethiro.app import WORKERS
@@ -24,6 +26,7 @@ Imported only by tests: it needs pytest, which an app installs as a dev tool.
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import inspect
 import os
@@ -52,6 +55,52 @@ KIT_ROUTES: tuple[tuple[str, str], ...] = (
     ("GET", "/api/me"), ("GET", "/api/auth/start"), ("GET", "/api/users"), ("GET", "/api/roles"),
     ("GET", "/api/hiroleague"), ("GET", "/api/apps"),
 )
+
+
+_BROAD = {"Exception", "BaseException"}
+_LOG_CALLS = {"debug", "info", "warning", "warn", "error", "exception", "critical", "log", "fineinfo", "failed"}
+
+
+def _broad(kind: ast.expr | None) -> bool:
+    if kind is None:
+        return True  # a bare `except:`
+    if isinstance(kind, ast.Name):
+        return kind.id in _BROAD
+    if isinstance(kind, ast.Attribute):
+        return kind.attr in _BROAD
+    if isinstance(kind, ast.Tuple):
+        return any(_broad(k) for k in kind.elts)
+    return False
+
+
+def _keeps_the_error(body: list[ast.stmt]) -> bool:
+    """The handler raises, or logs (a logger's method, or errors.failed), somewhere in its own code."""
+    todo: list[ast.AST] = list(body)
+    while todo:
+        node = todo.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            continue  # code defined here runs later, if ever
+        if isinstance(node, ast.Raise):
+            return True
+        if isinstance(node, ast.Call):
+            fn = node.func
+            name = fn.attr if isinstance(fn, ast.Attribute) else fn.id if isinstance(fn, ast.Name) else ""
+            if name in _LOG_CALLS:
+                return True
+        todo.extend(ast.iter_child_nodes(node))
+    return False
+
+
+def silent_catches(package: Path) -> list[tuple[Path, int]]:
+    """Every broad `except` in the package's code (migrations left out) that drops its error: where it is."""
+    found = []
+    for path in sorted(package.rglob("*.py")):
+        if any(part.startswith("migrations") for part in path.relative_to(package).parts):
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        found += [(path, node.lineno) for node in ast.walk(tree)
+                  if isinstance(node, ast.ExceptHandler) and _broad(node.type) and not _keeps_the_error(node.body)]
+    return found
 
 
 def _loose(schema: dict | None) -> bool:
@@ -312,14 +361,72 @@ class AppContract:
                  for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1) if direct.search(line)]
         assert not found, f"write through hiro_extension_kit.files instead: {found}"
 
+    # --- nothing escapes the log (the logging foundation's safety nets) ---
+
+    def test_every_safety_net_catches_its_failure_into_the_log(self):
+        """The foundation's self-test, on the app's own setup: an uncaught error in the main thread and in another, a
+        failing finalizer, a failed task on a loop started as the app starts its own (`events.bind()`), a warning, a
+        library's problem and the web server's, with their tracebacks; faulthandler on; a child's output in its file."""
+        from hiro_commons import logging_foundation
+
+        from . import events
+
+        bound = events._loop
+        try:
+            results = logging_foundation.self_test(startup=events.bind)
+        finally:
+            events._loop = bound
+        missing = [net for net, ok in results.items() if not ok]
+        assert not missing, f"these failures didn't reach the app's log: {missing}"
+
+    def test_a_crashed_route_is_answered_and_logged_with_its_traceback(self):
+        """errors.install(app) is wired: the app's handler answers an unexpected error, and its line carries the
+        traceback."""
+        import json
+
+        from hiro_commons import logging_foundation
+        from starlette.requests import Request
+
+        from .errors import AppError
+
+        handlers = self.app.exception_handlers
+        assert AppError in handlers and Exception in handlers, "call errors.install(app) in create_app"
+        word = f"contract-crash-{os.getpid()}-{id(self)}"
+        try:
+            raise KeyError(word)
+        except KeyError as exc:
+            request = Request({"type": "http", "method": "GET", "path": "/api/contract-crash", "headers": [], "query_string": b""})
+            answer = asyncio.run(handlers[Exception](request, exc))
+        assert answer.status_code == 500
+        logging_foundation.flush()
+        where = logging_foundation.where()
+        assert where is not None
+        lines = [json.loads(t) for _d, p in logging_foundation.daily.files(*where)[:2]
+                 for t in p.read_text(encoding="utf-8").splitlines() if word in t]
+        assert lines and "Traceback" in lines[0].get("Attributes", {}).get("exception.stacktrace", "")
+
+    def test_the_watchdog_runs(self):
+        """It logs what blocks the event loop, and where (watchdog.py)."""
+        from .watchdog import Watchdog
+
+        assert any(isinstance(w, Watchdog) for w in self.workers), "put hiro_extension_kit.watchdog.watchdog in WORKERS"
+
+    def test_no_catch_drops_an_error(self):
+        """A broad `except` (bare, Exception, BaseException) logs, raises again or calls `failed()`: an error it swallows
+        is lost for good. (ruff's blind-except rule can't tell `failed()` is a log line, so the kit checks it.)"""
+        from . import identity
+
+        package = identity.app().package
+        found = [f"{path.relative_to(package)}:{line}" for path, line in silent_catches(package)]
+        assert not found, f"these catches drop the error: log it (errors.failed), or raise it again: {found}"
+
     def test_the_app_logs_to_its_data_folder(self):
         """The app sets the kit's logging up on its own data folder when its app module loads (the files themselves,
         and that nothing escapes them, are the kit's tests)."""
-        import logging
-        from logging.handlers import RotatingFileHandler
+        from hiro_commons import logging_foundation
 
         from . import identity
 
         me = identity.app()
-        files = {h.baseFilename for h in logging.getLogger().handlers if isinstance(h, RotatingFileHandler)}
-        assert {str(me.data_dir / "logs" / f"{me.name}.log"), str(me.data_dir / "logs" / f"{me.name}-errors.log")} <= files
+        where = logging_foundation.where()  # the logging foundation, set up through logs.py
+        assert where is not None and (where[0].resolve(), where[1]) == ((me.data_dir / "logs").resolve(), me.name)

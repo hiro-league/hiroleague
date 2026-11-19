@@ -53,7 +53,7 @@ disk and nothing in its API.
 | `clock` | times in words, 12-hour with AM/PM and always the day: `spoken()`, `full()` |
 | `files` | atomic writes: `write_bytes()`, `write_text()`, `write_lines()` |
 | `schemas` | `Ok` |
-| `logs` | `setup(folder)`: the console and the rotating files, uncaught exceptions, crashes |
+| `logs` | `setup(folder)`: the app on the logging foundation (`hiro_commons.logging_foundation`): one JSON-lines file a day, the console, the link's lines, uncaught exceptions, crashes |
 | `logfiles`, `logs_api` | reading those files; the Logs page's routes (`router`) and its `notifier` worker |
 | `db` | `Database` (an app may make a second one: HomeHiro's streams.db); the app's own (`main`): `engine`, `get_session`, `run_db()`, `migrate()` |
 | `models` | the table every app has (`Setting`); the app's `models.py` imports it |

@@ -2,25 +2,37 @@
 // llm/requests_api.py). Types are written out from the backends' answers, which every app's generated file shares.
 import { api, apiUrl } from '$kit/api/client';
 
-export type Level = 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL';
+export type Level = 'DEBUG' | 'FINEINFO' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL';
 /** The app's own name ("homehiro") or "crash". */
 export type Source = string;
 export type Span = '1h' | '24h' | '7d';
 export type View = 'problems' | 'all';
 
-/** id: its file and line; detail: the traceback, or the rest of the message */
-export type LogLine = { id: string; at: string; level: Level; logger: string; source: Source; message: string; detail: string | null };
+/** id: its file and line; detail: the traceback; fields: the line's own (elapsed_ms, url, error...), as text */
+export type LogLine = {
+	id: string;
+	at: string;
+	level: Level;
+	logger: string;
+	source: Source;
+	message: string;
+	detail: string | null;
+	fields: Record<string, string>;
+};
 /** more: there were more than the backend sends (the oldest are left out) */
 export type LogLines = { lines: LogLine[]; more: boolean; unreadable: string[] };
 export type LogSummary = { errors: number; warnings: number; newest: LogLine | null; hours: { errors: number; warnings: number }[] };
-export type LogFile = { name: string; what: string; size: number; limit: number; kept: number; keep: number };
+/** day: the day a daily file holds (ISO date); null for crash.log */
+export type LogFile = { name: string; what: string; day: string | null; size: number };
+/** files: newest first, crash.log last; keep_days: how long a daily file is kept */
+export type LogFiles = { files: LogFile[]; keep_days: number };
 
 export const getLogs = (span: Span, view: View, source: Source | 'all', signal?: AbortSignal) =>
 	api<LogLines>(`logs?span=${span}&view=${view}&source=${source}`, { signal });
 
 export const getLogSummary = (signal?: AbortSignal) => api<LogSummary>('logs/summary', { signal });
 
-export const getLogFiles = (signal?: AbortSignal) => api<LogFile[]>('logs/files', { signal });
+export const getLogFiles = (signal?: AbortSignal) => api<LogFiles>('logs/files', { signal });
 
 /** Where a log file downloads from (the browser saves it). */
 export const logFileUrl = (name: string) => apiUrl(`logs/files/${encodeURIComponent(name)}`);

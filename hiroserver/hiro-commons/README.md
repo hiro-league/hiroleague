@@ -18,7 +18,11 @@
   See [Constants architecture](https://docs.hiroleague.com/architecture/components/constants).
 - `hiro_commons.crypto` — Ed25519 / signing primitives shared between server
   and gateway.
-- Other cross-cutting helpers (timestamps, structured logging setup, etc.).
+- `hiro_commons.logging_foundation` — the logging foundation: one setup for a process
+  (standard logging in; one JSON line per entry, with OpenTelemetry's log field names; one file a day,
+  kept 30 days; the structlog `Logger`'s lines bridged in). The apps use it through the extension kit.
+- `hiro_commons.log` — the core's structured logger (structlog, CSV files).
+- Other cross-cutting helpers (timestamps, etc.).
 
 ## Versioning
 

@@ -1,17 +1,17 @@
-"""The Logs page's backend (logfiles.py, logs_api.py): the files read as they grow and rotate, crash
-reports, the routes, downloads limited to the log files, and the notice open pages get."""
+"""The Logs page's backend (logfiles.py, logs_api.py): the daily files read as they grow, a day's file read only
+when the span reaches it, crash reports, the routes, downloads limited to the log files, and the notice open pages
+get."""
 
 import asyncio
+import json
 import logging
-import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from hiro_extension_kit import logfiles, logs_api
-from hiro_extension_kit import errors, events
+from hiro_extension_kit import errors, events, logfiles, logs_api
 
 
 @pytest.fixture
@@ -22,8 +22,20 @@ def folder(tmp_path, monkeypatch):
     logfiles.forget()
 
 
-def stamp(minutes_ago: float) -> str:
-    return (datetime.now().astimezone() - timedelta(minutes=minutes_ago)).strftime("%Y-%m-%d %H:%M:%S%z")
+NUMBER = {"DEBUG": 5, "INFO": 9, "WARNING": 13, "ERROR": 17, "CRITICAL": 21}
+
+
+def entry(minutes_ago: float, level: str, scope: str, body: str, **attributes) -> str:
+    at = datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
+    got = {"Timestamp": at.isoformat().replace("+00:00", "Z"), "SeverityText": level, "SeverityNumber": NUMBER[level],
+           "Body": body, "InstrumentationScope": scope, "Resource": {"service.name": "test"}}
+    if attributes:
+        got["Attributes"] = attributes
+    return json.dumps(got)
+
+
+def day_file(folder, days_ago: int = 0):
+    return folder / f"testapp-{(datetime.now() - timedelta(days=days_ago)).date().isoformat()}.jsonl"
 
 
 def write(path, *lines: str, mode: str = "w") -> None:
@@ -39,42 +51,41 @@ def client(folder):
     return TestClient(app)
 
 
-def test_an_entry_keeps_the_lines_after_it_as_its_traceback(folder):
-    write(folder / "testapp-errors.log",
-          f"{stamp(5)} ERROR testapp.ha: HA connect hook: KeyError: 'area_id'",
-          "Traceback (most recent call last):",
-          '  File "sync.py", line 190, in _sync',
-          "KeyError: 'area_id'",
-          f"{stamp(1)} WARNING testapp.frigate: Frigate: /api/events was slow: 8.1 s (limit 15 s)")
+def test_an_entry_keeps_its_fields_and_traceback(folder):
+    trace = "Traceback (most recent call last):\n  File \"sync.py\", line 190, in _sync\nKeyError: 'area_id'"
+    write(day_file(folder),
+          entry(5, "ERROR", "testapp.ha", "HA connect hook: KeyError: 'area_id'", **{
+              "exception.type": "KeyError", "exception.message": "'area_id'", "exception.stacktrace": trace}),
+          entry(1, "WARNING", "testapp.frigate", "Frigate: /api/events was slow", elapsed_ms=8100))
     found, unreadable = logfiles.entries(["testapp"], True, datetime.now().astimezone() - timedelta(hours=1))
     assert unreadable == [] and [e.logger for e in found] == ["testapp.frigate", "testapp.ha"]  # newest first
-    assert found[1].detail == ["Traceback (most recent call last):", '  File "sync.py", line 190, in _sync', "KeyError: 'area_id'"]
+    assert found[1].detail == trace.splitlines() and found[1].fields == {}
+    assert found[0].fields == {"elapsed_ms": 8100}
 
 
 def test_a_growing_file_is_read_on_from_where_it_was(folder):
-    path = folder / "testapp.log"
-    write(path, f"{stamp(3)} INFO testapp.sync: HA sync: 80 devices", f"{stamp(2)} ERROR testapp.x: boom")
+    path = day_file(folder)
+    write(path, entry(3, "INFO", "testapp.sync", "HA sync: 80 devices"), entry(2, "ERROR", "testapp.x", "boom"))
     first, _ = logfiles.read(path, "testapp")
-    write(path, "Traceback (most recent call last):", "ValueError: boom", mode="a")
+    assert len(first) == 2
     with path.open("a", encoding="utf-8", newline="\n") as f:
-        f.write(f"{stamp(1)} INFO testapp.y: half a line still being written")  # no newline yet: not read
-    again, _ = logfiles.read(path, "testapp")
-    assert len(again) == 2 and again[1].detail == ["Traceback (most recent call last):", "ValueError: boom"]
+        f.write(entry(1, "INFO", "testapp.y", "half a line still being written"))  # no newline yet: not read
+    assert len(logfiles.read(path, "testapp")[0]) == 2
     with path.open("a", encoding="utf-8") as f:
         f.write("\n")
     assert logfiles.read(path, "testapp")[0][2].message == "half a line still being written"
 
 
-def test_a_rotated_file_is_read_again_and_older_copies_only_when_the_span_needs_them(folder):
-    write(folder / "testapp.log", f"{stamp(10)} INFO a: new one")
-    write(folder / "testapp.log.1", f"{stamp(200)} INFO a: older", f"{stamp(20)} INFO a: newest of the old")
-    hour = datetime.now().astimezone() - timedelta(hours=1)
-    assert [e.message for e in logfiles.entries(["testapp"], False, hour)[0]] == ["new one", "newest of the old"]
-    os.replace(folder / "testapp.log", folder / "testapp.log.1")  # rotated, as RotatingFileHandler does
-    write(folder / "testapp.log", f"{stamp(1)} INFO a: after the rotation, a longer line than the one before it")
-    assert [e.message for e in logfiles.read(folder / "testapp.log", "testapp")[0]] == \
-        ["after the rotation, a longer line than the one before it"]
-    assert [e.message for e in logfiles.read(folder / "testapp.log.1", "testapp")[0]] == ["new one"]
+def test_an_older_days_file_is_read_only_when_the_span_reaches_it(folder):
+    write(day_file(folder), entry(10, "INFO", "a", "today"))
+    write(day_file(folder, 1), entry(60 * 24, "INFO", "a", "yesterday"))
+    write(day_file(folder, 3), "not json at all, and never opened for a span of a day")
+    week = datetime.now().astimezone() - timedelta(days=7)
+    day = datetime.now().astimezone() - timedelta(hours=26)
+    assert [e.message for e in logfiles.entries(["testapp"], False, week)[0]] == ["today", "yesterday"]
+    logfiles.forget()
+    assert [e.message for e in logfiles.entries(["testapp"], False, day)[0]] == ["today", "yesterday"]
+    assert day_file(folder, 3) not in logfiles._cache
 
 
 def test_a_crash_report_is_one_entry_at_the_files_time(folder):
@@ -86,21 +97,22 @@ def test_a_crash_report_is_one_entry_at_the_files_time(folder):
 
 
 def test_the_lines_route_filters_the_span_the_view_and_the_source(client, folder):
-    write(folder / "testapp-errors.log", f"{stamp(90)} WARNING testapp.ha: HA connection lost", f"{stamp(5)} ERROR testapp.x: boom")
-    write(folder / "testapp.log", f"{stamp(4)} INFO testapp.sync: HA sync", f"{stamp(5)} ERROR testapp.x: boom")
-    write(folder / "whatsapp-errors.log", f"{stamp(2)} WARNING whatsmeow.Client: Got 503 stream error")  # the old worker's: not read
+    write(day_file(folder), entry(90, "WARNING", "testapp.ha", "HA connection lost"), entry(5, "ERROR", "testapp.x", "boom"),
+          entry(4, "INFO", "testapp.sync", "HA sync", devices=80))
+    write(folder / "whatsapp-2026-01-01.jsonl", entry(2, "WARNING", "whatsmeow.Client", "Got 503"))  # not the app's
     write(folder / "crash.log", "Fatal Python error: Segmentation fault")
     r = client.get("/api/logs", params={"span": "1h"}).json()
     assert [(line["source"], line["message"]) for line in r["lines"]] == [("crash", "Fatal Python error: Segmentation fault"), ("testapp", "boom")]
-    assert r["lines"][1]["id"] == "testapp-errors.log:2" and r["more"] is False and r["unreadable"] == []
+    assert r["lines"][1]["id"] == f"{day_file(folder).name}:2" and r["more"] is False and r["unreadable"] == []
     r = client.get("/api/logs", params={"span": "1h", "view": "all", "source": "testapp"}).json()
-    assert [line["message"] for line in r["lines"]] == ["HA sync", "boom"]
+    assert [(line["message"], line["fields"]) for line in r["lines"]] == [("HA sync", {"devices": "80"}), ("boom", {})]
     r = client.get("/api/logs", params={"span": "24h", "limit": 1}).json()
     assert len(r["lines"]) == 1 and r["more"] is True
 
 
 def test_the_summary_counts_the_last_24_hours(client, folder):
-    write(folder / "testapp-errors.log", f"{stamp(60 * 30)} ERROR a: too old", f"{stamp(30)} WARNING a: slow", f"{stamp(3)} ERROR a: boom")
+    write(day_file(folder, 2), entry(60 * 50, "ERROR", "a", "too old"))
+    write(day_file(folder), entry(30, "WARNING", "a", "slow"), entry(3, "ERROR", "a", "boom"), entry(2, "INFO", "a", "fine"))
     r = client.get("/api/logs/summary").json()
     hours = r.pop("hours")
     assert r == {
@@ -112,25 +124,31 @@ def test_the_summary_counts_the_last_24_hours(client, folder):
 
 
 def test_only_the_log_files_can_be_downloaded(client, folder):
-    write(folder / "testapp.log", f"{stamp(1)} INFO a: hello")
-    write(folder / "testapp.log.2", f"{stamp(100)} INFO a: older")
+    write(day_file(folder), entry(1, "INFO", "a", "hello"))
+    write(day_file(folder, 2), entry(60 * 48, "INFO", "a", "older"))
     (folder.parent / "testapp.db").write_text("secret")
-    r = client.get("/api/logs/files/testapp.log")
+    r = client.get(f"/api/logs/files/{day_file(folder).name}")
     assert r.status_code == 200 and "hello" in r.text and "attachment" in r.headers["content-disposition"]
-    assert client.get("/api/logs/files/testapp.log.2").status_code == 200
-    for name in ("testapp.db", "..%2Ftestapp.db", "testapp.log.9", "whatsapp-console.log.2"):
+    assert client.get(f"/api/logs/files/{day_file(folder, 2).name}").status_code == 200
+    for name in ("testapp.db", "..%2Ftestapp.db", "testapp-2020-01-01.jsonl", "whatsapp-console.log.2"):
         assert client.get(f"/api/logs/files/{name}").status_code == 404
-    files = {f["name"]: f for f in client.get("/api/logs/files").json()}
-    assert files["testapp.log"]["kept"] == 1 and files["testapp.log"]["keep"] == 5 and files["crash.log"]["size"] == 0
+    got = client.get("/api/logs/files").json()
+    assert got["keep_days"] == 30
+    assert [(f["name"], f["day"]) for f in got["files"]] == [
+        (day_file(folder).name, datetime.now().date().isoformat()),
+        (day_file(folder, 2).name, (datetime.now() - timedelta(days=2)).date().isoformat()),
+        ("crash.log", None),
+    ]
+    assert got["files"][-1]["size"] == 0
 
 
 def test_a_file_that_cant_be_read_is_said_and_logged_once(folder, monkeypatch, caplog):
-    path = folder / "testapp-errors.log"
-    write(path, f"{stamp(1)} ERROR a: boom")
+    path = day_file(folder)
+    write(path, entry(1, "ERROR", "a", "boom"))
     real_open = type(path).open
 
     def locked(self, *args, **kwargs):
-        if self.name == "testapp-errors.log":
+        if self.name == path.name:
             raise PermissionError("in use")
         return real_open(self, *args, **kwargs)
 
@@ -138,8 +156,8 @@ def test_a_file_that_cant_be_read_is_said_and_logged_once(folder, monkeypatch, c
     with caplog.at_level(logging.WARNING, "testapp.logs"):
         for _ in range(3):
             found, unreadable = logfiles.entries(["testapp"], True, datetime.now().astimezone() - timedelta(hours=1))
-    assert found == [] and unreadable == ["testapp-errors.log can't be read (PermissionError: in use)"]
-    assert len([r for r in caplog.records if "Logs: reading testapp-errors.log" in r.getMessage()]) == 1
+    assert found == [] and unreadable == [f"{path.name} can't be read (PermissionError: in use)"]
+    assert len([r for r in caplog.records if f"Logs: reading {path.name}" in r.getMessage()]) == 1
 
 
 def test_open_pages_hear_when_a_line_is_written(monkeypatch):
