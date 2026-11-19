@@ -13,6 +13,7 @@ task the file names. The file:
 
     {"name": "Chores board",                        the work's name, as tasks say it in --part-of
      "doc": "https://claude.ai/artifact/...",       the plan doc
+     "about": "A board where the kids tick chores", optional: what the plan is for, in a sentence
      "tasks": ["chores-board"],                     optional: tasks that are this plan's, by id
      "needs_michel": "Answer Q2",                   optional: what waits on Michel
      "side_by_side": "Phases 3 and 4",              optional: what can run at the same time
@@ -73,7 +74,7 @@ def checked(raw: object) -> dict:
     """The plan a file holds, as the event carries it; Stop names the first thing wrong."""
     if not isinstance(raw, dict):
         raise hw.Stop("The file must hold one plan: a JSON object (hiro-work plan --help).")
-    unknown = sorted(set(raw) - {"name", "doc", "tasks", "needs_michel", "side_by_side", "phases"})
+    unknown = sorted(set(raw) - {"name", "doc", "about", "tasks", "needs_michel", "side_by_side", "phases"})
     if unknown:
         raise hw.Stop(f"Not a plan's field: {', '.join(unknown)}.")
     doc = words(raw.get("doc"), "The plan's doc", 320, needed=True)
@@ -101,6 +102,7 @@ def checked(raw: object) -> dict:
     return {
         "plan": words(raw.get("name"), "The plan's name", 80, needed=True),
         "doc": doc,
+        "about": words(raw.get("about"), "The plan's about", 300),
         "tasks": task_ids(raw.get("tasks"), "The plan's tasks"),
         "needs_michel": words(raw.get("needs_michel"), "needs_michel"),
         "side_by_side": words(raw.get("side_by_side"), "side_by_side"),
