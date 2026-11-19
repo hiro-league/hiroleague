@@ -36,7 +36,8 @@ from pathlib import Path
 import hiro_work as hw
 from audit import when
 
-STEP = "plan"
+# Not "plan": that is a deploy's own step, and CodeHiro reads a step by its name
+STEP = "plan-sent"
 # A phase's states, as plans.md's key names them: live, live with a check left, merged and not deployed, being
 # worked on, in review, next, waits on a decision, not started
 STATES = ("live", "check", "merged", "working", "review", "next", "waits", "todo")

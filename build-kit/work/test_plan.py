@@ -42,7 +42,7 @@ def events(tmp_path) -> list[dict]:
 def test_a_send_is_one_event_holding_the_whole_plan(log):
     assert send(log, a_plan(needs_michel="  Answer   Q2 ", tasks=["chores-board"])) == 0
     (e,) = events(log)
-    assert (e["step"], e["phase"], e["task"], e["plan"]) == ("plan", "end", None, "Chores board")
+    assert (e["step"], e["phase"], e["task"], e["plan"]) == ("plan-sent", "end", None, "Chores board")
     assert e["needs_michel"] == "Answer Q2"  # spaces tidied
     assert e["tasks"] == ["chores-board"]
     assert e["phases"][1] == {"name": "Kids tick them off", "state": "review", "says": "", "needs": "1",
