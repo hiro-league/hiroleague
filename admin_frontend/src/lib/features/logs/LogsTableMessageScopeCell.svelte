@@ -9,7 +9,7 @@
     msgOrd: number | null;
     chipAlt: boolean;
     onFilterToMessage: (msgId: string, event: MouseEvent) => void;
-    /** Phase 6b: open the line's story over the page */
+    /** Phase 6b: show only the line's story (its lines from every part); the story itself opens from the filter */
     onOpenStory?: (storyId: string) => void;
   };
 
@@ -48,19 +48,17 @@
     </button>
 {/if}
 {#if row.story_id && onOpenStory}
-  <!-- Phase 6b: the line's story, by its kind (today's lines don't say their kind yet: phase 6a) -->
+  <!-- Phase 6b: the line's story: a click shows only its lines, from every part, as the message icon does for a
+       message; the filter's "Open the story" opens it over the page -->
   <button
     type="button"
     class="inline-grid shrink-0 place-items-center rounded-md p-0.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
-    title="Open its story"
-    onclick={(e) => {
-      e.stopPropagation();
-      onOpenStory(row.story_id!);
-    }}
+    title="Show only this story's lines"
+    onclick={(e) => onFilterToMessage(row.story_id!, e)}
     ondblclick={(e) => e.stopPropagation()}
   >
     <KindIcon kind="unknown" size={14} />
-    <span class="sr-only">Open its story</span>
+    <span class="sr-only">Show only this story's lines</span>
   </button>
 {/if}
 </div>

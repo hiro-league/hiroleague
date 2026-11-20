@@ -18,9 +18,11 @@
   type Props = {
     prefs: LogsPreferences;
     ctrl: LogsPageController;
+    /** Opens a story over the page (the logging plan's phase 6b), from the Story filter */
+    onOpenStory?: (storyId: string) => void;
   };
 
-  let { prefs, ctrl }: Props = $props();
+  let { prefs, ctrl, onOpenStory }: Props = $props();
 
   // The core's own sources and every other part's stream: each app's, the phone's (the logging plan's phase 6b)
   const sourceOptions = $derived<MultiSelectOption[]>(
@@ -137,6 +139,9 @@
                 <X size={15} strokeWidth={2} />
               </Button>
             </div>
+            {#if scopeIsStory && onOpenStory}
+              <Button variant="outline" size="sm" class="h-7" onclick={() => onOpenStory(prefs.scopeMsgId.trim())}>Open the story</Button>
+            {/if}
           </div>
         </div>
       {/if}

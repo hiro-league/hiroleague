@@ -113,7 +113,7 @@
 <StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
   <LogsToolbar {prefs} {ctrl} onRequestClearLogs={requestClearLogs} {groupRepeats} onToggleGroupRepeats={() => (groupRepeats = !groupRepeats)}>
     {#snippet filters()}
-      <LogsFiltersPanel {prefs} {ctrl} />
+      <LogsFiltersPanel {prefs} {ctrl} {onOpenStory} />
     {/snippet}
   </LogsToolbar>
 </StickyBar>
