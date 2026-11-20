@@ -105,4 +105,9 @@ COPY --from=ui-check /ui-checked /ui-checked
 #    APP and APP_PORT come from the app's app.env (compose.yaml's env_file); exec, so uvicorn gets the stop signal.
 FROM backend
 COPY --from=ui /ui/build /app/static
+# The commit this image is built from (deploy.sh passes it): `hiro-work deploy` reads it from the running container to
+# know what runs, so a deploy whose build failed leaves the older commit there and the next deploy tries again. Last,
+# so a new commit changes no cached layer.
+ARG REVISION=unknown
+LABEL org.opencontainers.image.revision=$REVISION
 CMD ["sh", "-c", "exec uvicorn \"$APP.main:app\" --host 127.0.0.1 --port \"$APP_PORT\""]

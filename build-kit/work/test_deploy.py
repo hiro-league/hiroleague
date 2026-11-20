@@ -107,6 +107,93 @@ def test_a_new_apps_empty_github_repo_lacks_every_commit(tmp_path, monkeypatch):
     assert tr.read_facts("evalhiro", {"evalhiro": "none"}).error.startswith("GitHub couldn't be read")
 
 
+def app_repo(tmp_path, monkeypatch, commits=("first", "second")):
+    """env0's homehiro with these commits, GitHub (origin) at its main; returns each commit, oldest first."""
+    repo, origin = tmp_path / "env0" / "homehiro", tmp_path / "origin.git"
+    repo.mkdir(parents=True)
+    hw.git(tmp_path, "init", "-q", "--bare", "-b", "main", str(origin))
+    hw.git(repo, "init", "-q", "-b", "main")
+    shas = []
+    for m in commits:
+        hw.git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", m)
+        shas.append(hw.git(repo, "rev-parse", "HEAD"))
+    hw.git(repo, "remote", "add", "origin", str(origin))
+    hw.git(repo, "push", "-q", "origin", "main")
+    monkeypatch.setattr(hw, "repo_dir", lambda env, r: tmp_path / f"env{env}" / r)
+    return shas
+
+
+def test_what_runs_is_read_from_the_core_release_and_the_app_label():
+    assert tr.runs_commit(tr.CORE, "/opt/hiroleague/releases/20261120T001038Z-ffe948187f") == "ffe948187f"
+    assert tr.runs_commit(tr.CORE, "none") is None
+    assert tr.runs_commit(tr.APP, "0f519ae3c0ffee") == "0f519ae3c0ffee"
+    assert tr.runs_commit(tr.APP, "<no value>") is None  # an image from before the label
+    assert tr.runs_commit(tr.APP, "unknown") is None     # built without deploy.sh's commit
+    assert tr.runs_commit(tr.APP, "none") is None        # no container
+
+
+def test_a_failed_build_leaves_the_app_not_live_and_the_next_deploy_runs_its_hook_again(tmp_path, monkeypatch):
+    old, new = app_repo(tmp_path, monkeypatch)
+    # The push moved Simone's repo to the new commit, but the build failed: the container runs the old image
+    f = tr.read_facts("homehiro", {"homehiro": new, "homehiro-runs": old[:10]})
+    assert (f.server, f.live, f.live_unknown) == (new, old, "")
+    assert [c.split(" ", 1)[1] for c in f.live_lacks] == ["second"]
+    plan = tr.make_plan([f])
+    assert plan.then == ["homehiro"] and plan.again == ["homehiro"] and not plan.stops
+
+
+def test_a_new_commit_after_a_failed_build_is_pushed_and_carries_the_failed_one(tmp_path, monkeypatch):
+    old, failed, new = app_repo(tmp_path, monkeypatch, ("first", "second", "third"))
+    f = tr.read_facts("homehiro", {"homehiro": failed, "homehiro-runs": old})
+    assert [c.split(" ", 1)[1] for c in f.live_lacks] == ["third", "second"]
+    plan = tr.make_plan([f])
+    assert plan.then == ["homehiro"] and plan.again == []  # the push runs the hook itself
+
+
+def test_an_app_that_runs_its_latest_is_up_to_date(tmp_path, monkeypatch):
+    _, new = app_repo(tmp_path, monkeypatch)
+    f = tr.read_facts("homehiro", {"homehiro": new, "homehiro-runs": new})
+    assert not f.live_lacks and tr.make_plan([f]).empty
+
+
+@pytest.mark.parametrize("runs, words", [("<no value>", "doesn't say its commit"), ("none", "nothing runs it")])
+def test_an_app_whose_container_doesnt_say_what_it_runs_is_deployed_again(tmp_path, monkeypatch, runs, words):
+    _, new = app_repo(tmp_path, monkeypatch)
+    f = tr.read_facts("homehiro", {"homehiro": new, "homehiro-runs": runs})
+    assert f.live is None and words in f.live_unknown and not f.live_lacks
+    plan = tr.make_plan([f])
+    assert plan.again == ["homehiro"] and not plan.stops
+
+
+def test_running_a_commit_this_pc_lacks_stops_the_deploy(tmp_path, monkeypatch):
+    _, new = app_repo(tmp_path, monkeypatch)
+    f = tr.read_facts("homehiro", {"homehiro": new, "homehiro-runs": "abcdef1234"})
+    assert f.live_ahead and list(tr.make_plan([f]).stops) == ["homehiro"]
+
+
+def test_deploying_again_runs_the_hook_on_simone_and_a_failed_hook_is_a_failed_deploy(tmp_path, monkeypatch):
+    monkeypatch.setattr(hw, "LOGS", tmp_path)
+    monkeypatch.setattr(hw, "EVENTS", tmp_path / "events.jsonl")
+    monkeypatch.setattr(tr, "bare_name", lambda repo: repo)
+    monkeypatch.setattr(tr, "verify", lambda *a: None)
+    ran = []
+
+    def stream(out, args, cwd, repo, log, on_line=None):
+        ran.append(args)
+        return (1, "homehiro: not deployed: the build failed") if len(ran) == 1 else (0, "homehiro: deployed")
+
+    monkeypatch.setattr(tr, "stream", stream)
+    f = tr.Facts(repo="homehiro", head="b" * 40, server="b" * 40, live="a" * 40)
+    r = tr.Result("homehiro")
+    tr.deploy(tr.Out(None), "deploy-test", f, r, again=True)
+    assert ran[0][:2] == ["ssh", "-o"] and ran[0][-1] == tr.again_script(f)
+    assert 'cd "$HOME/homehiro.git"' in ran[0][-1] and "| hooks/post-receive" in ran[0][-1]
+    assert r.deployed is False and "didn't finish" in r.failed  # not "git refused the push"
+    r = tr.Result("homehiro")
+    tr.deploy(tr.Out(None), "deploy-test", f, r, again=True)
+    assert r.deployed is True and not r.failed
+
+
 def test_a_deploys_task_is_named_by_its_time():
     assert tr.task_id(datetime(2026, 11, 16, 14, 5, 9)) == "deploy-20261116-140509"
 
@@ -188,3 +275,13 @@ def test_stop_waits_out_a_push_unless_forced_and_closes_the_deploy(deploy_files,
     assert not killed and not ends("deploy-run")
     tr.cmd_stop(force=True)
     assert killed and ends("deploy-run")[0]["ok"] is False and not tr.LOCK.exists()
+
+
+def test_a_deploy_with_nothing_to_ship_says_so_and_ends_well(deploy_files, monkeypatch):
+    monkeypatch.setattr(tr, "task_id", lambda now: "deploy-empty")
+    monkeypatch.setattr(tr, "make_plan", lambda facts: tr.Plan(push=[], first=[], then=[], stops={}))
+    run_here()
+    assert ends("deploy-empty")[0]["ok"] is True
+    assert "Nothing to ship" in (deploy_files / "deploy" / "deploy-empty.log").read_text(encoding="utf-8")
+    # No step of any repo: CodeHiro's Deployments reads that as "Nothing to ship"
+    assert not [e for e in tr.events_of("deploy-empty") if e.get("repo")]

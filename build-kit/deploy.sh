@@ -72,8 +72,11 @@ not_deployed() {
 # Docker checks the registries on every build, and the server's internet has brief TLS timeouts:
 # retry the build rather than fail the deploy. No provenance record in the image: it only slows the export.
 export BUILDX_NO_DEFAULT_ATTESTATIONS=1
+# The image says which commit it is built from (the Dockerfile's last label): what the post-receive hook checked out
+# here, the main of this folder's bare repo (~/<app>.git). `hiro-work deploy` reads it from the running container.
+REVISION=$(git --git-dir="$HOME/$(basename "$PWD").git" rev-parse -q --verify refs/heads/main || echo unknown)
 for attempt in 1 2 3 4; do
-  docker compose build && break
+  docker compose build --build-arg REVISION="$REVISION" && break
   [ "$attempt" = 4 ] && not_deployed "the build failed"
   echo "$APP: build failed (attempt $attempt), retrying in 10 s"; sleep 10
 done

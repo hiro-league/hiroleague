@@ -5,14 +5,18 @@ One run, started when Michel says, ships everything committed since the last one
     hiro-work deploy [repo ...] [--dry-run]
     hiro-work deploy --stop [--force]
 
-1. The plan: for each repo, what GitHub lacks (origin's branch..dev/main) and what live lacks (the server's
-   commit..dev/main; aicam: ~/aicam's commit on Simone), shown before anything moves. A repo whose GitHub or server
-   has commits this PC lacks stops the whole deploy here: nothing is ever forced.
+1. The plan: for each repo, what GitHub lacks (origin's branch..dev/main) and what live lacks (what runs..dev/main),
+   shown before anything moves. What runs is read where it runs, not from the server's bare repo, which a push moves
+   even when the deploy behind it fails: an app's running container says the commit its image is built from (the
+   label deploy.sh gives it), the core's current release folder names its commit, aicam is ~/aicam's commit and
+   hiro-docs is its bare repo (its push is its deploy). A repo whose GitHub or server has commits this PC lacks stops
+   the whole deploy here: nothing is ever forced.
 2. No question: the go is Michel's word in the session that starts it (building-and-releasing.md).
 3. Push: every repo with new commits to GitHub, side by side (a plain push, which git refuses unless it fast-forwards).
 4. Deploy: the core first when live lacks something (its own hook: `git push server dev:main`), then the apps and aicam
    side by side (`git push server main`; aicam: then `git -C ~/aicam pull --ff-only` on Simone, and which service may
-   need a restart: the deploy never restarts one). Each deploy's own safety (database copies, migration trials, going
+   need a restart: the deploy never restarts one). A repo whose bare repo already has the commit but doesn't run it
+   (its last deploy failed) is deployed again by running its post-receive hook on Simone, as the push would have. Each deploy's own safety (database copies, migration trials, going
    back by itself) is the hook's, untouched here. A failed core deploy stops the apps.
 5. Verify each (it answers; no new errors in its log since its deploy started), then one report.
 
@@ -56,6 +60,12 @@ DEPLOY = {"hiroleague": CORE, **{a.repo: APP for a in appfile.APPS}, "aicam": AI
 NO_HOOK = (AICAM, DOCS)
 # Where each deploy is checked on Simone (127.0.0.1 there): the core's /status, each app's /api/health
 CORE_HEALTH = "http://127.0.0.1:18080/status"
+# What runs: the core's release folder (<time>-<commit>, deploy/deploy.sh) behind this link; each app's container (named
+# as its repo, compose.yaml) runs an image labelled with its commit (the build kit's and Code reports' Dockerfile)
+CORE_CURRENT = "/opt/hiroleague/current"
+REVISION_LABEL = "org.opencontainers.image.revision"
+# Kinds whose deploy is a hook that builds and starts something, so what runs can lag the bare repo
+BUILT = (CORE, APP)
 APP_PORT = {a.repo: a.live_port for a in appfile.APPS}  # apps.toml
 SERVER = "simone"
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", SERVER]
@@ -86,7 +96,10 @@ class Facts:
     repo: str
     head: str                                   # env0's dev/main
     github: str | None = None                   # origin's same branch (None: not there yet)
-    live: str | None = None                     # what runs (None: no server for this repo, or nothing deployed yet)
+    live: str | None = None                     # what runs (None: no server for this repo, nothing deployed yet, or
+                                                # it can't be told: live_unknown)
+    server: str | None = None                   # the server's bare repo's main: what was last pushed there
+    live_unknown: str = ""                      # why what runs can't be told (deployed again, to be sure)
     github_lacks: list[str] = field(default_factory=list)   # "sha subject" lines, newest first
     live_lacks: list[str] = field(default_factory=list)
     github_ahead: bool = False                  # GitHub has commits dev/main lacks
@@ -117,6 +130,9 @@ class Plan:
     first: list[str]                 # deployed alone, first (the core)
     then: list[str]                  # deployed side by side after it (apps, aicam)
     stops: dict[str, list[str]]      # repo -> why the deploy can't go
+    # Deployed again: the bare repo has the commit already (a push would carry nothing and run no hook), but it
+    # doesn't run it
+    again: list[str] = field(default_factory=list)
 
     @property
     def deploys(self) -> list[str]:
@@ -142,9 +158,21 @@ def make_plan(facts: list[Facts]) -> Plan:
     then the other deploys side by side."""
     stops = {f.repo: p for f in facts if (p := problems(f))}
     push = [f.repo for f in facts if f.github_lacks]
-    live = [f.repo for f in facts if f.live_lacks and f.repo in DEPLOY]
+    moves = [f for f in facts if (f.live_lacks or f.live_unknown) and f.repo in DEPLOY]
+    live = [f.repo for f in moves]
+    again = [f.repo for f in moves if DEPLOY[f.repo] in BUILT and f.server == f.head]
     return Plan(push=push, first=[r for r in live if DEPLOY[r] == CORE],
-                then=[r for r in live if DEPLOY[r] != CORE], stops=stops)
+                then=[r for r in live if DEPLOY[r] != CORE], stops=stops, again=again)
+
+
+def runs_commit(kind: str, raw: str) -> str | None:
+    """The commit (maybe abbreviated) in what Simone says runs: the core's current release folder
+    (/opt/hiroleague/releases/<time>-<commit>), an app's container label. None when it names none."""
+    raw = raw.strip()
+    if kind == CORE:
+        m = re.search(r"-([0-9a-f]{7,40})/?$", raw)
+        return m.group(1) if m else None
+    return raw if re.fullmatch(r"[0-9a-f]{7,40}", raw) else None
 
 
 def deployed(repo: str, output: str) -> bool:
@@ -231,13 +259,19 @@ def bare_name(repo: str) -> str | None:
 
 
 def read_server(repos: list[str]) -> dict[str, str]:
-    """One ssh call: each bare repo's main, and ~/aicam's commit and uncommitted files."""
+    """One ssh call: each bare repo's main, what runs ("<repo>-runs": the core's current release, each app's container
+    label; "none" when there is none), and ~/aicam's commit and uncommitted files."""
     lines = []
     for repo in repos:
         name = bare_name(repo) if repo in DEPLOY else None
         if name:
             lines.append(f'echo "{repo} $(git --git-dir="$HOME/{name}.git" rev-parse -q --verify refs/heads/main '
                          '|| echo none)"')
+        if name and DEPLOY[repo] == CORE:
+            lines.append(f'echo "{repo}-runs $(readlink {CORE_CURRENT} || echo none)"')
+        elif name and DEPLOY[repo] == APP:
+            lines.append(f'echo "{repo}-runs $(docker inspect -f \'{{{{index .Config.Labels "{REVISION_LABEL}"}}}}\' '
+                         f'{repo} 2>/dev/null || echo none)"')
     if "aicam" in repos:
         lines += ['echo "aicam-live $(git -C "$HOME/aicam" rev-parse HEAD)"',
                   'echo "aicam-dirty $(git -C "$HOME/aicam" status --porcelain | wc -l)"']
@@ -288,12 +322,28 @@ def read_facts(repo: str, server: dict[str, str]) -> Facts:
     if repo not in DEPLOY:
         return f
     bare = server.get(repo, "none").strip()
-    if repo == "aicam":
+    f.server = None if bare == "none" else bare
+    kind = DEPLOY[repo]
+    if kind == AICAM:
         f.live = server.get("aicam-live", "").strip() or None
         f.live_dirty = int(server.get("aicam-dirty", "0").strip() or 0)
-        f.server_ahead = bare != "none" and not (has(d, bare) and ancestor(d, bare, head))
-    else:
-        f.live = None if bare == "none" else bare
+    elif kind == DOCS:
+        f.live = f.server  # its push is its deploy
+    if kind != DOCS:
+        f.server_ahead = bool(f.server) and not (has(d, f.server) and ancestor(d, f.server, head))
+    if kind in BUILT:
+        raw = server.get(f"{repo}-runs", "none").strip()
+        short = runs_commit(kind, raw)
+        if short:
+            # The PC knows every commit that ever ran (the deploy pushes from here); one it doesn't know is left to
+            # the check below, which stops the deploy
+            f.live = hw.git(d, "rev-parse", "-q", "--verify", f"{short}^{{commit}}", check=False) or short
+        elif f.server:  # pushed before, yet nothing says what runs: deploy it again to be sure
+            f.live_unknown = ("its container doesn't say its commit (its image is older than the label)"
+                              if kind == APP and raw != "none" else "nothing runs it" if raw == "none"
+                              else f"what runs doesn't name a commit ({raw[:60]})")
+    if f.live_unknown:
+        return f
     if f.live and not (has(d, f.live) and ancestor(d, f.live, head)):
         f.live_ahead = True
     elif not f.live_ahead:
@@ -312,10 +362,18 @@ def gather(repos: list[str]) -> list[Facts]:
 
 def show(out: Out, facts: list[Facts], plan: Plan) -> None:
     for f in facts:
-        where = "GitHub only" if f.repo not in DEPLOY else ("live: " + (f.live[:8] if f.live else "nothing yet"))
+        where = "GitHub only" if f.repo not in DEPLOY else ("live: " + (
+            f.live[:8] if f.live else "unknown" if f.live_unknown else "nothing yet"))
+        if f.repo in DEPLOY and DEPLOY[f.repo] in BUILT and f.server and f.server != f.live:
+            where += f"; Simone's repo: {f.server[:8]}"
         out(f"{f.repo}  ({hw.main_of(f.repo)} {f.head[:8]}; {where})")
         for why in plan.stops.get(f.repo, []):
             out(f"  x {why}")
+        if f.live_unknown:
+            out(f"  ! {f.live_unknown}: deployed again")
+        elif f.repo in plan.again:
+            out(f"  ! its last deploy didn't go live (Simone's repo has {f.server[:8]}, it runs "
+                f"{f.live[:8] if f.live else 'nothing'}): deployed again")
         if f.github_lacks:
             out(f"  GitHub lacks {len(f.github_lacks)}:")
             out("\n".join(f"    {c}" for c in f.github_lacks[:15]))
@@ -324,15 +382,18 @@ def show(out: Out, facts: list[Facts], plan: Plan) -> None:
             out("\n".join(f"    {c}" for c in f.live_lacks[:15]))
         if len(f.live_lacks) > 15 or len(f.github_lacks) > 15:
             out("    ...")
-        if not (f.github_lacks or f.live_lacks or plan.stops.get(f.repo)):
+        if not (f.github_lacks or f.live_lacks or f.live_unknown or plan.stops.get(f.repo)):
             out("  up to date")
         for line in copy_list_changes(f):
             out(line)
     out("")
     out("Plan:")
     out("  1. push to GitHub, side by side: " + (", ".join(plan.push) or "nothing"))
-    out("  2. deploy first: " + (", ".join(plan.first) or "(the core has nothing new)"))
-    out("  3. then deploy side by side: " + (", ".join(plan.then) or "nothing"))
+    def named(repos: list[str]) -> str:
+        return ", ".join(r + (" (again)" if r in plan.again else "") for r in repos)
+
+    out("  2. deploy first: " + (named(plan.first) or "(the core has nothing new)"))
+    out("  3. then deploy side by side: " + (named(plan.then) or "nothing"))
     out("  4. verify each deploy, then one report")
     left = [r for r in hw.KIT_READERS if r not in plan.deploys]
     kit = core_kit_changes(facts) if left else 0
@@ -431,8 +492,16 @@ def push_github(out: Out, task: str, f: Facts, r: Result) -> None:
     hw.record_commits(task, 0, f.repo, f.github, f.head, "push")
 
 
-def deploy(out: Out, task: str, f: Facts, r: Result) -> None:
-    """The repo's own deploy (its hook on Simone), then the checks that it went live."""
+def again_script(f: Facts) -> str:
+    """Runs the repo's post-receive hook on Simone as a push of its main would, for a commit the bare repo already
+    has (a push would carry nothing, so git would run no hook): it checks the commit out and runs the deploy."""
+    return (f'cd "$HOME/{bare_name(f.repo)}.git" && '
+            f"printf '%s %s refs/heads/main\\n' {f.server} {f.server} | hooks/post-receive")
+
+
+def deploy(out: Out, task: str, f: Facts, r: Result, again: bool = False) -> None:
+    """The repo's own deploy (its hook on Simone, run by the push, or by hand when the push would carry nothing),
+    then the checks that it went live."""
     d, main = hw.repo_dir(0, f.repo), hw.main_of(f.repo)
     since = int(time.time()) - 5  # Simone's log lines from here on are this deploy's (clocks within seconds)
     log = hw.LOGS / "deploy" / f"{task}-{f.repo}-deploy.log"
@@ -443,12 +512,14 @@ def deploy(out: Out, task: str, f: Facts, r: Result) -> None:
         with timed(out, task, "deploy", f.repo, log):
             went = False
             try:
-                code, text = stream(out, ["git", "-C", str(d), "push", "server", f"{main}:main"], None, f.repo, log,
-                                    stages.line)
+                if again:
+                    out(f"{f.repo} | Simone's repo has {f.server[:8]} already: running its hook again")
+                cmd = [*SSH, again_script(f)] if again else ["git", "-C", str(d), "push", "server", f"{main}:main"]
+                code, text = stream(out, cmd, None, f.repo, log, stages.line)
                 went = code == 0 and (DEPLOY[f.repo] in NO_HOOK or deployed(f.repo, text))
             finally:
                 stages.close(went)
-            if code != 0:
+            if code != 0 and not again:
                 raise hw.Stop(f"git refused the push to Simone (never forced): {text[-300:]}")
             if DEPLOY[f.repo] == AICAM:
                 code, text = stream(out, [*SSH, "git -C ~/aicam pull --ff-only"], None, f.repo, log)
@@ -459,7 +530,9 @@ def deploy(out: Out, task: str, f: Facts, r: Result) -> None:
             elif DEPLOY[f.repo] != DOCS and not deployed(f.repo, text):
                 raise hw.Stop(f"its deploy didn't finish (log: {log}); its own way back ran if it got that far")
         r.deployed = True
-        hw.record_commits(task, 0, f.repo, f.live, f.head, "deploy")  # what went live: CodeHiro names its tasks
+        # What went live, from what ran before (CodeHiro names its tasks); when that couldn't be told, from what was
+        # pushed before
+        hw.record_commits(task, 0, f.repo, f.live or (f.server if f.live_unknown else None), f.head, "deploy")
     except hw.Stop as e:
         r.deployed, r.failed = False, str(e)
     with contextlib.suppress(hw.Stop):
@@ -518,13 +591,13 @@ def run_deploy(out: Out, task: str, facts: list[Facts], plan: Plan) -> list[Resu
         if failed:
             raise hw.Stop("GitHub refused " + ", ".join(failed) + ": nothing is deployed (GitHub is never behind live)")
     for repo in plan.first:
-        deploy(out, task, by[repo], results[repo])
+        deploy(out, task, by[repo], results[repo], repo in plan.again)
         if not results[repo].deployed:
             out(f"x {repo} didn't deploy: the apps stay as they are")
             return list(results.values())
     if plan.then:
         with ThreadPoolExecutor(max_workers=len(plan.then)) as pool:
-            list(pool.map(lambda repo: deploy(out, task, by[repo], results[repo]), plan.then))
+            list(pool.map(lambda repo: deploy(out, task, by[repo], results[repo], repo in plan.again), plan.then))
     return list(results.values())
 
 
@@ -768,7 +841,7 @@ def cmd_deploy(a) -> None:
                 if plan.stops:
                     raise hw.Stop("nothing moved: " + "; ".join(f"{r}: {', '.join(w)}" for r, w in plan.stops.items()))
                 if plan.empty:
-                    out("\nNothing to ship: GitHub and live have everything.")
+                    out("\nNothing to ship: GitHub has every commit, and each repo runs its latest.")
                     ok = True
                     return
                 out("")
