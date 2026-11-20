@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from hiro_commons.log import Logger
-from hiro_commons.logging_foundation import daily
+from hiro_commons.logging_foundation import daily, story
 from hiro_commons.logging_foundation.line import Line, parse
 
 from .base import Tool, ToolParam
@@ -380,6 +380,10 @@ def _row(line: Line, label: str) -> dict[str, Any]:
         "scope_traffic_class": scope.get("traffic_class", ""),
         "scope_traffic_subclass": scope.get("traffic_subclass", ""),
         "has_msg_id": bool(scope.get("msg_id")),
+        # The story the line belongs to and its step (W3C TraceId, SpanId), when it was logged inside one: a chat
+        # message's story id comes from the message's id, and its graph run carries the same id.
+        "story_id": line.trace_id or "",
+        "step_id": line.span_id or "",
     }
 
 
@@ -628,7 +632,10 @@ def _apply_scope_filter(
     if device_id:
         result = [r for r in result if r.get("scope_device_id") == device_id]
     if msg_id:
-        result = [r for r in result if r.get("scope_msg_id") == msg_id]
+        # The message's lines, and every line of its story: its timed steps, its AI calls, its run (the story's id
+        # comes from the message's own id)
+        story_id = story.id_for(msg_id)
+        result = [r for r in result if r.get("scope_msg_id") == msg_id or r.get("story_id") == story_id]
     if method:
         result = [r for r in result if r.get("scope_method") == method]
     if tcl_set:
@@ -695,7 +702,8 @@ class LogSearchTool(Tool):
         ),
         "msg_id": ToolParam(
             str,
-            "Exact-match filter on the msg_id scope field (routing.id of a user message)",
+            "Exact-match filter on the msg_id scope field (routing.id of a user message), with every line of that "
+            "message's story (its timed steps and AI calls)",
             required=False,
         ),
         "method": ToolParam(

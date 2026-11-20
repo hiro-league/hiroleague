@@ -938,6 +938,7 @@ source = { editable = "hiro-commons" }
 dependencies = [
     { name = "colorama" },
     { name = "cryptography" },
+    { name = "opentelemetry-api" },
     { name = "structlog" },
 ]
 
@@ -945,6 +946,7 @@ dependencies = [
 requires-dist = [
     { name = "colorama", specifier = ">=0.4.6" },
     { name = "cryptography", specifier = ">=43" },
+    { name = "opentelemetry-api", specifier = ">=1.45.2" },
     { name = "structlog", specifier = ">=25" },
 ]
 

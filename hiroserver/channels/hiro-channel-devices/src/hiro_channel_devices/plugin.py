@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -19,7 +20,7 @@ from hiro_commons.signing import sign_nonce
 from websockets.exceptions import ConnectionClosed
 from hiro_commons.log import Logger, log_scope
 
-from hiro_channel_sdk import ChannelInfo, ChannelPlugin, UnifiedMessage, unified_message_log_scope
+from hiro_channel_sdk import ChannelInfo, ChannelPlugin, UnifiedMessage, message_story, unified_message_log_scope
 from hiro_channel_sdk.constants import (
     AUTH_ROLE_DESKTOP,
     MESSAGE_TYPE_STREAM,
@@ -104,13 +105,11 @@ class DevicesChannel(ChannelPlugin):
         if self._gateway_ws is None:
             log.warning("⚠️ Gateway not connected — dropping outbound message")
             return
-        out: dict = {
-            "payload": message.model_dump(mode="json"),
-        }
-        if message.routing.recipient_id:
-            out["target_device_id"] = message.routing.recipient_id
         _sd, _smid, _smeth, _stpv, _stcl, _stsub = unified_message_log_scope(message, direction="outbound")
-        with log_scope(
+        is_stream = message.message_type == MESSAGE_TYPE_STREAM
+        # Forwarding is a timed step of the message's story; the frame carries it on to the gateway.
+        with message_story.hop("devices.send", message.routing.metadata, _smid, area="DEVICES",
+                               level=logging.DEBUG if is_stream else logging.INFO), log_scope(
             device_id=_sd,
             msg_id=_smid,
             method=_smeth,
@@ -118,17 +117,18 @@ class DevicesChannel(ChannelPlugin):
             traffic_class=_stcl,
             traffic_subclass=_stsub,
         ):
+            out: dict = {
+                "payload": message.model_dump(mode="json"),
+            }
+            if message.routing.recipient_id:
+                out["target_device_id"] = message.routing.recipient_id
             # Stream frames are per-chunk noise; demote to fineinfo (same as OutboundPipeline).
-            _fwd_log = (
-                log.fineinfo
-                if message.message_type == MESSAGE_TYPE_STREAM
-                else log.info
-            )
+            _fwd_log = log.fineinfo if is_stream else log.info
             _fwd_log(
                 "📤 Forwarding message to gateway",
                 items=len(message.content),
             )
-        await self._gateway_ws.send(json.dumps(out))
+            await self._gateway_ws.send(json.dumps(out))
 
     async def _run_gateway_loop(self) -> None:
         backoff = BACKOFF_BASE
@@ -264,7 +264,10 @@ class DevicesChannel(ChannelPlugin):
         # Scope matches server inbound rules (message / event.ref_id / RPC method only —
         # not routing.id for unrelated shapes).
         _sd, _smid, _smeth, _stpv, _stcl, _stsub = unified_message_log_scope(unified, direction="inbound")
-        with log_scope(
+        if unified.routing.metadata is None:
+            unified.routing.metadata = {}
+        # Receiving is a timed step of the message's story; the message carries it on to the server.
+        with message_story.hop("devices.receive", unified.routing.metadata, _smid, area="DEVICES"), log_scope(
             device_id=_sd,
             msg_id=_smid,
             method=_smeth,

@@ -46,6 +46,9 @@ GRAPH_LEDGER_COLUMNS = [
     "row_kind",
     "input_preview",
     "output_preview",
+    # The story the row belongs to (W3C TraceId, 32 hex digits): the id every log line of that story carries, and
+    # LLM requests' column of the same name. Last, so an older file's header grows by one column, its rows kept.
+    "story_id",
 ]
 
 LEDGER_LOGGER_PREFIX = "AGENT.GRAPH.LEDGER"

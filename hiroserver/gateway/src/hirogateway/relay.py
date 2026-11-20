@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import secrets
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,6 +32,7 @@ from websockets.asyncio.server import ServerConnection
 from hiro_commons.nonces import generate_nonce
 from hiro_commons.log import Logger, log_scope
 
+from hiro_channel_sdk import message_story
 from hiro_channel_sdk.log_scope_fields import unified_message_log_scope
 from hiro_channel_sdk.models import UnifiedMessage
 from hiro_channel_sdk.constants import (
@@ -241,6 +243,15 @@ def _fallback_message_id_from_envelope(msg: dict[str, object]) -> str | None:
     return msg_id if isinstance(msg_id, str) and msg_id else None
 
 
+def _routing_metadata(payload: object) -> dict[str, Any] | None:
+    """The payload's routing metadata, made when the routing has none (it then carries the story), or None when the
+    payload has no routing at all."""
+    if not isinstance(payload, dict) or not isinstance(payload.get("routing"), dict):
+        return None
+    meta = payload["routing"].setdefault("metadata", {})
+    return meta if isinstance(meta, dict) else None
+
+
 def _relay_log_scope_fields(
     msg: dict[str, object],
     *,
@@ -419,7 +430,10 @@ async def relay_message(sender_id: str, raw: str) -> None:
         target_id=target_id,
     )
 
-    with log_scope(
+    is_stream = isinstance(payload, dict) and payload.get("message_type") == "stream"
+    # The relay is a timed step of the message's story; the frame carries it on to the plugin or the device.
+    with message_story.hop("gateway.relay", _routing_metadata(payload), scope_mid, area="RELAY",
+                           level=logging.DEBUG if is_stream else logging.INFO), log_scope(
         device_id=scope_dev,
         msg_id=scope_mid,
         method=scope_meth,
@@ -431,7 +445,6 @@ async def relay_message(sender_id: str, raw: str) -> None:
         log_extras: dict[str, Any] = {}
         if hint:
             log_extras["content_hint"] = hint
-        is_stream = isinstance(payload, dict) and payload.get("message_type") == "stream"
         # Per file-communication logging spec: stream frames at DEBUG on relay (high volume).
         _recv_log = log.debug if is_stream else log.info
         _recv_log(

@@ -22,6 +22,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
+from hiro_commons.logging_foundation import story
 from PIL import Image
 from sqlmodel import Session, col, delete, select
 
@@ -87,6 +88,7 @@ class Request:
     profile: str | None = None  # the profile being asked (set before each try)
     outcome: str | None = None
     error: str | None = None
+    story_id: str | None = field(default_factory=story.current_id)  # the story that asked (LlmRequest.story_id)
 
 
 _current: ContextVar[Request | None] = ContextVar("llm_request", default=None)
@@ -242,7 +244,7 @@ def _save(session: Session, req: Request) -> None:
         pictures_kept=bool(last.pictures), ms=sum(t.ms for t in req.tries),
         tokens_in=sum(t.tokens_in for t in req.tries), tokens_out=sum(t.tokens_out for t in req.tries),
         cost=None if all(t.cost is None for t in req.tries) else sum(t.cost or 0.0 for t in req.tries),
-        warning=_warning(last, sizes))
+        warning=_warning(last, sizes), story_id=req.story_id)
     session.add(row)
     # Phase 7b: what the requests add up to is counted by the HiroLeague core (Logs → AI usage), not here.
     session.commit()

@@ -83,6 +83,7 @@ class LlmRequestOut(BaseModel):
     tokens_out: int
     cost: float | None
     warning: str | None
+    story_id: str | None  # the story that asked (the logging plan's id): its lines in every app's and the core's logs
 
 
 def _disk() -> int:
@@ -106,7 +107,8 @@ def requests(source: Source | None = None, camera: str | None = Query(None, max_
         like = f"%{q.strip()}%"
         query = query.where(or_(col(LlmRequest.task).ilike(like), col(LlmRequest.camera).ilike(like),
                                 col(LlmRequest.model).ilike(like), col(LlmRequest.prompt).ilike(like),
-                                col(LlmRequest.reply).ilike(like), col(LlmRequest.error).ilike(like)))
+                                col(LlmRequest.reply).ilike(like), col(LlmRequest.error).ilike(like),
+                                col(LlmRequest.story_id) == q.strip().lower()))  # a story's id finds its request
     rows = session.exec(query.limit(LIMIT + 1)).all()
     out = [LlmRequestRow(id=r.id, at=r.at, source=r.source, task=r.task, camera=r.camera, status=r.status, error=r.error,
                          model=r.model, profile=r.profile, pictures=len(r.pictures), pictures_kept=r.pictures_kept,

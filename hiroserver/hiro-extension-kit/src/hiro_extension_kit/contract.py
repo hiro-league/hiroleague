@@ -246,6 +246,25 @@ class AppContract:
         assert r.status_code == 200, r.text
         assert r.json()["owner"] is True
 
+    def test_a_request_carries_its_story_into_the_core(self, monkeypatch):
+        """The logging plan's one id: a page request that brings a W3C traceparent continues that story, its request
+        to the core carries the same id (the SDK's frame), and the answer names it (errors.install puts the kit's
+        stories middleware on the app)."""
+        from fastapi.testclient import TestClient
+
+        from .hiroleague import link
+        from .testing import FakeCore
+
+        core = FakeCore()
+        core.answers["core.info"] = {"name": "HiroLeague", "version": "0.0.0"}
+        monkeypatch.setattr(link, "client", core)
+        story_id = "4bf92f3577b34da6a3ce929d0e0e4736"
+        r = TestClient(self.app).post("/api/hiroleague/test", headers={"traceparent": f"00-{story_id}-00f067aa0ba902b7-01"})
+        assert r.status_code == 200, r.text
+        assert r.headers.get("traceparent", "").split("-")[1:2] == [story_id], "call errors.install(app) in create_app"
+        carried = core.frames[-1].routing.metadata.get("traceparent", "")
+        assert carried.split("-")[1:2] == [story_id], "the request to the core lost the page's story"
+
     # --- the frontend's types ---
 
     def test_no_two_models_share_a_name(self):

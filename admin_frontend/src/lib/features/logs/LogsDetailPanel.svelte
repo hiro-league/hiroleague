@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { base } from '$app/paths';
   import { errorMessage } from '$kit/api/client';
   import { Copy } from '@lucide/svelte';
   import DetailPanel from '$kit/ui/detail-panel.svelte';
@@ -161,6 +162,24 @@
             {/if}
           </p>
         </div>
+        {#if activeRow.story_id}
+          <!-- The story the line belongs to (a chat message's id), its step, and the graph run with the same id -->
+          <div>
+            <span class={sub}>Story</span>
+            <p class="mt-1 font-mono text-xs">{activeRow.story_id}</p>
+            {#if activeRow.step_id}
+              <p class="mt-0.5 font-mono text-xs text-muted-foreground">step {activeRow.step_id}</p>
+            {/if}
+            <Button
+              variant="outline"
+              size="sm"
+              class="mt-1.5"
+              href={`${base}/logs?tab=runs&story=${encodeURIComponent(activeRow.story_id)}`}
+            >
+              Open its graph run
+            </Button>
+          </div>
+        {/if}
         <div>
           <span class={sub}>Timestamp (epoch)</span>
           <p class="mt-1 tabular-nums text-[0.82rem]">{activeRow.timestamp}</p>

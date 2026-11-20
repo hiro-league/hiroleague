@@ -464,3 +464,19 @@ def _rows(tmp_path: Path) -> list[dict[str, str]]:
     assert path.exists()
     with path.open(encoding="utf-8") as fh:
         return list(csv.DictReader(fh))
+
+
+@pytest.mark.asyncio
+async def test_a_row_carries_the_story_it_was_written_in(tmp_path: Path) -> None:
+    from hiro_commons.logging_foundation import story
+
+    graph = _graph(tmp_path)
+    message_id = "6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7"
+    with story.begin("agent.run", story_id=story.id_for(message_id), line=False):
+        await graph.ok_node(_state(message_id))
+    await graph.early_node(_state("in-no-story"))
+
+    by_node = {row["node"]: row for row in _rows(tmp_path)}
+    assert by_node["ok"]["story_id"] == message_id.replace("-", "")  # the log lines' TraceId
+    assert by_node["ok"]["run_id"] == f"chat-{message_id}"
+    assert by_node["early"]["story_id"] == ""

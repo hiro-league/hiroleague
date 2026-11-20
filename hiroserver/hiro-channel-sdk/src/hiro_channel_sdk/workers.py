@@ -14,6 +14,10 @@ and no failure goes unlogged:
 `stop()` cancels them all and waits until they have ended. `restart()` is safe from any thread: a worker remembers
 the event loop it started on.
 
+Each round of `every` is a story of its own (the logging plan's one id per story), and a task a round spawns is
+another: one camera check is one story, from the picture to the core's AI answer. A task spawned inside any other
+story (a page request, the core's request) is a step of that story: it inherits it.
+
 How a failure is logged is the app's (`configure(failed=...)`): HomeHiro logs an expected error as one line and
 anything else with its traceback. Without it, every failure is logged with its traceback.
 """
@@ -25,11 +29,17 @@ import inspect
 import logging
 from collections.abc import Callable, Coroutine
 from contextlib import suppress
+from contextvars import ContextVar
 from typing import Any
+
+from hiro_commons.logging_foundation import story
 
 log = logging.getLogger("hiro.workers")
 
 STOP_TIMEOUT = 5.0  # seconds stop() waits for cancelled tasks to end
+
+# Set while a round of `every` runs: what it spawns starts a story of its own rather than joining the round's.
+_in_round: ContextVar[bool] = ContextVar("hiro_worker_round", default=False)
 
 FailedFn = Callable[[logging.Logger, str, BaseException], None]
 
@@ -139,10 +149,19 @@ class Worker:
 
     def spawn(self, coro: Coroutine[Any, Any, Any], name: str | None = None) -> asyncio.Task:
         """Run `coro` as a task of this worker: kept until it ends, cancelled by stop(), failures logged."""
-        task = asyncio.create_task(coro, name=f"{self.name}-{name}" if name else self.name)
+        task_name = f"{self.name}-{name}" if name else self.name
+        if _in_round.get():
+            coro = self._own_story(coro, f"{self.name}.{name or 'task'}")
+        task = asyncio.create_task(coro, name=task_name)
         self._tasks.add(task)
         task.add_done_callback(self._ended)
         return task
+
+    @staticmethod
+    async def _own_story(coro: Coroutine[Any, Any, Any], step: str) -> Any:
+        _in_round.set(False)  # (this task's own copy of the context)
+        with story.begin(step, area=log.name, level=logging.DEBUG):
+            return await coro
 
     def _ended(self, task: asyncio.Task) -> None:
         self._tasks.discard(task)
@@ -162,13 +181,18 @@ class Worker:
     async def _every(self, seconds: float, fn: Callable[[], Any], name: str, first_after: float) -> None:
         await asyncio.sleep(first_after)
         while True:
+            round_ = _in_round.set(True)
             try:
-                result = fn()
-                if inspect.isawaitable(result):
-                    await result
-            except Exception as exc:
-                self._note(exc)
-                report(f"{self.name}: {name} failed", exc)
+                with story.begin(f"{self.name}.{name}", area=log.name, level=logging.DEBUG):
+                    try:
+                        result = fn()
+                        if inspect.isawaitable(result):
+                            await result
+                    except Exception as exc:
+                        self._note(exc)
+                        report(f"{self.name}: {name} failed", exc)
+            finally:
+                _in_round.reset(round_)
             await asyncio.sleep(seconds)
 
     def wake(self) -> None:

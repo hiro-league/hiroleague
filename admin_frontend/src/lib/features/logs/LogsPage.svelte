@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { afterNavigate } from '$app/navigation';
+  import { page } from '$app/state';
   import { FolderOpen } from '@lucide/svelte';
   import PageHeader from '$kit/ui/page-header.svelte';
   import PageTabs from '$kit/ui/page-tabs.svelte';
@@ -44,6 +45,9 @@
 
   afterNavigate(() => {
     tabPrefs.syncActiveTabFromUrl();
+    // `?tab=runs&story=<id>` (a log line's "Open its graph run"): the run that story's ledger rows name
+    const story = page.url.searchParams.get('story')?.trim();
+    if (tabPrefs.activeTab === 'runs' && story) void runsCtrl.openStory(story);
   });
 </script>
 

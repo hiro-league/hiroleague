@@ -54,6 +54,7 @@ from hiro_channel_sdk.log_scope_fields import (
     TRAFFIC_CLASS_INFRA_TRANSPORT,
     unified_message_log_scope,
 )
+from hiro_channel_sdk import message_story
 from hiro_channel_sdk.models import UnifiedMessage
 
 from ..domain.channel_config import ChannelConfig, list_enabled_channels, load_channel_config
@@ -89,6 +90,14 @@ _FINEINFO_CHANNEL_EVENTS = frozenset({
     "device_connected",
     "device_disconnected",
 })
+
+
+def _story_msg_id(params: dict[str, Any]) -> str | None:
+    """The id of the message whose story an inbound frame belongs to (None for a frame of no message's story)."""
+    try:
+        return unified_message_log_scope(UnifiedMessage.model_validate(params), direction="inbound")[1]
+    except ValueError:  # not a unified message: its "Received" line says so; no story to time
+        return None
 
 
 @dataclass
@@ -403,53 +412,56 @@ class ChannelManager:
                         # Inject resolved device_name so downstream components can log it.
                         routing_meta = params.setdefault("routing", {}).setdefault("metadata", {})
                         routing_meta["device_name"] = device
-                        # Reuse comm log helpers when params are a valid UnifiedMessage (human-first kind + content_hint).
-                        try:
-                            um = UnifiedMessage.model_validate(params)
-                            kind = comm_kind(um)
-                            # Surface per-message voice-reply intent in the log message (not only extras) for text and audio sends.
-                            vr_suffix = ""
-                            vr_extras: dict[str, Any] = {}
-                            if um.message_type == MESSAGE_TYPE_MESSAGE:
-                                vr_on = routing_requests_voice_reply(um.routing.metadata)
-                                vr_suffix = " · voice_reply=yes" if vr_on else " · voice_reply=no"
-                                vr_extras["voice_reply_requested"] = vr_on
-                            sd, smid, smeth, stpv, stcl, stsub = unified_message_log_scope(
-                                um,
-                                direction="inbound",
-                            )
-                            with log_scope(
-                                device_id=sd,
-                                msg_id=smid,
-                                method=smeth,
-                                text_preview=stpv,
-                                traffic_class=stcl,
-                                traffic_subclass=stsub,
-                            ):
-                                log.info(
-                                    f"{LOG_IN} Received — {device} · {kind}{vr_suffix}",
-                                    **comm_extras(
-                                        um,
-                                        channel=channel_name,
-                                        **vr_extras,
-                                    ),
-                                )
-                        except Exception:
-                            mt = params.get("message_type", "?")
-                            log.info(
-                                f"{LOG_IN} Received — {device} · {mt}",
-                                channel=channel_name,
-                            )
-                        if self._on_message:
+                        # The server receiving it is a timed step of the message's story (continued from the plugin's, in the
+                        # metadata); the agent's run and the replies it queues are steps under it.
+                        with message_story.hop("server.receive", routing_meta, _story_msg_id(params), area="CHANNEL_MAN"):
+                            # Reuse comm log helpers when params are a valid UnifiedMessage (human-first kind + content_hint).
                             try:
-                                await self._on_message(params)
-                            except Exception as exc:
-                                log.error(
-                                    f"❌ {LOG_IN} on_message handler error — {device}",
-                                    channel=channel_name,
-                                    error=str(exc),
-                                    exc_info=True,
+                                um = UnifiedMessage.model_validate(params)
+                                kind = comm_kind(um)
+                                # Surface per-message voice-reply intent in the log message (not only extras) for text and audio sends.
+                                vr_suffix = ""
+                                vr_extras: dict[str, Any] = {}
+                                if um.message_type == MESSAGE_TYPE_MESSAGE:
+                                    vr_on = routing_requests_voice_reply(um.routing.metadata)
+                                    vr_suffix = " · voice_reply=yes" if vr_on else " · voice_reply=no"
+                                    vr_extras["voice_reply_requested"] = vr_on
+                                sd, smid, smeth, stpv, stcl, stsub = unified_message_log_scope(
+                                    um,
+                                    direction="inbound",
                                 )
+                                with log_scope(
+                                    device_id=sd,
+                                    msg_id=smid,
+                                    method=smeth,
+                                    text_preview=stpv,
+                                    traffic_class=stcl,
+                                    traffic_subclass=stsub,
+                                ):
+                                    log.info(
+                                        f"{LOG_IN} Received — {device} · {kind}{vr_suffix}",
+                                        **comm_extras(
+                                            um,
+                                            channel=channel_name,
+                                            **vr_extras,
+                                        ),
+                                    )
+                            except Exception:
+                                mt = params.get("message_type", "?")
+                                log.info(
+                                    f"{LOG_IN} Received — {device} · {mt}",
+                                    channel=channel_name,
+                                )
+                            if self._on_message:
+                                try:
+                                    await self._on_message(params)
+                                except Exception as exc:
+                                    log.error(
+                                        f"❌ {LOG_IN} on_message handler error — {device}",
+                                        channel=channel_name,
+                                        error=str(exc),
+                                        exc_info=True,
+                                    )
 
                     case _ if method == METHOD_EVENT:
                         event_name = params.get("event")

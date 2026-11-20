@@ -40,3 +40,6 @@ class LlmRequest(SQLModel, table=True):
     tokens_out: int = 0
     cost: float | None = None  # USD; None on a plan or without a price
     warning: str | None = None
+    # The story that asked (the logging plan's one id): the same id as its lines in the app's log and the core's AI
+    # ask, so the request and its story join. None: asked outside any story.
+    story_id: str | None = Field(default=None, index=True)

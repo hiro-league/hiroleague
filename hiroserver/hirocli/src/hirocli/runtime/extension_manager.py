@@ -70,7 +70,8 @@ from hiro_channel_sdk.extension import (
 from hiro_channel_sdk.models import UnifiedMessage
 from hiro_commons.keys import load_public_key_b64
 from hiro_commons import tasks
-from hiro_commons.log import Logger
+from hiro_commons.log import FINEINFO, Logger
+from hiro_commons.logging_foundation import story
 from hiro_commons.nonces import generate_nonce
 from hiro_commons.signing import verify_signature
 
@@ -448,13 +449,16 @@ class ExtensionManager:
             # Answered in its own task so a slow handler doesn't hold up other frames.
             tasks.keep(self._answer(conn, msg), name=f"extension-request-{msg.request_id}")
         elif msg.message_type == MESSAGE_TYPE_EVENT and msg.event is not None:
-            log.info(f"⬇️ Extension event — {conn.name} · {msg.event.type}", extension_id=conn.extension_id)
-            handler = self._event_handlers.get(msg.event.type)
-            if handler is not None:
-                tasks.keep(
-                    self._run_event_handler(handler, conn, msg.event.type, msg.event.data),
-                    name=f"extension-event-{msg.event.type}",
-                )
+            # An app's event continues its story too; its handler's task inherits it.
+            with story.begin("extension.event", parent=msg.routing.metadata, area="EXTENSIONS", line=False,
+                             extension=conn.name, event=msg.event.type):
+                log.info(f"⬇️ Extension event — {conn.name} · {msg.event.type}", extension_id=conn.extension_id)
+                handler = self._event_handlers.get(msg.event.type)
+                if handler is not None:
+                    tasks.keep(
+                        self._run_event_handler(handler, conn, msg.event.type, msg.event.data),
+                        name=f"extension-event-{msg.event.type}",
+                    )
         else:
             log.warning(
                 f"⚠️ Ignored a message from extension — {conn.name} · {msg.message_type}",
@@ -464,20 +468,25 @@ class ExtensionManager:
     async def _answer(self, conn: _Connection, msg: UnifiedMessage) -> None:
         parsed = parse_request(msg)
         method = parsed[0] if parsed else "<unreadable>"
-        log.info(f"⬇️ Extension request — {conn.name} · {method}", extension_id=conn.extension_id)
-        send = partial(self._send_to, conn)
-        try:
-            response = await self._request_handler.handle(msg, emit_outbound=send, caller=CALLER_EXTENSION)
-            if response is not None:
-                await send(response)
-        except ConnectionClosed:
-            log.info(f"🔌 Couldn't answer extension, connection closed — {conn.name} · {method}")
-        except Exception as exc:
-            log.error(
-                f"❌ Extension request failed — {conn.name} · {method}",
-                error=str(exc),
-                exc_info=True,
-            )
+        # The app's request continues the story its frame carries (a page request, a camera check...): every line the
+        # handler logs here (the AI ask, an ask passed on to another app) carries the app's story id, and a request the
+        # core sends on (extensions.ask) carries it further (build_request).
+        with story.begin("extension.request", parent=msg.routing.metadata, area="EXTENSIONS", level=FINEINFO,
+                         extension=conn.name, method=method):
+            log.info(f"⬇️ Extension request — {conn.name} · {method}", extension_id=conn.extension_id)
+            send = partial(self._send_to, conn)
+            try:
+                response = await self._request_handler.handle(msg, emit_outbound=send, caller=CALLER_EXTENSION)
+                if response is not None:
+                    await send(response)
+            except ConnectionClosed:
+                log.info(f"🔌 Couldn't answer extension, connection closed — {conn.name} · {method}")
+            except Exception as exc:
+                log.error(
+                    f"❌ Extension request failed — {conn.name} · {method}",
+                    error=str(exc),
+                    exc_info=True,
+                )
 
     async def _send_to(self, conn: _Connection, out: UnifiedMessage) -> None:
         await conn.ws.send(out.model_dump_json())

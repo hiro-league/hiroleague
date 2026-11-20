@@ -13,8 +13,8 @@
 - `Attributes`: the line's fields, readable ones first as the code gave them; an exception's `exception.type`,
   `exception.message` and `exception.stacktrace` (OpenTelemetry's names) last.
 - `Resource`: the process that wrote it (`service.name`: `home`, `net`, the core...).
-- `TraceId`, `SpanId`: the story and its step, once a story carries an id (the plan's phases 3 and 4); absent until
-  then.
+- `TraceId`, `SpanId`: the story the line belongs to and its step (W3C Trace Context's ids, 32 and 16 hex digits),
+  when it was logged inside a step (story.py); absent otherwise.
 
 Only the Stable parts of OpenTelemetry are used: its log data model's field names and severity numbers. No
 OpenTelemetry package is needed for that.
@@ -30,13 +30,18 @@ import logging
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 # The attributes every LogRecord has; anything else on a record came from `extra=` and is one of the line's fields.
 _RECORD_KEYS = frozenset(logging.LogRecord("", 0, "", 0, "", (), None).__dict__) | {"message", "asctime", "taskName"}
 ATTRIBUTES = "attributes"  # a record's dict of fields (the structlog bridge puts them here, as `extra={...}` could)
+STORY = "hiro_story"  # a record's own (story id, step id), when it names them itself (a step's end line)
 # Set by the foundation itself, or a copy of the sentence for a colour console (uvicorn's): not fields.
-_OURS = frozenset({ATTRIBUTES, "hiro_line", "hiro_fields", "color_message"})
+_OURS = frozenset({ATTRIBUTES, STORY, "hiro_line", "hiro_fields", "color_message"})
+
+# The story and step now, as (story id, step id), or None: set by story.py when it loads. A process that never uses
+# stories never loads it, and its lines carry no ids.
+current_story: Callable[[], tuple[str, str] | None] | None = None
 
 _SECRET_NAMES = frozenset({"password", "passwd", "token", "secret", "api_key", "apikey", "authorization", "cookie",
                            "access_token", "refresh_token", "session_token", "private_key"})
@@ -118,6 +123,9 @@ def build(record: logging.LogRecord, service: str) -> dict[str, Any]:
         "Body": body_of(record),
         "InstrumentationScope": record.name,
     }
+    ids = getattr(record, STORY, None) or (current_story() if current_story is not None else None)
+    if ids:
+        line["TraceId"], line["SpanId"] = ids
     if attributes:
         line["Attributes"] = attributes
     line["Resource"] = {"service.name": service}

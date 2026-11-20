@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import logging
 import os
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -41,6 +42,7 @@ from websockets.exceptions import ConnectionClosed, InvalidURI
 
 from hiro_commons.keys import generate_private_key, load_private_key_pem, private_key_to_pem, public_key_to_b64
 from hiro_commons.log import Logger
+from hiro_commons.logging_foundation import story
 from hiro_commons.signing import sign_nonce
 
 from .constants import (
@@ -56,6 +58,7 @@ from .constants import (
     EXTENSION_FRAME_WELCOME,
     EXTENSION_MAX_MESSAGE_BYTES,
     EXTENSION_REQUEST_TIMEOUT_SECONDS,
+    ASKED_BY,
     MESSAGE_TYPE_EVENT,
     MESSAGE_TYPE_REQUEST,
     MESSAGE_TYPE_RESPONSE,
@@ -67,7 +70,8 @@ from .constants import (
 from .models import ContentItem, EventPayload, MessageRouting, UnifiedMessage
 from .access import ExtensionFeature
 
-log = Logger.get("EXTENSION")
+EXTENSION_AREA = "EXTENSION"
+log = Logger.get(EXTENSION_AREA)
 
 # Client status values (``ExtensionClient.status``).
 STATUS_NO_ADDRESS = "no_address"      # no core address set yet
@@ -177,7 +181,9 @@ def build_request(
     direction: str,
     recipient_id: str | None = None,
 ) -> UnifiedMessage:
-    """A request in the device language: JSON body ``{"method", "params"}``."""
+    """A request in the device language: JSON body ``{"method", "params"}``. It carries the current story (its
+    W3C ``traceparent``, in ``routing.metadata``) so the other side continues it: the logging plan's one id across the
+    apps, from a page request through an app to the core and on to another app."""
     return UnifiedMessage(
         message_type=MESSAGE_TYPE_REQUEST,
         request_id=uuid4().hex,
@@ -186,6 +192,7 @@ def build_request(
             direction=direction,
             sender_id=sender_id,
             recipient_id=recipient_id,
+            metadata=dict(story.inject({})),
         ),
         content=[
             ContentItem(
@@ -230,7 +237,7 @@ def build_event(
     direction: str,
     recipient_id: str | None = None,
 ) -> UnifiedMessage:
-    """A fire-and-forget event."""
+    """A fire-and-forget event, carrying the current story as a request does."""
     return UnifiedMessage(
         message_type=MESSAGE_TYPE_EVENT,
         routing=MessageRouting(
@@ -238,6 +245,7 @@ def build_event(
             direction=direction,
             sender_id=sender_id,
             recipient_id=recipient_id,
+            metadata=dict(story.inject({})),
         ),
         event=EventPayload(type=event_type, data=data or {}),
     )
@@ -691,7 +699,9 @@ class ExtensionClient:
         elif msg.message_type == MESSAGE_TYPE_EVENT and msg.event is not None:
             handler = self._event_handlers.get(msg.event.type)
             if handler is not None:
-                self._spawn(self._run_event_handler(handler, msg.event.type, msg.event.data))
+                with story.begin("extension.event", parent=msg.routing.metadata, area=EXTENSION_AREA, line=False,
+                                 event=msg.event.type):  # the handler's task inherits the event's story
+                    self._spawn(self._run_event_handler(handler, msg.event.type, msg.event.data))
         else:
             log.warning("⚠️ Ignored a message from the core", message_type=msg.message_type)
 
@@ -704,7 +714,12 @@ class ExtensionClient:
             )
         else:
             method, params = parsed
-            reply = await self._call_handler(msg, method, params, sender)
+            # The core's request continues the story it carries (another app's ask, the core's own): its lines here
+            # carry the same id. An ask from another app is a step worth a line; the core's own requests are routine.
+            level = logging.INFO if ASKED_BY in params else logging.DEBUG
+            with story.begin("extension.answer", parent=msg.routing.metadata, area=EXTENSION_AREA, level=level,
+                             method=method):
+                reply = await self._call_handler(msg, method, params, sender)
         try:
             await ws.send(reply.model_dump_json())
         except ConnectionClosed:

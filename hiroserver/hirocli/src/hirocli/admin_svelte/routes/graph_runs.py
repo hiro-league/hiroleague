@@ -67,6 +67,18 @@ async def tail_graph_runs(
         }
 
 
+@graph_runs_router.get("/graph-runs/by-story/{story_id}")
+async def get_graph_runs_by_story(
+    story_id: str,
+    workspace_id: SelectedWorkspaceIdDep,
+) -> Any:
+    """The graph runs of a story, by the story id their ledger rows carry (a log line's story id opens its run)."""
+    result = await run_in_threadpool(GraphLedgerService().runs_for_story, workspace_id, story_id)
+    if not result.ok:
+        return _api_data(result)
+    return {"run_ids": result.data or []}
+
+
 @graph_runs_router.get("/graph-runs/{run_id}/langsmith-url")
 async def get_graph_run_langsmith_url(
     run_id: str,

@@ -43,6 +43,15 @@ def decide_with(check: LevelCheck | None) -> None:
     _check = check
 
 
+def passes(area: str, level: int) -> bool:
+    """Whether a line of this area at this level is written: the process's own rule when it has one (the core's level
+    per area), else the area's standard logger. A story step's end line asks here, as a structlog event does."""
+    logger = logging.getLogger(area)
+    if _check is None:
+        return logger.isEnabledFor(level)
+    return _check(area, level) and logger.manager.disable < level
+
+
 def _add_module(logger: Any, _method: str, event: EventDict) -> EventDict:
     if "module" not in event and getattr(logger, "name", None):
         event["module"] = logger.name
