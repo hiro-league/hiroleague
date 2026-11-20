@@ -46,9 +46,10 @@ part "ui-kit: check" "ui-kit" \
 # every app's deploy.
 part "build-kit: bash -n" "build-kit" \
     bash -c "cd '${REPO_ROOT}/build-kit' && for f in *.sh; do bash -n \"\$f\" || exit 1; done"
-# hiro-work, the environments' commands (build-kit/work): its choices of ports, reserved repos and environment.
+# hiro-work, the environments' commands (build-kit/work): its choices of ports, reserved repos and environment. On
+# every core (-n auto): its git tests on temporary repos took about 2 min one after another, 25 s side by side.
 part "build-kit: hiro-work tests" "build-kit/work build-kit/check-engine.sh data.toml" \
-    bash -c "cd '${REPO_ROOT}/hiroserver' && uv run python -m pytest ../build-kit/work -q -p no:cacheprovider"
+    bash -c "cd '${REPO_ROOT}/hiroserver' && uv run python -m pytest ../build-kit/work -q -p no:cacheprovider -n auto"
 # What every area reads: the workspace's own settings and lock, and the runner
 ws="hiroserver/pyproject.toml hiroserver/uv.lock scripts/run-tests.sh"
 # The lint every Hiro League repo follows (build-kit/ruff-rules.toml, which each app's pyproject extends too), over

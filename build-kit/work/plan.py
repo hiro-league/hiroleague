@@ -26,6 +26,9 @@ task the file names. The file:
      "tasks": ["chores-board"],                     optional: tasks that are this plan's, by id
      "needs_michel": "Answer Q2",                   optional: what waits on Michel
      "side_by_side": "Phases 3 and 4",              optional: what can run at the same time
+     "ships": "whole",                              optional: "whole", the plan ships whole on its own branch
+                                                    (plan/<name>: its phases merge into it, it reaches main when it
+                                                    lands); left out, "phases": each phase merges into main
      "phases": [{"name": "Mockup of the board",     in the plan's order
                  "state": "live",                   live | check | merged | working | review | paused | next | waits |
                                                     todo | cancelled
@@ -59,8 +62,10 @@ FINAL = (*SHIPPED, "cancelled")
 KEPT = (*SHIPPED, "merged")
 # How a phase's state reads in hiro-work's own lines
 SAYS = {"next": "Next", "paused": "Paused", "working": "Being worked on", "cancelled": "Cancelled"}
-# The plan's fields a send carries, besides its phases
-FIELDS = ("doc", "design", "about", "tasks", "needs_michel", "side_by_side")
+# The plan's fields a send carries, besides its phases (a resend keeps them: a pause keeps the plan's branch)
+FIELDS = ("doc", "design", "about", "tasks", "needs_michel", "side_by_side", "ships", "branch")
+# How a plan ships: phase by phase into main (the default), or whole, on its own branch
+SHIPS = ("whole", "phases")
 MAX_PHASES = 12
 MAX_WORDS = 200
 TASK_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -92,7 +97,8 @@ def checked(raw: object) -> dict:
     """The plan a file holds, as the event carries it; Stop names the first thing wrong."""
     if not isinstance(raw, dict):
         raise hw.Stop("The file must hold one plan: a JSON object (hiro-work plan --help).")
-    unknown = sorted(set(raw) - {"name", "doc", "design", "about", "tasks", "needs_michel", "side_by_side", "phases"})
+    unknown = sorted(set(raw) - {"name", "doc", "design", "about", "tasks", "needs_michel", "side_by_side", "ships",
+                                 "phases"})
     if unknown:
         raise hw.Stop(f"Not a plan's field: {', '.join(unknown)}.")
     doc = words(raw.get("doc"), "The plan's doc", 320, needed=True)
@@ -101,6 +107,9 @@ def checked(raw: object) -> dict:
     design = words(raw.get("design"), "The plan's design doc", 320)
     if design and not DOC.match(design):
         raise hw.Stop("The plan's design doc must be its Claude Doc's link (https://claude.ai/...).")
+    ships = raw.get("ships") or "phases"
+    if ships not in SHIPS:
+        raise hw.Stop('The plan\'s ships must be "whole" (on its own branch) or "phases" (each into main).')
     phases = raw.get("phases")
     if not isinstance(phases, list) or not 1 <= len(phases) <= MAX_PHASES:
         raise hw.Stop(f"A plan has 1 to {MAX_PHASES} phases.")
@@ -120,16 +129,28 @@ def checked(raw: object) -> dict:
             "needs": words(p.get("needs"), f"Phase {i}'s needs", 60),
             "tasks": task_ids(p.get("tasks"), f"Phase {i}'s tasks"),
         })
+    name = words(raw.get("name"), "The plan's name", 80, needed=True)
     return {
-        "plan": words(raw.get("name"), "The plan's name", 80, needed=True),
+        "plan": name,
         "doc": doc,
         "design": design,
         "about": words(raw.get("about"), "The plan's about", 300),
         "tasks": task_ids(raw.get("tasks"), "The plan's tasks"),
         "needs_michel": words(raw.get("needs_michel"), "needs_michel"),
         "side_by_side": words(raw.get("side_by_side"), "side_by_side"),
+        "ships": ships,
+        "branch": branch_name(name) if ships == "whole" else "",
         "phases": out,
     }
+
+
+def branch_name(name: str) -> str:
+    """A plan's branch, the same in every repo: its name in lower case, each run of other characters than a-z0-9 a
+    "-", under plan/ ("Logging and tracing" is plan/logging-and-tracing)."""
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    if not slug:
+        raise hw.Stop(f"Plan {name}: its name gives no branch name (it needs a letter or a digit).")
+    return f"plan/{slug}"
 
 
 def plans(lines: list[dict]) -> list[dict]:
@@ -161,6 +182,43 @@ def read_log(path: Path) -> list[dict]:
 def latest(name: str) -> dict | None:
     """The plan as last sent, by its name."""
     return next((p for p in plans(read_log(hw.EVENTS)) if str(p["plan"]).casefold() == name.casefold()), None)
+
+
+def branch_of(name: str) -> str:
+    """The plan's branch when it ships whole, as last sent; "" for a plan that ships phase by phase, or no plan."""
+    p = latest(name) if name else None
+    return str(p.get("branch") or "") if p and p.get("ships") == "whole" else ""
+
+
+def ships_guard(old: dict | None, new: dict) -> list[str]:
+    """Stop a send that would lose a plan's branch or share one: two plans whose names give one branch name (G5), or
+    "whole" turned off while the branch holds work main lacks, or an open task works on it (G4: land it or close it
+    first). Turned off with nothing on it, the branch goes: it exists only while it holds work. Returns the repos whose
+    branch went."""
+    if new["ships"] == "whole":
+        other = next((p for p in plans(read_log(hw.EVENTS)) if p.get("ships") == "whole" and p.get("branch") ==
+                      new["branch"] and str(p["plan"]).casefold() != new["plan"].casefold()), None)
+        if other:
+            raise hw.Stop(f"Plan {new['plan']}: its branch would be {new['branch']}, which is plan {other['plan']}'s. "
+                          "Give it a name that differs in its letters or digits.")
+        return []
+    if not old or old.get("ships") != "whole" or not old.get("branch"):
+        return []
+    branch = old["branch"]
+    held = [r for r in hw.REPOS if hw.branch_tip(r, branch) and hw.git(
+        hw.repo_dir(0, r), "rev-list", "--count", f"{hw.main_of(r)}..{branch}") != "0"]
+    working = [t.id for t in hw.load_tasks() if t.state in ("working", "paused") and t.target == branch]
+    if held or working:
+        what = "; ".join(x for x in (f"it holds work main lacks in {', '.join(held)}" if held else "",
+                                     f"open tasks work on it: {', '.join(working)}" if working else "") if x)
+        raise hw.Stop(f"Plan {new['plan']} ships whole on {branch}, and {what}. It can't turn to phase by phase: land "
+                      "it or close it first.")
+    gone = []
+    for r in hw.REPOS:
+        if at := hw.branch_tip(r, branch):
+            hw.git(hw.repo_dir(0, r), "update-ref", "-d", f"refs/heads/{branch}", at)
+            gone.append(r)
+    return gone
 
 
 def guard(old: dict | None, new: dict, removing: list[str]) -> None:
@@ -245,9 +303,15 @@ def cmd_send(a) -> None:
     except ValueError as exc:
         raise hw.Stop(f"{a.name} isn't JSON: {exc}.") from exc
     plan = checked(raw)
-    guard(latest(plan["plan"]), plan, a.remove or [])
+    old = latest(plan["plan"])
+    guard(old, plan, a.remove or [])
+    gone = ships_guard(old, plan)
     hw.event(task=None, env=None, step=STEP, phase="end", ok=True, **plan)
-    hw.say(f"Plan {plan['plan']}: {shipped(plan)}, recorded. CodeHiro's Work area shows it once the sender delivers it.")
+    whole = f", ships whole on {plan['branch']}" if plan["branch"] else ""
+    hw.say(f"Plan {plan['plan']}: {shipped(plan)}{whole}, recorded. CodeHiro's Work area shows it once the sender "
+           "delivers it.")
+    if gone:
+        hw.say(f"  {old['branch']} held nothing main lacks: removed from {', '.join(gone)}.")
 
 
 def cmd_show(a) -> None:
@@ -264,6 +328,8 @@ def cmd_show(a) -> None:
     if not plan:
         raise hw.Stop(f"No plan {a.name} (hiro-work plan list).")
     hw.say(f"{plan['plan']}: {shipped(plan)}, sent {when(plan.get('at'))}\n{plan.get('doc')}")
+    if plan.get("ships") == "whole":
+        hw.say(f"Ships whole on {plan.get('branch')}: its phases merge into it, and it reaches main when it lands.")
     for i, p in enumerate(plan["phases"], 1):
         more = "; ".join(x for x in (p.get("says"), f"needs {p['needs']}" if p.get("needs") else "",
                                      f"tasks {', '.join(p['tasks'])}" if p.get("tasks") else "") if x)

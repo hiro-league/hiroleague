@@ -6,8 +6,13 @@ repos as git worktrees, kept warm between tasks, each with its own data (C:\hiro
 (7N00-7N49), its reserved repos on the branch task/<task>. A task merges when it should ship: its branches merge into
 dev/main and env0 is brought up to them. Until then its commits stay on its branch.
 
+A plan that ships whole (hiro-work plan send, "ships": "whole") has a branch of its own, plan/<name>, in each repo it
+changes: its phases branch from it and merge back into it, and it reaches dev/main only when it lands. A task's
+target says where its work goes: dev/main, or its plan's branch. A plan's branch is never checked out.
+
     hiro-work status                         environments, tasks, reserved repos, servers
-    hiro-work start <task> --repos a,b [--kit] [--title ...] [--about ...] [--part-of ...] [--own-branch] [--env N]
+    hiro-work start <task> --repos a,b [--kit] [--title ...] [--about ...] [--part-of ...] [--own-branch] [--on-main]
+                    [--env N]
     hiro-work describe <task> [--about ...] [--part-of ...]   what it does / what it is part of, changed
     hiro-work sync <task>                    bring the latest dev/main into the task's branch, without merging the task
     hiro-work merge <task>                   bring the latest in, check, update env0, release the environment
@@ -331,6 +336,10 @@ class Task:
     about: str = ""
     # Where its environment's data comes from (data.SOURCES): env0's copy, vanilla, live or live:<stamp>
     data: str = "env0"
+    # Where its work goes when it merges: "" for dev/main, or its plan's branch (plan/<name>) when its plan ships
+    # whole; `plan` is that plan's name. A record from before plans had branches has neither: it targets main.
+    target: str = ""
+    plan: str = ""
     created: str = ""
     updated: str = ""
 
@@ -818,6 +827,136 @@ def fresh_base(repo: str, task: str | None, fetch: bool = True) -> str:
     return git(d, "rev-parse", main)
 
 
+# ----------------------------------------------------------------------------------------------- a plan's branch
+
+
+def branch_tip(repo: str, branch: str) -> str:
+    """A branch's commit in a repo ("" when it has none). Every environment's worktree shares env0's branches."""
+    return git(repo_dir(0, repo), "rev-parse", "--verify", "-q", f"refs/heads/{branch}", check=False)
+
+
+def is_ancestor(repo_path: Path, older: str, newer: str) -> bool:
+    return subprocess.run(["git", "-C", str(repo_path), "merge-base", "--is-ancestor", older, newer],
+                          capture_output=True, creationflags=NO_WINDOW).returncode == 0
+
+
+def sits_on(repo: str, branch: str) -> list[str]:
+    """The folders that have a branch checked out, in any worktree of the repo."""
+    out, folder = [], ""
+    for line in git(repo_dir(0, repo), "worktree", "list", "--porcelain").splitlines():
+        if line.startswith("worktree "):
+            folder = line.removeprefix("worktree ").replace("/", "\\")
+        elif line == f"branch refs/heads/{branch}":
+            out.append(folder)
+    return out
+
+
+def ensure_plan_branch(repo: str, branch: str) -> str:
+    """The plan's branch in a repo, made from env0's dev/main when it has none there; its commit."""
+    if at := branch_tip(repo, branch):
+        return at
+    main = git(repo_dir(0, repo), "rev-parse", main_of(repo))
+    # "" as the old value: made only when nobody made it meanwhile (a phase starting beside this one); else theirs
+    git(repo_dir(0, repo), "update-ref", f"refs/heads/{branch}", main, "", check=False)
+    return branch_tip(repo, branch)
+
+
+def unchecked_out(repo: str, branch: str) -> None:
+    """Stop when a folder has the plan's branch checked out: moving it would leave that folder out of step (git
+    update-ref moves a branch whatever sits on it)."""
+    if held := sits_on(repo, branch):
+        raise Stop(f"{repo}: {', '.join(held)} has {branch} checked out, and a plan's branch is never checked out. "
+                   f"Move that folder off it (`git -C <folder> switch --detach {branch}`), then run this again.")
+
+
+def move_plan_branch(repo: str, branch: str, new: str, old: str) -> None:
+    """Move a plan's branch from ``old`` to ``new`` ("" old: make it), compare-and-swap: only forward, only from
+    where it was read, and never under a folder that has it checked out. Two phases merging at once: the second is
+    told to merge again."""
+    unchecked_out(repo, branch)
+    d = repo_dir(0, repo)
+    if old and not is_ancestor(d, old, new):
+        raise Stop(f"{repo}: {branch} moved since this read it (another phase merged into it): merge again.")
+    out = subprocess.run(["git", "-C", str(d), "update-ref", f"refs/heads/{branch}", new, old], capture_output=True,
+                         text=True, creationflags=NO_WINDOW)
+    if out.returncode != 0:
+        raise Stop(f"{repo}: {branch} moved since this read it (another phase merged into it): merge again.")
+
+
+def refresh_plan_branch(env: int, repo: str, branch: str) -> str | None:
+    """Bring a plan's branch up to env0's dev/main, in the environment's folder of the repo (clean: the caller checks):
+    detached on the branch, dev/main merged; clean, the branch moves to the merge (committed on the detached HEAD on
+    purpose); a conflict is left for the task's next sync or merge, and said. The folder is left detached. Returns a
+    note, or None when the branch holds dev/main already (or there is none)."""
+    old = branch_tip(repo, branch)
+    main = main_of(repo)
+    if not old or is_ancestor(repo_dir(0, repo), git(repo_dir(0, repo), "rev-parse", main), old):
+        return None
+    d = repo_dir(env, repo)
+    git(d, "switch", "-q", "--detach", old)
+    out = subprocess.run(["git", "-C", str(d), "merge", "--no-edit", "-q", "-m", f"Merge {main} into {branch}", main],
+                         capture_output=True, text=True, creationflags=NO_WINDOW)
+    if out.returncode != 0:
+        git(d, "merge", "--abort", check=False)
+        return (f"{repo}: {branch} conflicts with {main}: left as it is; the task's next sync or merge brings {main} "
+                "in, to resolve there")
+    move_plan_branch(repo, branch, git(d, "rev-parse", "HEAD"), old)
+    return f"{repo}: {branch} brought up to {main}"
+
+
+def follow_ref(task: Task, repo: str) -> str:
+    """What a repo the task doesn't reserve sits on: its plan's branch where the plan has one in that repo, else
+    dev/main."""
+    return task.target if task.target and branch_tip(repo, task.target) else main_of(repo)
+
+
+def release_others(env: int, task: Task) -> None:
+    """A free environment sits on main: a task on a plan's branch leaves its other repos there too (they followed the
+    plan's branch), each that is clean."""
+    if not task.target:
+        return
+    for repo in REPOS:
+        d = repo_dir(env, repo)
+        if repo not in task.repos and (d / ".git").exists() and not dirty(d):
+            git(d, "switch", "-q", "--detach", main_of(repo))
+
+
+def named_task(value: str) -> dict:
+    """The record of the task an id names (open or ended), or {}."""
+    for p in (task_path(value), TASKS / "done" / f"{value}.json"):
+        if value and p.exists():
+            with contextlib.suppress(OSError, ValueError):
+                return json.loads(p.read_text(encoding="utf-8"))
+    return {}
+
+
+def plan_target(part_of: str | None, on_main: bool) -> tuple[str, str, str]:
+    """(part_of, plan, target) for a new task. A plan that ships whole is its target, unless --on-main; --part-of
+    naming a task on a plan's branch takes that task's plan and target. A plan/<name> branch for a plan not recorded
+    as shipping whole stops the start: its work would go to main by accident."""
+    import plan
+
+    value = (part_of or "").strip()
+    name = part_of_name(value)
+    rec = named_task(value)
+    if rec.get("target") and not on_main:
+        return rec.get("plan") or name, rec.get("plan") or name, rec["target"]
+    branch = plan.branch_of(name)
+    if branch:
+        return name, ("" if on_main else name), ("" if on_main else branch)
+    if name and not on_main:
+        try:
+            wanted = plan.branch_name(name)
+        except Stop:
+            return name, "", ""
+        found = [r for r in REPOS if branch_tip(r, wanted)]
+        if found:
+            raise Stop(f"{wanted} exists in {', '.join(found)}, but plan {name} isn't recorded as shipping whole. Send "
+                       "the plan with \"ships\": \"whole\" to work on that branch, or start with --on-main to go to "
+                       "main.")
+    return name, "", ""
+
+
 # ------------------------------------------------------------------------------------------------------- the verbs
 
 
@@ -831,26 +970,37 @@ def part_of_name(value: str | None) -> str:
     return value
 
 
+def plan_base(env: int, repo: str, task: Task) -> str:
+    """Where a task on a plan's branch starts in a repo it reserves: the plan's branch, made from main when the repo
+    has none, and brought up to main first when that merges cleanly (in the environment's clean folder)."""
+    ensure_plan_branch(repo, task.target)
+    if note := refresh_plan_branch(env, repo, task.target):
+        say(f"  {note}")
+    return branch_tip(repo, task.target)
+
+
 def cmd_start(a) -> None:
     with locked():
         tasks = load_tasks()
         if task_path(a.task).exists():
             raise Stop(f"Task '{a.task}' is already open.")
         repos = expand(a.repos.split(","), a.kit)
-        # A step of an open task or plan stays on its branch: a branch of its own is Michel's call (--own-branch)
-        same = [] if a.own_branch else same_work(a.part_of or "", tasks)
+        part_of, plan_name, target = plan_target(a.part_of, getattr(a, "on_main", False))
+        # A phase of a plan that ships whole never stops for the plan's other open tasks: each phase is a task, on the
+        # plan's branch. Elsewhere a phase beside an open one says --own-branch, and a step joins that task
+        same = [] if a.own_branch or target else same_work(a.part_of or "", tasks)
         if same:
             raise Stop("Part of open work already: " + ", ".join(f"{t.id} ({t.title}, "
                                                                  + (f"env{t.env}" if t.env else "paused") + ")"
                                                                  for t in same)
-                       + ". A step of it joins that task, on its branch: `python C:\\hiro\\env0\\hiro-docs\\standards"
-                       "\\tools\\guard.py join <task>` (and `hiro-work reserve <task> <repo>` for one more repo). A branch "
-                       "of its own merges and ships alone: ask Michel, then start again with --own-branch.")
+                       + ". A phase of it is a task of its own: start again with --own-branch. A step of it joins that "
+                       "task, on its branch: `python C:\\hiro\\env0\\hiro-docs\\standards\\tools\\guard.py join <task>` "
+                       "(and `hiro-work reserve <task> <repo>` for one more repo).")
         env = pick_env(tasks, a.env)
         task = Task(id=a.task, title=a.title or a.task, env=env, repos=repos,
                     preset=switches.preset(a.preset)["name"], switches=switches.parse_sets(a.set or []),
                     sign_in="as" if a.as_person else "off" if a.quick_sign_in else "on", sign_in_as=a.as_person or "",
-                    part_of=part_of_name(a.part_of), about=(a.about or "").strip(), data=a.data,
+                    part_of=part_of, about=(a.about or "").strip(), data=a.data, target=target, plan=plan_name,
                     created=datetime.now().astimezone().isoformat(timespec="seconds"))
         save(task)  # the reservation holds from here
     event(task=task.id, env=env, step="task", phase="start", repos=repos, title=task.title,
@@ -865,10 +1015,12 @@ def cmd_start(a) -> None:
                 raise Stop(f"env{env}'s {repo} has uncommitted files: it isn't free (hiro-work sweep).")
             with step(task.id, env, "switch", repo):
                 if repo in repos:
+                    if task.target:  # the task's branch starts from its plan's, brought up to main when it can be
+                        base = plan_base(env, repo, task)
                     git(d, "switch", "-q", "-C", task.branch, base)
                     task.base[repo] = base
                 else:
-                    git(d, "switch", "-q", "--detach", base)
+                    git(d, "switch", "-q", "--detach", follow_ref(task, repo) if task.target else base)
         install_all(env, REPOS, task.id)
         refresh_data(env, task.id, task.data)
         save(task)
@@ -909,7 +1061,9 @@ def say_overlaps(task: Task) -> None:
 def bring_up_others(env: int, task: Task) -> list[str]:
     """An environment's repos its task doesn't reserve follow env0: each moves forward to env0's dev/main when it is
     clean and behind, so checks read today's core and kits (a kit changed in env0 meanwhile, as on Mon, Nov 16, 2026,
-    broke a merge in env1). A repo with uncommitted files is left as it is, and said."""
+    broke a merge in env1). A task on a plan's branch follows that branch where the repo has one, brought up to main
+    first when it merges cleanly, so it builds against the plan's kits. A repo with uncommitted files is left as it
+    is, and said."""
     if not env:
         return []
     notes = []
@@ -920,16 +1074,20 @@ def bring_up_others(env: int, task: Task) -> list[str]:
         if dirty(d):
             notes.append(f"{repo}: has uncommitted files, left as it is")
             continue
-        target = git(repo_dir(0, repo), "rev-parse", main_of(repo))
+        ref = follow_ref(task, repo)
+        if ref != main_of(repo) and (note := refresh_plan_branch(env, repo, ref)):
+            notes.append(note)
+        where = f"env0's {ref}" if ref == main_of(repo) else ref
+        target = git(repo_dir(0, repo), "rev-parse", ref)
         head = git(d, "rev-parse", "HEAD")
         if head == target:
             continue
         ahead = subprocess.run(["git", "-C", str(d), "merge-base", "--is-ancestor", head, target]).returncode == 0
         if not ahead:
-            notes.append(f"{repo}: not behind env0's {main_of(repo)}, left as it is")
+            notes.append(f"{repo}: not behind {where}, left as it is")
             continue
         git(d, "switch", "-q", "--detach", target)
-        notes.append(f"{repo}: brought up to env0's {main_of(repo)} ({target[:8]})")
+        notes.append(f"{repo}: brought up to {where} ({target[:8]})")
     return notes
 
 
@@ -982,6 +1140,8 @@ def cmd_reserve(a) -> None:
             if dirty(d):
                 raise Stop(f"env{env}'s {repo} has uncommitted files: it isn't free (hiro-work sweep).")
             base = fresh_base(repo, task.id)
+            if task.target:
+                base = plan_base(env, repo, task)
             git(d, "switch", "-q", "-C", task.branch, base)
             task.base[repo] = base
             task.repos.append(repo)
@@ -1000,7 +1160,8 @@ def card(task: Task) -> None:
     if task.about:
         say(f"  {task.about}")
     if task.env:
-        say(f"  branch {task.branch} | data {data_dir(task.env)} | ports {min(p.values())}-{min(p.values()) + appfile.BLOCK - 1}")
+        into = f", into {task.target}" if task.target else ""
+        say(f"  branch {task.branch}{into} | data {data_dir(task.env)} | ports {min(p.values())}-{min(p.values()) + appfile.BLOCK - 1}")
         rec = switches.read(data_dir(task.env))
         say(f"  {switches.describe(rec)} | {switches.describe_sign_in(rec)}")
         say(f"  {data.describe_source(data.read_source(sys.modules[__name__], task.env))}")
@@ -1160,14 +1321,20 @@ def cmd_merge(a) -> None:
         d = repo_dir(env, repo)
         git(d, "switch", "-q", "--detach", main_of(repo))
         git(d, "branch", "-q", "-D", task.branch)
+    release_others(env, task)
     with step(task.id, env, "servers down"):
         servers_down(env)
     with locked():
         task.state = "done"
         save(task)
-    event(task=task.id, env=env, step="task", phase="end", ok=True, merged=True)
-    say(f"Task {task.id} merged: {', '.join(task.repos)} in env0; env{env} is free. Not pushed: the deploy "
-        "pushes.")
+    event(task=task.id, env=env, step="task", phase="end", ok=True, merged=True,
+          **({"into": task.target, "plan": task.plan} if task.target else {}))
+    if task.target:
+        say(f"Task {task.id} merged into {task.target} (plan {task.plan}): {', '.join(task.repos)}; env0's main is "
+            f"untouched and env{env} is free. Its work reaches main when the plan lands.")
+    else:
+        say(f"Task {task.id} merged: {', '.join(task.repos)} in env0; env{env} is free. Not pushed: the deploy "
+            "pushes.")
     if waiting:
         say(waiting_installs_note(waiting))
 
@@ -1197,13 +1364,14 @@ def cmd_sync(a) -> None:
 
 
 def merge_latest(task: Task, env: int, then: str = "merge") -> None:
-    """Bring each of the task's branches up to GitHub and to env0's dev/main (``then``: the command to run again
-    after a conflict is resolved)."""
+    """Bring each of the task's branches up to GitHub and to env0's dev/main, then to its plan's branch when it has one
+    (``then``: the command to run again after a conflict is resolved)."""
     for repo in task.repos:
         d = repo_dir(env, repo)
+        refs = [f"origin/{main_of(repo)}", main_of(repo), *([task.target] if task.target else [])]
         with step(task.id, env, "merge latest", repo):
             git(d, "fetch", "-q", "origin", check=False)
-            for ref in (f"origin/{main_of(repo)}", main_of(repo)):
+            for ref in refs:
                 # A new app has no GitHub repo until its first deploy: a ref that doesn't exist is nothing to merge
                 # (merging it would fail and read as a conflict)
                 if not git(d, "rev-parse", "--verify", "-q", ref, check=False):
@@ -1214,6 +1382,10 @@ def merge_latest(task: Task, env: int, then: str = "merge") -> None:
                     git(d, "merge", "--abort", check=False)
                     # A fix: a merge brings in origin/dev and then env0's dev. A resolve that merges only the first makes the merge
                     # merge the second after the commit hook's check, so every part of the check runs twice
+                    if task.target:
+                        raise Stop(f"{repo}: merging {ref} into {task.branch} conflicts. Resolve it in {d}: merge "
+                                   f"{refs[0]}, {refs[1]} and {refs[2]} ({then} merges them in that order), then "
+                                   f"commit, then {then} again.")
                     raise Stop(f"{repo}: merging {ref} into {task.branch} conflicts. Resolve it in {d}: merge both "
                                f"origin/{main_of(repo)} and {main_of(repo)} ({then} merges them in that order), "
                                f"then commit, then {then} again.")
@@ -1251,6 +1423,9 @@ def merge_steps(task: Task, env: int) -> dict[str, list[str]]:
                 outcome.fail(out.stdout.strip()[-300:])
     if failed:
         raise Stop("Checks failed: " + "; ".join(failed) + ". Fix, commit, merge again.")
+    if task.target:  # 3. the plan's branch moves to the task's; env0 isn't touched, so no install waits there
+        into_plan(task, env)
+        return {}
     # 3. dev/main moves to the branch; env0's checkouts follow (a fast-forward)
     waiting: dict[str, list[str]] = {}
     for repo in task.repos:
@@ -1263,6 +1438,28 @@ def merge_steps(task: Task, env: int) -> dict[str, list[str]]:
             if held := install(0, repo, task.id, spare_servers=True):
                 waiting[repo] = held
     return waiting
+
+
+def into_plan(task: Task, env: int) -> None:
+    """A phase's merge into its plan's branch: in each reserved repo the branch moves to the task's, only when it is
+    still where the merge read it (the task's branch holds it); otherwise nothing moves and the session merges again.
+    Every repo is checked before any moves, under the tasks' lock (two phases can merge at once)."""
+    with locked():
+        moves = []
+        for repo in task.repos:
+            new, old = git(repo_dir(env, repo), "rev-parse", task.branch), branch_tip(repo, task.target)
+            unchecked_out(repo, task.target)
+            if old and not is_ancestor(repo_dir(0, repo), old, new):
+                raise Stop(f"{repo}: {task.target} moved since this merge read it (another phase merged into it): "
+                           "merge again.")
+            moves.append((repo, new, old))
+        for repo, new, old in moves:
+            main = git(repo_dir(0, repo), "rev-parse", main_of(repo))
+            if not old and is_ancestor(repo_dir(0, repo), new, main):
+                continue  # nothing main lacks: a plan's branch exists only while it holds work
+            with step(task.id, env, "into plan", repo):
+                move_plan_branch(repo, task.target, new, old)
+                record_commits(task.id, env, repo, old or main, new, "plan")
 
 
 # Repos' checks side by side in a merge, the second starting only while the PC has MERGE_MIN_FREE_GB free. Measured on
@@ -1399,12 +1596,15 @@ def cancel_task(task: Task) -> None:
             git(d, "switch", "-q", "--detach", main_of(repo))
         if not git(d, "rev-parse", "--verify", "-q", task.branch, check=False):
             continue
-        if git(d, "rev-list", "--count", f"{main_of(repo)}..{task.branch}") == "0":
+        # Its own commits: those its plan's branch lacks, for a task on one (the plan's commits aren't its own)
+        if git(d, "rev-list", "--count", f"{follow_ref(task, repo)}..{task.branch}") == "0":
             git(d, "branch", "-q", "-D", task.branch)
         else:
             # -M: a task cancelled before, reopened and cancelled again replaces its older copy (an ancestor of this one)
             git(d, "branch", "-q", "-M", task.branch, cancelled_branch(task.id))
             kept.append(repo)
+    if env:
+        release_others(env, task)
     with locked():
         task.state, task.env = "cancelled", None
         save(task)
@@ -1439,7 +1639,7 @@ def cmd_reopen(a) -> None:
         if git(d, "rev-parse", "--verify", "-q", cancelled_branch(task.id), check=False):
             git(d, "branch", "-q", "-m", cancelled_branch(task.id), task.branch)
         elif not git(d, "rev-parse", "--verify", "-q", task.branch, check=False):
-            git(d, "branch", "-q", task.branch, main_of(repo))
+            git(d, "branch", "-q", task.branch, follow_ref(task, repo))  # its plan's branch, for a task on one
     with locked():
         task.state, task.env = "paused", None
         save(task)
@@ -1460,6 +1660,7 @@ def cmd_pause(a) -> None:
             git(d, "add", "-A")
             git(d, "commit", "-q", "--no-verify", "-m", f"WIP (paused) {task.id}")
         git(d, "switch", "-q", "--detach", main_of(repo))
+    release_others(env, task)
     with step(task.id, env, "servers down"):
         servers_down(env)
     with locked():
@@ -1491,7 +1692,7 @@ def cmd_resume(a) -> None:
                 git(d, "reset", "-q", "--soft", "HEAD~1")
                 git(d, "reset", "-q")
         else:
-            git(d, "switch", "-q", "--detach", main_of(repo))
+            git(d, "switch", "-q", "--detach", follow_ref(task, repo))
     install_all(env, REPOS, task.id)
     refresh_data(env, task.id, task.data)
     if a.part_of is not None:
@@ -1782,7 +1983,8 @@ def cmd_status(a) -> None:
     for env in ENVS:
         here = [t for t in tasks if t.env == env and t.state == "working"]
         up = [n for n, p in ports(env).items() if listening(p)]
-        what = "; ".join((f"{t.part_of} › " if t.part_of else "") + f"{t.id} ({', '.join(t.repos)})" for t in here)             or ("main, Michel's dev" if env == 0 else "free")
+        what = "; ".join((f"{t.part_of} › " if t.part_of else "") + f"{t.id} ({', '.join(t.repos)}"
+                         + (f", into {t.target})" if t.target else ")") for t in here)             or ("main, Michel's dev" if env == 0 else "free")
         exists = env == 0 or (env_dir(env) / "hiroleague" / ".git").exists()
         say(f"  env{env}  {'' if exists else '(not made yet) '}{what}" + (f"  | up: {', '.join(up)}" if up else ""))
     paused = [t for t in tasks if t.state == "paused"]
@@ -1882,7 +2084,9 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--env", type=int, choices=list(ENVS))
     s.add_argument("--part-of", help="the bigger work it is a piece of: a name, or a task's id (its title is used)")
     s.add_argument("--own-branch", action="store_true",
-                   help="a piece of open work that merges and ships alone, on Michel's say (else it joins that task)")
+                   help="a phase of open work: a task of its own beside its open tasks (a step joins that task)")
+    s.add_argument("--on-main", action="store_true",
+                   help="a piece of a plan that ships whole that must ship now: it goes to main, not the plan's branch")
     s.add_argument("--about", help="what it does, in a sentence (the Work area shows it under its name)")
     s.add_argument("--preset", default=switches.DEFAULT,
                    help="env1..5: its switchboard's preset (hiro-work preset list); Safe when not said")
