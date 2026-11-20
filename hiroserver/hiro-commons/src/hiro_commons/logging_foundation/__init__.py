@@ -23,6 +23,8 @@ What a process gets:
   - a hard crash in native code (faulthandler writes every thread's stack to `crash.log`);
   - a child process's own output and crash (`child_log()`: its own daily file).
   `self_test()` (selftest.py) raises each kind of failure and checks it reached the file; every app's contract runs it.
+- **A story's id and its timed steps** (story.py, imported where a story starts): every line logged inside a step
+  carries the story's `TraceId` and the step's `SpanId`, and each step's end is a line with how long it took.
 - **The console** (`docker logs`) keeps a short line per record, for watching a process start.
 
 Third-party libraries that are chatty at INFO (QUIET) are held back to WARNING.

@@ -10,6 +10,7 @@ from threading import Lock
 from typing import Any, Callable, Iterable
 
 from hiro_commons.log import Logger
+from hiro_commons.logging_foundation import story
 
 from .context import current_run, current_substep
 from .helpers import blank_zero_float, format_cost, preview, row_kind, slug, to_float
@@ -157,6 +158,8 @@ class LedgerSink:
             if accumulator is not None:
                 accumulator.fold_row(priced)
             payload = {column: priced.get(column, "") for column in GRAPH_LEDGER_COLUMNS}
+            # The row joins its story by the story's id: the one current where the row is written (a chat's run).
+            payload["story_id"] = priced.get("story_id") or story.current_id() or ""
             self._logger.info("graph_ledger", **payload)
 
     def read_run_costs(self, run_ids: Iterable[str]) -> dict[str, float]:

@@ -182,3 +182,18 @@ def _workspace_patch(tmp_path: Path):
         "hirocli.admin.features.graph_runs.service.resolve_workspace",
         return_value=(SimpleNamespace(path=str(tmp_path)), None),
     )
+
+
+def test_a_storys_id_finds_its_graph_run(tmp_path: Path) -> None:
+    sid = "6f1c2a3b4d5e4f608a7192b3c4d5e6f7"
+    _write_graph_log(
+        tmp_path,
+        [
+            {"ts": "1000", "run_id": "chat-a", "row_kind": "node", "node": "llm", "story_id": sid},
+            {"ts": "1001", "run_id": "chat-a", "row_kind": "run", "node": "@run", "story_id": sid},
+            {"ts": "1002", "run_id": "chat-b", "row_kind": "run", "node": "@run", "story_id": "other"},
+        ],
+    )
+    with _workspace_patch(tmp_path):
+        result = GraphLedgerService().runs_for_story("ws", sid.upper())
+    assert result.ok and result.data == ["chat-a"]

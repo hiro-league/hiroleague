@@ -38,6 +38,7 @@ from hiro_channel_sdk.constants import (
     AI_ERROR_NO_PROFILE,
 )
 from hiro_commons.log import Logger
+from hiro_commons.logging_foundation import story
 
 from ...domain.credential_store import CredentialStore
 from ...domain.preferences import AI_MAX_FALLBACKS, AiProfile, LocalServerSettings, WorkspacePreferences
@@ -172,6 +173,13 @@ class AskRunner:
         draft: AiProfile | None = None,
     ) -> AskAnswer:
         """Answer ``request`` (module notes). ``draft``: Try it on a profile not saved yet."""
+        # The ask is a step of the story that asked (an app's request, a chat's run), or a story of its own: each AI
+        # call's own line (answered, timed out, failed, not answered) carries the story's id. Those lines already say
+        # how long it took, so the step writes no line of its own.
+        with story.step("ai.ask", area="AI.ASK", line=False):
+            return await self._ask(request, prefs=prefs, draft=draft)
+
+    async def _ask(self, request: AskRequest, *, prefs: WorkspacePreferences, draft: AiProfile | None) -> AskAnswer:
         _check_request(request)
         profiles = dict(prefs.ai.profiles)
         if draft is not None:

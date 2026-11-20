@@ -28,7 +28,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import OperationalError
 
-from . import identity
+from . import identity, stories
 
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -179,9 +179,12 @@ def install(app: FastAPI) -> None:
     async def unexpected(request: Request, exc: Exception) -> JSONResponse:
         # A crashed route: which request it was, with its traceback (the logging plan's safety nets: it doesn't rely
         # on uvicorn, which logs it again as "Exception in ASGI application" after Starlette raises it once more).
-        log.error("%s %s failed: %s: %s", request.method, request.url.path, type(exc).__name__, exc, exc_info=exc)
+        # Starlette runs this outside every middleware, so it steps back into the request's story for its id.
+        with stories.of(request):
+            log.error("%s %s failed: %s: %s", request.method, request.url.path, type(exc).__name__, exc, exc_info=exc)
         return _unexpected_answer(exc)
 
+    stories.install(app)  # every request a story (stories.py): every kit app calls this, so each gets it here
     app.add_exception_handler(AppError, expected_answer)
     app.add_exception_handler(OperationalError, database)
     app.add_exception_handler(Exception, unexpected)

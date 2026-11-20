@@ -16,9 +16,11 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
+from hiro_channel_sdk import message_story
 from hiro_channel_sdk.log_scope_fields import unified_message_log_scope
 from hiro_channel_sdk.models import UnifiedMessage
 from hiro_commons.log import Logger, log_scope
+from hiro_commons.logging_foundation import story
 
 from .comm_log import LOG_OUT, comm_extras, comm_kind, comm_peer_label
 
@@ -66,6 +68,9 @@ class OutboundPipeline:
             traffic_class=_out_traffic_class,
             traffic_subclass=_out_traffic_subclass,
         ):
+            # The queue breaks the story's context: the message carries the step that queued it (the agent's run, the
+            # server's receive), and sending it is a step under that one.
+            story.inject(msg.routing.metadata)
             await self.queue.put(msg)
             # Per-hop queue visibility is verbose; higher layers (e.g. Sent on
             # the channel) retain INFO for message-flow milestones. Use
@@ -95,7 +100,7 @@ class OutboundPipeline:
                     _out_traffic_class,
                     _out_traffic_subclass,
                 ) = unified_message_log_scope(msg, direction="outbound")
-                with log_scope(
+                with message_story.hop("server.send", msg.routing.metadata, _out_msg_id, area="OUTBOUND"), log_scope(
                     device_id=_out_device_id,
                     msg_id=_out_msg_id,
                     method=_out_method,

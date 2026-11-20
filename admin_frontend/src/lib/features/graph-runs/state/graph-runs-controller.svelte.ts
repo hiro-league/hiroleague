@@ -19,6 +19,7 @@ import { useTableFilters } from '$kit/ui/table-filters.svelte';
 import { distinctOptionsWithSentinel } from '$kit/ui/distinct-options';
 import {
   getGraphRun,
+  getGraphRunsByStory,
   getGraphRunLangsmithUrl,
   getGraphRunRetrievalLoop,
   GRAPH_RUN_HEADER_FIELDS,
@@ -415,6 +416,18 @@ export function createGraphRunsPageController(
     }
   }
 
+  /** Open the graph run of a story (from a log line's story id); says so when the story has none. */
+  async function openStory(storyId: string) {
+    try {
+      const { run_ids } = await getGraphRunsByStory(storyId);
+      const runId = run_ids.at(-1);
+      if (runId) await openRunTab(runId);
+      else notify('info', 'This story has no graph run.');
+    } catch (e) {
+      notify('error', errorMessage(e));
+    }
+  }
+
   function closeRunTab(runId: string) {
     openRunIds = openRunIds.filter((id) => id !== runId);
     delete timelineByRun[runId];
@@ -683,6 +696,7 @@ export function createGraphRunsPageController(
     mount,
     showRunsOnly,
     openRunTab,
+    openStory,
     closeRunTab,
     refreshMain,
     loadMoreRuns,

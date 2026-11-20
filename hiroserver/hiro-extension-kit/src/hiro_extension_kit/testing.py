@@ -276,7 +276,10 @@ class FakeCore:
 
     `ask(to, method, params)` answers what another extension offers, from `extensions[to][method]` the same way; an
     extension in `away` (or not in `extensions`) is not connected, as the core answers. Kept in `asked` as
-    ("ask:<method>", params). An app's tests/fakes.py sets its own defaults (the AI's answers, HomeHiro's)."""
+    ("ask:<method>", params). An app's tests/fakes.py sets its own defaults (the AI's answers, HomeHiro's).
+
+    Each request and ask is also built as the SDK sends it, kept in `frames`: what the core would read, the story's
+    id in its metadata included (the contract checks it)."""
 
     def __init__(self) -> None:
         self.connected = True
@@ -291,10 +294,16 @@ class FakeCore:
                                             {"role_id": "kid", "name": "Kid", "built_in": False}]
         self.people: list[dict[str, Any]] = []
         self.handlers: dict[str, Any] = {}  # the core's events the app listens to (the SDK's on_event)
+        self.frames: list[Any] = []  # each request as the SDK builds it (hiro_channel_sdk.extension.build_request)
         self._n = 0
 
     def on_event(self, event_type: str, handler: Any) -> None:
         self.handlers[event_type] = handler
+
+    def _frame(self, method: str, params: dict[str, Any]) -> None:
+        from hiro_channel_sdk.extension import build_request
+
+        self.frames.append(build_request(method, params, sender_id="app", direction="inbound"))
 
     def person(self, name: str, role_id: str = "adult", whatsapp: str = "", calls_them: str = "") -> dict[str, Any]:
         """Add someone to the core's list directly (as its admin or CLI would)."""
@@ -324,6 +333,7 @@ class FakeCore:
         from hiro_channel_sdk import ExtensionRequestError
 
         params = dict(params or {})
+        self._frame("extensions.ask", {"to": to, "method": method, "params": params, "timeout": timeout})
         self.asked.append((f"ask:{method}", params))
         self.timeouts.append(timeout)
         if not self.connected:
@@ -337,6 +347,7 @@ class FakeCore:
 
     async def request(self, method: str, params: dict[str, Any] | None = None, *, timeout: float = 15.0) -> dict[str, Any]:
         params = dict(params or {})
+        self._frame(method, params)
         self.asked.append((method, params))
         self.timeouts.append(timeout)
         if not self.connected:

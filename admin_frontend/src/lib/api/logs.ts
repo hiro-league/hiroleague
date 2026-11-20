@@ -83,6 +83,9 @@ export type LogRow = {
   scope_traffic_class?: string;
   scope_traffic_subclass?: string;
   has_msg_id?: boolean;
+  /** The story the line belongs to and its step (W3C TraceId, SpanId), when it was logged inside one. */
+  story_id?: string;
+  step_id?: string;
 };
 
 export type LogsLayout = {

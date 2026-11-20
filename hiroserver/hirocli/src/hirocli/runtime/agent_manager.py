@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 from hiro_channel_sdk.log_scope_fields import (
     unified_message_log_scope,
 )
+from hiro_channel_sdk import message_story
 from hiro_channel_sdk.models import UnifiedMessage
 from hiro_commons.log import Logger, log_scope
 
@@ -358,7 +359,11 @@ class AgentManager:
             text_preview=_pv, traffic_class=_tc, traffic_subclass=_tsc,
         ):
             try:
-                await self._handle_inner(msg, persisted_event=persisted_event)
+                # The agent's run is a timed step of the message's story, under the server's receive; its graph run
+                # (the ledger's chat-<message id>) carries the same story id.
+                with message_story.hop("agent.run", msg.routing.metadata, _mid or msg.routing.id, area="AGENT",
+                                       run_id=f"chat-{msg.routing.id}"):
+                    await self._handle_inner(msg, persisted_event=persisted_event)
             except Exception as exc:
                 log.error(
                     f"❌ graph run failed — {comm_peer_label(msg, self._ctx)} · {comm_kind(msg)}",

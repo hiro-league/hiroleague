@@ -38,6 +38,8 @@ export type GraphLedgerRow = {
   input_preview: string;
   output_preview: string;
   error_code: string;
+  /** The story the row belongs to (W3C TraceId): the id its log lines carry. Blank on rows written before it. */
+  story_id: string;
 };
 
 export type GraphRunsTailResponse = {
@@ -108,6 +110,7 @@ export const GRAPH_RUN_HEADER_FIELDS = [
   'row_kind',
   'input_preview',
   'output_preview',
+  'story_id',
   'id'
 ] as const satisfies ReadonlyArray<keyof GraphLedgerRow>;
 
@@ -160,6 +163,11 @@ export const GRAPH_RUN_NODE_TABLE_FIELDS = [
   'model',
   'error_code'
 ] as const satisfies ReadonlyArray<keyof GraphLedgerRow>;
+
+/** The graph runs of a story, by the story id their rows carry (a chat message's: one run). */
+export async function getGraphRunsByStory(storyId: string): Promise<{ run_ids: string[] }> {
+  return apiRequest<{ run_ids: string[] }>(`/graph-runs/by-story/${encodeURIComponent(storyId)}`);
+}
 
 export async function getGraphRun(runId: string): Promise<GraphRunInspectResponse> {
   return apiRequest<GraphRunInspectResponse>(`/graph-runs/${encodeURIComponent(runId)}`);

@@ -123,6 +123,24 @@ class GraphLedgerService:
             log.warning("⚠️ Graph run inspect failed — HiroAdmin · graph_runs", workspace=workspace, run_id=rid, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
 
+    def runs_for_story(self, workspace: str | None, story_id: str) -> Result[list[str]]:
+        """The graph runs of a story (a chat message's: one run, `chat-<message id>`), by the story id their rows
+        carry, oldest first."""
+        sid = (story_id or "").strip().lower()
+        if not sid:
+            return Result.failure("story_id is required.")
+        try:
+            found: list[str] = []
+            for row in _read_all_rows(_graph_log_path(workspace)):
+                run_id = str(row.get("run_id") or "")
+                if row.get("story_id") == sid and run_id and run_id not in found:
+                    found.append(run_id)
+            return Result.success(found)
+        except Exception as exc:
+            log.warning("⚠️ Graph runs by story failed — HiroAdmin · graph_runs", workspace=workspace, story_id=sid,
+                        error=str(exc), exc_info=True)
+            return Result.failure(str(exc))
+
     def retrieval_loop(
         self,
         workspace: str | None,
@@ -241,7 +259,8 @@ def _read_csv_rows(source: Any, *, fieldnames: list[str] | None = None) -> list[
 def _shape_row(raw: dict[str, Any]) -> dict[str, Any] | None:
     if not raw or raw.get("ts") in {"ts", None, ""}:
         return None
-    row = {column: raw.get(column, "") for column in GRAPH_LEDGER_COLUMNS}
+    # A row written before a column was added has none (DictReader gives None): blank, as an empty cell
+    row = {column: "" if raw.get(column) is None else raw[column] for column in GRAPH_LEDGER_COLUMNS}
     row["row_kind"] = row.get("row_kind") or "node"
     for key in ("ts", "stt_audio_seconds", "tts_audio_seconds", "cost_usd"):
         row[key] = _float_or_blank(row.get(key))

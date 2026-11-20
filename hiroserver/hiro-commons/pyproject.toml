@@ -26,6 +26,8 @@ dependencies = [
     "cryptography>=43",
     "structlog>=25",
     "colorama>=0.4.6",
+    # A story's id and its timed steps (logging_foundation/story.py): OpenTelemetry's Stable tracing API only.
+    "opentelemetry-api>=1.45.2",
 ]
 
 [project.urls]

@@ -5,6 +5,10 @@ Each wrapper that talks to an outside system times its calls here, so the timing
 - a paid call (TTS, LLMs) is always logged at INFO: they are few, and each one costs money;
 - every other call is logged at DEBUG only.
 A failed call is raised to its caller, which logs it with the reason.
+
+Each line is a timed step of the story the call is part of (the logging plan): it carries the story's id like every
+line logged inside one (a page request, a worker's round...), and its time as the field `elapsed_ms`. The call
+itself sends no id out: HA, Frigate and the AI providers don't take one.
 """
 
 import logging
@@ -28,10 +32,11 @@ def slow_after(timeout: float) -> float:
 def done(log: logging.Logger, what: str, started: float, *, timeout: float, paid: bool = False) -> None:
     """Log a call that answered: `what` names it, e.g. "HA: config/device_registry/list"."""
     seconds = elapsed(started)
+    fields = {"call": what, "elapsed_ms": round(seconds * 1000)}
     if seconds >= slow_after(timeout):
-        log.warning("%s was slow: %.1f s (limit %.0f s)", what, seconds, timeout)
+        log.warning("%s was slow: %.1f s (limit %.0f s)", what, seconds, timeout, extra=fields)
     elif paid:
-        log.info("%s answered in %d ms", what, seconds * 1000)
+        log.info("%s answered in %d ms", what, seconds * 1000, extra=fields)
     else:
-        log.debug("%s answered in %d ms", what, seconds * 1000)
+        log.debug("%s answered in %d ms", what, seconds * 1000, extra=fields)
 
