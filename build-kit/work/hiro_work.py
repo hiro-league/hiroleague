@@ -340,6 +340,11 @@ class Task:
     # whole; `plan` is that plan's name. A record from before plans had branches has neither: it targets main.
     target: str = ""
     plan: str = ""
+    # A landing task (hiro-work plan land): the plan's branch it brings onto main, the commit it took in each repo (a
+    # phase merged into the branch meanwhile lands next time), and the phases that were In the plan when it started
+    lands: str = ""
+    landed: dict[str, str] = field(default_factory=dict)
+    lands_phases: list[str] = field(default_factory=list)
     created: str = ""
     updated: str = ""
 
@@ -1001,10 +1006,12 @@ def cmd_start(a) -> None:
                     preset=switches.preset(a.preset)["name"], switches=switches.parse_sets(a.set or []),
                     sign_in="as" if a.as_person else "off" if a.quick_sign_in else "on", sign_in_as=a.as_person or "",
                     part_of=part_of, about=(a.about or "").strip(), data=a.data, target=target, plan=plan_name,
+                    lands=getattr(a, "lands", "") or "", lands_phases=list(getattr(a, "lands_phases", None) or []),
                     created=datetime.now().astimezone().isoformat(timespec="seconds"))
         save(task)  # the reservation holds from here
     event(task=task.id, env=env, step="task", phase="start", repos=repos, title=task.title,
-          **({"part_of": task.part_of} if task.part_of else {}), **({"about": task.about} if task.about else {}))
+          **({"part_of": task.part_of} if task.part_of else {}), **({"about": task.about} if task.about else {}),
+          **({"lands": task.lands} if task.lands else {}))
     try:
         init_env(env, task.id)
         fetch_all(REPOS, task.id, env)
@@ -1310,12 +1317,21 @@ def cmd_merge(a) -> None:
     for repo in task.repos:
         if dirty(repo_dir(env, repo)):
             raise Stop(f"env{env}'s {repo} has uncommitted files: commit them on {task.branch} first.")
+    for repo, at in task.landed.items():
+        # A landing whose conflict was resolved by hand: its branch must hold what plan land took
+        if not is_ancestor(repo_dir(env, repo), at, task.branch):
+            raise Stop(f"{repo}: {task.branch} doesn't hold {task.lands} as plan land took it ({at[:8]}). In "
+                       f"{repo_dir(env, repo)}: git merge --no-ff -m \"Land {task.part_of}\" {at}, resolve, commit, "
+                       f"then merge again.")
     say_overlaps(task)
     # Merging is one step with its own inside (CodeHiro shows the task as merging while it runs)
     with step(task.id, env, "merge"):
         for line in bring_up_others(env, task):
             say(f"  {line}")
         waiting = merge_steps(task, env)
+        if task.lands:
+            for line in after_landing(task):
+                say(f"  {line}")
     # 4. Release the environment, keep it warm
     for repo in task.repos:
         d = repo_dir(env, repo)
@@ -1328,8 +1344,10 @@ def cmd_merge(a) -> None:
         task.state = "done"
         save(task)
     event(task=task.id, env=env, step="task", phase="end", ok=True, merged=True,
-          **({"into": task.target, "plan": task.plan} if task.target else {}))
+          **({"into": task.target, "plan": task.plan} if task.target else {}),
+          **({"lands": task.lands, "plan": task.part_of} if task.lands else {}))
     if task.target:
+        follow_plans(task.id, "inplan", ("working", "review"), open_ids("working", "paused"))
         say(f"Task {task.id} merged into {task.target} (plan {task.plan}): {', '.join(task.repos)}; env0's main is "
             f"untouched and env{env} is free. Its work reaches main when the plan lands.")
     else:
@@ -1432,12 +1450,34 @@ def merge_steps(task: Task, env: int) -> dict[str, list[str]]:
         with step(task.id, env, "fast-forward", repo):
             before = git(repo_dir(0, repo), "rev-parse", "HEAD")
             git(repo_dir(0, repo), "merge", "--ff-only", "-q", task.branch)
-            record_commits(task.id, env, repo, before, git(repo_dir(0, repo), "rev-parse", "HEAD"), "merge")
+            # A landing's commits are recorded as landed: CodeHiro keeps them the work of the phases that brought them
+            record_commits(task.id, env, repo, before, git(repo_dir(0, repo), "rev-parse", "HEAD"),
+                           "land" if task.lands else "merge")
             # A fix: env0's servers are Michel's and merge never stops them, and npm ci under a running Vite fails
             # with EPERM after env0 has already moved. So that install waits (hiro-work install 0 <repo>).
             if held := install(0, repo, task.id, spare_servers=True):
                 waiting[repo] = held
     return waiting
+
+
+def after_landing(task: Task) -> list[str]:
+    """After a landing's fast-forward: in each repo the plan's branch goes when main holds all of it (it exists only
+    while it holds work main lacks); one a phase merged into meanwhile stays, and lands next time. The phases that
+    were In the plan when it started are Merged."""
+    import plan
+
+    notes, kept = [], []
+    for repo in task.landed:
+        at = branch_tip(repo, task.lands)
+        if not at:
+            continue
+        if is_ancestor(repo_dir(0, repo), at, git(repo_dir(0, repo), "rev-parse", main_of(repo))):
+            git(repo_dir(0, repo), "update-ref", "-d", f"refs/heads/{task.lands}", at)
+        else:
+            kept.append(repo)
+    if kept:
+        notes.append(f"{task.lands} kept in {', '.join(kept)}: a phase merged into it meanwhile; it lands next time")
+    return notes + plan.landed(task)
 
 
 def into_plan(task: Task, env: int) -> None:
@@ -1634,6 +1674,13 @@ def cmd_reopen(a) -> None:
     task = task_from(json.loads(done.read_text(encoding="utf-8")))
     if task.state != "cancelled":
         raise Stop(f"Task {task.id} was merged: it can't be reopened. Start a new task for more work.")
+    if task.target:
+        import plan
+
+        p = plan.latest(task.plan)
+        if p and not plan.is_open(p):
+            raise Stop(f"Plan {task.plan} is closed, and {task.id} worked on its branch: open the plan again first (a "
+                       "send with a phase still to do), then reopen the task.")
     for repo in task.repos:
         d = repo_dir(0, repo)
         if git(d, "rev-parse", "--verify", "-q", cancelled_branch(task.id), check=False):
@@ -1992,15 +2039,16 @@ def cmd_status(a) -> None:
         say("Paused: " + ", ".join(f"{t.id} ({t.updated[:10]})" for t in paused))
 
 
-def merged_left(listing: str, main: str) -> list[str]:
-    """The merged branches left behind, from `git branch --merged`: not the main branch, and not one checked out here
-    ("*") or in another worktree ("+", an open task's branch in env1..env5: it is in use, not left)."""
+def merged_left(listing: str, main: str, keep: tuple[str, ...] = ()) -> list[str]:
+    """The merged branches left behind, from `git branch --merged`: not the main branch, not an open plan's branch
+    (``keep``: it may hold nothing yet), and not one checked out here ("*") or in another worktree ("+", an open task's
+    branch in env1..env5: it is in use, not left)."""
     out = []
     for line in listing.splitlines():
         if line[:1] in ("*", "+"):
             continue
         b = line.strip()
-        if b and b not in (main, "main", "dev") and not b.startswith("("):
+        if b and b not in (main, "main", "dev", *keep) and not b.startswith("("):
             out.append(b)
     return out
 
@@ -2013,15 +2061,25 @@ def cmd_sweep(a) -> None:
         say(f"  {repo}: {what}")
         findings.append({"kind": kind, "where": repo, "what": what, "since": None, "fix": fix})
 
+    import plan
+
+    open_plans = plan.whole_branches()
     for repo in REPOS:
         d = repo_dir(0, repo)
         for block in git(d, "worktree", "list", "--porcelain").split("\n\n"):
             path = block.splitlines()[0].removeprefix("worktree ").replace("/", "\\")
+            on = next((x.removeprefix("branch refs/heads/") for x in block.splitlines() if x.startswith(
+                "branch refs/heads/plan/")), "")
+            if on:  # a plan's branch is never checked out: a merge into it refuses while one is
+                found("plan", repo, f"{path} has {on} checked out", f"git -C {path} switch --detach {on}")
             if path.lower() == str(d).lower() or path.lower().startswith(str(ROOT).lower() + "\\env"):
                 continue
             found("worktree", repo, f"worktree outside C:\\hiro\\env1-5: {path}", f"git -C {d} worktree remove {path}")
+        for b in git(d, "for-each-ref", "--format=%(refname:short)", "refs/heads/plan/").split():
+            if b not in open_plans:  # its plan closed, landed, was renamed, or never sent as shipping whole
+                found("plan", repo, f"{b}: no open plan ships whole on it", f"hiro-work plan list; git -C {d} branch -D {b}")
         main = main_of(repo)
-        merged = merged_left(git(d, "branch", "--merged", main), main)
+        merged = merged_left(git(d, "branch", "--merged", main), main, tuple(open_plans))
         if merged:
             found("merged", repo, f"{len(merged)} merged branch(es) kept: {', '.join(merged)}",
                   f"git -C {d} branch -d {' '.join(merged)}")

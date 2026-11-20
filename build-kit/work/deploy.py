@@ -802,6 +802,11 @@ def show_open(out: Out, plan) -> None:
     lines = still_open(plan)
     if lines:
         out("\nStill working, not in this deploy: " + "; ".join(lines))
+    # A plan that ships whole reaches main only when it lands: its branch's work isn't in this deploy
+    import plan as plans
+
+    if held := plans.unlanded():
+        out("\nPlans not landed, not in this deploy: " + "; ".join(held))
 
 
 def cmd_deploy(a) -> None:

@@ -7,7 +7,12 @@ change, the session sends them, through the same outbox as every step (C:\hiro\l
                                   the plan as it stands now, from a JSON file (below): one event, the whole plan
     hiro-work plan list           every plan sent: its phases live, and when it was last sent
     hiro-work plan show NAME      a plan as last sent
-    hiro-work plan close NAME     the plan stops here: its open tasks are cancelled, its phases not done yet too
+    hiro-work plan close NAME     the plan stops here: its open tasks are cancelled, its phases not done yet too;
+                                  a plan that ships whole has its branch set aside (cancelled/plan/<name>)
+    hiro-work plan land NAME [--env N]
+                                  a plan that ships whole lands: a task from main (land-<name>) merges what its
+                                  branch holds, as one merge commit per repo; `hiro-work merge land-<name>` checks it
+                                  and brings it onto main
 
 Each send is the whole plan, never a change to it: CodeHiro shows the latest, and works out what changed between two
 sends. A send never drops by accident a phase that is live, merged or has tasks: one the last send had and this one
@@ -30,8 +35,8 @@ task the file names. The file:
                                                     (plan/<name>: its phases merge into it, it reaches main when it
                                                     lands); left out, "phases": each phase merges into main
      "phases": [{"name": "Mockup of the board",     in the plan's order
-                 "state": "live",                   live | check | merged | working | review | paused | next | waits |
-                                                    todo | cancelled
+                 "state": "live",                   live | check | merged | inplan (done, held in its plan's branch) |
+                                                    working | review | paused | next | waits | todo | cancelled
                  "says": "",                        optional: the state in the plan's words ("Waits on Q2")
                  "needs": "1, Q2",                  optional: what it needs first
                  "tasks": ["chores-mockup"]}]}      optional: the tasks that work on this phase, by id
@@ -44,6 +49,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -54,14 +60,16 @@ from audit import when
 STEP = "plan-sent"
 # A phase's states, as plans.md's key names them: live, live with a check left, merged and not deployed, being
 # worked on, in review, next, waits on a decision, not started
-STATES = ("live", "check", "merged", "working", "review", "paused", "next", "waits", "todo", "cancelled")
+STATES = ("live", "check", "merged", "inplan", "working", "review", "paused", "next", "waits", "todo", "cancelled")
 SHIPPED = ("live", "check")
 # A phase in one of these is finished: the plan ends when all are
 FINAL = (*SHIPPED, "cancelled")
 # A phase in one of these holds work a send must not drop by accident (it has tasks too)
-KEPT = (*SHIPPED, "merged")
+# "inplan": a phase merged into its plan's branch, which lands on main later
+KEPT = (*SHIPPED, "merged", "inplan")
 # How a phase's state reads in hiro-work's own lines
-SAYS = {"next": "Next", "paused": "Paused", "working": "Being worked on", "cancelled": "Cancelled"}
+SAYS = {"next": "Next", "paused": "Paused", "working": "Being worked on", "cancelled": "Cancelled",
+        "inplan": "In the plan", "merged": "Merged"}
 # The plan's fields a send carries, besides its phases (a resend keeps them: a pause keeps the plan's branch)
 FIELDS = ("doc", "design", "about", "tasks", "needs_michel", "side_by_side", "ships", "branch")
 # How a plan ships: phase by phase into main (the default), or whole, on its own branch
@@ -279,13 +287,158 @@ def cmd_close(a) -> None:
         hw.can_cancel(t)
     for t in tasks:
         hw.cancel_task(t)
+    # A phase In the plan never reached main: closing the plan drops it with its branch
     phases = [{**ph, "state": "cancelled", "says": ""} if ph.get("state") not in (*FINAL, "merged") else dict(ph)
               for ph in plan["phases"]]
     resend(plan, phases)
+    aside = set_aside(plan)
     count = {s: sum(1 for ph in phases if ph["state"] in s) for s in (SHIPPED, ("cancelled",), ("merged",))}
     waits = f", {count[('merged',)]} merged (it ends once they are live)" if count[("merged",)] else ""
     hw.say(f"Plan {plan['plan']} closed: {count[SHIPPED]} live, {count[('cancelled',)]} cancelled{waits}. Update the "
            "plan doc to match (a closed plan opens again with a send that has a phase still to do).")
+    if aside:
+        hw.say(f"  {plan['branch']} set aside as {aside_branch(plan['branch'])} in {', '.join(aside)}: main never "
+               "had it; a send that opens the plan again takes it back.")
+
+
+def is_open(plan: dict) -> bool:
+    """A plan with a phase still to do: not every phase live or cancelled."""
+    return any(ph.get("state") not in FINAL for ph in plan["phases"])
+
+
+def whole_branches(open_only: bool = True) -> dict[str, str]:
+    """branch -> plan name, for every plan that ships whole (only the open ones by default), as last sent."""
+    return {str(p["branch"]): str(p["plan"]) for p in plans(read_log(hw.EVENTS))
+            if p.get("ships") == "whole" and p.get("branch") and (is_open(p) or not open_only)}
+
+
+def ahead(repo: str, branch: str) -> int:
+    """How many commits a branch holds that the repo's dev/main lacks (0 when it has none)."""
+    if not hw.branch_tip(repo, branch):
+        return 0
+    return int(hw.git(hw.repo_dir(0, repo), "rev-list", "--count", f"{hw.main_of(repo)}..{branch}") or 0)
+
+
+def unlanded() -> list[str]:
+    """The open plans whose branch holds work main lacks, each with its repos: the deploy names them (its work isn't
+    in it until the plan lands)."""
+    out = []
+    for branch, name in whole_branches().items():
+        repos = [r for r in hw.REPOS if ahead(r, branch)]
+        if repos:
+            out.append(f"{name} ({branch}: {', '.join(repos)})")
+    return out
+
+
+def aside_branch(branch: str) -> str:
+    return f"cancelled/{branch}"
+
+
+def set_aside(plan: dict) -> list[str]:
+    """A closed plan's branch: renamed cancelled/plan/<name> where it holds work main lacks (a reopened plan takes it
+    back), removed where it holds none. Returns the repos where it was set aside."""
+    branch = plan.get("branch") if plan.get("ships") == "whole" else ""
+    kept = []
+    for repo in hw.REPOS if branch else []:
+        at = hw.branch_tip(repo, branch)
+        if not at:
+            continue
+        d = hw.repo_dir(0, repo)
+        if ahead(repo, branch):
+            # -M's way, by refs: a plan closed, reopened and closed again replaces its older copy
+            hw.git(d, "update-ref", f"refs/heads/{aside_branch(branch)}", at)
+            kept.append(repo)
+        hw.git(d, "update-ref", "-d", f"refs/heads/{branch}", at)
+    return kept
+
+
+def take_back(plan: dict) -> list[str]:
+    """A send that opens a closed plan again: its branch comes back from cancelled/plan/<name> where it has none."""
+    branch = plan.get("branch") if plan.get("ships") == "whole" and is_open(plan) else ""
+    back = []
+    for repo in hw.REPOS if branch else []:
+        at = hw.branch_tip(repo, aside_branch(branch))
+        if at and not hw.branch_tip(repo, branch):
+            d = hw.repo_dir(0, repo)
+            hw.git(d, "update-ref", f"refs/heads/{branch}", at, "")
+            hw.git(d, "update-ref", "-d", f"refs/heads/{aside_branch(branch)}", at)
+            back.append(repo)
+    return back
+
+
+def land_id(branch: str) -> str:
+    """The landing task's id: land-<the plan's slug> (plan/logging-and-tracing lands as land-logging-and-tracing)."""
+    return f"land-{branch.removeprefix('plan/')}"[:64]
+
+
+def cmd_land(a) -> None:
+    """A plan that ships whole lands: a task from main (land-<slug>) reserves each repo where the plan's branch holds
+    work main lacks, and merges that branch there as one merge commit ("Land <plan>", main its first parent, so a
+    landed plan is backed out as one: git revert -m 1). Its merge (hiro-work merge land-<slug>) checks it and brings it
+    onto main like any task. The plan's open phases carry on; their work lands next time."""
+    if not a.name:
+        raise hw.Stop("hiro-work plan land NAME")
+    plan = latest(a.name)
+    if not plan:
+        raise hw.Stop(f"No plan {a.name} (hiro-work plan list).")
+    branch = plan.get("branch") if plan.get("ships") == "whole" else ""
+    if not branch:
+        raise hw.Stop(f"Plan {plan['plan']} ships phase by phase: each phase merges into main, nothing lands.")
+    tasks = hw.load_tasks()
+    if landing := next((t for t in tasks if t.state in ("working", "paused") and t.lands == branch), None):
+        raise hw.Stop(f"Plan {plan['plan']} is landing already: {landing.id}. Merge it (hiro-work merge {landing.id}) "
+                      "or cancel it first.")
+    repos = [r for r in hw.REPOS if ahead(r, branch)]
+    if not repos:
+        raise hw.Stop(f"Plan {plan['plan']} has nothing to land: {branch} holds nothing main lacks.")
+    phases = [ph["name"] for ph in plan["phases"] if ph.get("state") == "inplan"]
+    tid = land_id(branch)
+    hw.cmd_start(argparse.Namespace(
+        task=tid, repos=",".join(repos), kit=False, title=f"Land {plan['plan']}", env=a.env, part_of=plan["plan"],
+        own_branch=True, on_main=True, about=f"Lands plan {plan['plan']}: what {branch} holds, onto main",
+        preset=hw.switches.DEFAULT, set=None, data="env0", quick_sign_in=False, as_person=None, lands=branch,
+        lands_phases=phases))
+    task = hw.get(tid)
+    conflicts = []
+    for repo in repos:
+        d, at = hw.repo_dir(task.env, repo), hw.branch_tip(repo, branch)
+        task.landed[repo] = at  # what this landing brings: a phase that merges into the plan meanwhile lands next time
+        with hw.step(tid, task.env, "land", repo):
+            out = subprocess.run(["git", "-C", str(d), "merge", "--no-ff", "--no-edit", "-q", "-m",
+                                  f"Land {plan['plan']}", at], capture_output=True, text=True,
+                                 creationflags=hw.NO_WINDOW)
+            if out.returncode != 0:
+                hw.git(d, "merge", "--abort", check=False)
+                conflicts.append(f"{d}: git merge --no-ff -m \"Land {plan['plan']}\" {at}")
+    with hw.locked():
+        hw.save(task)
+    open_phases = [t.id for t in tasks if t.state in ("working", "paused") and t.target == branch]
+    if open_phases:
+        hw.say(f"  Not in this landing, still open on {branch}: {', '.join(open_phases)}. Their work lands next time.")
+    if conflicts:
+        raise hw.Stop(f"Plan {plan['plan']} conflicts with main. Resolve it in each folder, then commit, then "
+                      f"hiro-work merge {tid}: " + "; ".join(conflicts))
+    hw.say(f"Plan {plan['plan']} is ready to land: {tid} holds {branch} merged onto main in {', '.join(repos)}. "
+           f"Next: hiro-work merge {tid} (every check runs; then main has it).")
+
+
+def landed(task) -> list[str]:
+    """After a landing's merge: the phases that were In the plan when it started are Merged (on main, not deployed).
+    Returns what to tell the session."""
+    plan = latest(task.part_of) if task.part_of else None
+    if not plan or not task.lands_phases:
+        return []
+    phases, moved = [], []
+    for i, ph in enumerate(plan["phases"], 1):
+        ph = dict(ph)
+        if ph["name"] in task.lands_phases and ph.get("state") == "inplan":
+            ph["state"], ph["says"] = "merged", ""
+            moved.append(f"phase {i} ({ph['name']})")
+        phases.append(ph)
+    if not moved:
+        return []
+    resend(plan, phases)
+    return [f"Plan {plan['plan']}: {', '.join(moved)} now Merged in CodeHiro. Update the plan doc to match."]
 
 
 def shipped(plan: dict) -> str:
@@ -312,6 +465,8 @@ def cmd_send(a) -> None:
            "delivers it.")
     if gone:
         hw.say(f"  {old['branch']} held nothing main lacks: removed from {', '.join(gone)}.")
+    if back := take_back(plan):
+        hw.say(f"  {plan['branch']} is back from {aside_branch(plan['branch'])} in {', '.join(back)}.")
 
 
 def cmd_show(a) -> None:
@@ -349,16 +504,20 @@ def cmd_plan(a) -> None:
         cmd_show(a)
     elif a.what == "close":
         cmd_close(a)
+    elif a.what == "land":
+        cmd_land(a)
     else:
-        raise hw.Stop("hiro-work plan send FILE | list | show NAME | close NAME")
+        raise hw.Stop("hiro-work plan send FILE | list | show NAME | close NAME | land NAME")
 
 
 def add_parser(sub) -> None:
-    p = sub.add_parser("plan", help="a plan's phases, sent to CodeHiro: send FILE, list, show NAME, close NAME",
+    p = sub.add_parser("plan", help="a plan's phases, sent to CodeHiro: send FILE, list, show NAME, close NAME, "
+                                    "land NAME",
                        formatter_class=argparse.RawDescriptionHelpFormatter,
                        description=__doc__.split("\n\n", 1)[1].rsplit("\n\n", 1)[0])
-    p.add_argument("what", help="send, list, show or close")
-    p.add_argument("name", nargs="?", help="send: the plan's JSON file; show, close: the plan's name")
+    p.add_argument("what", help="send, list, show, close or land")
+    p.add_argument("name", nargs="?", help="send: the plan's JSON file; show, close, land: the plan's name")
+    p.add_argument("--env", type=int, choices=list(hw.ENVS), help="land: the environment the landing works in")
     p.add_argument("--remove", action="append", metavar="PHASE",
                    help="send: a phase the last send had that this one leaves out on purpose (once per phase)")
     p.set_defaults(func=cmd_plan)
