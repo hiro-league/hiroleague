@@ -92,7 +92,13 @@ def fields_of(record: logging.LogRecord) -> dict[str, Any]:
     for key, v in record.__dict__.items():
         if key not in _RECORD_KEYS and key not in _OURS and not key.startswith("_"):
             found[key] = v
-    return {k: (HIDDEN if is_secret(k) else _value(v)) for k, v in found.items()}
+    return hide_secrets(found)
+
+
+def hide_secrets(fields: dict[str, Any]) -> dict[str, Any]:
+    """The fields as JSON can hold them, with every field whose name says it holds a secret written as "[hidden]"
+    (inside lists and dicts too). The core's log store applies it again to the lines other parts send it."""
+    return {str(k): (HIDDEN if is_secret(str(k)) else _value(v)) for k, v in fields.items()}
 
 
 def body_of(record: logging.LogRecord) -> str:

@@ -39,6 +39,8 @@ from .sign_in_for_extensions import SIGN_IN_REQUEST_HANDLERS
 from .site_names import SITE_NAMES_REQUEST_HANDLERS
 from .extensions_for_extensions import EXTENSIONS_REQUEST_HANDLERS
 from .asks_between_extensions import ASK_REQUEST_HANDLERS
+from .device_problems import DEVICE_PROBLEM_HANDLERS
+from .logs_for_extensions import LOGS_REQUEST_HANDLERS
 from .uses_for_extensions import USES_REQUEST_HANDLERS
 from .envelope_factory import EnvelopeFactory
 from .notify import NOTIFY_REQUEST_HANDLERS
@@ -341,6 +343,8 @@ _REGISTERED_HANDLERS: Final[tuple[tuple[str, Any, frozenset[str]], ...]] = (
     *SITE_NAMES_REQUEST_HANDLERS,  # sites.claim: an app's LAN name, set up by the core
     *EXTENSIONS_REQUEST_HANDLERS,  # extensions.list: every paired extension and its repo (the code reports)
     *ASK_REQUEST_HANDLERS,  # Phase 9b: extensions.ask (one extension asks another, through the core)
+    *LOGS_REQUEST_HANDLERS,  # logs.send: an app's log lines into the core's log store (the logging plan, phase 5)
+    *DEVICE_PROBLEM_HANDLERS,  # logs.report: the device app's problems into the log store (the logging plan, phase 8)
 )
 
 REGISTERED_REQUEST_METHOD_NAMES: frozenset[str] = frozenset(

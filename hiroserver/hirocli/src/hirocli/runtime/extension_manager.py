@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import json
+from logging import DEBUG
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -52,6 +53,7 @@ from hiro_channel_sdk.constants import (
     EXTENSION_MAX_MESSAGE_BYTES,
     EXTENSION_REQUEST_TIMEOUT_SECONDS,
     METHOD_EXTENSION_INFO,
+    METHOD_LOGS_SEND,
     MESSAGE_TYPE_EVENT,
     MESSAGE_TYPE_REQUEST,
     MESSAGE_TYPE_RESPONSE,
@@ -89,6 +91,8 @@ if TYPE_CHECKING:
     from .server_context import ServerContext
 
 log = Logger.get("EXTENSIONS")
+
+_QUIET_METHODS = frozenset({METHOD_LOGS_SEND})  # answered with no line of their own (see _answer)
 
 # After this many wrong pairing codes the current code is dropped; the admin must
 # show a new one. Codes are short, so this keeps guessing pointless.
@@ -471,9 +475,13 @@ class ExtensionManager:
         # The app's request continues the story its frame carries (a page request, a camera check...): every line the
         # handler logs here (the AI ask, an ask passed on to another app) carries the app's story id, and a request the
         # core sends on (extensions.ask) carries it further (build_request).
-        with story.begin("extension.request", parent=msg.routing.metadata, area="EXTENSIONS", level=FINEINFO,
-                         extension=conn.name, method=method):
-            log.info(f"⬇️ Extension request — {conn.name} · {method}", extension_id=conn.extension_id)
+        # An app's log lines (logs.send) come every few seconds while it logs: answered without a line of their own,
+        # or the core's log would hold a line for every batch of every app's.
+        quiet = method in _QUIET_METHODS
+        with story.begin("extension.request", parent=msg.routing.metadata, area="EXTENSIONS",
+                         level=DEBUG if quiet else FINEINFO, extension=conn.name, method=method):
+            (log.debug if quiet else log.info)(f"⬇️ Extension request — {conn.name} · {method}",
+                                               extension_id=conn.extension_id)
             send = partial(self._send_to, conn)
             try:
                 response = await self._request_handler.handle(msg, emit_outbound=send, caller=CALLER_EXTENSION)

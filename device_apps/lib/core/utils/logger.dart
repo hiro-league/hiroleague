@@ -1,8 +1,10 @@
 import 'package:talker/talker.dart';
 
 import '../logging/app_talker.dart';
+import '../logging/device_problems.dart';
 
-/// Structured logger backed by [Talker] (console, in-app log UI, file on mobile/desktop).
+/// Structured logger backed by [Talker] (console, in-app log UI, file on mobile/desktop); its warnings and errors
+/// also go to the core's log ([DeviceProblems]).
 /// Usage:
 ///   final _log = Logger.get('GatewayClient');
 ///   _log.info('Connected', fields: {'url': url});
@@ -57,5 +59,16 @@ class Logger {
       exception: error,
       stackTrace: stackTrace,
     );
+    // Warnings and errors are problems: they go to the core's log too, fields made safe there (device_problems.dart).
+    if (level == LogLevel.warning || level == LogLevel.error) {
+      deviceProblems.record(
+        level: level == LogLevel.error ? 'ERROR' : 'WARNING',
+        area: _tag,
+        message: message,
+        fields: fields,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
   }
 }

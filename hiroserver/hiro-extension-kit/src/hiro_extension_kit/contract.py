@@ -50,10 +50,11 @@ KIT_NOT_JSON: frozenset[tuple[str, str]] = frozenset({
     ("GET", "/api/auth/signout"),  # HiroLeague's Sign out passes through, a redirect back there
 })
 
-# The kit's routes every app on the kit mounts: sign-in and who is asking, Settings → HiroLeague, the app switcher.
+# The kit's routes every app on the kit mounts: sign-in and who is asking, Settings → HiroLeague, the app switcher,
+# its pages' problems.
 KIT_ROUTES: tuple[tuple[str, str], ...] = (
     ("GET", "/api/me"), ("GET", "/api/auth/start"), ("GET", "/api/users"), ("GET", "/api/roles"),
-    ("GET", "/api/hiroleague"), ("GET", "/api/apps"),
+    ("GET", "/api/hiroleague"), ("GET", "/api/apps"), ("POST", "/api/page-problems"),
 )
 
 

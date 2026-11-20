@@ -9,7 +9,17 @@ The files, in the workspace's logs folder (and the gateway's):
 - `server-<YYYY-MM-DD>.jsonl`: the server process;
 - `cli-<YYYY-MM-DD>.jsonl`: every `hiro` command;
 - `channel-<name>-<YYYY-MM-DD>.jsonl`: each channel plugin;
-- `gateway-<YYYY-MM-DD>.jsonl`, and the gateway instance's `stderr.log` (a crash before its logging started).
+- `gateway-<YYYY-MM-DD>.jsonl`, and the gateway instance's `stderr.log` (a crash before its logging started);
+- the log store's streams (services/log_store.py): the lines every other part sends the core, `app-<name>-<day>.jsonl`
+  for each app (`app-home`, `app-net`...), and any other stream a part writes (the device app's `device`).
+
+Sources: `all` (every stream: the core's and every app's), `core` (the core's own: server, CLI, channels, gateway; the
+admin Logs page reads these), `server`, `cli`, `channels`, `gateway`, `apps` (every app's), or one stream by its name
+(`app-home`, or the app's own name, `home`; `device`).
+
+Two questions answer across every part at once: `log_problems` (what went wrong in a span of time) and `log_story`
+(everything one story did, by its id). Their rows are brief, for an agent to read: the time in words, the source, the
+level, the area, the message, the fields and the story id.
 
 A row keeps the shape the admin Logs page has always read (time, level, module, message, extra, the scope fields...).
 Its source is the file's, except that the server's and the CLI's are told apart by module, as they always were: a
@@ -23,12 +33,14 @@ import datetime
 import html as _html
 import json
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from hiro_commons.log import Logger
 from hiro_commons.logging_foundation import daily, story
+from hiro_commons.timestamps import human_datetime
 from hiro_commons.logging_foundation.line import Line, parse
 
 from .base import Tool, ToolParam
@@ -55,6 +67,10 @@ _SEARCH_BYTES = 24 * 1024 * 1024
 # Expand a time-range read until the oldest row is before *min_ts*, the files run out, or this many rows.
 _TAIL_SINCE_MAX_LINES = 300_000
 _STARTUP_MESSAGE = "🚀 Hiro Server starting"
+_SOURCE_HELP = (
+    "Log source: 'all' (the core and every app, the default), 'core' (server, channels, gateway, CLI), 'server', "
+    "'channels', 'gateway', 'cli', 'apps' (every app), or one app by its name ('home', 'net') or stream ('app-home')"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +169,26 @@ def channel_names(log_dir: Path) -> list[str]:
     return sorted(names)
 
 
+_DAILY_FILE = re.compile(r"^(?P<name>.+)-\d{4}-\d{2}-\d{2}\.jsonl$")
+_CORE_STREAMS = ("server", "cli", "gateway")  # (the gateway's folder may be the core's)
+_APP_PREFIX = "app-"
+
+
+def stream_names(log_dir: Path) -> list[str]:
+    """Every stream with a daily file in the folder: the core's own and the log store's (each app's, the device's)."""
+    names = set()
+    if log_dir.is_dir():
+        for path in log_dir.glob("*.jsonl"):
+            m = _DAILY_FILE.match(path.name)
+            if m:
+                names.add(m["name"])
+    return sorted(names)
+
+
+def _is_core_stream(name: str) -> bool:
+    return name in _CORE_STREAMS or name.startswith("channel-")
+
+
 def has_files(folder: Path | None, name: str) -> bool:
     return folder is not None and bool(daily.files(folder, name))
 
@@ -164,21 +200,36 @@ def _collect_log_files(
 ) -> list[LogStream]:
     """The streams for the requested source(s)."""
     streams: list[LogStream] = []
-    src = (source or "all").lower()
+    src = (source or "all").strip().lower()
+    core = src in ("all", "core")
 
     # The server's and the CLI's files are read together: each row's source comes from its module (see _source_of).
-    if src in ("all", "server", "cli"):
+    if core or src in ("server", "cli"):
         streams.append(LogStream("server", log_dir, "server"))
         streams.append(LogStream("cli", log_dir, "cli"))
 
-    if src in ("all", "channels"):
+    if core or src == "channels":
         for channel in channel_names(log_dir):
             streams.append(LogStream(f"channel-{channel}", log_dir, f"channel-{channel}"))
 
-    if src in ("all", "gateway") and gateway_log_dir is not None:
+    # The log store's streams: what the apps (and the device app) sent the core
+    others = [n for n in stream_names(log_dir) if not _is_core_stream(n)]
+    if src == "all":
+        wanted = others
+    elif src == "apps":
+        wanted = [n for n in others if n.startswith(_APP_PREFIX)]
+    elif src in others:
+        wanted = [src]
+    elif f"{_APP_PREFIX}{src}" in others:  # an app by its own name: "home"
+        wanted = [f"{_APP_PREFIX}{src}"]
+    else:
+        wanted = []
+    streams.extend(LogStream(name, log_dir, name) for name in wanted)
+
+    if (core or src == "gateway") and gateway_log_dir is not None:
         streams.append(LogStream("gateway", gateway_log_dir, "gateway"))
 
-    if src in ("all", "gateway"):
+    if core or src == "gateway":
         gateway_instance_path = _resolve_gateway_instance_path()
         if gateway_instance_path is not None:
             stderr_file = gateway_instance_path / "stderr.log"
@@ -616,8 +667,9 @@ def _apply_scope_filter(
     msg_id: str | None = None,
     method: str | None = None,
     traffic_classes: list[str] | None = None,
+    story_id: str | None = None,
 ) -> list[dict]:
-    """Exact-match filter on parsed scope fields (device_id / msg_id / method / traffic_class).
+    """Exact-match filter on parsed scope fields (device_id / msg_id / method / traffic_class), and on the story.
 
     Filters AND together: a row must satisfy every non-None constraint. ``traffic_classes``
     is OR within itself (any-of) and AND with the others.
@@ -626,9 +678,12 @@ def _apply_scope_filter(
     msg_id = (msg_id or "").strip() or None
     method = (method or "").strip() or None
     tcl_set = {tc.strip() for tc in (traffic_classes or []) if tc and tc.strip()} or None
-    if not any([device_id, msg_id, method, tcl_set]):
+    story_id = story_id_of(story_id) if (story_id or "").strip() else None
+    if not any([device_id, msg_id, method, tcl_set, story_id]):
         return rows
     result = rows
+    if story_id:
+        result = [r for r in result if r.get("story_id") == story_id]
     if device_id:
         result = [r for r in result if r.get("scope_device_id") == device_id]
     if msg_id:
@@ -671,13 +726,13 @@ class LogTailResult:
 class LogSearchTool(Tool):
     name = "log_search"
     description = (
-        "Search server, channel, gateway, and CLI log files for entries matching "
+        "Search the logs of the core (server, channels, gateway, CLI) and of every app for entries matching "
         "the given filters. Rows are returned sorted by timestamp."
     )
     params = {
         "source": ToolParam(
             str,
-            "Log source: 'server', 'channels', 'gateway', 'cli', or 'all' (default: 'all')",
+            _SOURCE_HELP,
             required=False,
         ),
         "level": ToolParam(
@@ -717,6 +772,11 @@ class LogSearchTool(Tool):
             "Comma-separated for multi-select; matches any.",
             required=False,
         ),
+        "story_id": ToolParam(
+            str,
+            "Only the lines of this story (its 32-hex id, a W3C traceparent, or a chat message's id), from every source",
+            required=False,
+        ),
         "limit": ToolParam(
             int,
             f"Maximum rows to return (default {_DEFAULT_SEARCH_LIMIT})",
@@ -741,6 +801,7 @@ class LogSearchTool(Tool):
         traffic_class: str | list[str] | None = None,
         limit: int | None = None,
         workspace: str | None = None,
+        story_id: str | None = None,
     ) -> LogSearchResult:
         log_dir = _resolve_log_dir(workspace)
         gateway_log_dir = _resolve_gateway_log_dir()
@@ -770,6 +831,7 @@ class LogSearchTool(Tool):
             msg_id=msg_id,
             method=method,
             traffic_classes=traffic_classes or None,
+            story_id=story_id,
         )
         all_rows.sort(key=lambda r: float(r.get("timestamp", 0)))
 
@@ -796,7 +858,7 @@ class LogTailTool(Tool):
     params = {
         "source": ToolParam(
             str,
-            "Log source: 'server', 'channels', 'gateway', 'cli', or 'all' (default: 'all')",
+            _SOURCE_HELP,
             required=False,
         ),
         "lines": ToolParam(
@@ -868,3 +930,280 @@ class LogTailTool(Tool):
         all_rows = _keep_source(all_rows, source)
         all_rows.sort(key=lambda r: float(r.get("timestamp", 0)))
         return LogTailResult(rows=all_rows, file_offsets=new_offsets)
+
+
+# ---------------------------------------------------------------------------
+# One question across every part: the problems in a span, a whole story
+# ---------------------------------------------------------------------------
+
+_PROBLEM_LEVEL = "WARNING"
+_DEFAULT_SPAN = "1h"
+_DEFAULT_PROBLEM_ROWS = 100
+_DEFAULT_STORY_ROWS = 1000
+_SPAN = re.compile(r"^\s*(?P<n>\d+(?:\.\d+)?)\s*(?P<unit>s|sec|m|min|h|hr|hour|hours|d|day|days)\s*$", re.I)
+_UNIT_SECONDS = {"s": 1, "sec": 1, "m": 60, "min": 60, "h": 3600, "hr": 3600, "hour": 3600, "hours": 3600,
+                 "d": 86400, "day": 86400, "days": 86400}
+_HEX32 = re.compile(r"^[0-9a-f]{32}$")
+_SAMPLES = 3
+_VARIES = re.compile(r"\b[0-9a-f]*\d[0-9a-f]*\b", re.I)  # numbers and hex ids: what changes between repeats
+
+
+def _kind(message: str) -> str:
+    """A message with its numbers and ids blanked: "retrying in 5 s" and "retrying in 10 s" are one kind."""
+    return _VARIES.sub("#", message)
+
+_TRACEPARENT = re.compile(r"^[0-9a-f]{2}-(?P<trace>[0-9a-f]{32})-[0-9a-f]{16}-[0-9a-f]{2}$")
+# A line at WARNING or above, read off the raw text before parsing it (the foundation writes compact JSON)
+_PROBLEM_MARKS = ('"SeverityNumber":13', '"SeverityNumber":17', '"SeverityNumber":21', '"SeverityText":"WARNING"',
+                  '"SeverityText":"ERROR"', '"SeverityText":"CRITICAL"')
+
+
+def moment(value: str | float | None, *, now: float | None = None) -> float | None:
+    """A moment as epoch seconds: a span back from now ("90m", "1h", "2d"), an ISO time ("2026-11-20T13:15", the
+    house's time when it names no zone), or epoch seconds. None when empty; ValueError when unreadable."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = value.strip()
+    now = time.time() if now is None else now
+    m = _SPAN.match(text)
+    if m:
+        return now - float(m["n"]) * _UNIT_SECONDS[m["unit"].lower()]
+    try:
+        return float(text)
+    except ValueError:
+        pass
+    try:
+        at = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"Not a time or a span: {value!r} (say '1h', '30m', '2d' or an ISO time).") from exc
+    return (at if at.tzinfo else at.astimezone()).timestamp()
+
+
+def story_id_of(value: str) -> str:
+    """The story id a value names: a story id (32 hex digits), a W3C traceparent, or any other id (a chat message's
+    id gives its story's, story.id_for)."""
+    text = (value or "").strip().lower()
+    if _HEX32.match(text):
+        return text
+    m = _TRACEPARENT.match(text)
+    if m:
+        return m["trace"]
+    return story.id_for((value or "").strip())
+
+
+def _when(ts: float) -> str:
+    """A row's time for people: "Today, 1:15:46 PM"."""
+    dt = _epoch_to_dt(ts)
+    return human_datetime(dt, seconds=True) if dt is not None else str(ts)
+
+
+def brief(row: dict[str, Any]) -> dict[str, Any]:
+    """A row as an agent reads it: no HTML, the time in words, the fields as a dict."""
+    out: dict[str, Any] = {
+        "when": _when(float(row.get("timestamp", 0))),
+        "timestamp": row.get("timestamp"),
+        "source": row.get("source", ""),
+        "level": row.get("level", ""),
+        "area": row.get("module", ""),
+        "message": row.get("message", ""),
+    }
+    fields = {k: v for k, v in (row.get("fields") or [])}
+    if fields:
+        out["fields"] = fields
+    if row.get("story_id"):
+        out["story_id"] = row["story_id"]
+    return out
+
+
+def _read_matching(path: Path, label: str, marks: tuple[str, ...], since: float | None = None) -> list[dict[str, Any]]:
+    """The rows of one file whose raw line holds one of `marks` (cheap: only those are parsed), at or after `since`.
+    A plain stderr file's rows are all errors: all of them."""
+    if path.suffix == ".log":
+        rows = _read_all_rows(path, label)
+    else:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            log.debug("A log file couldn't be read", file=str(path), error=str(exc))
+            return []
+        rows = [_row(parsed, label) for raw in text.splitlines()
+                if any(mk in raw for mk in marks) and (parsed := parse(raw)) is not None]
+    if since is not None:
+        rows = [r for r in rows if float(r["timestamp"]) >= since]
+    return rows
+
+
+def _streams_rows(streams: list[LogStream], marks: tuple[str, ...], since: float | None) -> list[dict[str, Any]]:
+    """Every stream's rows holding a mark: the days from `since` on (or the newest files up to the search budget)."""
+    first_day = datetime.datetime.fromtimestamp(since).astimezone().date() if since is not None else None
+    rows: list[dict[str, Any]] = []
+    for stream in streams:
+        budget = _SEARCH_BYTES
+        for day, path in stream.files():
+            if first_day is not None and day is not None and day < first_day:
+                break  # a line is never in an earlier day's file than its own (the store writes late lines later)
+            if first_day is None:
+                try:
+                    size = path.stat().st_size
+                except OSError:
+                    continue
+                if budget < _SEARCH_BYTES and size > budget:
+                    break
+                budget -= size
+            rows.extend(_read_matching(path, stream.label, marks, since))
+    return rows
+
+
+@dataclass
+class LogProblemsResult:
+    span: str = ""  # the span in words: "Today, 12:15:00 PM to Today, 1:15:00 PM"
+    total: int = 0
+    by_source: dict[str, int] = field(default_factory=dict)  # problems per source, most first
+    # One per part, level and area: count, kinds (how many different messages), messages (the latest few kinds),
+    # first and last time (words), a few story ids; errors first, then the most frequent
+    groups: list[dict[str, Any]] = field(default_factory=list)
+    rows: list[dict[str, Any]] = field(default_factory=list)  # the newest problems, brief rows, oldest first
+    truncated: bool = False
+
+
+class LogProblemsTool(Tool):
+    name = "log_problems"
+    description = (
+        "What went wrong in a span of time, across the core (server, channels, gateway, CLI) and every app: the "
+        "warnings and errors of every part, grouped by part and area (with counts, the latest messages, first and last "
+        "time, and story ids to follow with log_story), and the newest problem lines with their fields and tracebacks."
+    )
+    params = {
+        "since": ToolParam(
+            str,
+            "Start of the span: back from now ('1h', '30m', '2d') or an ISO time (default '1h')",
+            required=False,
+        ),
+        "until": ToolParam(str, "End of the span: back from now or an ISO time (default: now)", required=False),
+        "level": ToolParam(str, "Lowest level counted: WARNING (default), ERROR or CRITICAL", required=False),
+        "source": ToolParam(str, _SOURCE_HELP, required=False),
+        "limit": ToolParam(int, f"How many problem lines to return (default {_DEFAULT_PROBLEM_ROWS})", required=False),
+        "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
+    }
+
+    def execute(
+        self,
+        since: str | None = None,
+        until: str | None = None,
+        level: str | None = None,
+        source: str | None = None,
+        limit: int | None = None,
+        workspace: str | None = None,
+    ) -> LogProblemsResult:
+        now = time.time()
+        start = moment(since or _DEFAULT_SPAN, now=now)
+        end = moment(until, now=now) or now
+        assert start is not None
+        lowest = (level or _PROBLEM_LEVEL).upper()
+        if _LEVEL_ORDER.get(lowest, 0) < _LEVEL_ORDER[_PROBLEM_LEVEL]:
+            lowest = _PROBLEM_LEVEL  # a problem is a warning or worse: search the rest with log_search
+        streams = _collect_log_files(_resolve_log_dir(workspace), _resolve_gateway_log_dir(), source or "all")
+        rows = _streams_rows(streams, _PROBLEM_MARKS, start)
+        rows = _keep_source(rows, source)
+        rows = [r for r in _apply_level_filter(rows, lowest) if float(r["timestamp"]) <= end]
+        rows.sort(key=lambda r: float(r.get("timestamp", 0)))
+
+        # One group per part, level and area: the same problem often names something different each time (a person,
+        # a camera, a retry's delay), so a group shows how many kinds of message it holds and the latest few.
+        groups: dict[tuple[str, str, str], dict[str, Any]] = {}
+        by_source: dict[str, int] = {}
+        for r in reversed(rows):  # newest first: a group's samples are its latest
+            by_source[r["source"]] = by_source.get(r["source"], 0) + 1
+            key = (r["source"], r["level"], r["module"])
+            g = groups.get(key)
+            if g is None:
+                g = groups[key] = {"source": key[0], "level": key[1], "area": key[2], "count": 0, "kinds": set(),
+                                   "messages": [], "first": r["timestamp"], "last": r["timestamp"], "story_ids": []}
+            g["count"] += 1
+            g["first"] = r["timestamp"]
+            kind = _kind(r["message"])
+            if kind not in g["kinds"]:
+                g["kinds"].add(kind)
+                if len(g["messages"]) < _SAMPLES:
+                    g["messages"].append(r["message"])
+            if r.get("story_id") and r["story_id"] not in g["story_ids"] and len(g["story_ids"]) < _SAMPLES:
+                g["story_ids"].append(r["story_id"])
+        ordered = sorted(groups.values(), key=lambda g: (-_LEVEL_ORDER.get(g["level"], 0), -g["count"]))
+        for g in ordered:
+            g["first"], g["last"] = _when(float(g["first"])), _when(float(g["last"]))
+            g["kinds"] = len(g["kinds"])
+        n = limit if limit is not None else _DEFAULT_PROBLEM_ROWS
+        return LogProblemsResult(
+            span=f"{_when(start)} to {_when(end)}",
+            total=len(rows),
+            by_source=dict(sorted(by_source.items(), key=lambda kv: -kv[1])),
+            groups=ordered,
+            rows=[brief(r) for r in rows[-n:]] if n > 0 else [],
+            truncated=len(rows) > n,
+        )
+
+
+@dataclass
+class LogStoryResult:
+    story_id: str = ""
+    sources: list[str] = field(default_factory=list)  # the parts it went through, in the order it reached them
+    started: str = ""  # its first line's time, in words
+    took_ms: int = 0  # from its first line to its last
+    problems: int = 0  # its lines at WARNING or above
+    # Its timed steps, in order: step, source, elapsed_ms, outcome, when, step_id, parent_step
+    steps: list[dict[str, Any]] = field(default_factory=list)
+    rows: list[dict[str, Any]] = field(default_factory=list)  # every line, brief, in order
+    truncated: bool = False
+
+
+class LogStoryTool(Tool):
+    name = "log_story"
+    description = (
+        "Everything one story did, across the core and every app, in order: every line logged under its id (a page "
+        "request, a camera check, a chat message from the phone to the reply), its timed steps with how long each "
+        "took, and which parts it went through. Give a story id (from a log line or log_problems), a W3C traceparent, "
+        "or a chat message's id."
+    )
+    params = {
+        "story_id": ToolParam(str, "The story's id (32 hex digits), a traceparent, or a chat message's id"),
+        "limit": ToolParam(int, f"How many lines at most (default {_DEFAULT_STORY_ROWS})", required=False),
+        "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
+    }
+
+    def execute(self, story_id: str, limit: int | None = None, workspace: str | None = None) -> LogStoryResult:
+        sid = story_id_of(story_id)
+        streams = _collect_log_files(_resolve_log_dir(workspace), _resolve_gateway_log_dir(), "all")
+        streams = [s for s in streams if s.plain is None]  # a plain stderr line has no story
+        rows = [r for r in _streams_rows(streams, (sid,), None) if r.get("story_id") == sid]
+        rows.sort(key=lambda r: float(r.get("timestamp", 0)))
+        n = limit if limit is not None else _DEFAULT_STORY_ROWS
+        result = LogStoryResult(story_id=sid, truncated=len(rows) > n)
+        if not rows:
+            return result
+        for r in rows:
+            if r["source"] not in result.sources:
+                result.sources.append(r["source"])
+            fields = {k: v for k, v in (r.get("fields") or [])}
+            if "step" in fields and "elapsed_ms" in fields:
+                step = {"step": fields["step"], "source": r["source"], "elapsed_ms": _number(fields["elapsed_ms"]),
+                        "outcome": fields.get("outcome", ""), "when": _when(float(r["timestamp"])),
+                        "step_id": r.get("step_id", "")}
+                if fields.get("parent_step"):
+                    step["parent_step"] = fields["parent_step"]
+                result.steps.append(step)
+        first, last = float(rows[0]["timestamp"]), float(rows[-1]["timestamp"])
+        result.started = _when(first)
+        result.took_ms = round((last - first) * 1000)
+        result.problems = len(_apply_level_filter(rows, _PROBLEM_LEVEL))
+        result.rows = [brief(r) for r in rows[:n]]
+        return result
+
+
+def _number(value: Any) -> float | int | str:
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return int(f) if f.is_integer() else f

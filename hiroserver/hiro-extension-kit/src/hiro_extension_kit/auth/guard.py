@@ -27,6 +27,7 @@ def _matches(rule: Rule, method: str, path: str) -> bool:
 # The kit's own routes that every app mounts, with the kit's rule, before the app's own rules: an app needn't list them.
 KIT_RULES: tuple[Rule, ...] = (
     Rule("/api/apps", "signed_in"),  # the app switcher's list (hiroleague_api.py): everyone with a role
+    Rule("/api/page-problems", "signed_in", methods=("POST",)),  # a page's problems, into the log (page_problems.py)
 )
 
 

@@ -28,7 +28,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import OperationalError
 
-from . import identity, stories
+from . import identity, page_problems, stories
 
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -185,6 +185,7 @@ def install(app: FastAPI) -> None:
         return _unexpected_answer(exc)
 
     stories.install(app)  # every request a story (stories.py): every kit app calls this, so each gets it here
+    page_problems.install(app)  # its pages' problems, into its log (page_problems.py), before the app's own routes
     app.add_exception_handler(AppError, expected_answer)
     app.add_exception_handler(OperationalError, database)
     app.add_exception_handler(Exception, unexpected)

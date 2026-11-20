@@ -41,6 +41,7 @@ from hirocli.domain.character import seed_default_characters
 from hirocli.domain.data_store import ensure_data_db
 from hirocli.domain.db import ensure_db
 from hirocli.domain.events import get_domain_event_bus
+from hirocli.services import log_store
 from hirocli.runtime.channel_event_handler import ChannelEventHandler
 from hirocli.runtime.channel_manager import ChannelManager
 from hirocli.runtime.communication_manager import CommunicationManager
@@ -199,6 +200,8 @@ async def _main(
     # catch (a task that failed and was never awaited) land in it too.
     Logger.start(ctx.log_dir, name="server", service="core", console=foreground)
     logging_foundation.watch_loop()
+    # The lines the apps (and the device app) send are kept in the same folder (logs.send; services/log_store.py)
+    log_store.start(ctx.log_dir)
 
     log.info("🚀 Hiro Server starting...", workspace=workspace_name, foreground=foreground, admin=admin)
     log.info(
@@ -353,6 +356,7 @@ async def _main(
             await ctx.knowledge_manager.close()
         ctx.preference_reactor.close()
         get_domain_event_bus().detach_loop()
+        log_store.stop()
 
     if ctx.restart_requested:
         if os.environ.get(ENV_SERVICE_MANAGER) == "systemd":

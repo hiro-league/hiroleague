@@ -83,4 +83,4 @@ def test_the_core_away_or_failing_says_why(link):
 
 
 def test_anyone_with_a_role_may_ask():
-    assert [(r.path, r.who) for r in KIT_RULES] == [("/api/apps", "signed_in")]
+    assert [(r.path, r.who) for r in KIT_RULES] == [("/api/apps", "signed_in"), ("/api/page-problems", "signed_in")]
