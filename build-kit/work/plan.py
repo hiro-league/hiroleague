@@ -225,6 +225,7 @@ def ships_guard(old: dict | None, new: dict) -> list[str]:
     for r in hw.REPOS:
         if at := hw.branch_tip(r, branch):
             hw.git(hw.repo_dir(0, r), "update-ref", "-d", f"refs/heads/{branch}", at)
+            note(hw.copy_off(r, branch, delete=True))
             gone.append(r)
     return gone
 
@@ -348,8 +349,15 @@ def set_aside(plan: dict) -> list[str]:
             # -M's way, by refs: a plan closed, reopened and closed again replaces its older copy
             hw.git(d, "update-ref", f"refs/heads/{aside_branch(branch)}", at)
             kept.append(repo)
+            note(hw.copy_off(repo, aside_branch(branch)))
         hw.git(d, "update-ref", "-d", f"refs/heads/{branch}", at)
+        note(hw.copy_off(repo, branch, delete=True))
     return kept
+
+
+def note(line: str | None) -> None:
+    if line:
+        hw.say(f"  {line}")
 
 
 def take_back(plan: dict) -> list[str]:
@@ -363,6 +371,8 @@ def take_back(plan: dict) -> list[str]:
             hw.git(d, "update-ref", f"refs/heads/{branch}", at, "")
             hw.git(d, "update-ref", "-d", f"refs/heads/{aside_branch(branch)}", at)
             back.append(repo)
+            note(hw.copy_off(repo, branch))
+            note(hw.copy_off(repo, aside_branch(branch), delete=True))
     return back
 
 

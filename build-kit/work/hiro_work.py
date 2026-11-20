@@ -888,6 +888,31 @@ def move_plan_branch(repo: str, branch: str, new: str, old: str) -> None:
         raise Stop(f"{repo}: {branch} moved since this read it (another phase merged into it): merge again.")
 
 
+# Where a plan's branch is copied off the PC: each repo's bare repo on Simone (the `server` remote), whose deploy hook
+# ignores every branch but main. The copy is a note when it fails (Simone away), never a stop.
+COPY_REMOTE = "server"
+COPY_TIMEOUT_S = 60
+
+
+def copy_off(repo: str, branch: str, delete: bool = False) -> str | None:
+    """Copy a plan's branch (or a set-aside one) to the repo's bare repo on Simone, as it is here now, or remove it
+    there (``delete``). Returns a note when it couldn't, else None. A plan's branch can hold weeks of work that exists
+    nowhere else until it lands."""
+    spec = f":refs/heads/{branch}" if delete else f"+refs/heads/{branch}:refs/heads/{branch}"
+    # git's own variables are dropped: run from a commit's hook, GIT_DIR would push the committing repo instead
+    clean = {k: v for k, v in os.environ.items() if not k.startswith("GIT_") or k == "GIT_EXEC_PATH"}
+    try:
+        out = subprocess.run(["git", "-C", str(repo_dir(0, repo)), "push", "-q", COPY_REMOTE, spec],
+                             capture_output=True, text=True, timeout=COPY_TIMEOUT_S, env=clean,
+                             creationflags=NO_WINDOW)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"{repo}: {branch} not copied to Simone ({exc.__class__.__name__}); it is copied at its next move"
+    if out.returncode != 0 and not (delete and "remote ref does not exist" in out.stderr):
+        why = (out.stderr.strip().splitlines() or ["no answer"])[-1]
+        return f"{repo}: {branch} not copied to Simone ({why}); it is copied at its next move"
+    return None
+
+
 def refresh_plan_branch(env: int, repo: str, branch: str) -> str | None:
     """Bring a plan's branch up to env0's dev/main, in the environment's folder of the repo (clean: the caller checks):
     detached on the branch, dev/main merged; clean, the branch moves to the merge (committed on the detached HEAD on
@@ -906,6 +931,8 @@ def refresh_plan_branch(env: int, repo: str, branch: str) -> str | None:
         return (f"{repo}: {branch} conflicts with {main}: left as it is; the task's next sync or merge brings {main} "
                 "in, to resolve there")
     move_plan_branch(repo, branch, git(d, "rev-parse", "HEAD"), old)
+    if note := copy_off(repo, branch):
+        say(f"  {note}")
     return f"{repo}: {branch} brought up to {main}"
 
 
@@ -1473,6 +1500,8 @@ def after_landing(task: Task) -> list[str]:
             continue
         if is_ancestor(repo_dir(0, repo), at, git(repo_dir(0, repo), "rev-parse", main_of(repo))):
             git(repo_dir(0, repo), "update-ref", "-d", f"refs/heads/{task.lands}", at)
+            if note := copy_off(repo, task.lands, delete=True):  # its copy on Simone goes with it
+                notes.append(note)
         else:
             kept.append(repo)
     if kept:
@@ -1500,6 +1529,10 @@ def into_plan(task: Task, env: int) -> None:
             with step(task.id, env, "into plan", repo):
                 move_plan_branch(repo, task.target, new, old)
                 record_commits(task.id, env, repo, old or main, new, "plan")
+            with step(task.id, env, "copy off", repo) as outcome:
+                if note := copy_off(repo, task.target):
+                    outcome.fail(note)
+                    say(f"  {note}")
 
 
 # Repos' checks side by side in a merge, the second starting only while the PC has MERGE_MIN_FREE_GB free. Measured on
