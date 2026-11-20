@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
+import '../../core/logging/device_problems.dart';
 import '../../core/utils/logger.dart';
 import '../sync/resource_sync_bootstrap.dart';
 import '../sync/resource_sync_registry.dart';
@@ -178,6 +179,7 @@ class GatewayNotifier extends _$GatewayNotifier {
 
   /// Logout / disposal — abandon queued idempotent retries.
   void _teardownClient() {
+    deviceProblems.disconnected();
     _attachmentFetchTimer?.cancel();
     _attachmentFetchTimer = null;
     _requestClient?.cancelAll();
@@ -215,7 +217,10 @@ class GatewayNotifier extends _$GatewayNotifier {
       GatewayClientDisconnected() => const GatewayState.disconnected(),
       GatewayClientError(:final message) => GatewayState.error(message),
     };
+    if (update is! GatewayClientConnected) deviceProblems.disconnected();
     if (update is GatewayClientConnected) {
+      // The phone's problems (made offline too) go to the core's log now (device_problems.dart).
+      deviceProblems.connected(_reportProblems);
       // Re-issue reads that were in-flight during socket teardown — after listeners
       // attach so responses route to [GatewayRequestClient].
       if (_frozenRetryBacklog.isNotEmpty && _requestClient != null) {
@@ -277,6 +282,17 @@ class GatewayNotifier extends _$GatewayNotifier {
     } finally {
       _attachmentFetchInFlight = false;
     }
+  }
+
+  /// One batch of the phone's problems to the core; true when it took them.
+  Future<bool> _reportProblems(List<Map<String, dynamic>> lines) async {
+    final rc = _requestClient;
+    if (rc == null || state is! GatewayConnected) return false;
+    final answer = await rc.request(
+      DeviceProblems.method,
+      params: {'lines': lines},
+    );
+    return answer['status'] == 'ok';
   }
 
   /// Sends a message payload to all connected devices (broadcast),

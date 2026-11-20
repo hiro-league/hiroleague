@@ -9,6 +9,9 @@ each app asks or answers on top (its own modules use `link.client`).
 The connection never holds the app up: with the core down or redeploying, the client retries with growing delays in
 the background and nothing else waits on it.
 
+While connected, the app's log lines (INFO and up) go to the core's log store too (the SDK's `log_sender`, started
+with the link): the core's log tools then answer across every app. The app's own file stays the first copy.
+
 Settings → HiroLeague sets the core's address (stored in the database, key `hiroleague_url`), the app's own address
 (key `<app>_url`, e.g. `nethiro_url`) and pairs. The app's address is a LAN name the core sets up (`sites.claim`,
 hiroleague docs/site-names-design.md): the app claims `<label>.hiro.local` or `<label>.local` with the port it listens on,
@@ -25,7 +28,9 @@ from hiro_channel_sdk import ExtensionClient, ExtensionCredentials, ExtensionInf
 from hiro_channel_sdk.constants import (CORE_REPO, METHOD_CORE_INFO, METHOD_SITES_CLAIM, METHOD_SITES_LIST, OFFER_KIND_SITE,
                                         SITES_DOMAIN, SITES_ERROR_INVALID, SITES_ERROR_TAKEN)
 from hiro_channel_sdk.extension import STATUS_CONNECTED
+from hiro_channel_sdk.log_sender import LogSender
 from hiro_channel_sdk.workers import Worker
+from hiro_commons import logging_foundation
 from sqlmodel import Session
 
 from . import calls, identity, settings
@@ -169,6 +174,10 @@ class HiroLeagueLink(Worker):
     def on_start(self) -> None:
         # Stopping the worker cancels this task, which closes the connection.
         self.spawn(self._connect(), "connect")
+        # The app's log lines go to the core's log store while the link is up (the SDK's log_sender: it reads the
+        # app's own file, so lines logged while the core is away go when it is back)
+        if (files := logging_foundation.where()) is not None:
+            self.spawn(LogSender(self.client, *files).run(), "send logs")
 
     async def _connect(self) -> None:
         self.admin_url_set = await run_db(_read, ADMIN_URL_KEY)

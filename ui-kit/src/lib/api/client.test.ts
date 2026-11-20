@@ -4,6 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('$app/paths', () => ({ resolve: () => '/' }));
 vi.mock('$hiro-app/app', () => ({ APP: { name: 'TestHiro', api: {} } }));
+// What goes to the app's log (problems.ts), heard here instead of sent.
+const reported = vi.fn();
+vi.mock('./problems', () => ({ newTraceparent: () => `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01`, report: (p: unknown) => reported(p) }));
+const TRACEPARENT = `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01`;
 
 const { ApiError, createApi } = await import('./client');
 
@@ -15,6 +19,7 @@ describe('createApi', () => {
 	beforeEach(() => {
 		fetchMock = vi.fn();
 		vi.stubGlobal('fetch', fetchMock);
+		reported.mockClear();
 	});
 	afterEach(() => {
 		vi.unstubAllGlobals();
@@ -24,7 +29,7 @@ describe('createApi', () => {
 	it('answers with the data itself', async () => {
 		fetchMock.mockResolvedValue(answer(200, { n: 1 }));
 		await expect(createApi()<{ n: number }>('things')).resolves.toEqual({ n: 1 });
-		expect(fetchMock).toHaveBeenCalledWith('/api/things', expect.objectContaining({ method: 'GET', headers: undefined }));
+		expect(fetchMock).toHaveBeenCalledWith('/api/things', expect.objectContaining({ method: 'GET', headers: { traceparent: TRACEPARENT } }));
 	});
 
 	it("sends the app's headers with every call, beside the JSON one", async () => {
@@ -34,8 +39,8 @@ describe('createApi', () => {
 		await api('things', { method: 'PUT', body: { n: 1 } });
 		picked = 'b';
 		await api('things');
-		expect(fetchMock.mock.calls[0][1].headers).toEqual({ 'x-hiro-workspace': 'a', 'Content-Type': 'application/json' });
-		expect(fetchMock.mock.calls[1][1].headers).toEqual({ 'x-hiro-workspace': 'b' });
+		expect(fetchMock.mock.calls[0][1].headers).toEqual({ 'x-hiro-workspace': 'a', traceparent: TRACEPARENT, 'Content-Type': 'application/json' });
+		expect(fetchMock.mock.calls[1][1].headers).toEqual({ 'x-hiro-workspace': 'b', traceparent: TRACEPARENT });
 	});
 
 	it("says FastAPI's words for a failure, and tells the app its session is gone", async () => {
@@ -48,6 +53,8 @@ describe('createApi', () => {
 		await expect(api('things')).rejects.toMatchObject({ status: 401, message: 'Sign in first.' });
 		expect(onSignedOut).toHaveBeenCalledWith('things');
 		expect(onUnreachable).not.toHaveBeenCalled();
+		// The backend's own answers, shown to the person: not problems for the log.
+		expect(reported).not.toHaveBeenCalled();
 	});
 
 	it('tells the app when the backend is unreachable or failing', async () => {
@@ -56,8 +63,14 @@ describe('createApi', () => {
 		fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
 		await expect(api('things')).rejects.toMatchObject({ status: 0, message: "The TestHiro backend can't be reached. Is it restarting?" });
 		fetchMock.mockResolvedValue(answer(502, {}));
-		await expect(api('things')).rejects.toBeInstanceOf(ApiError);
+		await expect(api('things')).rejects.toMatchObject({ status: 502, traceparent: TRACEPARENT });
 		expect(onUnreachable).toHaveBeenCalledTimes(2);
+		// Both go to the app's log under the call's own story
+		expect(reported.mock.calls.map(([p]) => [p.kind, p.level, p.status, p.method, p.path, p.traceparent])).toEqual([
+			['request', 'WARNING', 0, 'GET', 'things', TRACEPARENT],
+			['request', 'ERROR', 502, 'GET', 'things', TRACEPARENT]
+		]);
+		expect(new ApiError(1, 'x')).toBeInstanceOf(Error);
 	});
 
 	it('gives up after the time limit without calling the backend unreachable', async () => {

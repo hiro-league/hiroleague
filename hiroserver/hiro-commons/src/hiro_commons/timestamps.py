@@ -24,14 +24,16 @@ def parse_iso8601_utc(value: str) -> datetime:
     return dt.astimezone(UTC)
 
 
-def _clock_12h(value: datetime) -> str:
+def _clock_12h(value: datetime, seconds: bool = False) -> str:
     hour12 = value.hour % 12 or 12
     suffix = "AM" if value.hour < 12 else "PM"
-    return f"{hour12}:{value.minute:02d} {suffix}"
+    sec = f":{value.second:02d}" if seconds else ""
+    return f"{hour12}:{value.minute:02d}{sec} {suffix}"
 
 
-def human_datetime(value: datetime, now: datetime | None = None) -> str:
-    """Format a moment for people: "Today, 1:15 PM", "Yesterday, 11:57 PM", "Mon, Sep 28, 9:05 AM".
+def human_datetime(value: datetime, now: datetime | None = None, *, seconds: bool = False) -> str:
+    """Format a moment for people: "Today, 1:15 PM", "Yesterday, 11:57 PM", "Mon, Sep 28, 9:05 AM"
+    (with `seconds`, "Today, 1:15:46 PM": a log line's time).
 
     12-hour clock, always with the day; the year only when it isn't this year. Spelled out by hand
     (not strftime's %p / locale) so a 24-hour system locale can't change it. Both datetimes are
@@ -39,7 +41,7 @@ def human_datetime(value: datetime, now: datetime | None = None) -> str:
     """
     local = value.astimezone()
     today = (now or datetime.now(UTC)).astimezone().date()
-    clock = _clock_12h(local)
+    clock = _clock_12h(local, seconds)
     days_ago = (today - local.date()).days
     if days_ago == 0:
         return f"Today, {clock}"

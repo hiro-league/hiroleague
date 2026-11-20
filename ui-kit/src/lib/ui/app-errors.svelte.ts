@@ -1,7 +1,8 @@
 // Errors nobody caught: a promise that failed with no one waiting for it, or a throw in an event
 // handler. Without this they only reach the console and the page just seems not to react; the error
-// bar (error-bar.svelte, in the layout) shows them until dismissed.
+// bar (error-bar.svelte, in the layout) shows them until dismissed, and each goes to the app's log (problems.ts).
 import { errorMessage, isAbort } from '$kit/api/client';
+import { reportError } from '$kit/api/problems';
 
 export type AppError = { id: number; message: string; count: number };
 
@@ -16,6 +17,7 @@ class AppErrors {
 		const message = errorMessage(e) || 'Something went wrong.';
 		if (message.startsWith('ResizeObserver loop')) return;
 		console.error(e);
+		reportError(e); // and into the app's log (problems.ts)
 		const same = this.list.find((x) => x.message === message);
 		if (same) same.count++;
 		else this.list = [...this.list, { id: this.#next++, message, count: 1 }].slice(-3);

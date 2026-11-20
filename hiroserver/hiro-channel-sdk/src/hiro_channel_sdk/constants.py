@@ -201,6 +201,19 @@ METHOD_AI_RERANK: str = "ai.rerank"
 METHOD_MEMORY_SETTINGS: str = "memory.settings"
 METHOD_KNOWLEDGE_SETTINGS: str = "knowledge.settings"
 
+# The logging plan, phase 5: every app sends its lines to the core's log store (each keeps its own file first).
+#   logs.send   extension → core, {lines: [[place, line], ...], restart?} → {last: place | None}. `line` is one line
+#               of the app's own log file (the logging foundation's JSON, INFO and up); `place` is where it ends in
+#               that file, "<YYYY-MM-DD>:<byte offset>", in the file's order. The core keeps what is after the last
+#               place it kept for this app (a batch sent twice is kept once) and answers that last place, which the
+#               app's sender (log_sender.py) starts from next time. `restart`: the app's file was replaced, so the
+#               core forgets its last place first. Answered quietly: the core logs no line per batch.
+METHOD_LOGS_SEND: str = "logs.send"
+#   logs.report device → core (through the gateway), {lines: [...]}: the device app's problems (WARNING and up), each
+#               with its own id so a resend is kept once; the core writes them to its log store's `device` stream
+#               (hirocli runtime/device_problems.py, the logging plan's phase 8).
+METHOD_LOGS_REPORT: str = "logs.report"
+
 # Phase 7b: the core speaks (voice profiles; hiroleague services/voice).
 #   voice.speak     extension → core, {text, use? | profile?, person?, label?}
 #                   → {ogg_b64, seconds, waveform_b64, cached, cost, profile_id, profile_name, provider,

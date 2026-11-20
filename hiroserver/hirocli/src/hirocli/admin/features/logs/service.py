@@ -134,7 +134,7 @@ class LogsService:
             elif since_seconds_ago is not None:
                 min_ts = time.time() - float(since_seconds_ago)
             exec_kwargs: dict[str, Any] = dict(
-                source="all",
+                source="core",
                 lines=lines,
                 workspace=workspace,
             )
@@ -157,7 +157,7 @@ class LogsService:
         try:
             offsets_json = json.dumps(file_offsets) if file_offsets else None
             result = LogTailTool().execute(
-                source="all",
+                source="core",
                 after_offsets=offsets_json,
                 workspace=workspace,
             )
@@ -182,7 +182,7 @@ class LogsService:
             return Result.failure("Search query is empty.")
         try:
             result = LogSearchTool().execute(
-                source="all",
+                source="core",
                 query=q,
                 workspace=workspace,
             )
@@ -217,7 +217,7 @@ class LogsService:
             )
         try:
             result = LogSearchTool().execute(
-                source="all",
+                source="core",
                 query=q or None,
                 device_id=did,
                 msg_id=mid,
@@ -249,7 +249,7 @@ class LogsService:
         """Exact-match filter by structured scope fields (device / message / request type).
 
         Filters AND together: pass only the fields you want to constrain.
-        Results are sorted by timestamp and cover all log sources.
+        Results are sorted by timestamp and cover the core's own log sources (server, CLI, channels, gateway).
         """
         did = (device_id or "").strip() or None
         mid = (msg_id or "").strip() or None
@@ -258,7 +258,7 @@ class LogsService:
             return Result.failure("At least one scope filter (device_id, msg_id, method) is required.")
         try:
             result = LogSearchTool().execute(
-                source="all",
+                source="core",
                 device_id=did,
                 msg_id=mid,
                 method=meth,
@@ -279,7 +279,7 @@ class LogsService:
             log_dir = _resolve_log_dir(workspace)
             gateway_log_dir = _resolve_gateway_log_dir()
             methods: set[str] = set(REGISTERED_REQUEST_METHOD_NAMES)
-            for stream in _collect_log_files(log_dir, gateway_log_dir, "all"):
+            for stream in _collect_log_files(log_dir, gateway_log_dir, "core"):
                 for row in _stream_tail(stream, INITIAL_TAIL_LINES):
                     m = row.get("scope_method", "")
                     if isinstance(m, str) and m.strip():

@@ -2,6 +2,7 @@
 // and calls are in the other files of lib/api (HomeHiro's general ones: api/home.ts).
 import { resolve } from '$app/paths';
 import { APP } from '$hiro-app/app';
+import { newTraceparent, report } from './problems';
 
 // Built from the app's base URL, so calls keep working behind a proxy prefix (e.g. HA's sidebar).
 export const apiUrl = (path: string) => `${resolve('/')}api/${path}`;
@@ -17,11 +18,12 @@ function errorText(detail: unknown): string | null {
 }
 
 /** A failed call: `status` is the HTTP status (0 = the backend could not be reached, e.g. it is
- * restarting), `message` FastAPI's detail as words. */
+ * restarting), `message` FastAPI's detail as words, `traceparent` the call's story (problems.ts). */
 export class ApiError extends Error {
 	constructor(
 		readonly status: number,
-		message: string
+		message: string,
+		readonly traceparent?: string
 	) {
 		super(message);
 		this.name = 'ApiError';
@@ -63,7 +65,13 @@ export function createApi(hooks: ApiHooks = {}) {
 	return async function api<T>(path: string, init?: Init): Promise<T> {
 		const body = init?.body;
 		const form = body instanceof FormData;
-		const headers: Record<string, string> = { ...hooks.headers?.() };
+		// The call's story (the logging plan): the backend continues it, and a failed call's report names it.
+		const traceparent = newTraceparent();
+		const headers: Record<string, string> = { ...hooks.headers?.(), traceparent };
+		const method = init?.method ?? 'GET';
+		// No answer, or a 5xx: a problem of the system, into the app's log (a 4xx is the backend's own answer).
+		const failed = (status: number, message: string) =>
+			report({ kind: 'request', level: status ? 'ERROR' : 'WARNING', message, error_type: 'ApiError', traceparent, method, path, status });
 		if (body !== undefined && !form) headers['Content-Type'] = 'application/json';
 		// Our own stop for a call that takes too long, beside the caller's: which one fired says what to tell.
 		const limit = init?.timeoutMs ?? hooks.timeoutMs;
@@ -76,17 +84,23 @@ export function createApi(hooks: ApiHooks = {}) {
 		let res: Response;
 		try {
 			res = await fetch(apiUrl(path), {
-				method: init?.method ?? 'GET',
-				headers: Object.keys(headers).length ? headers : undefined,
+				method,
+				headers,
 				body: body === undefined ? undefined : form ? body : JSON.stringify(body),
 				signal: limit || init?.signal ? stop.signal : undefined
 			});
 		} catch (e) {
 			// A call that ran out of time is not the backend being down (it may only be busy): say so, start no check.
-			if (timedOut) throw new ApiError(0, `${APP.name} took more than ${Math.round(limit! / 1000)} s to answer. It may be busy: try again.`);
+			if (timedOut) {
+				const message = `${APP.name} took more than ${Math.round(limit! / 1000)} s to answer. It may be busy: try again.`;
+				failed(0, message);
+				throw new ApiError(0, message, traceparent);
+			}
 			if (isAbort(e)) throw e;
 			hooks.onUnreachable?.(path);
-			throw new ApiError(0, `The ${APP.name} backend can't be reached. Is it restarting?`);
+			const message = `The ${APP.name} backend can't be reached. Is it restarting?`;
+			failed(0, message);
+			throw new ApiError(0, message, traceparent);
 		} finally {
 			clearTimeout(timer);
 			init?.signal?.removeEventListener('abort', cancel);
@@ -95,7 +109,9 @@ export function createApi(hooks: ApiHooks = {}) {
 		if (!res.ok) {
 			if (res.status === 401) hooks.onSignedOut?.(path);
 			if (res.status >= 500) hooks.onUnreachable?.(path);
-			throw new ApiError(res.status, errorText(data.detail) ?? `${res.status} ${res.statusText}`);
+			const message = errorText(data.detail) ?? `${res.status} ${res.statusText}`;
+			if (res.status >= 500) failed(res.status, message);
+			throw new ApiError(res.status, message, traceparent);
 		}
 		return data as T;
 	};

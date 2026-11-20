@@ -113,7 +113,7 @@ character_app = typer.Typer(
 )
 logs_app = typer.Typer(
     name="logs",
-    help="Search and tail server, channel, and gateway log files.",
+    help="Read the logs of the core and of every app: search, tail, what went wrong (problems), one story by its id.",
     add_completion=False,
 )
 knowledge_app = typer.Typer(

@@ -19,6 +19,7 @@
 	import { resolve } from '$app/paths';
 	import { ModeWatcher } from 'mode-watcher';
 	import { errorMessage } from '$kit/api/client';
+	import { reportError } from '$kit/api/problems';
 	import { APP } from '$hiro-app/app';
 	import { Button } from '$kit/components/ui/button/index.js';
 	import * as Card from '$kit/components/ui/card/index.js';
@@ -117,8 +118,8 @@
 		{@render banners?.()}
 		<!-- min-w-0: let wide tables scroll inside their box instead of widening the page -->
 		<main class={cn('min-w-0 flex-1 p-4 md:p-6', mainClass)}>
-			<!-- A page that throws while it draws or updates shows why, instead of going blank. -->
-			<svelte:boundary onerror={(e) => console.error(e)}>
+			<!-- A page that throws while it draws or updates shows why, instead of going blank, and says so in the app's log. -->
+			<svelte:boundary onerror={(e) => (console.error(e), reportError(e, 'page'))}>
 				{#if pageAllowed(who.me, here) || who.state === 'error'}
 					{@render children()}
 				{:else}
