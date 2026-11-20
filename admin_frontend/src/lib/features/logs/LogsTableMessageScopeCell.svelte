@@ -1,5 +1,6 @@
 <script lang="ts">
   import { MessageSquare } from '@lucide/svelte';
+  import KindIcon from './one-view/KindIcon.svelte';
   import { cn } from '$lib/utils';
   import type { RenderLogRow } from './shared/logs-ui';
 
@@ -8,13 +9,15 @@
     msgOrd: number | null;
     chipAlt: boolean;
     onFilterToMessage: (msgId: string, event: MouseEvent) => void;
+    /** Phase 6b: open the line's story over the page */
+    onOpenStory?: (storyId: string) => void;
   };
 
-  let { row, msgOrd, chipAlt, onFilterToMessage }: Props = $props();
+  let { row, msgOrd, chipAlt, onFilterToMessage, onOpenStory }: Props = $props();
 </script>
 
+<div class="flex items-center justify-center gap-0.5">
 {#if row.scope_msg_id}
-  <div class="flex items-center justify-center gap-0.5">
     {#if msgOrd != null}
       <!-- Chip color alternates when the message # changes vs the previous scoped row (table order). -->
       <span
@@ -43,5 +46,21 @@
         Filter to message{msgOrd != null ? ` ${msgOrd}` : ''}
       </span>
     </button>
-  </div>
 {/if}
+{#if row.story_id && onOpenStory}
+  <!-- Phase 6b: the line's story, by its kind (today's lines don't say their kind yet: phase 6a) -->
+  <button
+    type="button"
+    class="inline-grid shrink-0 place-items-center rounded-md p-0.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
+    title="Open its story"
+    onclick={(e) => {
+      e.stopPropagation();
+      onOpenStory(row.story_id!);
+    }}
+    ondblclick={(e) => e.stopPropagation()}
+  >
+    <KindIcon kind="unknown" size={14} />
+    <span class="sr-only">Open its story</span>
+  </button>
+{/if}
+</div>

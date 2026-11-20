@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronDown, ChevronUp, PanelRightClose, PanelRightOpen, Pause, Play, Trash2 } from '@lucide/svelte';
+  import { ChevronDown, ChevronUp, Group, PanelRightClose, PanelRightOpen, Pause, Play, Trash2 } from '@lucide/svelte';
   import SearchInput from '$kit/ui/search-input.svelte';
   import type { LogTimeRange } from '$lib/api/logs';
   import { Button } from '$kit/components/ui/button/index.js';
@@ -19,9 +19,12 @@
     ctrl: LogsPageController;
     onRequestClearLogs: () => void;
     filters: import('svelte').Snippet;
+    /** Show every part's problems grouped by part, level and area (the logging plan's phase 6b) */
+    groupRepeats?: boolean;
+    onToggleGroupRepeats?: () => void;
   };
 
-  let { prefs, ctrl, onRequestClearLogs, filters }: Props = $props();
+  let { prefs, ctrl, onRequestClearLogs, filters, groupRepeats = false, onToggleGroupRepeats }: Props = $props();
 
   const timeRangeLabels: Record<LogTimeRange, string> = {
     '1h': '1 hr',
@@ -108,6 +111,16 @@
       onchange={onSessionRangeChange}
       label="Log time window"
     />
+    {#if onToggleGroupRepeats}
+      <Button
+        variant="outline"
+        size="sm"
+        class={cn('h-8 gap-1', groupRepeats && 'border-primary bg-primary/10')}
+        aria-pressed={groupRepeats}
+        title="Group the warnings and errors that repeat: one row per part, level and module, with its count"
+        onclick={onToggleGroupRepeats}
+      ><Group size={14} />Group repeats</Button>
+    {/if}
     <!-- Trailing actions grouped to the right; the collapse chevron pins to the far
          right of the line so the first toolbar row stays usable while collapsed. -->
     <div class="ml-auto flex items-center gap-2">

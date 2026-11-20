@@ -9,7 +9,7 @@
   import type { LogsPageController } from './state/logs-controller.svelte';
   import type { LogsPreferences } from '$lib/preferences/logs-preferences.svelte';
   import {
-    SOURCE_LABELS,
+    sourceLabel,
     TRAFFIC_CLASS_LABELS,
     isLogSourceFilter,
     msgIdFilterPreview
@@ -22,8 +22,9 @@
 
   let { prefs, ctrl }: Props = $props();
 
+  // The core's own sources and every other part's stream: each app's, the phone's (the logging plan's phase 6b)
   const sourceOptions = $derived<MultiSelectOption[]>(
-    ctrl.availableSources.map((s) => ({ value: s, label: SOURCE_LABELS[s] }))
+    ctrl.availableSources.map((s) => ({ value: s, label: sourceLabel(s) }))
   );
   function onSourceSelectedChange(values: string[]) {
     prefs.activeSources = values.filter(isLogSourceFilter);

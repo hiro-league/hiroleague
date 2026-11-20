@@ -63,6 +63,7 @@ def _logs_layout(workspace_id: str | None) -> Result[dict[str, Any]]:
                 "available_channels": info.data.available_channels,
                 "has_gateway": info.data.has_gateway,
                 "has_cli": info.data.has_cli,
+                "other_streams": info.data.other_streams,
             }
         )
     except Exception as exc:

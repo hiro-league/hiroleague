@@ -29,6 +29,7 @@ from hirocli.tools.logs import (
     find_last_server_session_start_ts,
     has_files,
     pretty_print_log_value,
+    stream_names,
 )
 from hiro_commons.logging_foundation import daily
 
@@ -45,6 +46,8 @@ class LogsLayoutInfo:
     available_channels: list[str]
     has_gateway: bool
     has_cli: bool
+    # The other parts' streams in the core's log store: each app's (app-home...) and the phone's (device)
+    other_streams: list[str]
 
 
 @dataclass
@@ -102,11 +105,13 @@ class LogsService:
                 )
             )
             has_cli = has_files(log_dir, "cli")
+            other = [n for n in stream_names(log_dir) if n.startswith("app-") or n == "device"]
             return Result.success(
                 LogsLayoutInfo(
                     available_channels=available_channels,
                     has_gateway=has_gateway,
                     has_cli=has_cli,
+                    other_streams=other,
                 )
             )
         except Exception as exc:
@@ -134,7 +139,7 @@ class LogsService:
             elif since_seconds_ago is not None:
                 min_ts = time.time() - float(since_seconds_ago)
             exec_kwargs: dict[str, Any] = dict(
-                source="core",
+                source="all",  # every part: the core, each app, the phone (the logging plan, 6b)
                 lines=lines,
                 workspace=workspace,
             )
@@ -157,7 +162,7 @@ class LogsService:
         try:
             offsets_json = json.dumps(file_offsets) if file_offsets else None
             result = LogTailTool().execute(
-                source="core",
+                source="all",  # every part: the core, each app, the phone (the logging plan, 6b)
                 after_offsets=offsets_json,
                 workspace=workspace,
             )
@@ -182,7 +187,7 @@ class LogsService:
             return Result.failure("Search query is empty.")
         try:
             result = LogSearchTool().execute(
-                source="core",
+                source="all",  # every part: the core, each app, the phone (the logging plan, 6b)
                 query=q,
                 workspace=workspace,
             )
@@ -217,7 +222,7 @@ class LogsService:
             )
         try:
             result = LogSearchTool().execute(
-                source="core",
+                source="all",  # every part: the core, each app, the phone (the logging plan, 6b)
                 query=q or None,
                 device_id=did,
                 msg_id=mid,
@@ -249,7 +254,7 @@ class LogsService:
         """Exact-match filter by structured scope fields (device / message / request type).
 
         Filters AND together: pass only the fields you want to constrain.
-        Results are sorted by timestamp and cover the core's own log sources (server, CLI, channels, gateway).
+        Results are sorted by timestamp and cover every part's streams (the core's, each app's, the phone's).
         """
         did = (device_id or "").strip() or None
         mid = (msg_id or "").strip() or None
@@ -258,7 +263,7 @@ class LogsService:
             return Result.failure("At least one scope filter (device_id, msg_id, method) is required.")
         try:
             result = LogSearchTool().execute(
-                source="core",
+                source="all",  # every part: the core, each app, the phone (the logging plan, 6b)
                 device_id=did,
                 msg_id=mid,
                 method=meth,
@@ -267,6 +272,19 @@ class LogsService:
             return Result.success(list(result.rows))
         except Exception as exc:
             _log.warning("⚠️ Logs filter by scope failed — HiroAdmin · logs", error=str(exc), exc_info=True)
+            return Result.failure(str(exc))
+
+    def problems(self, workspace: str | None, *, since: str | None = None) -> Result[dict[str, Any]]:
+        """Every part's warnings and errors in a span, grouped by part, level and area, with the newest lines: the
+        Logs page's "Group repeats" (the logging plan's phase 6b)."""
+        from dataclasses import asdict
+
+        from hirocli.tools.logs import LogProblemsTool
+
+        try:
+            return Result.success(asdict(LogProblemsTool().execute(since=since, limit=500, workspace=workspace)))
+        except Exception as exc:
+            _log.warning("⚠️ Logs problems failed — HiroAdmin · logs", error=str(exc), exc_info=True)
             return Result.failure(str(exc))
 
     def stories(

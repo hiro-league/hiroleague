@@ -170,14 +170,19 @@
             {#if activeRow.step_id}
               <p class="mt-0.5 font-mono text-xs text-muted-foreground">step {activeRow.step_id}</p>
             {/if}
-            <Button
-              variant="outline"
-              size="sm"
-              class="mt-1.5"
-              href={`${base}/logs?tab=runs&story=${encodeURIComponent(activeRow.story_id)}`}
-            >
-              Open its graph run
-            </Button>
+            <div class="mt-1.5 flex flex-wrap gap-1.5">
+              <!-- The logging plan's phase 6b: the whole story, every part's lines and steps, over the page -->
+              <Button variant="outline" size="sm" href={`${base}/logs?story=${encodeURIComponent(activeRow.story_id)}`}>
+                Open its story
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                href={`${base}/logs?tab=runs&story=${encodeURIComponent(activeRow.story_id)}`}
+              >
+                Open its graph run
+              </Button>
+            </div>
           </div>
         {/if}
         <div>

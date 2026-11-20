@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Radio, Router, Server, Terminal } from '@lucide/svelte';
   import type { LogSourceFilter } from '$lib/api/logs';
+  import PartIcon from '../one-view/PartIcon.svelte';
 
   type Props = {
     source: LogSourceFilter;
@@ -19,4 +20,6 @@
   <Router strokeWidth={2} {size} class={className} aria-hidden="true" />
 {:else if source === 'cli'}
   <Terminal strokeWidth={2} {size} class={className} aria-hidden="true" />
+{:else}
+  <PartIcon {source} {size} class={className} />
 {/if}

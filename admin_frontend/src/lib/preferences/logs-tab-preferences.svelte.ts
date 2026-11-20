@@ -10,7 +10,7 @@
 import { PREF_KEYS, type LogsPrimaryTabPreference } from './keys';
 import { createTabPreferences, type TabPreferences } from './create-tab-preferences.svelte';
 
-const ALLOWED: readonly LogsPrimaryTabPreference[] = ['logs', 'runs', 'usage'] as const; // usage: Phase 7b AI usage
+const ALLOWED: readonly LogsPrimaryTabPreference[] = ['logs', 'stories', 'runs', 'usage'] as const; // usage: Phase 7b AI usage
 
 export type LogsTabPreferences = TabPreferences<LogsPrimaryTabPreference>;
 
@@ -19,6 +19,8 @@ export function createLogsTabPreferences(): LogsTabPreferences {
     storageKey: PREF_KEYS.logsPrimaryActiveTab,
     defaultTab: 'logs',
     allowed: ALLOWED,
-    omitDefaultFromUrl: true
+    omitDefaultFromUrl: true,
+    // `?story=` belongs to the tab that set it (a story open over Logs or Stories, or Graph runs' "Open its graph run")
+    urlParamsToReset: ['story']
   });
 }

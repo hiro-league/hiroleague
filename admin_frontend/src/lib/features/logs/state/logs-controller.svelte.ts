@@ -21,6 +21,7 @@ import {
   logIdFromRowKey,
   rowPassesFilters,
   sourcesForLayout,
+  isCoreSource,
   withRenderKeys,
   type RenderLogRow
 } from '../shared/logs-ui';
@@ -215,8 +216,10 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
       layout = nextLayout;
       const validSources = sourcesForLayout(nextLayout);
       const restoredSources = prefs.activeSources.filter((source) => validSources.includes(source));
-      prefs.activeSources =
-        prefs.activeSources.length > 0 && restoredSources.length > 0 ? restoredSources : validSources;
+      // Every part shows unless the person narrowed the core's own sources: a choice saved before the apps and the
+      // phone were sources (the logging plan's phase 6b) still had every core source, and gets them all
+      const narrowed = validSources.some((s) => isCoreSource(s) && !prefs.activeSources.includes(s));
+      prefs.activeSources = narrowed && restoredSources.length > 0 ? restoredSources : validSources;
       prefs.activeChannel = nextLayout.available_channels.includes(prefs.activeChannel)
         ? prefs.activeChannel
         : '';

@@ -5,12 +5,14 @@ import {
   type LogLevel,
   type LogRow,
   type LogSourceFilter,
+  type CoreSourceFilter,
   type LogTimeRange,
   type LogsLayout,
   type TrafficClass
 } from '$lib/api/logs';
 import type { DeviceRow } from '$lib/api/channels-devices';
 import { CAT } from '$kit/ui/category';
+import { partLabel } from '../one-view/parts';
 
 /** Sortable table columns (Date/Time both map to the chronological `time` key). */
 export type LogSortColumn = 'time' | 'level' | 'source' | 'module' | 'class' | 'subclass' | 'message';
@@ -87,7 +89,7 @@ export type RenderLogRow = LogRow & { _rowKey: string };
 
 export const LOGS_PREF_SESSION_KEY = 'hiro.admin.logs';
 
-export const SOURCE_LABELS: Record<LogSourceFilter, string> = {
+export const SOURCE_LABELS: Record<CoreSourceFilter, string> = {
   server: 'Server',
   channels: 'Channels',
   gateway: 'Gateway',
@@ -99,6 +101,7 @@ export function logRowSourceFilter(rowSource: string): LogSourceFilter | null {
   if (rowSource === 'server' || rowSource === 'gateway' || rowSource === 'cli') {
     return rowSource;
   }
+  if (isOtherStream(rowSource)) return rowSource; // an app's or the phone's stream (phase 6b)
   if (rowSource.startsWith('channel-')) {
     return 'channels';
   }
@@ -113,7 +116,7 @@ export function logRowSourceLabel(rowSource: string): string {
     return channel ? `${SOURCE_LABELS.channels} · ${channel}` : SOURCE_LABELS.channels;
   }
   if (filter) {
-    return SOURCE_LABELS[filter];
+    return sourceLabel(filter);
   }
   return rowSource.trim() || '—';
 }
@@ -161,11 +164,27 @@ export function sourcesForLayout(nextLayout: LogsLayout | null): LogSourceFilter
   const sources: LogSourceFilter[] = ['server', 'channels'];
   if (nextLayout?.has_gateway) sources.push('gateway');
   if (nextLayout?.has_cli) sources.push('cli');
+  // Each app's and the phone's stream in the core's log store (the logging plan's phase 6b)
+  for (const s of nextLayout?.other_streams ?? []) if (isOtherStream(s)) sources.push(s);
   return sources;
 }
 
-export function isLogSourceFilter(value: string): value is LogSourceFilter {
+export function isCoreSource(value: string): value is CoreSourceFilter {
   return value === 'server' || value === 'channels' || value === 'gateway' || value === 'cli';
+}
+
+/** An app's stream (`app-home`) or the phone's (`device`). */
+export function isOtherStream(value: string): value is `app-${string}` | 'device' {
+  return value === 'device' || /^app-[a-z0-9-]+$/.test(value);
+}
+
+export function isLogSourceFilter(value: string): value is LogSourceFilter {
+  return isCoreSource(value) || isOtherStream(value);
+}
+
+/** A Source choice as people name it: "Server", "HomeHiro", "Phone". */
+export function sourceLabel(source: LogSourceFilter): string {
+  return isCoreSource(source) ? SOURCE_LABELS[source] : partLabel(source);
 }
 
 export function isLogLevel(value: string): value is LogLevel {
@@ -203,6 +222,7 @@ export type RowFilterContext = {
 };
 
 export function rowPassesFilters(row: LogRow, ctx: RowFilterContext): boolean {
+  if (isOtherStream(row.source) && !ctx.activeSources.includes(row.source)) return false;
   if (row.source === 'server' && !ctx.activeSources.includes('server')) return false;
   if (row.source === 'gateway' && !ctx.activeSources.includes('gateway')) return false;
   if (row.source === 'cli' && !ctx.activeSources.includes('cli')) return false;

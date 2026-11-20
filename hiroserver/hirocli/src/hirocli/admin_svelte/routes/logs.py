@@ -132,3 +132,10 @@ async def get_log_story(story_id: str, workspace_id: SelectedWorkspaceIdDep) -> 
     """One story across every part (the logging plan's phase 6a)."""
     result = await run_in_threadpool(LogsService().story, workspace_id, story_id)
     return _api_data(result)
+
+
+@logs_router.get("/logs/problems")
+async def list_log_problems(workspace_id: SelectedWorkspaceIdDep, since: str | None = None) -> Any:
+    """Every part's warnings and errors in a span, grouped (the logging plan's phase 6b)."""
+    result = await run_in_threadpool(partial(LogsService().problems, workspace_id, since=since))
+    return _api_data(result)

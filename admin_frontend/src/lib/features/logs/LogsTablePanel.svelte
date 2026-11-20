@@ -33,6 +33,8 @@
     onOpenRowDetails: (row: RenderLogRow) => void;
     onTableKeydown: (event: KeyboardEvent) => void;
     onFilterToMessage: (msgId: string, event: MouseEvent) => void;
+    /** Phase 6b: a line's story opens over the page */
+    onOpenStory?: (storyId: string) => void;
   };
 
   let {
@@ -46,7 +48,8 @@
     onSelectRow,
     onOpenRowDetails,
     onTableKeydown,
-    onFilterToMessage
+    onFilterToMessage,
+    onOpenStory
   }: Props = $props();
 
   /** Header id → sort key (Date & Time both sort chronologically). Others unsortable. */
@@ -127,7 +130,7 @@
                 <Table.Head
                   class={cn(
                     'h-auto px-2 py-2.5 text-[0.68rem] font-bold tracking-wide',
-                    header.id === '_msg_scope' && 'w-[3.25rem] min-w-[3.25rem] px-0 text-center',
+                    header.id === '_msg_scope' && 'w-[4.5rem] min-w-[4.5rem] px-0 text-center',
                     header.id === 'date_display' && 'w-[58px] text-center',
                     header.id === 'timestamp_display' && 'w-[76px] text-center',
                     header.id === 'source' && 'w-[136px]',
@@ -192,12 +195,13 @@
               onclick={() => onSelectRow(row)}
               ondblclick={() => onOpenRowDetails(row)}
             >
-              <Table.Cell class="w-[3.25rem] min-w-[3.25rem] px-0 py-1 text-center align-middle">
+              <Table.Cell class="w-[4.5rem] min-w-[4.5rem] px-0 py-1 text-center align-middle">
                 <LogsTableMessageScopeCell
                   {row}
                   msgOrd={ctrl.getScopeMsgOrdinal(row.scope_msg_id)}
                   chipAlt={ctrl.getScopeMsgChipStripeAlt(row._rowKey)}
                   {onFilterToMessage}
+                  {onOpenStory}
                 />
               </Table.Cell>
               <Table.Cell class="truncate px-2 py-1.5 text-center text-muted-foreground">

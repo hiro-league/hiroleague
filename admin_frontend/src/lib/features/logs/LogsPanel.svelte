@@ -14,6 +14,9 @@
   import LogsTablePanel from './LogsTablePanel.svelte';
   import LogsToolbar from './LogsToolbar.svelte';
   import { setupLogsPageRuntime } from './shared/logs-page-lifecycle';
+  // The logging plan's phase 6b: every part's problems grouped, under the same toolbar
+  import RepeatsTable from './one-view/RepeatsTable.svelte';
+  import { logWindowSpan } from '$lib/api/logs';
   import type { RenderLogRow } from './shared/logs-ui';
 
   // Portable logs body. The page header chrome (folder button, counts subtitle,
@@ -23,8 +26,18 @@
   let {
     ctrl,
     prefs,
-    notify
-  }: { ctrl: LogsPageController; prefs: LogsPreferences; notify: Notify } = $props();
+    notify,
+    onOpenStory
+  }: {
+    ctrl: LogsPageController;
+    prefs: LogsPreferences;
+    notify: Notify;
+    /** Opens a story over the page (phase 6b). */
+    onOpenStory: (storyId: string) => void;
+  } = $props();
+
+  // "Group repeats" shows every part's problems grouped instead of the lines (phase 6b)
+  let groupRepeats = $state(false);
 
   // Auto-follow new logs only while pinned to the very top (newest-first feed); once
   // the user scrolls down to read, stop yanking them back to the top.
@@ -98,7 +111,7 @@
      (secondary filters) collapses. The collapse chevron sits at the far right of the
      first line and targets the second line's region via aria-controls. -->
 <StickyBar class="-mx-4 border-b bg-background/85 px-4 backdrop-blur md:-mx-6 md:px-6">
-  <LogsToolbar {prefs} {ctrl} onRequestClearLogs={requestClearLogs}>
+  <LogsToolbar {prefs} {ctrl} onRequestClearLogs={requestClearLogs} {groupRepeats} onToggleGroupRepeats={() => (groupRepeats = !groupRepeats)}>
     {#snippet filters()}
       <LogsFiltersPanel {prefs} {ctrl} />
     {/snippet}
@@ -111,6 +124,17 @@
   <Notice tone="warning" message={ctrl.pollError} class="px-3 py-2 text-sm" />
 {/if}
 
+{#if groupRepeats}
+  <div class="mt-3">
+    <RepeatsTable
+      span={logWindowSpan(prefs.lastSessionOnly, prefs.logTimeRange)}
+      activeSources={prefs.activeSources}
+      levels={prefs.levelFilter}
+      search={prefs.searchText}
+      {onOpenStory}
+    />
+  </div>
+{:else}
 <MasterDetail bind:detailOpen={prefs.detailPanelOpen} scroll="page">
   {#snippet list()}
     <LogsTablePanel
@@ -125,6 +149,7 @@
       onOpenRowDetails={openRowDetails}
       onTableKeydown={(event) => ctrl.handleTableKeydown(event, () => tableScroller)}
       onFilterToMessage={ctrl.filterToMessage}
+      {onOpenStory}
     />
   {/snippet}
   {#snippet detail()}
@@ -138,6 +163,7 @@
     />
   {/snippet}
 </MasterDetail>
+{/if}
 
 <Dialog.Root
   open={clearLogsConfirmOpen}

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { afterNavigate } from '$app/navigation';
+  import { afterNavigate, goto } from '$app/navigation';
   import { page } from '$app/state';
   import { FolderOpen } from '@lucide/svelte';
   import PageHeader from '$kit/ui/page-header.svelte';
@@ -19,6 +19,11 @@
   import { createGraphRunsPageController } from '$lib/features/graph-runs/state/graph-runs-controller.svelte';
   import { LOGS_TAB_DESCRIPTORS } from './shared/logs-page-config';
   import AiUsagePanel from '$lib/features/ai-usage/AiUsagePanel.svelte';
+  // Logging and tracing plan, phase 6b: the stories, each drawn by its kind
+  import StoriesPanel from './one-view/StoriesPanel.svelte';
+  import StoryDialog from './one-view/StoryDialog.svelte';
+  import StoriesToolbar from './one-view/StoriesToolbar.svelte';
+  import { StoriesFilters } from './one-view/stories-filters.svelte';
 
   // Logs feed (first tab) — controller + filter prefs owned here so the shared
   // header chrome (folder button, counts, collapse chevron) can read them.
@@ -34,7 +39,19 @@
 
   const isRunsTab = $derived(tabPrefs.activeTab === 'runs');
   const isUsageTab = $derived(tabPrefs.activeTab === 'usage'); // Phase 7b: AI usage
-  const pageTitle = $derived(isRunsTab ? 'Graph runs' : isUsageTab ? 'AI usage' : 'Logs');
+  const isStoriesTab = $derived(tabPrefs.activeTab === 'stories');
+  const pageTitle = $derived(isRunsTab ? 'Graph runs' : isUsageTab ? 'AI usage' : isStoriesTab ? 'Stories' : 'Logs');
+
+  // A story opens over the page (Logs or Stories) from `?story=<id>`, so its link can be shared; on Graph runs the
+  // same param opens that story's run instead
+  const storiesFilters = new StoriesFilters();
+  const openStoryId = $derived(isRunsTab ? '' : (page.url.searchParams.get('story')?.trim() ?? ''));
+  function setStoryParam(id: string) {
+    const url = new URL(page.url);
+    if (id) url.searchParams.set('story', id);
+    else url.searchParams.delete('story');
+    void goto(url, { noScroll: true, keepFocus: true });
+  }
 
   onMount(() => {
     tabPrefs.initialize();
@@ -51,14 +68,33 @@
   });
 </script>
 
+{#snippet storiesBar()}
+  <StoriesToolbar filters={storiesFilters} />
+{/snippet}
+
+{#snippet runsNav()}
+      <GraphRunsSubtabNav
+        activePane={runsCtrl.activePane}
+        openRunIds={runsCtrl.openRunIds}
+        runDetailCardsExpanded={runsCtrl.runDetailCardsExpanded}
+        runTabDisplayLabel={runsCtrl.runTabDisplayLabel}
+        runTabTooltip={runsCtrl.runTabTooltip}
+        onShowRunsOnly={runsCtrl.showRunsOnly}
+        onOpenRunTab={(rid) => void runsCtrl.openRunTab(rid)}
+        onCloseRunTab={runsCtrl.closeRunTab}
+        onToggleRunDetailCards={runsCtrl.toggleRunDetailCards}
+        onRefresh={runsCtrl.refreshMain}
+      />
+{/snippet}
+
 <svelte:head>
   <title>{pageTitle} - Hiro Admin</title>
 </svelte:head>
 
 <section class={ADMIN_PAGE_MAX_W_WIDE}>
-  <PageHeader title={pageTitle}>
+  <PageHeader title={pageTitle} children={isRunsTab ? runsNav : isStoriesTab ? storiesBar : undefined}>
     {#snippet adornment()}
-    {#if !isRunsTab && !isUsageTab}
+    {#if !isRunsTab && !isUsageTab && !isStoriesTab}
       <button
         class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-40"
         type="button"
@@ -84,7 +120,7 @@
       <p class={'mt-1 font-sans text-xs text-muted-foreground'}>
         What every paid AI call costs (questions, speech, transcription, images, embeddings): the extensions' and Hiro's own jobs, by the hour.
       </p>
-    {:else}
+    {:else if !isStoriesTab}
       <p class={'mt-1 font-sans text-xs text-muted-foreground'}>
         {logsCtrl.visibleRows.length} visible / {logsCtrl.rows.length} loaded
         {#if logsCtrl.searchBusy}
@@ -106,20 +142,6 @@
       }}
     />
     {/snippet}
-    {#if isRunsTab}
-      <GraphRunsSubtabNav
-        activePane={runsCtrl.activePane}
-        openRunIds={runsCtrl.openRunIds}
-        runDetailCardsExpanded={runsCtrl.runDetailCardsExpanded}
-        runTabDisplayLabel={runsCtrl.runTabDisplayLabel}
-        runTabTooltip={runsCtrl.runTabTooltip}
-        onShowRunsOnly={runsCtrl.showRunsOnly}
-        onOpenRunTab={(rid) => void runsCtrl.openRunTab(rid)}
-        onCloseRunTab={runsCtrl.closeRunTab}
-        onToggleRunDetailCards={runsCtrl.toggleRunDetailCards}
-        onRefresh={runsCtrl.refreshMain}
-      />
-    {/if}
   </PageHeader>
   
 
@@ -193,8 +215,14 @@
     />
   {:else if isUsageTab}
     <AiUsagePanel />
+  {:else if isStoriesTab}
+    <StoriesPanel filters={storiesFilters} onOpenStory={setStoryParam} />
   {:else}
-    <LogsPanel ctrl={logsCtrl} {prefs} {notify} />
+    <LogsPanel ctrl={logsCtrl} {prefs} {notify} onOpenStory={setStoryParam} />
+  {/if}
+
+  {#if openStoryId}
+    <StoryDialog storyId={openStoryId} onClose={() => setStoryParam('')} {notify} />
   {/if}
 </section>
 

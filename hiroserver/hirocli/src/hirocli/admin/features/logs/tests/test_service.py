@@ -86,7 +86,7 @@ def test_tail_initial_success() -> None:
     assert r.data.file_offsets == {"/tmp/server.log": 100}
     T.return_value.execute.assert_called_once()
     call_kw = T.return_value.execute.call_args.kwargs
-    assert call_kw.get("source") == "core"  # the core's own streams: the apps' come with phase 6's view
+    assert call_kw.get("source") == "all"  # every part: the core, each app, the phone (phase 6b)
     assert call_kw.get("workspace") == "ws1"
     assert call_kw.get("min_timestamp") is None
 

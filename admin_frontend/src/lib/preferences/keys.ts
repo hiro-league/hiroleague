@@ -82,5 +82,5 @@ export type CharactersTabPreference = 'browse' | 'detail';
 export type KnowledgeTabPreference = 'ingest' | 'browse' | 'ask';
 export type MemoriesTabPreference = 'memories' | 'graph';
 export type GraphPanelSidePreference = 'auto' | 'left' | 'right';
-export type LogsPrimaryTabPreference = 'logs' | 'runs' | 'usage';
+export type LogsPrimaryTabPreference = 'logs' | 'stories' | 'runs' | 'usage';
 export type PreferencesTabPreference = 'models' | 'knowledge' | 'graph-engine' | 'agent';

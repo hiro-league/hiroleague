@@ -1197,6 +1197,7 @@ class LogStoryTool(Tool):
             if "step" in fields and "elapsed_ms" in fields:
                 step = {"step": fields["step"], "source": r["source"], "elapsed_ms": _number(fields["elapsed_ms"]),
                         "outcome": fields.get("outcome", ""), "when": _when(float(r["timestamp"])),
+                        "timestamp": r["timestamp"],  # its end: with elapsed_ms, where it sits in the story
                         "step_id": r.get("step_id", "")}
                 if fields.get("parent_step"):
                     step["parent_step"] = fields["parent_step"]

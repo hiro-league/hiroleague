@@ -161,7 +161,8 @@ def test_one_story_returns_its_lines_from_every_part_in_order(store, log_dir):
     assert [r["message"] for r in result.rows] == ["Ask now", "⬇️ Extension request — home · ai.ask",
                                                    "camera.check took 2100 ms"]
     assert result.sources == ["app-home", "server"]
-    assert result.steps == [{"step": "camera.check", "source": "app-home", "elapsed_ms": 2100, "outcome": "ok",
+    steps = [{k: v for k, v in s.items() if k != "timestamp"} for s in result.steps]  # (each step's time: its end)
+    assert steps == [{"step": "camera.check", "source": "app-home", "elapsed_ms": 2100, "outcome": "ok",
                              "when": result.rows[-1]["when"], "step_id": "a" * 16}]
     assert 1500 < result.took_ms < 2500 and result.problems == 0
     # A traceparent names the same story; so does the search's filter

@@ -49,7 +49,11 @@ export function logTimeRangeSeconds(range: LogTimeRange): number | null {
 }
 
 export type LogLevel = (typeof LOG_LEVELS)[number];
-export type LogSourceFilter = 'server' | 'channels' | 'gateway' | 'cli';
+/** The core's own streams. */
+export type CoreSourceFilter = 'server' | 'channels' | 'gateway' | 'cli';
+/** A Source choice: one of the core's own, or another part's stream in the core's log store (each app's `app-<name>`, the
+ * phone's `device`): the logging plan's phase 6b. */
+export type LogSourceFilter = CoreSourceFilter | `app-${string}` | 'device';
 
 export type LogExtraSegment = {
   key: string | null;
@@ -94,6 +98,8 @@ export type LogsLayout = {
   available_channels: string[];
   has_gateway: boolean;
   has_cli: boolean;
+  /** The other parts' streams in the core's log store: `app-home`, `app-net`..., `device`. */
+  other_streams: string[];
 };
 
 export type LogsTailResponse = {
@@ -157,4 +163,116 @@ export async function discoverLogMethods(): Promise<string[]> {
 
 export async function clearLogs(): Promise<LogsClearResponse> {
   return apiRequest<LogsClearResponse>('/logs/clear', { method: 'POST' });
+}
+
+// ---- Every part's problems and the named stories (the logging plan's phase 6b) -----------------------------------
+
+/** A brief line, as the core's log tools give it: the time in words, the fields as a dict. */
+export type BriefLogLine = {
+  when: string;
+  timestamp: number; // epoch seconds
+  source: string;
+  level: string;
+  area: string;
+  message: string;
+  fields?: Record<string, string>;
+  story_id?: string;
+};
+
+export type ProblemGroup = {
+  source: string;
+  level: string;
+  area: string;
+  count: number;
+  kinds: number;
+  messages: string[];
+  first: string; // in words
+  last: string; // in words
+  story_ids: string[];
+};
+
+export type LogProblems = {
+  span: string;
+  total: number;
+  by_source: Record<string, number>;
+  groups: ProblemGroup[];
+  rows: BriefLogLine[];
+  truncated: boolean;
+};
+
+export type StoryKind = 'conversation' | 'event' | 'round' | 'action' | 'job';
+
+export type StoryListItem = {
+  story_id: string;
+  kind: StoryKind;
+  name: string;
+  label: string;
+  title: string;
+  source: string; // the part that named it
+  when: string;
+  timestamp: number; // epoch seconds, its first line
+  took_ms: number;
+  outcome: string;
+  problems: number;
+  sources: string[];
+};
+
+export type LogStories = {
+  span: string;
+  total: number;
+  by_kind: Record<string, number>;
+  stories: StoryListItem[];
+  truncated: boolean;
+};
+
+export type StoryStepLine = {
+  step: string;
+  source: string;
+  elapsed_ms: number;
+  outcome: string;
+  when: string;
+  timestamp: number; // its end, epoch seconds
+  step_id: string;
+  parent_step?: string;
+};
+
+export type LogStory = {
+  story_id: string;
+  kind: StoryKind | '';
+  name: string;
+  label: string;
+  title: string;
+  sources: string[];
+  started: string;
+  took_ms: number;
+  problems: number;
+  steps: StoryStepLine[];
+  rows: BriefLogLine[];
+  truncated: boolean;
+};
+
+/** Every part's warnings and errors in a span (`since`: "1h", "90m", "2d"), grouped by part, level and area. */
+export async function getLogProblems(since: string): Promise<LogProblems> {
+  return apiRequest<LogProblems>(`/logs/problems?since=${encodeURIComponent(since)}`);
+}
+
+/** The named stories of a span across every part, newest first. */
+export async function getLogStories(params: { since: string; kind?: string; source?: string; problems?: boolean }): Promise<LogStories> {
+  const sp = new URLSearchParams({ since: params.since, limit: '300' });
+  if (params.kind) sp.set('kind', params.kind);
+  if (params.source) sp.set('source', params.source);
+  if (params.problems) sp.set('problems', 'true');
+  return apiRequest<LogStories>(`/logs/stories?${sp.toString()}`);
+}
+
+/** One story across every part: what it is, its steps and its lines. */
+export async function getLogStory(storyId: string): Promise<LogStory> {
+  return apiRequest<LogStory>(`/logs/stories/${encodeURIComponent(storyId)}`);
+}
+
+/** The Logs page's time window as a span the log tools read ("Last session" reads the last day). */
+export function logWindowSpan(lastSessionOnly: boolean, range: LogTimeRange): string {
+  if (lastSessionOnly) return '1d';
+  const seconds = logTimeRangeSeconds(range);
+  return seconds === null ? '30d' : `${Math.round(seconds / 60)}m`;
 }
