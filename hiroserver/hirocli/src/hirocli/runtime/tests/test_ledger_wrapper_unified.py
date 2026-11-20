@@ -13,7 +13,6 @@ from hiro_commons.log import Logger
 from hiro_memory.ledger import LedgerSink, graph_logged
 from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
 from hiro_memory.ledger.wrapper import wrap_graph_callable, wrap_graph_node
-from hirocli.runtime.tests.graph_fakes import make_agent_services
 
 
 class _Owner:

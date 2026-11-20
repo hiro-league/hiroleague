@@ -54,10 +54,10 @@ def register(service_app: typer.Typer, console: Console) -> None:
             result = ServiceInstallTool().execute(user=user, workspace=workspace)
         except NeedsRootError as exc:
             _print_needs_root(console, exc)
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         except ServiceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         console.print(
             f"[green]✅ HiroLeague service installed and started:[/green] [bold]{result.service}[/bold] "
@@ -100,10 +100,10 @@ def register(service_app: typer.Typer, console: Console) -> None:
             result = ServiceUninstallTool().execute(workspace=workspace)
         except NeedsRootError as exc:
             _print_needs_root(console, exc)
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         except ServiceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         if result.removed:
             console.print(f"[green]Service removed:[/green] {result.service} is stopped and no longer starts at boot.")
@@ -129,7 +129,7 @@ def register(service_app: typer.Typer, console: Console) -> None:
             result = ServiceStatusTool().execute(workspace=workspace)
         except ServiceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         if not result.installed:
             exe = result.hiro_executable or "hiro"

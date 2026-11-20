@@ -263,7 +263,8 @@ def _result_preview(data: Any, *, limit: int = 4) -> str:
             f"{k}={v}" for k, v in data.items() if isinstance(v, (str, int, float, bool)) and v not in (None, "")
         ]
         return " · ".join(scalars[:limit])[:160]
-    except Exception:
+    except Exception as exc:
+        log.debug("Could not build a result preview for the Graph Runs row; it stays blank", error=str(exc))
         return ""
 
 
@@ -295,7 +296,8 @@ def _resolution_preview(operation: str, data: Any) -> str:
             return _entity_resolution_preview(data)
         if operation == "EdgeDuplicate":
             return _edge_resolution_preview(data)
-    except Exception:
+    except Exception as exc:
+        log.debug("Could not build a resolution preview; the generic preview is used", operation=operation, error=str(exc))
         return ""
     return ""
 

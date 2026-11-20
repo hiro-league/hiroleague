@@ -43,7 +43,8 @@ def _usage_dict(value: Any) -> dict[str, Any] | None:
                 result = fn()
                 if isinstance(result, dict):
                     return result
-            except Exception:
+            except Exception as exc:
+                log.debug("Could not read Gemini's usage data this way — trying the next", method=attr, error=str(exc))
                 continue
     return None
 

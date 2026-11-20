@@ -8,6 +8,9 @@ from typing import Optional
 from pydantic import BaseModel
 
 from hiro_commons.constants.storage import CONFIG_FILENAME, LOGS_DIR
+from hiro_commons.log import Logger
+
+log = Logger.get("GATEWAY")
 
 STATE_FILENAME = "state.json"
 
@@ -66,7 +69,7 @@ def load_state(instance_path: Path) -> GatewayState:
         try:
             return GatewayState.model_validate_json(state_file.read_text(encoding="utf-8"))
         except Exception:
-            pass
+            log.warning("Could not read the gateway's state file; starting from an empty state", path=str(state_file), exc_info=True)
     return GatewayState()
 
 

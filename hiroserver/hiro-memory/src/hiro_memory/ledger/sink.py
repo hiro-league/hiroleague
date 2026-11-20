@@ -60,7 +60,6 @@ class LedgerSink:
                 Logger.add_file_sink(
                     str(self.path),
                     level="INFO",
-                    use_csv=True,
                     csv_columns=GRAPH_LEDGER_COLUMNS,
                     include_prefix=self._module,
                 )

@@ -31,6 +31,9 @@ from hirocli.tools.character import (
 )
 
 from hirocli.admin.shared.result import Result
+from hiro_commons.log import Logger
+
+log = Logger.get("ADMIN.CHARACTERS")
 
 _MAX_INLINE_PHOTO_BYTES = 2_000_000
 
@@ -102,6 +105,7 @@ class CharacterService:
         try:
             raw = CharacterListTool().execute(workspace=workspace_id)
         except Exception as exc:
+            log.warning("⚠️ Characters list failed — HiroAdmin · characters", workspace_id=workspace_id, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
         return Result.success(list(raw.characters))
 
@@ -135,6 +139,7 @@ class CharacterService:
                 rows.append(row)
             return Result.success(rows)
         except Exception as exc:
+            log.warning("⚠️ Characters list with photos failed — HiroAdmin · characters", workspace_id=workspace_id, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
 
     def get_character(self, workspace_id: str | None, character_id: str) -> Result[dict[str, Any]]:
@@ -148,6 +153,13 @@ class CharacterService:
                 workspace=workspace_id,
             )
         except Exception as exc:
+            log.warning(
+                "⚠️ Character load failed — HiroAdmin · characters",
+                workspace_id=workspace_id,
+                character_id=character_id,
+                error=str(exc),
+                exc_info=True,
+            )
             return Result.failure(str(exc))
         return Result.success(dict(raw.character))
 
@@ -195,6 +207,13 @@ class CharacterService:
         except FileNotFoundError as exc:
             return Result.failure(str(exc))
         except Exception as exc:
+            log.warning(
+                "⚠️ Character configuration load failed — HiroAdmin · characters",
+                workspace_id=workspace_id,
+                character_id=character_id,
+                error=str(exc),
+                exc_info=True,
+            )
             return Result.failure(str(exc))
         ch = dict(raw.character)
         ai_ids = [str(x) for x in ch.get("ai_profiles") or [] if isinstance(x, str)]
@@ -285,6 +304,13 @@ class CharacterService:
                 extras_json=extras_json or None,
             )
         except Exception as exc:
+            log.warning(
+                "⚠️ Character create failed — HiroAdmin · characters",
+                workspace_id=workspace_id,
+                character_id=character_id,
+                error=str(exc),
+                exc_info=True,
+            )
             return Result.failure(str(exc))
         return Result.success(
             CharacterSavePayload(character=dict(raw.character), warnings=list(raw.warnings))
@@ -329,6 +355,13 @@ class CharacterService:
         try:
             raw = CharacterUpdateTool().execute(**kwargs)
         except Exception as exc:
+            log.warning(
+                "⚠️ Character update failed — HiroAdmin · characters",
+                workspace_id=workspace_id,
+                character_id=character_id,
+                error=str(exc),
+                exc_info=True,
+            )
             return Result.failure(str(exc))
         return Result.success(
             CharacterSavePayload(character=dict(raw.character), warnings=list(raw.warnings))
@@ -343,6 +376,13 @@ class CharacterService:
                 workspace=workspace_id,
             )
         except Exception as exc:
+            log.warning(
+                "⚠️ Character delete failed — HiroAdmin · characters",
+                workspace_id=workspace_id,
+                character_id=character_id,
+                error=str(exc),
+                exc_info=True,
+            )
             return Result.failure(str(exc))
         if not raw.deleted:
             return Result.failure(f"Character '{character_id}' was not found.")
@@ -364,6 +404,13 @@ class CharacterService:
                 workspace=workspace_id,
             )
         except Exception as exc:
+            log.warning(
+                "⚠️ Character photo upload failed — HiroAdmin · characters",
+                workspace_id=workspace_id,
+                character_id=character_id,
+                error=str(exc),
+                exc_info=True,
+            )
             return Result.failure(str(exc))
         return Result.success(raw.photo_filename)
 

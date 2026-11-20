@@ -77,7 +77,7 @@ def _run_gateway(
         entry, _ = resolve_instance(instance_name)
     except GatewayInstanceError as exc:
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
 
     instance_path = Path(entry.path)
     config = load_config(instance_path)
@@ -95,7 +95,7 @@ def _run_gateway(
     configure_auth(auth_manager)
     configure_instance_path(instance_path)
     log.info("✅ Gateway trust root configured", instance=entry.name)
-    asyncio.run(_serve(entry.host, entry.port))
+    log_setup.run(_serve(entry.host, entry.port))
 
 
 async def _serve(host: str, port: int) -> None:
@@ -117,7 +117,7 @@ async def _serve(host: str, port: int) -> None:
         signal.signal(signal.SIGTERM, lambda *_: loop.call_soon_threadsafe(stop_event.set))
         signal.signal(signal.SIGINT, lambda *_: loop.call_soon_threadsafe(stop_event.set))
 
-    async with websockets.serve(handle_connection, host, port, reuse_address=True) as server:
+    async with websockets.serve(handle_connection, host, port, reuse_address=True):
         log.info(f"✅ Gateway listening at ws://{host}:{port}")
         await stop_event.wait()
         log.info("🛑 Shutting down", connected_devices=get_connected_devices())
@@ -148,7 +148,7 @@ def start(
         entry, _ = resolve_instance(instance)
     except GatewayInstanceError as exc:
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
 
     instance_path = Path(entry.path)
 
@@ -156,7 +156,7 @@ def start(
         # Child is sole PID writer — parent never writes, stop_process() cleans up.
         write_pid(instance_path, PID_FILENAME)
         console.print(
-            f"[green]Gateway starting[/green] in foreground "
+            "[green]Gateway starting[/green] in foreground "
             "[dim](Ctrl+C to stop)[/dim]"
         )
         try:
@@ -176,7 +176,7 @@ def start(
         result = start_instance(instance, verbose=verbose)
     except GatewayInstanceError as exc:
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
 
     if result.already_running:
         console.print(f"[yellow]Gateway already running[/yellow] (PID {result.pid}).")
@@ -198,7 +198,7 @@ def stop(
         result = stop_instance(instance)
     except GatewayInstanceError as exc:
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
 
     if result.was_running:
         console.print(f"[green]Gateway stopped[/green] (was PID {result.pid}).")
@@ -217,7 +217,7 @@ def status(
         result = get_status(instance)
     except GatewayInstanceError as exc:
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
 
     if not result.instances:
         console.print("[dim]No gateway instances configured.[/dim]")
@@ -247,7 +247,7 @@ def teardown(
         result = teardown_instance(instance, purge=purge, elevated_task=elevated_task)
     except GatewayInstanceError as exc:
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
 
     if result.purged:
         console.print(f"[green]Gateway instance '{result.instance_name}' removed.[/green]")
@@ -319,7 +319,7 @@ def instance_create(
         )
     except GatewayInstanceError as exc:
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
 
     console.print(f"[green]Gateway instance '[bold]{result.instance_name}[/bold]' created.[/green]")
     console.print(f"  path : [bold]{result.instance_path}[/bold]")
@@ -342,7 +342,7 @@ def instance_set_default(
         set_default_instance(name)
     except GatewayInstanceError as exc:
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
     console.print(f"[green]Default gateway instance set to '[bold]{name}[/bold]'.[/green]")
 
 
@@ -356,7 +356,7 @@ def instance_show(
         entry, _ = resolve_instance(name)
     except GatewayInstanceError as exc:
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
 
     result = get_status(entry.name)
     if not result.instances:
@@ -390,7 +390,7 @@ def instance_remove(
         remove_instance(name, purge=purge)
     except GatewayInstanceError as exc:
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
 
     console.print(f"[green]Gateway instance '[bold]{name}[/bold]' removed.[/green]")
 
@@ -426,7 +426,8 @@ def _print_instance_details(entry: GatewayInstanceStatusEntry, registry: Gateway
     try:
         config = load_config(instance_path)
         log_dir = str(resolve_log_dir(instance_path, config))
-    except Exception:
+    except Exception as exc:  # shown as unknown in the table
+        Logger.get("GATEWAY").debug("The instance's log folder couldn't be read", instance=entry.name, error=str(exc))
         log_dir = "—"
 
     table = Table(

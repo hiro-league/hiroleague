@@ -76,6 +76,7 @@ class GraphLedgerService:
                 GraphLedgerSnapshot(rows=page, file_offsets={str(path): offset}, has_more=has_more)
             )
         except Exception as exc:
+            log.warning("⚠️ Graph ledger tail failed — HiroAdmin · graph_runs", workspace=workspace, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
 
     def tail_after_offsets(
@@ -102,6 +103,7 @@ class GraphLedgerService:
                 GraphLedgerSnapshot(rows=[], file_offsets=dict(file_offsets), has_more=False)
             )
         except Exception as exc:
+            log.warning("⚠️ Graph ledger poll failed — HiroAdmin · graph_runs", workspace=workspace, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
 
     def inspect_run(
@@ -118,6 +120,7 @@ class GraphLedgerService:
             payload = _inspect_run_rows(path, rid)
             return Result.success(payload)
         except Exception as exc:
+            log.warning("⚠️ Graph run inspect failed — HiroAdmin · graph_runs", workspace=workspace, run_id=rid, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
 
     def retrieval_loop(
@@ -173,6 +176,7 @@ class GraphLedgerService:
                 }
             )
         except Exception as exc:
+            log.warning("⚠️ Graph run recall detail failed — HiroAdmin · graph_runs", workspace=workspace, run_id=rid, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
 
 

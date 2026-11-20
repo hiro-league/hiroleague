@@ -225,7 +225,8 @@ def _iso(value: Any) -> str:
         return ""
     try:
         return value.date().isoformat()
-    except Exception:
+    except Exception as exc:
+        log.debug("Temporal field is not a datetime; using its text", error=str(exc))
         return str(value)[:10]
 
 

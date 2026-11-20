@@ -15,6 +15,9 @@ from hirocli.admin_svelte.deps import SelectedWorkspaceIdDep
 from hirocli.admin_svelte.result_payload import _api_data, api_failure
 from hirocli.domain.local_models import list_local_model_rows, list_local_providers
 from hirocli.domain.workspace import resolve_workspace
+from hiro_commons.log import Logger
+
+log = Logger.get("ADMIN.CATALOG")
 
 catalog_router = APIRouter()
 
@@ -70,6 +73,13 @@ async def list_local_models(
         )
         return {"models": [dataclasses.asdict(r) for r in rows]}
     except Exception as exc:
+        log.warning(
+            "⚠️ Local models list failed — HiroAdmin · catalog",
+            workspace_id=workspace_id,
+            model_kind=model_kind,
+            error=str(exc),
+            exc_info=True,
+        )
         return api_failure(str(exc))
 
 

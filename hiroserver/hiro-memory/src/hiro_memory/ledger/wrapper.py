@@ -29,8 +29,8 @@ def wrap_graph_node(node_name: str, fn: Callable[..., Any]) -> Callable[..., Any
         return _run_wrapped_sync(self, node_name, spec, fn, args, kwargs, is_method=True)
 
     wrapped = async_wrapped if is_async else sync_wrapped
-    setattr(wrapped, "_is_pre_node_wrapped", True)
-    setattr(wrapped, "_graph_logged_spec", spec)
+    wrapped._is_pre_node_wrapped = True
+    wrapped._graph_logged_spec = spec
     return wrapped
 
 
@@ -51,8 +51,8 @@ def wrap_graph_callable(owner: Any, node_name: str, fn: Callable[..., Any]) -> C
         return _run_wrapped_sync(owner, node_name, spec, fn, args, kwargs, is_method=False)
 
     wrapped = async_wrapped if is_async else sync_wrapped
-    setattr(wrapped, "_is_pre_node_wrapped", True)
-    setattr(wrapped, "_graph_logged_spec", spec)
+    wrapped._is_pre_node_wrapped = True
+    wrapped._graph_logged_spec = spec
     return wrapped
 
 

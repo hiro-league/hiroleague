@@ -221,5 +221,5 @@ async def upload_chat_channel_photo(
             tmp_path,
         )
     finally:
-        Path(tmp_path).unlink(missing_ok=True)
+        await run_in_threadpool(Path(tmp_path).unlink, missing_ok=True)
     return _api_data(result)

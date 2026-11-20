@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from hiro_commons.log import Logger
 from qdrant_client import QdrantClient
 from qdrant_client import models as qm
 
@@ -22,6 +23,8 @@ from hiro_memory.knowledge.constants import (
 from hiro_memory.knowledge.converters import document_filter, hit_from_payload
 from hiro_memory.knowledge.embedding_backends import EmbeddingBackend, SparseVectorData
 from hiro_memory.knowledge.models import KnowledgeSearchHit
+
+log = Logger.get("SVC.KNOWLEDGE")
 
 
 class KnowledgeVectorStore:
@@ -114,7 +117,7 @@ class KnowledgeVectorStore:
         points = []
         # Each point carries both named vectors so hybrid is a query-time toggle (no re-ingest).
         for ord_, (chunk, vector, sparse) in enumerate(
-            zip(chunks, vectors, sparse_vectors), start=1
+            zip(chunks, vectors, sparse_vectors, strict=False), start=1
         ):
             indices, values = sparse
             payload = {
@@ -515,8 +518,8 @@ class KnowledgeVectorStore:
                         message="Payload indexes have no effect in the local Qdrant.*",
                     )
                     client.create_payload_index(self.collection_name, field_name, field_schema=schema)
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug("Could not create a payload index; filters on it scan instead", field=field_name, error=str(exc))
 
     @staticmethod
     def _collection_vector_size(client: QdrantClient, collection_name: str) -> int | None:

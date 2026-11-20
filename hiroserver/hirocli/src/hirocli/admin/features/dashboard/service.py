@@ -38,6 +38,7 @@ class DashboardService:
             ws_result = WorkspaceListTool().execute()
             workspaces = ws_result.workspaces
         except Exception as exc:
+            log.warning("⚠️ Dashboard workspaces load failed — HiroAdmin · dashboard", error=str(exc), exc_info=True)
             return Result.failure(f"Unable to load workspaces: {exc}")
 
         total_workspaces = len(workspaces)

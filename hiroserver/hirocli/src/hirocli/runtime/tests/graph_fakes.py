@@ -17,7 +17,7 @@ surface and nothing more.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hiro_channel_sdk.constants import (
     CONTENT_TYPE_AUDIO,
@@ -25,17 +25,16 @@ from hiro_channel_sdk.constants import (
     CONTENT_TYPE_TEXT,
 )
 from hiro_channel_sdk.models import ContentItem, MessageRouting, UnifiedMessage
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage
-from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import tool
-from pydantic import PrivateAttr
 
 from hiro_memory.conversation.results import MemoryAddResult
 from hirocli.runtime.agent_graph.workspace_ledger import workspace_ledger_sink
 from hiro_memory.ledger import LedgerSink
 from hirocli.services.stt.provider import TranscriptionResult
 from hirocli.services.voice.kit import Speech
+
+if TYPE_CHECKING:
+    from hirocli.runtime.agent_graph.services import AgentServices
 
 
 @tool

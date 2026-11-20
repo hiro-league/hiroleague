@@ -54,8 +54,7 @@ def _parse_timestamp(raw: Any) -> datetime | None:
         pass
     for fmt in ("%Y-%m", "%Y-%m-%d"):
         try:
-            dt = datetime.strptime(text, fmt)
-            return dt.replace(tzinfo=UTC)
+            return datetime.strptime(text, fmt).replace(tzinfo=UTC)
         except ValueError:
             continue
     return None

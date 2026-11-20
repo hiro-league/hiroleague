@@ -5,12 +5,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from hiro_commons.log import Logger
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from pydantic import PrivateAttr
 
 from .ledger import LedgerSink
+
+log = Logger.get("MEMORY.TESTING")
 
 if TYPE_CHECKING:
     from .knowledge.models import KnowledgeSearchHit
@@ -122,6 +125,7 @@ class _ScriptedStructured:
             try:
                 parsed = self._schema.model_validate_json(content)
             except Exception as exc:  # noqa: BLE001 — surfaced via parsing_error like langchain
+                log.debug("Scripted reply does not fit the schema; returned as parsing_error", error=str(exc))
                 error = exc
         if self._include_raw:
             return {"raw": msg, "parsed": parsed, "parsing_error": error}

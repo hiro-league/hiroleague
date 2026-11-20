@@ -46,7 +46,7 @@ def register(device_app: typer.Typer, console: Console) -> None:
             )
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         from ..qr_rendering import render_qr_terminal
 
@@ -70,7 +70,7 @@ def register(device_app: typer.Typer, console: Console) -> None:
             result = DeviceListTool().execute(workspace=workspace)
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         if not result.devices:
             console.print("[dim]No approved devices yet.[/dim]")
@@ -107,7 +107,7 @@ def register(device_app: typer.Typer, console: Console) -> None:
             result = DeviceRevokeTool().execute(device_id=device_id, workspace=workspace)
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         if result.removed:
             console.print(f"[green]Revoked device[/green] [bold]{result.device_id}[/bold].")

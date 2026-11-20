@@ -13,7 +13,7 @@ from hiro_commons.log import Logger
 from ..domain.available_models import AvailableModelsService
 from ..domain.credential_store import CredentialStore
 from ..domain.model_catalog import MODEL_KINDS, ModelKind, get_model_catalog
-from ..domain.workspace import WorkspaceError, resolve_workspace
+from ..domain.workspace import resolve_workspace
 from .base import Tool, ToolParam
 
 log = Logger.get("TOOL.PROVIDER")

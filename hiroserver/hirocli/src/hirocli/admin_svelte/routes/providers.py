@@ -17,7 +17,6 @@ from hirocli.admin_svelte.schemas import (
     ProviderSetEndpointRequest,
 )
 from hirocli.domain.local_models import (
-    LOCAL_PROVIDER_ID,
     list_local_model_rows,
     list_local_providers,
 )

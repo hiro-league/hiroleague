@@ -56,7 +56,7 @@ def register(ai_app: typer.Typer, uses_app: typer.Typer, console: Console) -> No
             result = AiProfilesListTool().execute(workspace=workspace)
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         if not result.profiles:
             console.print("[dim]No AI profiles yet. Add one in the admin: Catalog, AI profiles.[/dim]")
             return
@@ -108,7 +108,7 @@ def register(ai_app: typer.Typer, uses_app: typer.Typer, console: Console) -> No
             )
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         if not result.ok or result.answer is None:
             err = result.error or {}
             console.print(f"[red]Not answered ({err.get('code')}):[/red] {err.get('message')}")
@@ -141,7 +141,7 @@ def register(ai_app: typer.Typer, uses_app: typer.Typer, console: Console) -> No
             result = AiImportHomeHiroTool().execute(db_path=str(db_path), dry_run=dry_run, workspace=workspace)
         except (WorkspaceError, ImportError_, ValueError) as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         verb = "Would write" if dry_run else "Wrote"
         console.print(f"[bold]{verb}[/bold] {len(result.profiles)} AI profiles (ids hh-<HomeHiro profile id>, as HomeHiro's copies send them):")
         back = {new: old for old, new in result.from_ids.items()}
@@ -173,7 +173,7 @@ def register(ai_app: typer.Typer, uses_app: typer.Typer, console: Console) -> No
             r = AiUsageImportHomeHiroTool().execute(db_path=str(db_path), dry_run=dry_run, workspace=workspace)
         except (WorkspaceError, UsageImportError, ValueError) as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         verb = "Would add" if dry_run else "Added"
         span = f" ({r.first_hour} to {r.last_hour}, UTC hours)" if r.first_hour else ""
         console.print(
@@ -194,7 +194,7 @@ def register(ai_app: typer.Typer, uses_app: typer.Typer, console: Console) -> No
             result = AiUsesListTool().execute(workspace=workspace)
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         if not result.extensions:
             console.print("[dim]No extension has declared AI uses yet.[/dim]")
             return
@@ -226,7 +226,7 @@ def register(ai_app: typer.Typer, uses_app: typer.Typer, console: Console) -> No
             result = AiProfileRestoreDefaultTool().execute(profile_id=profile_id, workspace=workspace)
         except (WorkspaceError, ValueError) as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         console.print(f"[green]{result.profile_id}[/green] back to the {result.preset} job's default tuning")
 
     @uses_app.command("set")
@@ -242,7 +242,7 @@ def register(ai_app: typer.Typer, uses_app: typer.Typer, console: Console) -> No
             result = AiUsesSetTool().execute(key=key, profile_id=profile_id, workspace=workspace)
         except (WorkspaceError, ValueError) as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         console.print(f"[green]{result.key}[/green] -> {result.profile_id or 'no profile'}")
 
     @uses_app.command("forget")
@@ -257,7 +257,7 @@ def register(ai_app: typer.Typer, uses_app: typer.Typer, console: Console) -> No
             result = AiUsesForgetTool().execute(key=key, workspace=workspace)
         except (WorkspaceError, ValueError) as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         console.print(f"[green]Forgot[/green] {result.key}" if result.forgotten else f"[yellow]No use {result.key}[/yellow]")
 
     @uses_app.command("refresh")

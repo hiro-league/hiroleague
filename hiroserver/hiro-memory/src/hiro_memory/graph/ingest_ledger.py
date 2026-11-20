@@ -33,6 +33,8 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
+from hiro_commons.log import Logger
+
 from hiro_memory.ledger import (
     LedgerEntry,
     LedgerSink,
@@ -44,6 +46,8 @@ from hiro_memory.ledger.wrapper import record_node_exception as _record_node_exc
 
 from .graphiti_adapters import GraphitiLLMUsage
 from .ledger_tracer import SpanRecord, current_spans
+
+log = Logger.get("SVC.KNOWLEDGE.GRAPH.GRAPHITI.INGEST")
 
 # Node-name prefix so every ingest row groups + sorts together in Graph Runs,
 # matching the retrieval-side convention (``knowledge/parse_query`` etc.).
@@ -442,7 +446,8 @@ def _episode_input_preview(
     if reference_time is not None:
         try:
             ref = f" · t={reference_time.date().isoformat()}"
-        except Exception:
+        except Exception as exc:
+            log.debug("Episode reference time is not a datetime; the label leaves it out", error=str(exc))
             ref = ""
     head = f"episode {episode_index}/{total} · chunk {cid} · '{label}'{ref}"
     # #1 — append the actual ingested text so it's visible in the episode step (the

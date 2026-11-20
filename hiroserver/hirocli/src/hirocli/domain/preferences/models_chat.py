@@ -19,7 +19,13 @@ class ChatPreferences(BaseModel):
     instructions: str = Field(default=DEFAULT_CHAT_INSTRUCTIONS, title="Chat instructions")
     # Conversation-history window kept per turn by trim_history (short-term context). Feeds the chat
     # answer + memory/knowledge retrieval — a chat-answering concern, not a long-term memory one.
-    max_messages: int = Field(default=DEFAULT_MAX_HISTORY_MESSAGES, ge=1, le=100, title="Max retained messages", description="Conversation history window kept per turn (short-term context for the reply + memory/knowledge retrieval).")
+    max_messages: int = Field(
+        default=DEFAULT_MAX_HISTORY_MESSAGES,
+        ge=1,
+        le=100,
+        title="Max retained messages",
+        description="Conversation history window kept per turn (short-term context for the reply + memory/knowledge retrieval).",
+    )
     # When on, chat instructs the model to cite knowledge inline as [n] AND surfaces the source list
     # to the client (citation bridge on graph.reply.completed). Moved here from knowledge.chat.
     # Advanced: niche citation behavior hidden behind the "show advanced" toggle.

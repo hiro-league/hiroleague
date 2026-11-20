@@ -102,7 +102,8 @@ def load_pairing_session(workspace_path: Path) -> PairingSession | None:
         return None
     try:
         session = PairingSession.model_validate_json(path.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as exc:
+        logger.warning("Could not read the pairing session file %s — treated as no session: %s", path, exc, exc_info=True)
         return None
     if not session.is_valid():
         clear_pairing_session(workspace_path)

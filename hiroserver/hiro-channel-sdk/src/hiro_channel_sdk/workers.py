@@ -183,17 +183,17 @@ class Worker:
             started = clock()
             try:
                 await self.run()
-                error: Exception | None = None
-            except Exception as exc:  # anything: it is retried
-                error = exc
-            if clock() - started >= self.good_after:
-                wait = self.retry_first  # it ran well for a while: this is a fresh problem
-            if error:
+            except Exception as error:  # anything: it is retried (said here, where the error is caught)
+                if clock() - started >= self.good_after:
+                    wait = self.retry_first  # it ran well for a while: this is a fresh problem
                 self._note(error)
                 try:
                     self.failed(error, wait)
                 except Exception as exc:  # a failing hook must not end the retries (a connection would never come back)
                     report(f"{self.name}: reacting to its failure", exc)
+            else:
+                if clock() - started >= self.good_after:
+                    wait = self.retry_first
             await self._pause(wait)
             wait = min(wait * 2, self.retry_most)
 

@@ -8,6 +8,9 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 )
 
 from .encoding import b64_decode, b64_encode
+from .log import Logger
+
+log = Logger.get("SIGNING")
 
 
 def sign_bytes(private_key: Ed25519PrivateKey, data: bytes) -> str:
@@ -20,7 +23,8 @@ def verify_signature(public_key: Ed25519PublicKey, data: bytes, signature_b64: s
     try:
         signature = b64_decode(signature_b64)
         public_key.verify(signature, data)
-    except Exception:
+    except Exception as exc:
+        log.debug("Signature did not verify", error=str(exc) or type(exc).__name__)
         return False
     return True
 

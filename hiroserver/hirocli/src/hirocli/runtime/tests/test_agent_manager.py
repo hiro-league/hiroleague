@@ -17,7 +17,6 @@ from hiro_channel_sdk.models import ContentItem, MessageRouting, UnifiedMessage
 from hirocli.domain.conversation_channel import CHAT_CHANNEL_ID_METADATA_KEY, create_channel
 from hirocli.domain.data_store import data_db_path, ensure_data_db
 from hirocli.runtime.agent_graph import GRAPH_RUN_COMPLETED, GRAPH_RUN_FAILED
-from hirocli.runtime.agent_graph import ChatAgentGraph
 from hirocli.runtime.agent_graph.nodes.context import _trim_chat_history
 from hirocli.runtime.agent_graph.nodes.tts import TTSNodes
 from hirocli.runtime.tests.graph_fakes import make_agent_services

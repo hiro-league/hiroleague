@@ -208,7 +208,7 @@ async def search_facts_traced(
         reranker_min_score=reranker_min_score,
     )
     reranked_edges = [edge_uuid_map[uuid] for uuid in reranked_uuids if uuid in edge_uuid_map]
-    score_by_uuid = dict(zip(reranked_uuids, edge_scores))
+    score_by_uuid = dict(zip(reranked_uuids, edge_scores, strict=False))
     trace.add_stage(
         StageRecord(
             kind="rank",
@@ -412,7 +412,7 @@ async def search_nodes_traced(
             [[n.uuid for n in result] for result in search_results], min_score=reranker_min_score
         )
     reranked_nodes = [node_uuid_map[u] for u in reranked_uuids if u in node_uuid_map]
-    score_by_uuid = dict(zip(reranked_uuids, scores))
+    score_by_uuid = dict(zip(reranked_uuids, scores, strict=False))
     trace.add_stage(
         StageRecord(
             kind="rank",
@@ -484,7 +484,7 @@ async def search_episodes_traced(
             [[e.uuid for e in result] for result in search_results], min_score=reranker_min_score
         )
     reranked_eps = [episode_uuid_map[u] for u in reranked_uuids if u in episode_uuid_map]
-    score_by_uuid = dict(zip(reranked_uuids, scores))
+    score_by_uuid = dict(zip(reranked_uuids, scores, strict=False))
     trace.add_stage(
         StageRecord(
             kind="rank",

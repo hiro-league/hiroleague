@@ -33,7 +33,7 @@ def register(voice_app: typer.Typer, console: Console) -> None:
             result = VoiceProfilesListTool().execute(workspace=workspace)
         except (WorkspaceError, VoiceError) as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         if not result.profiles:
             console.print("[dim]No voice profiles yet.[/dim]")
             return
@@ -58,7 +58,7 @@ def register(voice_app: typer.Typer, console: Console) -> None:
             result = VoiceVoicesTool().execute(source=source, language=language, q=query, limit=limit, workspace=workspace)
         except (WorkspaceError, VoiceError) as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         table = Table("Id", "Name", "Source", "Language", "Gender", "About")
         for v in result.voices:
             table.add_row(v["id"], v["name"], v["source"], v["language"] or "", v["gender"] or "", (v["description"] or "")[:60])
@@ -78,7 +78,7 @@ def register(voice_app: typer.Typer, console: Console) -> None:
             result = VoiceUsesSetTool().execute(key=key, profile_id=profile_id, workspace=workspace)
         except (WorkspaceError, ValueError) as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         console.print(f"{result.key} → {result.profile_id or 'no profile'}")
 
     @voice_app.command("clip-cache")
@@ -92,7 +92,7 @@ def register(voice_app: typer.Typer, console: Console) -> None:
             r = VoiceClipCacheTool().execute(workspace=workspace)
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         console.print(
             f"{r.clips} clips, {r.bytes / 1024 / 1024:.1f} of {r.max_mb} MB · said again {r.hits} times, "
             f"saved ${r.saved_usd:.4f}"
@@ -113,7 +113,7 @@ def register(voice_app: typer.Typer, console: Console) -> None:
             result = VoiceImportHomeHiroTool().execute(db_path=str(db_path), dry_run=dry_run, workspace=workspace)
         except (WorkspaceError, VoiceImportError, ValueError) as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         verb = "Would write" if dry_run else "Wrote"
         console.print(f"[bold]{verb}[/bold] {len(result.profiles)} voice profiles:")
         for pid, f in result.profiles.items():

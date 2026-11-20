@@ -52,7 +52,7 @@ def register(extension_app: typer.Typer, console: Console) -> None:
             result = ExtensionAddTool().execute(workspace=workspace, ttl_seconds=ttl_seconds)
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         console.print("[bold cyan]Pairing code created[/bold cyan]")
         console.print(f"  address : [bold]{result.address}[/bold]")
@@ -71,7 +71,7 @@ def register(extension_app: typer.Typer, console: Console) -> None:
             result = ExtensionListTool().execute(workspace=workspace)
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         if not result.extensions:
             console.print("[dim]No paired extensions yet. Pair one with `hiro extension add`.[/dim]")
@@ -105,7 +105,7 @@ def register(extension_app: typer.Typer, console: Console) -> None:
             result = ExtensionRemoveTool().execute(extension_id=extension_id, workspace=workspace)
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         if result.removed:
             console.print(f"[green]Removed extension[/green] [bold]{result.extension_id}[/bold].")
             console.print("[dim]If it is connected now, it is refused from its next connection.[/dim]")
@@ -129,7 +129,7 @@ def register(extension_app: typer.Typer, console: Console) -> None:
             result = ExtensionAddressTool().execute(host=host, workspace=workspace)
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         console.print(f"  listens on : [bold]{result.host}:{result.port}[/bold]")
         console.print(f"  address    : [bold]{result.address}[/bold]")
         if result.note:
@@ -155,7 +155,7 @@ def register(extension_app: typer.Typer, console: Console) -> None:
             )
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         console.print(f"  names point at : [bold]{result.ip or '(off)'}[/bold]")
         console.print(f"  Caddy file     : {result.caddy_file or '(none)'}")
         console.print(f"  hand-written   : {result.caddy_main or '(none)'}")

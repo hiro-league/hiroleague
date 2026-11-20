@@ -80,6 +80,7 @@ async def get_preferences_schema() -> Any:
     try:
         return workspace_preferences_schema_payload()
     except Exception as exc:
+        logger.warning("Preferences schema build failed: %s", exc, exc_info=True)
         return api_failure(str(exc))
 
 
@@ -104,6 +105,7 @@ async def get_preferences(
                 "prompt_defaults": dict(PROMPT_DEFAULTS),
             }
     except Exception as exc:
+        logger.warning("Preferences load failed for workspace %s: %s", workspace_id, exc, exc_info=True)
         return api_failure(str(exc))
 
 

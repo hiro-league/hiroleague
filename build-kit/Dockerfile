@@ -74,6 +74,8 @@ COPY --from=hiroleague hiroserver/hiro-channel-sdk /hiroleague/hiroserver/hiro-c
 COPY --from=hiroleague hiroserver/hiro-commons /hiroleague/hiroserver/hiro-commons
 COPY --from=hiroleague hiroserver/hiro-extension-kit /hiroleague/hiroserver/hiro-extension-kit
 COPY --from=hiroleague hiroserver/hiro-memory /hiroleague/hiroserver/hiro-memory
+# The lint rules every Hiro League repo follows: the app's pyproject extends ../../hiroleague/build-kit/ruff-rules.toml
+COPY --from=hiroleague build-kit/ruff-rules.toml /hiroleague/build-kit/ruff-rules.toml
 COPY backend/ ./
 # --refresh-package: never take the SDK, commons, the kit or the memory library from uv's cache. They keep their version
 # while their code changes, and uv reuses a cached build of a same-version local package (the stale-SDK trap of

@@ -232,6 +232,7 @@ class LLMNodes(NodeGroup):
                 result = await tool.ainvoke(args)
                 content = _tool_result_content(result)
             except Exception as exc:
+                log.warning("A tool call failed — the model gets the error instead of a result", tool=tool_name, exc_info=True)
                 status = "failed"
                 error = str(exc)
                 content = f"Error: {error}"

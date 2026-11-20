@@ -17,17 +17,20 @@ from hirocli.runtime.request_methods import REGISTERED_REQUEST_METHOD_NAMES
 from hirocli.tools.logs import (
     LogSearchTool,
     LogTailTool,
-    find_last_server_session_start_ts,
     _collect_log_files,
     _file_has_content,
-    _read_tail_rows,
     _resolve_gateway_instance_path,
     _resolve_gateway_log_dir,
     _resolve_log_dir,
     _segment_to_key_value,
     _split_extra_segments,
+    _stream_tail,
+    channel_names,
+    find_last_server_session_start_ts,
+    has_files,
     pretty_print_log_value,
 )
+from hiro_commons.logging_foundation import daily
 
 # Initial window size matches legacy admin logs page.
 INITIAL_TAIL_LINES = 500
@@ -88,23 +91,17 @@ class LogsService:
         log_dir: Path,
         gateway_log_dir: Path | None,
     ) -> Result[LogsLayoutInfo]:
-        """Discover channel log stems and whether gateway/cli logs exist."""
+        """The channels with a daily file, and whether the gateway's and the CLI's files exist."""
         try:
-            available_channels = [
-                f.stem.removeprefix("channel-")
-                for f in sorted(log_dir.glob("channel-*.log"))
-            ]
+            available_channels = channel_names(log_dir)
             has_gateway = (
-                (
-                    gateway_log_dir is not None
-                    and (gateway_log_dir / "gateway.log").exists()
-                )
+                has_files(gateway_log_dir, "gateway")
                 or (
                     (gateway_instance_path := _resolve_gateway_instance_path()) is not None
                     and _file_has_content(gateway_instance_path / "stderr.log")
                 )
             )
-            has_cli = (log_dir / "cli.log").exists()
+            has_cli = has_files(log_dir, "cli")
             return Result.success(
                 LogsLayoutInfo(
                     available_channels=available_channels,
@@ -113,6 +110,7 @@ class LogsService:
                 )
             )
         except Exception as exc:
+            _log.warning("⚠️ Logs layout failed — HiroAdmin · logs", error=str(exc), exc_info=True)
             return Result.failure(str(exc))
 
     def tail_initial(
@@ -147,6 +145,7 @@ class LogsService:
                 LogTailSnapshot(rows=list(result.rows), file_offsets=dict(result.file_offsets))
             )
         except Exception as exc:
+            _log.warning("⚠️ Logs tail initial failed — HiroAdmin · logs", error=str(exc), exc_info=True)
             return Result.failure(str(exc))
 
     def tail_after_offsets(
@@ -169,6 +168,7 @@ class LogsService:
             # Tool / IO edge cases during rapid file rotation — treat as empty poll.
             return Result.success(LogTailSnapshot(rows=[], file_offsets=dict(file_offsets)))
         except Exception as exc:
+            _log.warning("⚠️ Logs tail after offsets failed — HiroAdmin · logs", error=str(exc), exc_info=True)
             return Result.failure(str(exc))
 
     def search(
@@ -188,6 +188,7 @@ class LogsService:
             )
             return Result.success(list(result.rows))
         except Exception as exc:
+            _log.warning("⚠️ Logs search failed — HiroAdmin · logs", error=str(exc), exc_info=True)
             return Result.failure(str(exc))
 
     def search_filtered(
@@ -226,6 +227,7 @@ class LogsService:
             )
             return Result.success(list(result.rows))
         except Exception as exc:
+            _log.warning("⚠️ Logs search filtered failed — HiroAdmin · logs", error=str(exc), exc_info=True)
             return Result.failure(str(exc))
 
     @staticmethod
@@ -264,6 +266,7 @@ class LogsService:
             )
             return Result.success(list(result.rows))
         except Exception as exc:
+            _log.warning("⚠️ Logs filter by scope failed — HiroAdmin · logs", error=str(exc), exc_info=True)
             return Result.failure(str(exc))
 
     def discover_methods(self, workspace: str | None) -> Result[list[str]]:
@@ -275,24 +278,24 @@ class LogsService:
         try:
             log_dir = _resolve_log_dir(workspace)
             gateway_log_dir = _resolve_gateway_log_dir()
-            files = _collect_log_files(log_dir, gateway_log_dir, "all")
             methods: set[str] = set(REGISTERED_REQUEST_METHOD_NAMES)
-            for file_path, src_label in files:
-                rows, _ = _read_tail_rows(file_path, src_label, INITIAL_TAIL_LINES)
-                for row in rows:
+            for stream in _collect_log_files(log_dir, gateway_log_dir, "all"):
+                for row in _stream_tail(stream, INITIAL_TAIL_LINES):
                     m = row.get("scope_method", "")
                     if isinstance(m, str) and m.strip():
                         methods.add(m.strip())
             return Result.success(sorted(methods))
         except Exception as exc:
+            _log.warning("⚠️ Logs discover methods failed — HiroAdmin · logs", error=str(exc), exc_info=True)
             return Result.failure(str(exc))
 
     def clear_all(self, workspace: str | None) -> Result[LogsClearSummary]:
         """Truncate all admin-visible log files for the workspace and gateway.
 
         Files are truncated rather than deleted so running processes can keep writing through
-        existing handles. This includes detached-process ``stderr.log`` files beside the
-        workspace and gateway instance roots.
+        existing handles: every source's daily files (server, CLI, channels, gateway), every ``*.log``
+        file in the logs folders (the plugins' own output among them), and the detached-process
+        ``stderr.log`` files beside the workspace and gateway instance roots. The archive stays.
         """
         try:
             entry, _ = resolve_workspace(workspace)
@@ -304,10 +307,13 @@ class LogsService:
             paths: set[Path] = set()
             if log_dir.exists():
                 paths.update(p for p in log_dir.glob("*.log") if p.is_file())
+                for name in ["server", "cli", *(f"channel-{c}" for c in channel_names(log_dir))]:
+                    paths.update(p for _d, p in daily.files(log_dir, name))
             # stderr.log now lives under <workspace>/logs/, not the workspace root.
             paths.add(workspace_log_dir(workspace_path) / "stderr.log")
             if gateway_log_dir is not None and gateway_log_dir.exists():
                 paths.update(p for p in gateway_log_dir.glob("*.log") if p.is_file())
+                paths.update(p for _d, p in daily.files(gateway_log_dir, "gateway"))
             if gateway_instance_path is not None:
                 paths.add(gateway_instance_path / "stderr.log")
 
@@ -321,4 +327,5 @@ class LogsService:
 
             return Result.success(LogsClearSummary(cleared_files=cleared))
         except Exception as exc:
+            _log.warning("⚠️ Logs clear all failed — HiroAdmin · logs", error=str(exc), exc_info=True)
             return Result.failure(str(exc))

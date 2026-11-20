@@ -44,7 +44,9 @@ def test_words_and_a_schema_answer(fake_ai):
 
     out = run(labelled(lambda: profiles.chat("judge", MESSAGES, schema=schema, timeout=30)))
 
-    assert fake_ai.asked[-1] == ("ai.chat", {"use": "judge", "messages": MESSAGES, "schema": schema, "timeout": 30, "label": "LoCoMo conv-43, question 4"})
+    assert fake_ai.asked[-1] == (
+        "ai.chat", {"use": "judge", "messages": MESSAGES, "schema": schema, "timeout": 30, "label": "LoCoMo conv-43, question 4"}
+    )
     assert (out.content, out.tool_calls) == ('{"answer": "Cairo"}', [])
 
 

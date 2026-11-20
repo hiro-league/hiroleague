@@ -53,10 +53,10 @@ def register(app: typer.Typer, console: Console) -> None:
             result = StartTool().execute(workspace=workspace, foreground=foreground, admin=admin, metrics=metrics)
         except ValueError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         if result.already_running:
             if foreground:
@@ -117,7 +117,7 @@ def register(app: typer.Typer, console: Console) -> None:
             result = StopTool().execute(workspace=workspace)
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         if result.was_running:
             console.print(f"[green]Server stopped[/green] (was PID {result.pid}).")
@@ -157,10 +157,10 @@ def register(app: typer.Typer, console: Console) -> None:
             )
         except ValueError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         if result.was_running:
             console.print(
@@ -194,7 +194,7 @@ def register(app: typer.Typer, console: Console) -> None:
             result = StatusTool().execute(workspace=workspace)
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         if not result.workspaces:
             console.print("[dim]No workspaces configured.[/dim]")

@@ -11,8 +11,9 @@ a busy plan never turns into paid calls on the fallback).
 
 Each ask gets a fresh folder under ``<workspace>/plans/work/`` holding only its pictures (and Codex's
 schema file), removed after. An ask that names a folder (``PlanCall.folder``, a code review) runs the tool
-in that folder instead, with look-only tools; the ask's own folder still holds the schema file. The answer's API-price ``estimate`` (what it would have cost on a key) comes
-from the catalog price of the model that answered; Codex reports only a token total, so it has none.
+in that folder instead, with look-only tools; the ask's own folder still holds the schema file. The answer's API-price
+``estimate`` (what it would have cost on a key) comes from the catalog price of the model that answered; Codex reports
+only a token total, so it has none.
 """
 
 from __future__ import annotations

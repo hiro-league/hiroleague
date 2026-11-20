@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import uuid
 from dataclasses import dataclass, field
@@ -167,14 +168,14 @@ class MessageSendTool(Tool):
         # Use the running server's workspace only: a single Hiro process owns one DB + CommManager pair.
         resolved_workspace_path = rt.comm_manager.ctx.workspace_path.resolve()
         if workspace_path is not None:
-            explicit = Path(workspace_path).expanduser().resolve()
+            explicit = await asyncio.to_thread(lambda: Path(workspace_path).expanduser().resolve())
             if explicit != resolved_workspace_path:
                 raise ValueError(
                     "workspace_path does not match this server's workspace filesystem root.",
                 )
         elif workspace is not None:
             ws_entry, _ = resolve_workspace(workspace)
-            caller_path = Path(ws_entry.path).resolve()
+            caller_path = await asyncio.to_thread(Path(ws_entry.path).resolve)
             if caller_path != resolved_workspace_path:
                 raise ValueError(
                     "workspace parameter does not match this server's workspace — "
@@ -205,10 +206,10 @@ class MessageSendTool(Tool):
             items = [ContentItem(content_type="text", body=str(text).strip())]
         else:
             if path_ok:
-                p = Path(str(audio_path).strip()).expanduser().resolve()
-                if not p.is_file():
+                p = await asyncio.to_thread(lambda: Path(str(audio_path).strip()).expanduser().resolve())
+                if not await asyncio.to_thread(p.is_file):
                     raise ValueError(f"Audio file not found: {p}")
-                raw = p.read_bytes()
+                raw = await asyncio.to_thread(p.read_bytes)
             else:
                 try:
                     raw = base64.b64decode(str(audio_base64).strip(), validate=False)

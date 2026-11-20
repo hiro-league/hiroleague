@@ -91,7 +91,18 @@ class GraphViewPreferences(BaseModel):
     # A node TYPE whose instance count exceeds this shows a "many instances" perf
     # heads-up inside its per-type filter dropdown (the dropdown still lists + searches
     # every instance — this only flags very large types so the user reaches for search).
-    large_type_threshold: int = pref_field(advanced=True, default=200, ge=10, le=10000, title="Large node-type warning threshold", description="In the Graph tab's per-type node filter, a type with more instances than this shows a 'many instances' performance heads-up in its dropdown. The dropdown still lists and searches every instance — this only flags very large types. Display-only.")
+    large_type_threshold: int = pref_field(
+        advanced=True,
+        default=200,
+        ge=10,
+        le=10000,
+        title="Large node-type warning threshold",
+        description=(
+            "In the Graph tab's per-type node filter, a type with more instances than this shows a 'many instances' "
+            "performance heads-up in its dropdown. The dropdown still lists and searches every instance — this only "
+            "flags very large types. Display-only."
+        ),
+    )
 
 
 class GraphPreferences(BaseModel):
@@ -103,7 +114,14 @@ class GraphPreferences(BaseModel):
     hardcoded params. See docs/knowledge-graphiti-pivot-design.md §9–10.
     """
 
-    backend: KnowledgeGraphBackend = Field(default="off", title="Graph backend", description="Master switch for knowledge retrieval. Off = today's flat Qdrant retrieval (graph untouched). Graphiti = answer from the graph's facts.")
+    backend: KnowledgeGraphBackend = Field(
+        default="off",
+        title="Graph backend",
+        description=(
+            "Master switch for knowledge retrieval. Off = today's flat Qdrant retrieval (graph untouched). "
+            "Graphiti = answer from the graph's facts."
+        ),
+    )
     # Phase 7b step 5: each Graphiti model tier's model + tuning profile pair became one AI profile
     # (``jobs`` "graph_extraction" / "graph_small").
     extraction_profile: str | None = pref_field(

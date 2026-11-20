@@ -26,7 +26,6 @@ Imported only by tests: it needs pytest, which an app installs as a dev tool.
 
 from __future__ import annotations
 
-import ast
 import asyncio
 import inspect
 import os
@@ -38,6 +37,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
+from hiro_commons.logging_foundation.catches import silent_catches
 
 # The kit's own routes that answer something other than JSON, or nothing (an app mounts some or all of them).
 KIT_NOT_JSON: frozenset[tuple[str, str]] = frozenset({
@@ -55,52 +55,6 @@ KIT_ROUTES: tuple[tuple[str, str], ...] = (
     ("GET", "/api/me"), ("GET", "/api/auth/start"), ("GET", "/api/users"), ("GET", "/api/roles"),
     ("GET", "/api/hiroleague"), ("GET", "/api/apps"),
 )
-
-
-_BROAD = {"Exception", "BaseException"}
-_LOG_CALLS = {"debug", "info", "warning", "warn", "error", "exception", "critical", "log", "fineinfo", "failed"}
-
-
-def _broad(kind: ast.expr | None) -> bool:
-    if kind is None:
-        return True  # a bare `except:`
-    if isinstance(kind, ast.Name):
-        return kind.id in _BROAD
-    if isinstance(kind, ast.Attribute):
-        return kind.attr in _BROAD
-    if isinstance(kind, ast.Tuple):
-        return any(_broad(k) for k in kind.elts)
-    return False
-
-
-def _keeps_the_error(body: list[ast.stmt]) -> bool:
-    """The handler raises, or logs (a logger's method, or errors.failed), somewhere in its own code."""
-    todo: list[ast.AST] = list(body)
-    while todo:
-        node = todo.pop()
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
-            continue  # code defined here runs later, if ever
-        if isinstance(node, ast.Raise):
-            return True
-        if isinstance(node, ast.Call):
-            fn = node.func
-            name = fn.attr if isinstance(fn, ast.Attribute) else fn.id if isinstance(fn, ast.Name) else ""
-            if name in _LOG_CALLS:
-                return True
-        todo.extend(ast.iter_child_nodes(node))
-    return False
-
-
-def silent_catches(package: Path) -> list[tuple[Path, int]]:
-    """Every broad `except` in the package's code (migrations left out) that drops its error: where it is."""
-    found = []
-    for path in sorted(package.rglob("*.py")):
-        if any(part.startswith("migrations") for part in path.relative_to(package).parts):
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        found += [(path, node.lineno) for node in ast.walk(tree)
-                  if isinstance(node, ast.ExceptHandler) and _broad(node.type) and not _keeps_the_error(node.body)]
-    return found
 
 
 def _loose(schema: dict | None) -> bool:

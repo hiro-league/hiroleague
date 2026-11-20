@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from hiro_commons.keys import load_public_key_b64 as _load_public_key_b64
+from hiro_commons.log import Logger
 from hiro_commons.process import (
     is_running,
     read_pid,
@@ -32,13 +33,14 @@ from .config import GatewayConfig, load_config, load_state, save_config
 from .constants import PID_FILENAME
 from .instance import (
     GatewayInstanceError,
-    GatewayRegistry,
     create_instance,
     load_registry,
     remove_instance,
     resolve_instance,
     set_default_instance,
 )
+
+log = Logger.get("GATEWAY")
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +135,8 @@ def _do_register_autostart(instance_name: str, *, elevated: bool) -> tuple[bool,
     try:
         method = register_autostart(instance_name)
         return True, str(method)
-    except (NotImplementedError, Exception):
+    except (NotImplementedError, Exception) as exc:
+        log.warning("Could not register the gateway's autostart", instance=instance_name, error=str(exc), exc_info=True)
         return False, "failed"
 
 
@@ -152,7 +155,8 @@ def _do_unregister_autostart(instance_name: str, stored_method: str | None) -> b
     try:
         unregister_autostart(instance_name)
         return True
-    except (NotImplementedError, Exception):
+    except (NotImplementedError, Exception) as exc:
+        log.warning("Could not remove the gateway's autostart", instance=instance_name, error=str(exc), exc_info=True)
         return False
 
 
@@ -337,7 +341,8 @@ def teardown_instance(
         stored_method: str | None = config.autostart_method
         if stored_method == "skipped" and elevated_task:
             stored_method = "elevated"
-    except Exception:
+    except Exception as exc:
+        log.debug("Could not read the instance's config; guessing its autostart method", error=str(exc))
         stored_method = "elevated" if elevated_task else None
 
     autostart_removed = _do_unregister_autostart(entry.name, stored_method)

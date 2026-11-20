@@ -34,7 +34,9 @@ async def _until(done: Callable[[], bool], timeout: float = 5.0) -> None:
     busy (tests in parallel); the asserts after this fail if it never lands."""
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
-    while not done() and loop.time() < deadline:
+    while not done():
+        if loop.time() >= deadline:
+            return
         await asyncio.sleep(0.01)
 
 

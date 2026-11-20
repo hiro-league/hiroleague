@@ -40,21 +40,23 @@ def _cli_init(ctx: typer.Context) -> None:
         typer.echo(ctx.get_help())
         return
 
-    # Open routed log sinks (server.log + cli.log) for the default workspace
-    # so CLI commands can write to cli.log via Logger.get("CLI.*").
-    # Silently ignored when no workspace exists yet (e.g. first-ever run).
+    # The command's log: the default workspace's cli-<day>.jsonl (every line this `hiro` process logs), with the
+    # safety nets. Before any workspace exists (the first run) the loggers still work, on the console only.
+    from hiro_commons.log import Logger
+
+    Logger.setup(console=True)
     try:
-        from hiro_commons.log import Logger
         from ..domain.config import load_config, resolve_log_dir
         from ..domain.workspace import resolve_workspace
 
         entry, _ = resolve_workspace(None)
         config = load_config(Path(entry.path))
         Logger.set_level(config.log_level)
-        Logger.setup(console=True)
-        Logger.open_log_dir(resolve_log_dir(Path(entry.path), config))
-    except Exception:
-        pass
+        if config.module_log_levels:
+            Logger.set_module_levels(config.module_log_levels)
+        Logger.start(resolve_log_dir(Path(entry.path), config), name="cli", service="cli")
+    except Exception as exc:
+        Logger.get("CLI").debug("No workspace log for this command (no workspace yet?)", error=str(exc))
 
 
 console = Console()

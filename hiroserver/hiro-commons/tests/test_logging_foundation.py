@@ -90,7 +90,7 @@ def test_the_links_structlog_lines_land_in_the_file_with_their_fields(folder):
 
 def test_a_ledger_rows_area_stays_in_its_own_file(folder):
     foundation.setup(folder, name="testapp", service="test", console=False)
-    handler = Logger.add_file_sink(str(folder / "graph.log"), level="INFO", use_csv=True, csv_columns=["event"],
+    handler = Logger.add_file_sink(str(folder / "graph.log"), level="INFO", csv_columns=["event"],
                                    include_prefix="AGENT.GRAPH.LEDGER.ab")
     try:
         Logger.get("AGENT.GRAPH.LEDGER.ab").info("node_done")
@@ -125,15 +125,24 @@ def test_setting_up_again_writes_each_line_once(folder):
     assert [g["Body"] for g in lines(folder)] == ["once"]
 
 
-def test_one_file_a_day_and_only_30_days_are_kept(folder):
+def test_one_file_a_day_kept_30_days_then_a_compressed_archive_12_months(folder):
+    import gzip
+
     today = date(2026, 11, 19)
     for back in (0, 29, 30, 45):
-        (folder / daily.file_name("testapp", today - timedelta(days=back))).write_text("", encoding="utf-8")
-    (folder / "other-2026-01-01.jsonl").write_text("", encoding="utf-8")  # another part's: not ours to delete
-    gone = daily.prune(folder, "testapp", today)
-    assert sorted(p.name for p in gone) == ["testapp-2026-10-05.jsonl", "testapp-2026-10-20.jsonl"]
+        day = today - timedelta(days=back)
+        (folder / daily.file_name("testapp", day)).write_bytes(f"line of {day}\n".encode())
+    (folder / "other-2026-01-01.jsonl").write_text("", encoding="utf-8")  # another part's: not ours to move
+    (folder / "archive").mkdir()
+    for month in ("2025-11", "2025-12"):  # 12 months kept: Dec 2025 to Nov 2026
+        (folder / "archive" / f"testapp-{month}.jsonl.gz").write_bytes(gzip.compress(b"old\n"))
+    moved = daily.prune(folder, "testapp", today)
+    assert sorted(p.name for p in moved) == ["testapp-2026-10-05.jsonl", "testapp-2026-10-20.jsonl"]
     assert [d for d, _p in daily.files(folder, "testapp")] == [today, today - timedelta(days=29)]
     assert (folder / "other-2026-01-01.jsonl").exists()
+    october = folder / "archive" / "testapp-2026-10.jsonl.gz"
+    assert gzip.decompress(october.read_bytes()).decode() == "line of 2026-10-05\nline of 2026-10-20\n"  # in order
+    assert [d.isoformat() for d, _p in daily.archives(folder, "testapp")] == ["2026-10-01", "2025-12-01"]
 
 
 def test_a_new_day_opens_its_own_file(folder, monkeypatch):

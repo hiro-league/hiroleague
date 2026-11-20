@@ -11,7 +11,7 @@ from typing import Any
 from hiro_commons.log import Logger
 
 from hiro_memory.knowledge.converters import document_from_row, utc_now_iso
-from hiro_memory.knowledge.models import KnowledgeDocumentRow, KnowledgeListDocumentsResult
+from hiro_memory.knowledge.models import KnowledgeListDocumentsResult
 from hiro_memory.knowledge.runtime_owner import is_owner_token_alive
 
 log = Logger.get("SVC.KNOWLEDGE.CATALOG")

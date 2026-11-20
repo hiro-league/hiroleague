@@ -9,6 +9,9 @@ from hirocli.admin.features.logs.service import LogsService
 from hirocli.admin.shared.result import Result
 from hirocli.domain.config import load_config, resolve_log_dir
 from hirocli.domain.workspace import resolve_workspace
+from hiro_commons.log import Logger
+
+_log = Logger.get("ADMIN")
 
 
 def _workspace_log_dir(workspace_id: str | None):
@@ -27,9 +30,12 @@ def _shape_log_rows(rows: list[dict[str, Any]], service: LogsService) -> list[di
         next_row["message_pretty"] = message_pretty if message_ok else None
 
         segments: list[dict[str, Any]] = []
-        raw_extra = str(next_row.get("extra", "") or "")
-        for segment in service.split_log_extra_segments(raw_extra):
-            key, value = service.log_segment_key_value(segment)
+        # A row read from a file carries its fields as pairs (a traceback holds spaces and "=": never split again)
+        pairs = next_row.pop("fields", None)
+        if pairs is None:
+            raw_extra = str(next_row.get("extra", "") or "")
+            pairs = [service.log_segment_key_value(seg) for seg in service.split_log_extra_segments(raw_extra)]
+        for key, value in pairs:
             value_ok, value_pretty = service.pretty_print_log_field(value)
             segments.append(
                 {
@@ -60,4 +66,5 @@ def _logs_layout(workspace_id: str | None) -> Result[dict[str, Any]]:
             }
         )
     except Exception as exc:
+        _log.warning("⚠️ Logs layout failed — HiroAdmin · logs", error=str(exc), exc_info=True)
         return Result.failure(str(exc))

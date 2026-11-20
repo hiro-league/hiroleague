@@ -1,5 +1,5 @@
-"""The knowledge settings the engine reads: how ingest chunks a file, and what the retrieval graph reads. Their values live with the owner (the core's preferences,
-EvalHiro's run snapshot); the classes live here so both hand the engine the same shape.
+"""The knowledge settings the engine reads: how ingest chunks a file, and what the retrieval graph reads. Their values
+live with the owner (the core's preferences, EvalHiro's run snapshot); the classes live here so both hand the engine the same shape.
 
 The models, the embedders and the reranker are not settings: the owner picks them and hands them in
 (``agent.config.KnowledgeGraphConfig``).

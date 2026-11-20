@@ -8,6 +8,9 @@ from typing import Any
 from hirocli.tools.device import DeviceAddTool, DeviceListTool, DeviceRevokeTool
 
 from hirocli.admin.shared.result import Result
+from hiro_commons.log import Logger
+
+log = Logger.get("ADMIN.DEVICES")
 
 
 @dataclass(frozen=True)
@@ -29,6 +32,7 @@ class DeviceService:
         try:
             result = DeviceListTool().execute(workspace=workspace_id)
         except Exception as exc:
+            log.warning("⚠️ Devices list failed — HiroAdmin · devices", workspace_id=workspace_id, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
         return Result.success(list(result.devices))
 
@@ -38,6 +42,7 @@ class DeviceService:
         try:
             raw = DeviceAddTool().execute(workspace=workspace_id)
         except Exception as exc:
+            log.warning("⚠️ Device pairing code failed — HiroAdmin · devices", workspace_id=workspace_id, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
         return Result.success(
             DevicePairingData(
@@ -56,6 +61,13 @@ class DeviceService:
         try:
             result = DeviceRevokeTool().execute(device_id=device_id, workspace=workspace_id)
         except Exception as exc:
+            log.warning(
+                "⚠️ Device revoke failed — HiroAdmin · devices",
+                device_id=device_id,
+                workspace_id=workspace_id,
+                error=str(exc),
+                exc_info=True,
+            )
             return Result.failure(str(exc))
         if not result.removed:
             return Result.failure(f"Device '{device_id}' was not found or already revoked.")

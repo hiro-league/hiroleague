@@ -47,6 +47,9 @@ from hiro_commons.constants.network import (
 from hiro_commons.constants.storage import CONFIG_FILENAME, LOGS_DIR, MASTER_KEY_FILENAME, RUN_DIR
 
 from ..environment import default_workspace_log_level
+from hiro_commons.log import Logger
+
+log = Logger.get("CONFIG")
 
 
 class Config(BaseModel):
@@ -165,8 +168,8 @@ def load_state(workspace_path: Path) -> State:
     if state_file.exists():
         try:
             return State.model_validate_json(state_file.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+        except Exception as exc:
+            log.warning("Could not read the workspace state file — starting from an empty state", path=str(state_file), error=str(exc), exc_info=True)
     return State()
 
 

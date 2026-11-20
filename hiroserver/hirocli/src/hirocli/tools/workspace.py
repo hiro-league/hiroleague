@@ -33,6 +33,9 @@ from ..domain.workspace import (
     set_default_workspace,
 )
 from .base import Tool, ToolParam
+from hiro_commons.log import Logger
+
+log = Logger.get("TOOLS.WORKSPACE")
 
 
 # ---------------------------------------------------------------------------
@@ -103,7 +106,13 @@ def _load_workspace_config_safe(workspace_path: Path) -> Any | None:
         return None
     try:
         return load_config(workspace_path)
-    except Exception:
+    except Exception as exc:
+        log.warning(
+            "Could not read the workspace's config.json — shown without it",
+            workspace_path=str(workspace_path),
+            error=str(exc),
+            exc_info=True,
+        )
         return None
 
 
@@ -111,7 +120,8 @@ def _load_workspace_state_safe(workspace_path: Path) -> Any | None:
     """Return State if state.json exists, otherwise None."""
     try:
         return load_state(workspace_path)
-    except Exception:
+    except Exception as exc:
+        log.warning("Could not read the workspace's state — shown without it", workspace_path=str(workspace_path), error=str(exc), exc_info=True)
         return None
 
 

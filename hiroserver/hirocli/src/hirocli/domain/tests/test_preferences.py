@@ -209,7 +209,9 @@ def test_retrieval_agent_limit_coherence_validator() -> None:
 
 
 def test_retrieval_agent_caps_clamped_to_pydantic_bounds() -> None:
-    with pytest.raises(Exception):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
         RetrievalAgentLimits(max_parallel_searches=99)
 
 

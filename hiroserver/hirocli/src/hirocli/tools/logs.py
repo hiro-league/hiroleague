@@ -1,20 +1,26 @@
-"""Log reading tools: search and tail server, channel, and gateway log files.
+"""Log reading tools: search and tail the server, channel, gateway and CLI log files.
 
-These tools read CSV log files written by log_setup.init() / Logger.open_log_dir().
-They are available to the AI agent (for natural-language log queries),
-the CLI (`hiro logs search/tail`), and the admin UI (direct import).
+These tools read the core's daily log files, written through the logging foundation (hiro_commons.log:
+`Logger.start`): one JSON line per record with OpenTelemetry's field names, one file a day, kept 30 days.
+They are available to the AI agent (for natural-language log queries), the CLI (`hiro logs search/tail`), and the
+admin UI (direct import).
 
-CSV log format: timestamp,level,module,message,extra
-timestamp is a Unix epoch float (e.g. 1742312005.437821).
+The files, in the workspace's logs folder (and the gateway's):
+- `server-<YYYY-MM-DD>.jsonl`: the server process;
+- `cli-<YYYY-MM-DD>.jsonl`: every `hiro` command;
+- `channel-<name>-<YYYY-MM-DD>.jsonl`: each channel plugin;
+- `gateway-<YYYY-MM-DD>.jsonl`, and the gateway instance's `stderr.log` (a crash before its logging started).
+
+A row keeps the shape the admin Logs page has always read (time, level, module, message, extra, the scope fields...).
+Its source is the file's, except that the server's and the CLI's are told apart by module, as they always were: a
+`CLI.*` module is `cli`, any other `server`.
 """
 
 from __future__ import annotations
 
 import ast
-import csv
 import datetime
 import html as _html
-import io
 import json
 import re
 from dataclasses import dataclass, field
@@ -22,6 +28,8 @@ from pathlib import Path
 from typing import Any
 
 from hiro_commons.log import Logger
+from hiro_commons.logging_foundation import daily
+from hiro_commons.logging_foundation.line import Line, parse
 
 from .base import Tool, ToolParam
 
@@ -40,9 +48,13 @@ _LEVEL_ORDER: dict[str, int] = {
 }
 _DEFAULT_TAIL_LINES = 500
 _DEFAULT_SEARCH_LIMIT = 200
-# How many bytes to read from near the end of a file for tail operations.
-# Sized for ~1 000 typical log lines (average ~128 chars each).
-_TAIL_READ_BYTES = 131_072
+# How many bytes to read from near the end of a file for tail operations, to start with (doubled until enough lines).
+_TAIL_READ_BYTES = 262_144
+# A search reads each source's newest files until this many bytes (at least one file): about the old single file's.
+_SEARCH_BYTES = 24 * 1024 * 1024
+# Expand a time-range read until the oldest row is before *min_ts*, the files run out, or this many rows.
+_TAIL_SINCE_MAX_LINES = 300_000
+_STARTUP_MESSAGE = "🚀 Hiro Server starting"
 
 
 # ---------------------------------------------------------------------------
@@ -96,47 +108,92 @@ def _resolve_gateway_log_dir() -> Path | None:
 
 
 # ---------------------------------------------------------------------------
-# File collection and CSV parsing helpers
+# The streams: a source's daily files (or a plain stderr file)
 # ---------------------------------------------------------------------------
+
+_CHANNEL_FILE = re.compile(r"^channel-(?P<channel>.+)-\d{4}-\d{2}-\d{2}\.jsonl$")
+
+
+@dataclass(frozen=True)
+class LogStream:
+    """One source's files: the daily files of `name` in `folder`, or one plain stderr file (`plain`)."""
+
+    label: str  # "server", "cli", "channel-whatsapp", "gateway"
+    folder: Path
+    name: str | None = None
+    plain: Path | None = None
+
+    def files(self) -> list[tuple[datetime.date | None, Path]]:
+        """Its files, newest first (a plain file has no day)."""
+        if self.plain is not None:
+            return [(None, self.plain)] if _file_has_content(self.plain) else []
+        assert self.name is not None
+        return daily.files(self.folder, self.name)
+
+    def recent(self) -> list[Path]:
+        """The files a live tail follows: today's and yesterday's (a line written just before midnight)."""
+        if self.plain is not None:
+            return [p for _d, p in self.files()]
+        yesterday = _today() - datetime.timedelta(days=1)
+        return [p for d, p in self.files() if d is not None and d >= yesterday]
+
+
+def _today() -> datetime.date:
+    return datetime.datetime.now().astimezone().date()  # the house's day: the files are named by it
+
+
+def channel_names(log_dir: Path) -> list[str]:
+    """The channels with a daily file in the folder (within the 30 days kept)."""
+    names = set()
+    if log_dir.is_dir():
+        for path in log_dir.glob("channel-*.jsonl"):
+            m = _CHANNEL_FILE.match(path.name)
+            if m:
+                names.add(m["channel"])
+    return sorted(names)
+
+
+def has_files(folder: Path | None, name: str) -> bool:
+    return folder is not None and bool(daily.files(folder, name))
 
 
 def _collect_log_files(
     log_dir: Path,
     gateway_log_dir: Path | None,
     source: str,
-) -> list[tuple[Path, str]]:
-    """Return (file_path, source_label) pairs for the requested source(s)."""
-    files: list[tuple[Path, str]] = []
+) -> list[LogStream]:
+    """The streams for the requested source(s)."""
+    streams: list[LogStream] = []
     src = (source or "all").lower()
 
-    if src in ("all", "server"):
-        f = log_dir / "server.log"
-        if f.exists():
-            files.append((f, "server"))
+    # The server's and the CLI's files are read together: each row's source comes from its module (see _source_of).
+    if src in ("all", "server", "cli"):
+        streams.append(LogStream("server", log_dir, "server"))
+        streams.append(LogStream("cli", log_dir, "cli"))
 
     if src in ("all", "channels"):
-        for f in sorted(log_dir.glob("channel-*.log")):
-            channel_name = f.stem.removeprefix("channel-")
-            files.append((f, f"channel-{channel_name}"))
+        for channel in channel_names(log_dir):
+            streams.append(LogStream(f"channel-{channel}", log_dir, f"channel-{channel}"))
 
     if src in ("all", "gateway") and gateway_log_dir is not None:
-        f = gateway_log_dir / "gateway.log"
-        if f.exists():
-            files.append((f, "gateway"))
+        streams.append(LogStream("gateway", gateway_log_dir, "gateway"))
 
     if src in ("all", "gateway"):
         gateway_instance_path = _resolve_gateway_instance_path()
         if gateway_instance_path is not None:
             stderr_file = gateway_instance_path / "stderr.log"
             if _file_has_content(stderr_file):
-                files.append((stderr_file, "gateway"))
+                streams.append(LogStream("gateway", gateway_instance_path, plain=stderr_file))
 
-    if src in ("all", "cli"):
-        f = log_dir / "cli.log"
-        if f.exists():
-            files.append((f, "cli"))
+    return streams
 
-    return files
+
+def _keep_source(rows: list[dict[str, Any]], source: str | None) -> list[dict[str, Any]]:
+    """The server's and the CLI's rows share files: keep only the asked one's."""
+    src = (source or "all").lower()
+    if src in ("server", "cli"):
+        return [r for r in rows if r.get("source") == src]
+    return rows
 
 
 def _file_has_content(path: Path) -> bool:
@@ -145,6 +202,10 @@ def _file_has_content(path: Path) -> bool:
     except OSError:
         return False
 
+
+# ---------------------------------------------------------------------------
+# Rows: one line, in the shape the admin page reads
+# ---------------------------------------------------------------------------
 
 _LEVEL_CSS_CLASS = {
     "DEBUG": "log-lvl-debug",
@@ -161,8 +222,8 @@ def _module_color_idx(module: str) -> int:
     return sum(ord(c) for c in module) % 4
 
 
-# Space-separated "key=value" pairs in CSV extra (see _CsvRenderer). Split on
-# spaces that start a new "word=" token so values may contain spaces.
+# Space-separated "key=value" pairs in a row's extra. Split on spaces that start a new "word=" token so values may
+# contain spaces. (A row read from a file carries its fields as pairs too: `fields`, which nothing has to split.)
 _EXTRA_PAIR_BOUNDARY = re.compile(r" (?=[\w][\w.]*=)")
 
 
@@ -183,11 +244,8 @@ def _segment_to_key_value(seg: str) -> tuple[str, str]:
 def pretty_print_log_value(value: str) -> tuple[bool, str]:
     """Try to format a log field as indented JSON for the admin detail panel.
 
-    CSV ``extra`` values usually come from ``_CsvRenderer`` in hiro_commons, which
-    builds ``key=value`` with ``f\"{k}={v}\"`` — so dicts/lists are Python
-    ``repr`` (single quotes, ``True``/``None``), not strict JSON. ``json.loads``
-    fails on those; we fall back to :func:`ast.literal_eval` for dict/list/tuple
-    and then :func:`json.dumps` for display.
+    A field that holds a list or a dict is written as JSON; older text may hold Python's ``repr`` (single quotes,
+    ``True``/``None``), which :func:`ast.literal_eval` reads, then :func:`json.dumps` shows.
     """
     raw = (value or "").strip()
     if not raw:
@@ -199,139 +257,130 @@ def pretty_print_log_value(value: str) -> tuple[bool, str]:
         pass
     try:
         obj = ast.literal_eval(raw)
-    except (ValueError, SyntaxError, TypeError):
+    except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
         return (False, value)
     if isinstance(obj, (dict, list, tuple)):
         return (True, json.dumps(obj, indent=2, ensure_ascii=False))
     return (False, value)
 
 
-def _format_extra_html(extra: str) -> str:
-    """Single-line coloured key=value spans for AG Grid ``html_columns`` cells."""
-    segs = _split_extra_segments(extra)
-    if not segs:
-        return ""
+def _pairs_html(pairs: list[tuple[str, str]], *, rows: bool) -> str:
+    """Coloured key=value spans: one line (the table cell) or one row each (the tooltip)."""
     parts: list[str] = []
-    for seg in segs:
-        k, v = _segment_to_key_value(seg)
-        if k:
-            parts.append(
-                f'<span class="log-extra-key">{_html.escape(k)}</span>'
-                f'<span class="log-extra-eq">=</span>'
-                f'<span class="log-extra-val">{_html.escape(v)}</span>'
-            )
-        else:
-            parts.append(f'<span class="log-extra-val">{_html.escape(seg)}</span>')
-    return " ".join(parts)
-
-
-def _format_extra_tooltip_html(extra: str) -> str:
-    """Multi-line coloured tooltip: one row per key=value (custom tooltip uses innerHTML)."""
-    segs = _split_extra_segments(extra)
-    if not segs:
-        return ""
-    rows: list[str] = []
-    for seg in segs:
-        k, v = _segment_to_key_value(seg)
+    for k, v in pairs:
         inner = (
             f'<span class="log-extra-key">{_html.escape(k)}</span>'
             f'<span class="log-extra-eq">=</span>'
             f'<span class="log-extra-val">{_html.escape(v)}</span>'
             if k
-            else f'<span class="log-extra-val">{_html.escape(seg)}</span>'
+            else f'<span class="log-extra-val">{_html.escape(v)}</span>'
         )
-        rows.append(f'<div class="log-extra-tooltip-row">{inner}</div>')
-    return "".join(rows)
+        parts.append(f'<div class="log-extra-tooltip-row">{inner}</div>' if rows else inner)
+    return ("" if rows else " ").join(parts)
 
 
-def _epoch_to_dt(ts_str: str) -> datetime.datetime | None:
-    """Parse a CSV timestamp field (epoch float) into a datetime, or None."""
+def _epoch_to_dt(ts: float | str) -> datetime.datetime | None:
+    """An epoch timestamp as the house's local time, or None."""
     try:
-        return datetime.datetime.fromtimestamp(float(ts_str))
-    except Exception:
+        return datetime.datetime.fromtimestamp(float(ts)).astimezone()
+    except (ValueError, TypeError, OSError, OverflowError):
         return None
 
 
-def _format_date(ts_str: str) -> str:
-    """Format epoch float as 'Mar 18'. Returns '' if not parseable."""
-    dt = _epoch_to_dt(ts_str)
+def _format_date(ts: float | str) -> str:
+    """Format an epoch as 'Mar 18'. Returns '' if not parseable."""
+    dt = _epoch_to_dt(ts)
     if dt is None:
         return ""
     # %#d on Windows, %-d on Unix — use manual formatting to stay portable.
     return f"{dt.strftime('%b')} {dt.day}"
 
 
-def _to_12h(ts_str: str) -> str:
-    """Format epoch float as 'H:MM:SS AM/PM'. Returns ts_str unchanged if not parseable."""
-    dt = _epoch_to_dt(ts_str)
+def _to_12h(ts: float | str) -> str:
+    """Format an epoch as 'H:MM:SS AM/PM'. Returns it unchanged if not parseable."""
+    dt = _epoch_to_dt(ts)
     if dt is None:
-        return ts_str
+        return str(ts)
     hour = dt.hour
     suffix = "AM" if hour < 12 else "PM"
     hour12 = hour % 12 or 12
     return f"{hour12}:{dt.minute:02d}:{dt.second:02d} {suffix}"
 
 
-def _parse_csv_row(row: list[str], source: str) -> dict[str, str] | None:
-    """Parse a CSV row into a log record dict. Returns None for header/empty rows.
+# Keys stamped by hiro_commons.log.log_scope that identify a device or message.
+_SCOPE_KEYS = frozenset(
+    {"device_id", "msg_id", "method", "text_preview", "traffic_class", "traffic_subclass"}
+)
 
-    Includes ``level_html`` / ``module_html`` / ``message_html`` fields with
-    ``<span>`` wrappers for colour rendering via AG Grid ``html_columns``.
-    Raw ``level``, ``module``, and ``message`` are kept for filtering and sorting.
+
+def _field_text(value: Any) -> str:
+    """A field's value as the page shows it: lists and dicts as JSON, anything else as its text."""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
+
+
+def _pairs_of(line: Line) -> list[tuple[str, str]]:
+    """The line's fields as (key, text) pairs, in order; its traceback last, as `exception` (or `stack`)."""
+    pairs = [(k, _field_text(v)) for k, v in line.fields.items()]
+    if line.attributes.get("exception.stacktrace"):
+        pairs.append(("exception", str(line.attributes["exception.stacktrace"])))
+    elif line.attributes.get("code.stacktrace"):
+        pairs.append(("stack", str(line.attributes["code.stacktrace"])))
+    return pairs
+
+
+def _source_of(label: str, module: str) -> str:
+    """The row's source: the stream's, but the server's and the CLI's by module, as they always were."""
+    if label in ("server", "cli"):
+        return "cli" if module.startswith("CLI.") else "server"
+    return label
+
+
+def _row(line: Line, label: str) -> dict[str, Any]:
+    """A line as a row of the admin page (and the tools' results).
+
+    Includes ``level_html`` / ``module_html`` / ``message_html`` fields with ``<span>`` wrappers for colour
+    rendering. Raw ``level``, ``module``, and ``message`` are kept for filtering and sorting.
     """
-    if not row or row[0] == "timestamp":
-        return None  # skip header and blank lines
-    if len(row) >= 4:
-        level = row[1]
-        module = row[2]
-        lvl_cls = _LEVEL_CSS_CLASS.get(level, "")
-        mod_cls = f"log-mod-{_module_color_idx(module)}"
-        try:
-            ts_num = float(row[0])
-        except (ValueError, TypeError):
-            ts_num = 0.0
-        message = row[3]
-        # Startup rows get a styled span so the Message cell is highlighted via
-        # html_columns — rowClassRules/cellClassRules expression strings are not
-        # evaluated by the old browser grid serialisation, so html_columns is the
-        # only reliable per-row visual distinction mechanism.
-        is_startup = message.startswith("🚀 Hiro Server starting")
-        message_html = (
-            f'<span class="log-startup-msg">{_html.escape(message)}</span>'
-            if is_startup
-            else _html.escape(message)
-        )
-        raw_extra = row[4] if len(row) >= 5 else ""
-        scope = _extract_scope_fields(raw_extra)
-        return {
-            "id": f"{source}:{ts_num}",             # deterministic row key for AG Grid selection persistence
-            "timestamp": ts_num,                    # epoch float — AG Grid numeric sort key
-            "timestamp_display": _to_12h(row[0]),   # "2:32:05 PM" for Time column
-            "date_display": _format_date(row[0]),   # "Mar 18" for Date column
-            "level": level,
-            "level_html": f'<span class="{lvl_cls}">{level}</span>',
-            "module": module,
-            "module_html": f'<span class="{mod_cls}">{module}</span>',
-            "message": message,
-            "message_html": message_html,
-            "extra": raw_extra,
-            "extra_html": _format_extra_html(raw_extra),
-            "extra_tooltip_html": _format_extra_tooltip_html(raw_extra),
-            "source": source,
-            # rowClassRules in AG Grid evaluates expression strings using `data.*` variables,
-            # so this boolean drives the "log-startup-row" class applied to the full row.
-            "is_startup": is_startup,
-            # Structured scope fields parsed from extra — used for icon display and
-            # exact-match filtering without re-parsing the raw extra string.
-            "scope_device_id": scope.get("device_id", ""),
-            "scope_msg_id": scope.get("msg_id", ""),
-            "scope_method": scope.get("method", ""),
-            "scope_text_preview": scope.get("text_preview", ""),
-            "scope_traffic_class": scope.get("traffic_class", ""),
-            "scope_traffic_subclass": scope.get("traffic_subclass", ""),
-            "has_msg_id": bool(scope.get("msg_id")),
-        }
-    return None
+    level, module, message = line.level, line.scope, line.body
+    ts_num = line.at.timestamp()
+    source = _source_of(label, module)
+    is_startup = message.startswith(_STARTUP_MESSAGE)
+    message_html = (
+        f'<span class="log-startup-msg">{_html.escape(message)}</span>'
+        if is_startup
+        else _html.escape(message)
+    )
+    pairs = _pairs_of(line)
+    scope = {k: str(v) for k, v in line.attributes.items() if k in _SCOPE_KEYS and v}
+    return {
+        "id": f"{source}:{ts_num}",             # deterministic row key for selection persistence
+        "timestamp": ts_num,                    # epoch float — numeric sort key
+        "timestamp_display": _to_12h(ts_num),   # "2:32:05 PM" for Time column
+        "date_display": _format_date(ts_num),   # "Mar 18" for Date column
+        "level": level,
+        "level_html": f'<span class="{_LEVEL_CSS_CLASS.get(level, "")}">{level}</span>',
+        "module": module,
+        "module_html": f'<span class="log-mod-{_module_color_idx(module)}">{module}</span>',
+        "message": message,
+        "message_html": message_html,
+        "extra": " ".join(f"{k}={v}" for k, v in pairs),
+        "extra_html": _pairs_html(pairs, rows=False),
+        "extra_tooltip_html": _pairs_html(pairs, rows=True),
+        # The fields as pairs, so nothing has to split `extra` again (a traceback holds spaces and "=")
+        "fields": [[k, v] for k, v in pairs],
+        "source": source,
+        "is_startup": is_startup,
+        # Structured scope fields — used for icon display and exact-match filtering.
+        "scope_device_id": scope.get("device_id", ""),
+        "scope_msg_id": scope.get("msg_id", ""),
+        "scope_method": scope.get("method", ""),
+        "scope_text_preview": scope.get("text_preview", ""),
+        "scope_traffic_class": scope.get("traffic_class", ""),
+        "scope_traffic_subclass": scope.get("traffic_subclass", ""),
+        "has_msg_id": bool(scope.get("msg_id")),
+    }
 
 
 def _parse_stderr_line(
@@ -348,210 +397,182 @@ def _parse_stderr_line(
     ts_num = base_timestamp + (index / 1_000_000)
     level = "ERROR"
     module = "STDERR"
-    lvl_cls = _LEVEL_CSS_CLASS.get(level, "")
-    mod_cls = f"log-mod-{_module_color_idx(module)}"
-    raw_extra = f"file={path}"
+    pairs = [("file", str(path))]
     return {
         "id": f"{source}:{path}:{index}:{ts_num}",
         "timestamp": ts_num,
-        "timestamp_display": _to_12h(str(ts_num)),
-        "date_display": _format_date(str(ts_num)),
+        "timestamp_display": _to_12h(ts_num),
+        "date_display": _format_date(ts_num),
         "level": level,
-        "level_html": f'<span class="{lvl_cls}">{level}</span>',
+        "level_html": f'<span class="{_LEVEL_CSS_CLASS.get(level, "")}">{level}</span>',
         "module": module,
-        "module_html": f'<span class="{mod_cls}">{module}</span>',
+        "module_html": f'<span class="log-mod-{_module_color_idx(module)}">{module}</span>',
         "message": message,
         "message_html": _html.escape(message),
-        "extra": raw_extra,
-        "extra_html": _format_extra_html(raw_extra),
-        "extra_tooltip_html": _format_extra_tooltip_html(raw_extra),
+        "extra": f"file={path}",
+        "extra_html": _pairs_html(pairs, rows=False),
+        "extra_tooltip_html": _pairs_html(pairs, rows=True),
+        "fields": [[k, v] for k, v in pairs],
         "source": source,
         "is_startup": False,
     }
 
 
-def _is_plain_stderr(path: Path) -> bool:
-    return path.name == "stderr.log"
-
-
-def _read_all_rows(path: Path, source: str) -> list[dict[str, str]]:
-    """Read every CSV row from a log file."""
-    rows: list[dict[str, str]] = []
-    try:
-        if _is_plain_stderr(path):
-            base_timestamp = path.stat().st_mtime
-            for index, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines()):
-                parsed = _parse_stderr_line(path, source, line, index, base_timestamp)
-                if parsed is not None:
-                    rows.append(parsed)
-            return rows
-        with path.open(encoding="utf-8", errors="replace") as fh:
-            for row in csv.reader(fh):
-                parsed = _parse_csv_row(row, source)
-                if parsed is not None:
-                    rows.append(parsed)
-    except OSError:
-        pass
+def _rows_of_text(text: str, label: str) -> list[dict[str, Any]]:
+    rows = []
+    for raw in text.splitlines():
+        parsed = parse(raw)
+        if parsed is not None:
+            rows.append(_row(parsed, label))
     return rows
 
 
-def _read_tail_rows(
-    path: Path, source: str, n: int
-) -> tuple[list[dict[str, str]], int]:
-    """Read the last *n* CSV rows from *path*. Returns (rows, file_size_bytes)."""
+def _plain_rows(path: Path, source: str, lines: list[str], start: int) -> list[dict[str, Any]]:
+    base_timestamp = path.stat().st_mtime
+    rows = []
+    for index, text in enumerate(lines, start=start):
+        parsed = _parse_stderr_line(path, source, text, index, base_timestamp)
+        if parsed is not None:
+            rows.append(parsed)
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# Reading files
+# ---------------------------------------------------------------------------
+
+
+def _read_all_rows(path: Path, source: str) -> list[dict[str, Any]]:
+    """Every row of one file."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        log.debug("A log file couldn't be read", file=str(path), error=str(exc))
+        return []
+    if path.suffix == ".log":
+        return _plain_rows(path, source, text.splitlines(), 0)
+    return _rows_of_text(text, source)
+
+
+def _read_tail_rows(path: Path, source: str, n: int) -> tuple[list[dict[str, Any]], int]:
+    """The last *n* rows of one file, and its size (the offset to poll from)."""
     try:
         size = path.stat().st_size
     except OSError:
         return [], 0
-
-    rows: list[dict[str, str]] = []
     try:
-        if _is_plain_stderr(path):
-            base_timestamp = path.stat().st_mtime
+        if path.suffix == ".log":
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
             start = max(0, len(lines) - n)
-            for index, line in enumerate(lines[start:], start=start):
-                parsed = _parse_stderr_line(path, source, line, index, base_timestamp)
-                if parsed is not None:
-                    rows.append(parsed)
-            return rows, size
-        with path.open(encoding="utf-8", errors="replace") as fh:
-            seek_pos = max(0, size - _TAIL_READ_BYTES)
-            fh.seek(seek_pos)
+            return _plain_rows(path, source, lines[start:], start), size
+        want = _TAIL_READ_BYTES
+        while True:
+            seek_pos = max(0, size - want)
+            with path.open("rb") as fh:
+                fh.seek(seek_pos)
+                chunk = fh.read(size - seek_pos).decode("utf-8", errors="replace")
+            if seek_pos > 0:
+                chunk = chunk.partition("\n")[2]  # the first line may be cut: drop it
+            rows = _rows_of_text(chunk, source)
+            if len(rows) >= n or seek_pos == 0:
+                break
+            want *= 2
+    except OSError as exc:
+        log.debug("A log file couldn't be read", file=str(path), error=str(exc))
+        return [], size
+    return (rows[-n:] if len(rows) > n else rows), size
+
+
+def _read_rows_from_offset(path: Path, source: str, offset: int) -> tuple[list[dict[str, Any]], int]:
+    """The rows written after *offset* bytes, and the new offset (only whole lines: a line being written waits for
+    the next poll)."""
+    try:
+        with path.open("rb") as fh:
+            fh.seek(offset)
             chunk = fh.read()
-
-        lines = chunk.splitlines()
-        if seek_pos > 0 and lines:
-            # First line may be a partial row — discard it.
-            lines = lines[1:]
-
-        for row in csv.reader(lines):
-            parsed = _parse_csv_row(row, source)
-            if parsed is not None:
-                rows.append(parsed)
-    except OSError:
-        pass
-
-    # Return last n rows and the file size as the initial offset for polling.
-    return rows[-n:] if len(rows) > n else rows, size
+    except OSError as exc:
+        log.debug("A log file couldn't be read", file=str(path), error=str(exc))
+        return [], offset
+    if not chunk:
+        return [], offset
+    if path.suffix == ".log":
+        text = chunk.decode("utf-8", errors="replace")
+        return _plain_rows(path, source, text.splitlines(), offset), offset + len(chunk)
+    whole = chunk.rfind(b"\n") + 1
+    if whole == 0:
+        return [], offset
+    return _rows_of_text(chunk[:whole].decode("utf-8", errors="replace"), source), offset + whole
 
 
-# Expand tail window until the oldest row in the batch is before *min_ts* or the whole file is read.
-_TAIL_SINCE_MAX_LINES = 300_000
+def _stream_tail(stream: LogStream, n: int) -> list[dict[str, Any]]:
+    """The last *n* rows of a stream, across its days (newest file first, until there are enough)."""
+    gathered: list[list[dict[str, Any]]] = []
+    count = 0
+    for _day, path in stream.files():
+        rows, _size = _read_tail_rows(path, stream.label, n - count)
+        gathered.append(rows)
+        count += len(rows)
+        if count >= n:
+            break
+    return [r for rows in reversed(gathered) for r in rows]
 
 
-def _read_tail_rows_since(
-    path: Path,
-    source: str,
-    min_ts: float,
-    *,
-    start_n: int,
-) -> tuple[list[dict[str, str]], int]:
-    """Last lines from *path* with ``timestamp >= min_ts`` (initial admin load / time range).
+def _stream_since(stream: LogStream, min_ts: float) -> list[dict[str, Any]]:
+    """Every row of a stream at or after *min_ts* (whole days read, newest first, up to _TAIL_SINCE_MAX_LINES)."""
+    first_day = datetime.datetime.fromtimestamp(min_ts).astimezone().date()
+    gathered: list[list[dict[str, Any]]] = []
+    count = 0
+    for day, path in stream.files():
+        if day is not None and day < first_day:
+            break
+        rows = [r for r in _read_all_rows(path, stream.label) if float(r["timestamp"]) >= min_ts]
+        gathered.append(rows)
+        count += len(rows)
+        if count >= _TAIL_SINCE_MAX_LINES:
+            break
+    rows = [r for rows in reversed(gathered) for r in rows]
+    return rows[-_TAIL_SINCE_MAX_LINES:]
 
-    Starts at *start_n* lines and doubles until the batch crosses *min_ts*, the file is
-    exhausted, or ``_TAIL_SINCE_MAX_LINES`` is reached. Polling offset is always full file size.
-    """
-    n = max(1, start_n)
-    while n <= _TAIL_SINCE_MAX_LINES:
-        rows, size = _read_tail_rows(path, source, n)
-        if not rows:
-            return [], size
-        oldest = float(rows[0]["timestamp"])
-        if oldest < min_ts or len(rows) < n:
-            filtered = [r for r in rows if float(r["timestamp"]) >= min_ts]
-            return filtered, size
-        next_n = min(n * 2, _TAIL_SINCE_MAX_LINES)
-        if next_n == n:
-            filtered = [r for r in rows if float(r["timestamp"]) >= min_ts]
-            return filtered, size
-        n = next_n
-    rows, size = _read_tail_rows(path, source, _TAIL_SINCE_MAX_LINES)
-    filtered = [r for r in rows if float(r["timestamp"]) >= min_ts]
-    return filtered, size
+
+def _stream_search_rows(stream: LogStream) -> list[dict[str, Any]]:
+    """The rows a search reads: the newest files, until _SEARCH_BYTES (at least one)."""
+    gathered: list[list[dict[str, Any]]] = []
+    budget = _SEARCH_BYTES
+    for _day, path in stream.files():
+        try:
+            size = path.stat().st_size
+        except OSError:
+            continue
+        if gathered and size > budget:
+            break
+        gathered.append(_read_all_rows(path, stream.label))
+        budget -= size
+    return [r for rows in reversed(gathered) for r in rows]
 
 
 def find_last_server_session_start_ts(workspace: str | None) -> float | None:
-    """Epoch timestamp of the latest ``message`` row matching server startup, if any (``server.log`` tail).
+    """Epoch timestamp of the latest server startup line (``🚀 Hiro Server starting``), if any.
 
-    Scans an expanding tail window so the *most recent* startup line wins, not the first seen.
+    The server's files are read newest first; the newest file that holds one gives its last.
     """
     log_dir = _resolve_log_dir(workspace)
-    server_log = log_dir / "server.log"
-    if not server_log.exists():
-        return None
-    last_ts: float | None = None
-    n = 200
-    while n <= _TAIL_SINCE_MAX_LINES:
-        rows, _ = _read_tail_rows(server_log, "server", n)
-        for r in rows:
-            if r.get("is_startup"):
-                ts = float(r["timestamp"])
-                if last_ts is None or ts > last_ts:
-                    last_ts = ts
-        if len(rows) < n:
-            break
-        n = min(n * 2, _TAIL_SINCE_MAX_LINES)
-    return last_ts
-
-
-def _read_rows_from_offset(
-    path: Path, source: str, offset: int
-) -> tuple[list[dict[str, str]], int]:
-    """Read new CSV rows added after *offset* bytes. Returns (rows, new_offset)."""
-    rows: list[dict[str, str]] = []
-    new_offset = offset
-    try:
-        if _is_plain_stderr(path):
-            base_timestamp = path.stat().st_mtime
-            with path.open(encoding="utf-8", errors="replace") as fh:
-                fh.seek(offset)
-                chunk = fh.read()
-                new_offset = fh.tell()
-            if chunk:
-                start_line = offset
-                for index, line in enumerate(chunk.splitlines(), start=start_line):
-                    parsed = _parse_stderr_line(path, source, line, index, base_timestamp)
-                    if parsed is not None:
-                        rows.append(parsed)
-            return rows, new_offset
-        with path.open(encoding="utf-8", errors="replace") as fh:
-            fh.seek(offset)
-            chunk = fh.read()
-            new_offset = fh.tell()
-        if chunk:
-            for row in csv.reader(io.StringIO(chunk)):
-                parsed = _parse_csv_row(row, source)
-                if parsed is not None:
-                    rows.append(parsed)
-    except OSError:
-        pass
-    return rows, new_offset
-
-
-# ---------------------------------------------------------------------------
-# Scope field extraction — device_id / msg_id / method from CSV extra
-# ---------------------------------------------------------------------------
-
-# Keys stamped by hiro_commons.log.log_scope that identify a device or message.
-_SCOPE_KEYS = frozenset(
-    {"device_id", "msg_id", "method", "text_preview", "traffic_class", "traffic_subclass"}
-)
-
-
-def _extract_scope_fields(extra: str) -> dict[str, str]:
-    """Extract device_id, msg_id, method from the CSV extra field by exact key match.
-
-    Scope fields are written by the structlog _inject_scope processor and live
-    alongside other key=value pairs in the extra column.  Returns only the keys
-    that are actually present; absent keys are not included.
-    """
-    out: dict[str, str] = {}
-    for seg in _split_extra_segments(extra):
-        k, v = _segment_to_key_value(seg)
-        if k in _SCOPE_KEYS and v:
-            out[k] = v
-    return out
+    for _day, path in LogStream("server", log_dir, "server").files():
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            log.debug("A log file couldn't be read", file=str(path), error=str(exc))
+            continue
+        last: float | None = None
+        for raw in text.splitlines():
+            if _STARTUP_MESSAGE not in raw:
+                continue
+            parsed = parse(raw)
+            if parsed is not None and parsed.body.startswith(_STARTUP_MESSAGE):
+                ts = parsed.at.timestamp()
+                last = ts if last is None or ts > last else last
+        if last is not None:
+            return last
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -596,8 +617,6 @@ def _apply_scope_filter(
 
     Filters AND together: a row must satisfy every non-None constraint. ``traffic_classes``
     is OR within itself (any-of) and AND with the others.
-    Uses the pre-parsed ``scope_*`` fields on each row dict (populated by
-    ``_parse_csv_row``) so no repeated extra-field parsing is needed.
     """
     device_id = (device_id or "").strip() or None
     msg_id = (msg_id or "").strip() or None
@@ -729,11 +748,11 @@ class LogSearchTool(Tool):
         else:
             traffic_classes = []
 
-        files = _collect_log_files(log_dir, gateway_log_dir, source or "all")
         all_rows: list[dict] = []
-        for file_path, src_label in files:
-            all_rows.extend(_read_all_rows(file_path, src_label))
+        for stream in _collect_log_files(log_dir, gateway_log_dir, source or "all"):
+            all_rows.extend(_stream_search_rows(stream))
 
+        all_rows = _keep_source(all_rows, source)
         all_rows = _apply_level_filter(all_rows, level)
         all_rows = _apply_module_filter(all_rows, module)
         all_rows = _apply_query_filter(all_rows, query)
@@ -811,32 +830,33 @@ class LogTailTool(Tool):
         if after_offsets:
             try:
                 prev_offsets = json.loads(after_offsets)
-            except Exception:
-                pass
+            except (ValueError, TypeError) as exc:
+                log.debug("after_offsets isn't JSON: a fresh tail instead", error=str(exc))
 
-        files = _collect_log_files(log_dir, gateway_log_dir, source or "all")
+        streams = _collect_log_files(log_dir, gateway_log_dir, source or "all")
         all_rows: list[dict] = []
         new_offsets: dict[str, int] = {}
 
-        for file_path, src_label in files:
-            key = str(file_path)
-            if key in prev_offsets:
-                # Incremental: only read bytes appended since last poll.
-                rows, offset = _read_rows_from_offset(file_path, src_label, prev_offsets[key])
+        for stream in streams:
+            if prev_offsets:
+                # Polling: what each followed file gained since the last call. A file that appeared since (a new
+                # day, a channel that started) is read from its start.
+                for path in stream.recent():
+                    rows, offset = _read_rows_from_offset(path, stream.label, int(prev_offsets.get(str(path), 0)))
+                    all_rows.extend(rows)
+                    new_offsets[str(path)] = offset
+                continue
+            # Initial: the last n rows, or every row since *min_timestamp* when set.
+            if min_timestamp is not None:
+                all_rows.extend(_stream_since(stream, float(min_timestamp)))
             else:
-                # Initial: read the last n lines, or expand until *min_timestamp* when set
-                # (``after_offsets`` empty => full initial load).
-                if min_timestamp is not None and not prev_offsets:
-                    rows, offset = _read_tail_rows_since(
-                        file_path,
-                        src_label,
-                        float(min_timestamp),
-                        start_n=n,
-                    )
-                else:
-                    rows, offset = _read_tail_rows(file_path, src_label, n)
-            all_rows.extend(rows)
-            new_offsets[key] = offset
+                all_rows.extend(_stream_tail(stream, n))
+            for path in stream.recent():
+                try:
+                    new_offsets[str(path)] = path.stat().st_size
+                except OSError:
+                    new_offsets[str(path)] = 0
 
+        all_rows = _keep_source(all_rows, source)
         all_rows.sort(key=lambda r: float(r.get("timestamp", 0)))
         return LogTailResult(rows=all_rows, file_offsets=new_offsets)

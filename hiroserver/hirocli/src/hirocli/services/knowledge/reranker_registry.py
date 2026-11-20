@@ -218,7 +218,7 @@ class FastEmbedCrossEncoderReranker(BaseDocumentCompressor):
         if not docs:
             return []
         scores = list(self._ensure_model().rerank(query, [d.page_content for d in docs]))
-        ranked = sorted(zip(docs, scores), key=lambda pair: pair[1], reverse=True)[: self.top_n]
+        ranked = sorted(zip(docs, scores, strict=False), key=lambda pair: pair[1], reverse=True)[: self.top_n]
         out: list[Document] = []
         for doc, score in ranked:
             out.append(
@@ -276,7 +276,7 @@ class SentenceTransformersReranker(BaseDocumentCompressor):
             return []
         scores = self._ensure_model().predict([(query, doc.page_content) for doc in docs])
         ranked = sorted(
-            zip(docs, (float(score) for score in scores)),
+            zip(docs, (float(score) for score in scores), strict=False),
             key=lambda pair: pair[1],
             reverse=True,
         )[: self.top_n]

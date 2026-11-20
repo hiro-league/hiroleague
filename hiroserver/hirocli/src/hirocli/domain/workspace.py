@@ -38,6 +38,9 @@ from hiro_commons.constants.network import PORT_OFFSET_ADMIN, PORT_OFFSET_PLUGIN
 from hiro_commons.constants.storage import REGISTRY_FILENAME
 
 from ..constants import APP_NAME, ENV_WORKSPACE
+from hiro_commons.log import Logger
+
+log = Logger.get("WORKSPACE")
 
 
 class WorkspaceError(Exception):
@@ -106,8 +109,8 @@ def load_registry() -> WorkspaceRegistry:
     if rp.exists():
         try:
             return WorkspaceRegistry.model_validate_json(rp.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+        except Exception as exc:
+            log.warning("Could not read the workspace registry — using an empty one", path=str(rp), error=str(exc), exc_info=True)
     return WorkspaceRegistry()
 
 

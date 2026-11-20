@@ -2,7 +2,12 @@
 members = ["hiroleague", "hirocli", "gateway", "hiro-channel-sdk", "hiro-commons", "hiro-memory", "hiro-extension-kit", "channels/*"]
 
 [dependency-groups]
-dev = ["debugpy>=1.8,<2", "pytest-xdist>=3.8.0"]
+dev = ["debugpy>=1.8,<2", "pytest-xdist>=3.8.0", "ruff>=0.17.6"]
+
+# Lint: `uv run ruff check` from hiroserver (a part of scripts/check.sh). The rules are the ones every Hiro League repo
+# follows, in one shared file.
+[tool.ruff]
+extend = "../build-kit/ruff-rules.toml"
 
 # Workspace-level runs collect several test files with the same basename.
 # Importlib mode gives each file a unique import path during collection.

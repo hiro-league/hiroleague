@@ -583,7 +583,7 @@ async def stream_knowledge_events(
 ) -> StreamingResponse:
     selected_workspace_id = _selected_workspace_id(workspace)
     entry, _ = resolve_workspace(selected_workspace_id)
-    workspace_path = Path(entry.path).resolve()
+    workspace_path = await run_in_threadpool(Path(entry.path).resolve)
     event_types = (
         KNOWLEDGE_JOB_STARTED,
         KNOWLEDGE_JOB_PROGRESS,
@@ -603,7 +603,7 @@ async def stream_knowledge_events(
 
         async def handler(event: DomainEvent) -> None:
             try:
-                if Path(event.workspace_path).resolve() != workspace_path:
+                if await run_in_threadpool(Path(event.workspace_path).resolve) != workspace_path:
                     return
             except OSError:
                 if Path(event.workspace_path) != workspace_path:
@@ -827,7 +827,7 @@ async def graph_clear(
 
     try:
         entry, _ = resolve_workspace(workspace_id)
-        workspace_path = Path(entry.path).resolve()
+        workspace_path = await run_in_threadpool(Path(entry.path).resolve)
         removed = await clear_knowledge_graph(workspace_path)
         return _success({"removed_episodes": removed})
     except Exception as exc:
@@ -857,7 +857,7 @@ async def graph_remove_document(
 
     try:
         entry, _ = resolve_workspace(workspace_id)
-        workspace_path = Path(entry.path).resolve()
+        workspace_path = await run_in_threadpool(Path(entry.path).resolve)
         removed = await remove_document_from_graph(workspace_path, body.document_id)
         return _success({"document_id": body.document_id, "removed_episodes": removed})
     except Exception as exc:

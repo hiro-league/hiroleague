@@ -152,6 +152,7 @@ async def _invoke_search_tool(
             return payload, render_search_result_text(payload)
         return None, str(payload)
     except Exception as exc:
+        log.warning("Memory search tool call failed; the agent gets the error as the tool result", error=str(exc), exc_info=True)
         return None, f"Error: {exc}"
 
 

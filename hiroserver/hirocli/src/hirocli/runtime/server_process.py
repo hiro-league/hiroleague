@@ -22,6 +22,7 @@ import signal
 import sys
 from pathlib import Path
 
+from hiro_commons import logging_foundation
 from hiro_commons.log import Logger
 from hiro_commons.process import remove_pid, spawn_detached, uv_python_cmd, write_pid
 
@@ -151,6 +152,18 @@ def _register_signal_handlers(stop_event: asyncio.Event) -> None:
 # ---------------------------------------------------------------------------
 
 
+async def _logged_part(part) -> None:
+    """Run one part of the server (a coroutine, or the admin's task); a failure is logged with its traceback, and the
+    other parts go on."""
+    name = getattr(part, "__qualname__", None) or (part.get_name() if isinstance(part, asyncio.Task) else repr(part))
+    try:
+        await part
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.error(f"❌ Server part stopped with an error: {name}", part=name, exc_info=True)
+
+
 async def _main(
     foreground: bool = False,
     workspace_path: Path | None = None,
@@ -180,10 +193,12 @@ async def _main(
     get_domain_event_bus().attach_loop(ctx.loop)
 
     Logger.set_level(ctx.config.log_level)
-    Logger.setup(console=foreground)
-    Logger.open_log_dir(ctx.log_dir)
     if ctx.config.module_log_levels:
         Logger.set_module_levels(ctx.config.module_log_levels)
+    # The server's own daily file (server-<day>.jsonl) and every safety net; then this loop's errors nobody could
+    # catch (a task that failed and was never awaited) land in it too.
+    Logger.start(ctx.log_dir, name="server", service="core", console=foreground)
+    logging_foundation.watch_loop()
 
     log.info("🚀 Hiro Server starting...", workspace=workspace_name, foreground=foreground, admin=admin)
     log.info(
@@ -312,8 +327,10 @@ async def _main(
     if admin_task is not None:
         coros.append(admin_task)
 
+    # Each part's failure is logged when it happens, with its traceback: gather's return_exceptions alone kept it
+    # until the end, and the cancel at shutdown dropped it unread.
     server_task = asyncio.ensure_future(
-        asyncio.gather(*coros, return_exceptions=True)
+        asyncio.gather(*(_logged_part(c) for c in coros), return_exceptions=True)
     )
 
     await stop_event.wait()
@@ -321,8 +338,8 @@ async def _main(
     server_task.cancel()
     try:
         await server_task
-    except (asyncio.CancelledError, Exception):
-        pass
+    except asyncio.CancelledError:
+        log.debug("Server parts stopped")
     finally:
         resource_change_broadcaster.close()
         stop_watching_people()

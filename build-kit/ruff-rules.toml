@@ -1,0 +1,19 @@
+# The lint rules every Hiro League repo's Python follows: the core's packages (hiroserver/pyproject.toml) and every app
+# (its pyproject.toml: `[tool.ruff] extend = "../../hiroleague/build-kit/ruff-rules.toml"`). One file, so a rule changes
+# once for every repo; a repo adds only its own per-file ignores (generated migrations) and, where its Python is older,
+# its target version.
+#
+# The name isn't ruff.toml on purpose: ruff would then lint the build kit's own scripts by it.
+
+line-length = 150
+target-version = "py312"
+
+[lint]
+# pycodestyle, pyflakes, bugbear, blocking calls in async code (ASYNC), time without a time zone (DTZ); and nothing
+# escapes the log: no `except: pass` (S110) or `except: continue` (S112), no task nobody keeps (RUF006)
+select = ["E", "F", "W", "B", "ASYNC", "DTZ", "S110", "S112", "RUF006"]
+ignore = [
+    "B008",      # FastAPI's Depends(...) in default arguments is how FastAPI works
+    "E701",      # one-line `case x: return ...` in match statements, on purpose
+    "ASYNC109",  # a `timeout` argument on async functions is fine here
+]

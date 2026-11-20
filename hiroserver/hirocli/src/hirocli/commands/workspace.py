@@ -110,10 +110,10 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
             )
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         # workspace create makes the workspace — open sinks after so the path exists.
-        Logger.open_log_dir(Path(result.path) / "logs")
+        Logger.start(Path(result.path) / "logs", name="cli", service="cli")
         log.info("hiro workspaces create", name=result.name, path=result.path, set_default=make_default)
 
         console.print(f"[green]Workspace '[bold]{result.name}[/bold]' created.[/green]")
@@ -177,7 +177,8 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
             entry, _ = resolve_workspace(workspace)
             existing = _load_config(Path(entry.path))
             default_gw = existing.gateway_url
-        except (WorkspaceError, Exception):
+        except (WorkspaceError, Exception) as exc:  # no workspace yet: the default gateway is offered
+            log.debug("No workspace config to take the gateway from", error=str(exc))
             default_gw = "ws://localhost:8765"
 
         effective_gateway_url = gateway_url
@@ -205,16 +206,17 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
             )
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         try:
             from ..domain.config import load_config, resolve_log_dir
 
             ws_path = Path(result.workspace_path)
             cfg = load_config(ws_path)
-            Logger.open_log_dir(resolve_log_dir(ws_path, cfg))
-        except Exception:
-            pass
+            Logger.start(resolve_log_dir(ws_path, cfg), name="cli", service="cli")
+        except Exception as exc:
+            # The workspace is set up; only its CLI log isn't: the command goes on, and says why on the console.
+            log.warning("This command's log couldn't be opened in the new workspace", error=str(exc))
         log.info(
             "hiro workspaces setup",
             workspace=result.workspace,
@@ -323,7 +325,7 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
             result = WorkspaceRemoveTool().execute(workspace=workspace, purge=purge)
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         console.print(f"[green]Workspace '[bold]{result.name}[/bold]' removed.[/green]")
         if result.purged:
@@ -364,14 +366,14 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
             )
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         if result.renamed:
             console.print(f"  [green]Renamed[/green] → '[bold]{result.name}[/bold]'")
         if result.default_changed:
             console.print(f"  [green]Default workspace set to[/green] '[bold]{result.name}[/bold]'")
         if result.gateway_updated:
-            console.print(f"  [green]Gateway URL updated.[/green]")
+            console.print("  [green]Gateway URL updated.[/green]")
         if not any([result.renamed, result.default_changed, result.gateway_updated]):
             console.print("[dim]No changes made (values were already the same).[/dim]")
 
@@ -388,7 +390,7 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
             result = WorkspaceShowTool().execute(workspace=workspace)
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         workspace_path = Path(result.path)
         pid = read_running_pid(workspace_path, PID_FILENAME)

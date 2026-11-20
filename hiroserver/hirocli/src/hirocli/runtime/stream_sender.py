@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import time
 from collections.abc import Awaitable, Callable
@@ -42,7 +43,7 @@ async def send_file_as_stream(
     if not chunks:
         chunks = [b""]
     total = len(chunks)
-    size = file_path.stat().st_size
+    size = (await asyncio.to_thread(file_path.stat)).st_size
     t0 = time.perf_counter()
     peer = origin_request.routing.sender_id
     extras = dict(log_extras or {})

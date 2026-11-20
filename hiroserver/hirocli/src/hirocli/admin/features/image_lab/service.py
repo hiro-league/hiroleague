@@ -15,6 +15,9 @@ from hirocli.domain.credential_store import CredentialStore
 from hirocli.domain.model_catalog import get_model_catalog
 from hirocli.domain.preferences import load_preferences
 from hirocli.domain.workspace import resolve_workspace
+from hiro_commons.log import Logger
+
+log = Logger.get("ADMIN.IMAGE_LAB")
 
 
 class ImageLabService:
@@ -73,4 +76,5 @@ class ImageLabService:
                 }
             )
         except Exception as exc:
+            log.warning("⚠️ Image Lab options failed — HiroAdmin · image_lab", workspace_id=workspace_id, error=str(exc), exc_info=True)
             return Result.failure(str(exc))

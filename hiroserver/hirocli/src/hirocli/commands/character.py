@@ -34,7 +34,7 @@ def register(character_app: typer.Typer, console: Console) -> None:
             result = CharacterListTool().execute(workspace=workspace)
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         if not result.characters:
             console.print("[dim]No characters in the index.[/dim]")
@@ -75,10 +75,10 @@ def register(character_app: typer.Typer, console: Console) -> None:
             result = CharacterGetTool().execute(character_id=character_id, workspace=workspace)
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         except FileNotFoundError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         ch = result.character
         console.print(f"[bold]{ch['id']}[/bold] — {ch['name']}")
@@ -134,7 +134,7 @@ def register(character_app: typer.Typer, console: Console) -> None:
             )
         except (WorkspaceError, ValueError) as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         console.print(f"[green]Created character[/green] [bold]{result.character['id']}[/bold]")
         for w in result.warnings:
@@ -195,7 +195,7 @@ def register(character_app: typer.Typer, console: Console) -> None:
             )
         except (WorkspaceError, ValueError, FileNotFoundError) as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         console.print(f"[green]Updated character[/green] [bold]{result.character['id']}[/bold]")
         for w in result.warnings:
@@ -216,10 +216,10 @@ def register(character_app: typer.Typer, console: Console) -> None:
             result = CharacterDeleteTool().execute(character_id=character_id, workspace=workspace)
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         except ValueError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         if result.deleted:
             console.print(f"[green]Deleted character[/green] [bold]{result.character_id}[/bold].")
@@ -246,10 +246,10 @@ def register(character_app: typer.Typer, console: Console) -> None:
             )
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         except FileNotFoundError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         console.print(
             f"[green]Photo updated[/green] for [bold]{result.character_id}[/bold] "

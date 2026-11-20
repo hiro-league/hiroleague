@@ -11,12 +11,17 @@ side door for code written for structlog.
   not a log line, so it goes no further.
 - The core's scope fields (device, message id, method, text preview, traffic class and subclass) ride along as
   fields, as in the core's files.
+- Which events pass: each area's standard logger decides (its level, or its parent's), unless the process has its own
+  rule for its structlog areas (`decide_with`): the core's areas follow the core's level and its level per area (an
+  area's prefix, `AGENT` holding for `AGENT.GRAPH`), while the libraries' standard loggers stay at WARNING.
 """
 
 from __future__ import annotations
 
 import logging
 import sys
+import traceback
+from collections.abc import Callable
 from typing import Any
 
 import structlog
@@ -27,6 +32,15 @@ from .line import ATTRIBUTES
 
 _NOT_FIELDS = {"event", "level", "module", "ts", "exc_info", "exception", "stack_info", "stack"}
 _saved: dict[str, Any] | None = None  # structlog's configuration before ours, put back by unwire()
+LevelCheck = Callable[[str, int], bool]
+_check: LevelCheck | None = None  # the process's own rule for its structlog areas (decide_with), else None
+
+
+def decide_with(check: LevelCheck | None) -> None:
+    """Let `check(area, level)` decide which structlog events pass, instead of each area's standard logger (None:
+    back to the standard loggers). Kept across setup() and close(): it belongs to the process, not to one setup."""
+    global _check
+    _check = check
 
 
 def _add_module(logger: Any, _method: str, event: EventDict) -> EventDict:
@@ -66,10 +80,21 @@ def to_stdlib(_logger: Any, method: str, event: EventDict) -> EventDict:
     if not _own_file_takes(module):
         level = _level(method, event)
         logger = logging.getLogger(module)
-        if logger.isEnabledFor(level):
+        check = _check
+        if check is None:
+            if logger.isEnabledFor(level):
+                fields = {k: v for k, v in event.items() if k not in _NOT_FIELDS}
+                logger.log(level, "%s", event.get("event", ""), exc_info=_exc_info(event), extra={ATTRIBUTES: fields},
+                           stack_info=bool(event.get("stack_info")))
+        elif check(module, level) and logger.manager.disable < level:
+            # The process's rule passed it: hand the record to the handlers whatever the standard logger's own level
+            # (logger.log would ask that level again).
             fields = {k: v for k, v in event.items() if k not in _NOT_FIELDS}
-            logger.log(level, "%s", event.get("event", ""), exc_info=_exc_info(event), extra={ATTRIBUTES: fields},
-                       stack_info=bool(event.get("stack_info")))
+            stack = None
+            if event.get("stack_info"):
+                stack = "Stack (most recent call last):\n" + "".join(traceback.format_stack()[:-1]).rstrip()
+            logger.handle(logger.makeRecord(module, level, "(structlog)", 0, "%s", (event.get("event", ""),),
+                                            _exc_info(event), extra={ATTRIBUTES: fields}, sinfo=stack))
     raise structlog.DropEvent
 
 

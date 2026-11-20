@@ -193,8 +193,6 @@ class TTSNodes(NodeGroup):
         ``memory_out``. A missing text reply is the first-pass fatal condition;
         everything after a text reply (for example TTS) is degradable.
         """
-        inbound_id = state.get("inbound_id", "")
-        chat_channel_id = int(state.get("chat_channel_id") or 0)
         reply_id = state.get("reply_id") or ""
         reply_text = state.get("reply_text") or ""
         observe(input=f"reply_id: {reply_id or '<empty>'} · reply: {reply_text}")

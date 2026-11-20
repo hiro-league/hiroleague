@@ -65,7 +65,8 @@ def test_signing_in_opens_the_api_and_signing_out_closes_it(client: TestClient) 
     ok = client.post("/api/auth/sign-in", json={"sign_in": "Michel", "password": "correct horse"})
     assert ok.status_code == 200
     cookie = ok.headers["set-cookie"]
-    assert "hiro_admin_18083=" in cookie and "HttpOnly" in cookie and "SameSite=lax" in cookie  # Phase 8: Lax, so an extension's site can send the browser here
+    # Phase 8: Lax, so an extension's site can send the browser here
+    assert "hiro_admin_18083=" in cookie and "HttpOnly" in cookie and "SameSite=lax" in cookie
     assert "Secure" not in cookie  # plain http on this machine
     assert client.get("/api/secret").json() == "family"
     assert client.get("/api/auth/me").json()["person"]["name"] == "Michel"

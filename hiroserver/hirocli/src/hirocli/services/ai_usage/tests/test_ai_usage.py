@@ -128,10 +128,22 @@ def _homehiro_db(path: Path) -> Path:
         conn.execute("CREATE TABLE llmserver (id TEXT, kind TEXT)")
         conn.execute("INSERT INTO llmserver VALUES ('pc', 'ollama')")
         rows = [
-            ("2026-11-01 08:00:00.000000", "Ask a camera", "Door", "Front door", "Camera checks", "gemini", "gemini-3.8-flash", "api", "ok", 3, 300, 30, 900, 0.003, 0.0),
-            ("2026-11-01 08:00:00.000000", "Write text", "Came home", None, "Writer", "claude_cli", "claude-sonnet-5-5", "plan", "ok", 1, 50, 10, 4000, 0.0, 0.02),
-            ("2026-11-02 09:00:00.000000", "StudyHiro", "Math review", None, "Local", "local:pc", "gemma4", "local", "failed", 1, 0, 0, 100, 0.0, 0.0),
-            ("2026-11-09 15:00:00.000000", "Ask a camera", "Door", "Front door", "Camera checks", "google", "gemini-3.8-flash", "api", "ok", 2, 200, 20, 600, 0.002, 0.0),
+            (
+                "2026-11-01 08:00:00.000000", "Ask a camera", "Door", "Front door", "Camera checks", "gemini", "gemini-3.8-flash",
+                "api", "ok", 3, 300, 30, 900, 0.003, 0.0,
+            ),
+            (
+                "2026-11-01 08:00:00.000000", "Write text", "Came home", None, "Writer", "claude_cli", "claude-sonnet-5-5",
+                "plan", "ok", 1, 50, 10, 4000, 0.0, 0.02,
+            ),
+            (
+                "2026-11-02 09:00:00.000000", "StudyHiro", "Math review", None, "Local", "local:pc", "gemma4",
+                "local", "failed", 1, 0, 0, 100, 0.0, 0.0,
+            ),
+            (
+                "2026-11-09 15:00:00.000000", "Ask a camera", "Door", "Front door", "Camera checks", "google", "gemini-3.8-flash",
+                "api", "ok", 2, 200, 20, 600, 0.002, 0.0,
+            ),
         ]
         conn.executemany(
             "INSERT INTO llmtotal (hour, kind, task, camera, profile, provider, model, billing, result, requests, tokens_in, "

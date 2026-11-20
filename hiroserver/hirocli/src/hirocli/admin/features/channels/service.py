@@ -7,6 +7,9 @@ from typing import Any
 from hirocli.tools.channel import ChannelDisableTool, ChannelEnableTool, ChannelListTool
 
 from hirocli.admin.shared.result import Result
+from hiro_commons.log import Logger
+
+log = Logger.get("ADMIN.CHANNEL_PLUGINS")
 
 
 class ChannelService:
@@ -18,6 +21,7 @@ class ChannelService:
         try:
             result = ChannelListTool().execute(workspace=workspace_id)
         except Exception as exc:
+            log.warning("⚠️ Channel plugins list failed — HiroAdmin · channels", workspace_id=workspace_id, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
         return Result.success(list(result.channels))
 
@@ -29,6 +33,13 @@ class ChannelService:
         try:
             ChannelEnableTool().execute(channel_name=channel_name, workspace=workspace_id)
         except Exception as exc:
+            log.warning(
+                "⚠️ Channel plugin enable failed — HiroAdmin · channels",
+                channel_name=channel_name,
+                workspace_id=workspace_id,
+                error=str(exc),
+                exc_info=True,
+            )
             return Result.failure(str(exc))
         return Result.success(f"Channel '{channel_name}' enabled.")
 
@@ -40,5 +51,12 @@ class ChannelService:
         try:
             ChannelDisableTool().execute(channel_name=channel_name, workspace=workspace_id)
         except Exception as exc:
+            log.warning(
+                "⚠️ Channel plugin disable failed — HiroAdmin · channels",
+                channel_name=channel_name,
+                workspace_id=workspace_id,
+                error=str(exc),
+                exc_info=True,
+            )
             return Result.failure(str(exc))
         return Result.success(f"Channel '{channel_name}' disabled.")

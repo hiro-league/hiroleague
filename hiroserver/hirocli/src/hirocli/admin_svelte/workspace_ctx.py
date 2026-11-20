@@ -6,10 +6,12 @@ Kept separate from FastAPI so logic stays importable without HTTP dependencies.
 from __future__ import annotations
 
 from importlib import metadata
-from typing import Any
 
 from hirocli.admin.context import get_runtime_context
 from hirocli.domain.workspace import resolve_workspace
+from hiro_commons.log import Logger
+
+log = Logger.get("ADMIN")
 
 
 def _hosting_workspace_id() -> str | None:
@@ -26,7 +28,8 @@ def _workspace_name(workspace_id: str | None) -> str | None:
     try:
         entry, _ = resolve_workspace(workspace_id)
         return entry.name
-    except Exception:
+    except Exception as exc:
+        log.debug("Workspace not found — using the hosting workspace's name", workspace_id=workspace_id, error=str(exc))
         ctx = get_runtime_context()
         return ctx.hosting_workspace_name if ctx else None
 

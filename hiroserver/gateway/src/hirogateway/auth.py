@@ -7,8 +7,11 @@ from dataclasses import dataclass
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from hiro_commons.attestation import verify_device_attestation
 from hiro_commons.keys import load_public_key_b64, public_key_to_b64
+from hiro_commons.log import Logger
 from hiro_commons.signing import verify_signature
 from hiro_commons.timestamps import utc_now
+
+log = Logger.get("GATEWAY")
 
 
 @dataclass
@@ -63,7 +66,8 @@ class GatewayAuthManager:
             device_key = load_public_key_b64(attestation.device_public_key_b64)
             if not verify_signature(device_key, bytes.fromhex(nonce_hex), nonce_signature_b64):
                 return AuthResult(ok=False, reason="device nonce signature invalid")
-        except Exception:
+        except Exception as exc:
+            log.debug("Device nonce signature could not be checked; the device is refused", error=str(exc))
             return AuthResult(ok=False, reason="device nonce signature invalid")
 
         return AuthResult(ok=True, device_id=attestation.device_id)

@@ -159,7 +159,7 @@ class KnowledgeIndex:
         0 when ``params["force_reingest"]`` re-stamps an unchanged file. Raises on an unsupported extension, a file
         over ``max_file_size_bytes``, or a failed load or embed (the catalog row is marked failed first).
         ``params`` carries the document's metadata (owner_kind, owner_id, category_id, subcategory_id, tags)."""
-        path = Path(raw_path).expanduser().resolve()
+        path = await asyncio.to_thread(lambda: Path(raw_path).expanduser().resolve())
         loader = self.loader_registry.resolve(path.suffix.lower())
         if loader is None:
             raise ValueError(f"Unsupported file extension: {path.suffix}")

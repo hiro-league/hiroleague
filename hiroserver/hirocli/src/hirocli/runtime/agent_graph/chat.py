@@ -39,6 +39,7 @@ from __future__ import annotations
 
 from hiro_memory.ledger.node_group import mount as _mount
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import RetryPolicy
 
 from .config import ChatGraphConfig

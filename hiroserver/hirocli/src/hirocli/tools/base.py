@@ -68,6 +68,7 @@ class Tool(ABC):
 
     def attach_runtime(self, ctx: Any) -> None:
         """Inject registry runtime context — no-op unless a subclass overrides."""
+        return
 
     @abstractmethod
     def execute(self, **kwargs: Any) -> Any: ...

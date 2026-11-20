@@ -7,6 +7,9 @@ from typing import TYPE_CHECKING, Any
 
 from hirocli.admin.shared.formatters import fmt_bytes, fmt_rate_bps
 from hirocli.admin.shared.result import Result
+from hiro_commons.log import Logger
+
+log = Logger.get("ADMIN.METRICS")
 
 if TYPE_CHECKING:
     from hirocli.services.metrics import MetricsCollector, MetricsSnapshot
@@ -176,6 +179,7 @@ class MetricsAdminService:
         try:
             collector.configure(enabled=enabled, interval=interval)
         except Exception as exc:
+            log.warning("⚠️ Metrics configure failed — HiroAdmin · metrics", enabled=enabled, interval=interval, error=str(exc), exc_info=True)
             return Result(ok=False, error=str(exc))
         return Result(
             ok=True,

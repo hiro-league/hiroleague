@@ -148,7 +148,7 @@ def _trim_exchange_to_budget(
         cand = _Exchange(
             turns=[
                 WinTurn(t.external_id, t.role, txt, t.created_at)
-                for t, txt in zip(ex.turns, texts)
+                for t, txt in zip(ex.turns, texts, strict=True)
             ]
         )
         body = _render_body([cand], user_name=user_name, character_name=character_name)

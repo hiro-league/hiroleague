@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from ..domain.blob_store import DEFAULT_CHUNK_SIZE, chunk_count_for_size
 from ..domain.files_resolver import resolve_ref

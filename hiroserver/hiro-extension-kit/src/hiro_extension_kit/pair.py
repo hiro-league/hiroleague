@@ -24,6 +24,8 @@ from .hiroleague import URL_KEY, info_for, site_url_default
 
 WAIT = 30.0  # seconds to wait for the core to take the code
 
+log = identity.logger("pair")
+
 
 def _save_url(url: str) -> None:
     with Session(engine) as session:
@@ -62,6 +64,7 @@ def main(argv: list[str]) -> int:
     try:
         ok = asyncio.run(pair(url, code))
     except Exception as exc:  # anything: said in one line, nothing half-done but the saved address
+        log.debug("Pairing failed: %s", exc, exc_info=True)
         print(f"Pairing failed: {type(exc).__name__}: {exc}")
         return 1
     if not ok:

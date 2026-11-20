@@ -21,12 +21,14 @@ import time
 from pathlib import Path
 
 from hiro_commons.constants.storage import RUN_DIR
+from hiro_commons.log import Logger
 
 try:
     import tomllib
 except ModuleNotFoundError:
     import tomli as tomllib  # type: ignore[no-redef]
 
+log = Logger.get("PROCESS")
 
 _workspace_root_cache: Path | None = None
 
@@ -51,8 +53,8 @@ def find_workspace_root(start: Path | None = None) -> Path | None:
                 if "workspace" in data.get("tool", {}).get("uv", {}):
                     _workspace_root_cache = candidate
                     return candidate
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug("Could not read a pyproject.toml while looking for the workspace root", path=str(toml), error=str(exc))
     return None
 
 
@@ -169,7 +171,8 @@ def _proc_create_time(pid: int) -> float | None:
         import psutil
 
         return psutil.Process(pid).create_time()
-    except Exception:
+    except Exception as exc:
+        log.debug("Could not read the process's start time", pid=pid, error=str(exc))
         return None
 
 
@@ -236,6 +239,7 @@ def _pid_exists(pid: int) -> bool:
             )
             return str(pid) in result.stdout
         except Exception:
+            log.warning("tasklist failed; the process is taken as not running", pid=pid, exc_info=True)
             return False
     try:
         os.kill(pid, 0)
@@ -299,7 +303,8 @@ def kill_process(pid: int, *, include_tree: bool = False) -> bool:
         else:
             os.kill(pid, signal.SIGTERM)
         return True
-    except Exception:
+    except Exception as exc:
+        log.debug("Could not stop the process — likely already gone", pid=pid, error=str(exc))
         return False
 
 

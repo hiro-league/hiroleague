@@ -37,6 +37,9 @@ from ..domain.config import Config, load_config, master_key_path, workspace_log_
 from ..domain.features import feature_active
 from ..domain.crypto import load_or_create_master_key
 from ..domain.workspace import WorkspaceError, WorkspaceRegistry, create_workspace, resolve_workspace
+from hiro_commons.log import Logger
+
+log = Logger.get("TOOLS.SERVER")
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +180,8 @@ def graceful_http_stop(http_port: int, pid: int, workspace_path: Path, timeout: 
         url = f"http://127.0.0.1:{http_port}/_shutdown"
         req = urllib.request.Request(url, method="POST", data=b"")
         urllib.request.urlopen(req, timeout=5)
-    except Exception:
+    except Exception as exc:
+        log.debug("Graceful shutdown request failed — the caller falls back to stopping the process", http_port=http_port, error=str(exc))
         return False
 
     deadline = time.monotonic() + timeout
@@ -277,7 +281,8 @@ def register_autostart_for_workspace(workspace_id: str, elevated: bool) -> tuple
     try:
         method = register_autostart(workspace_id)
         return True, str(method)
-    except (NotImplementedError, Exception):
+    except (NotImplementedError, Exception) as exc:
+        log.warning("Could not register auto-start for the workspace", workspace_id=workspace_id, error=str(exc), exc_info=True)
         return False, "failed"
 
 
@@ -295,5 +300,6 @@ def unregister_autostart_for_workspace(workspace_id: str, stored_method: str | N
     try:
         unregister_autostart(workspace_id)
         return True
-    except (NotImplementedError, Exception):
+    except (NotImplementedError, Exception) as exc:
+        log.warning("Could not unregister auto-start for the workspace", workspace_id=workspace_id, error=str(exc), exc_info=True)
         return False

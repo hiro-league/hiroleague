@@ -74,8 +74,6 @@ def test_build_qdrant_filter_chunk_ids_emits_has_id_condition() -> None:
 
 def test_build_qdrant_filter_chunk_ids_combines_with_owner_filter() -> None:
     """chunk_ids + existing scalar filters → ANDed via must — both apply."""
-    from qdrant_client import models as qm
-
     from hiro_memory.knowledge.agent.helpers import build_qdrant_filter
 
     filt = build_qdrant_filter({

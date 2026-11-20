@@ -17,11 +17,12 @@ import subprocess
 import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import IO, TYPE_CHECKING, Any
 
 import websockets
 from websockets.asyncio.server import ServerConnection
 from websockets.exceptions import ConnectionClosed
+from hiro_commons import logging_foundation
 from hiro_commons.log import Logger, log_scope
 from hiro_commons.process import (
     is_running,
@@ -103,6 +104,20 @@ class _ConnectedChannel:
     pending: dict[str, asyncio.Future[Any]] = field(default_factory=dict)
 
 
+def _start_plugin(cmd: list[str], out: IO[str] | None) -> subprocess.Popen[bytes]:
+    """Start a plugin's process on its own (a new process group, no window), its output into `out` (or nowhere)."""
+    target: Any = out if out is not None else subprocess.DEVNULL
+    if sys.platform == "win32":
+        return subprocess.Popen(
+            cmd,
+            creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW),
+            close_fds=True,
+            stdout=target,
+            stderr=target,
+        )
+    return subprocess.Popen(cmd, start_new_session=True, close_fds=True, stdout=target, stderr=target)
+
+
 class ChannelManager:
     """Manages the lifecycle of channel plugins as subprocesses."""
 
@@ -117,6 +132,9 @@ class ChannelManager:
         self._on_event = on_event
         self._channels: dict[str, _ConnectedChannel] = {}
         self._subprocesses: dict[str, subprocess.Popen[bytes]] = {}
+        # Each plugin's own output (its stdout and stderr, a crash's last words included): the server's child file
+        # for it, server-channel-<name>-<day>.log in the logs folder, open while the plugin runs.
+        self._outputs: dict[str, IO[str]] = {}
         self._host = DEFAULT_LOCALHOST
         self._port = ctx.config.plugin_port
 
@@ -173,38 +191,37 @@ class ChannelManager:
         ]
         self._kill_previous_channel(ch.name)
         log.info(f"🔌 Spawning channel plugin: {ch.name}", cmd=cmd)
+        self._close_output(ch.name)
         try:
-            if sys.platform == "win32":
-                proc = subprocess.Popen(
-                    cmd,
-                    creationflags=(
-                        subprocess.CREATE_NEW_PROCESS_GROUP
-                        | subprocess.CREATE_NO_WINDOW
-                    ),
-                    close_fds=True,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-            else:
-                proc = subprocess.Popen(
-                    cmd,
-                    start_new_session=True,
-                    close_fds=True,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
+            out = logging_foundation.child_log(f"channel-{ch.name}")
+        except RuntimeError as exc:  # the server's logging isn't set up (a test): the plugin's own file still has its lines
+            log.debug("No file for the plugin's own output", channel=ch.name, error=str(exc))
+            out = None
+        try:
+            proc = _start_plugin(cmd, out)
             self._subprocesses[ch.name] = proc
+            if out is not None:
+                self._outputs[ch.name] = out
             write_channel_pid(self._ctx.workspace_path, ch.name, proc.pid)
         except FileNotFoundError:
+            if out is not None:
+                out.close()
             log.error(
                 "❌ Channel command not found",
                 cmd=cmd[0],
                 hint=f"hiro channel install {ch.name}",
             )
         except Exception as exc:
+            if out is not None:
+                out.close()
             log.error(
-                f"❌ Failed to spawn channel plugin: {ch.name}", error=str(exc)
+                f"❌ Failed to spawn channel plugin: {ch.name}", error=str(exc), exc_info=True
             )
+
+    def _close_output(self, channel_name: str) -> None:
+        out = self._outputs.pop(channel_name, None)
+        if out is not None:
+            out.close()
 
     def _kill_previous_channel(self, channel_name: str) -> None:
         pid = read_channel_pid(self._ctx.workspace_path, channel_name)
@@ -219,16 +236,18 @@ class ChannelManager:
         for ch in list(self._channels.values()):
             try:
                 await ch.ws.send(rpc.build_notification(METHOD_STOP, {}))
-            except Exception:
-                pass
+            except Exception as exc:  # its socket may be gone already: it is terminated below
+                log.debug(f"Stop notify failed at shutdown — {ch.name}", error=str(exc))
 
         await asyncio.sleep(1)
-        for proc in self._subprocesses.values():
+        for name, proc in self._subprocesses.items():
             if proc.poll() is None:
                 try:
                     proc.terminate()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log.warning(f"⚠️ Terminate failed at shutdown — {name}", error=str(exc))
+        for name in list(self._outputs):
+            self._close_output(name)
 
         channels = list_enabled_channels(self._ctx.workspace_path)
         for ch in channels:
@@ -291,6 +310,7 @@ class ChannelManager:
         if pid is not None and is_running(pid):
             kill_process(pid, include_tree=True)
         remove_channel_pid(self._ctx.workspace_path, channel_name)
+        self._close_output(channel_name)
         log.info(f"🔌 Channel deactivated — {channel_name}")
 
     # ------------------------------------------------------------------
@@ -348,12 +368,12 @@ class ChannelManager:
                             )
                             try:
                                 await prev.ws.send(rpc.build_notification(METHOD_STOP, {}))
-                            except Exception:
-                                pass
+                            except Exception as exc:  # the old connection may be gone already
+                                log.debug("Stop notify to the replaced channel failed", channel=channel_name, error=str(exc))
                             try:
                                 await prev.ws.close(code=WS_CLOSE_CHANNEL_REPLACED, reason="replaced by newer registration")
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                log.debug("Closing the replaced channel's socket failed", channel=channel_name, error=str(exc))
                         self._channels[channel_name] = _ConnectedChannel(
                             name=channel_name,
                             version=params.get("version", "?"),

@@ -210,7 +210,12 @@ def forget_all() -> None:
     _loaded_by_core.clear()
 
 
-async def run_unload_idle(workspace_path: Path, settings_for: dict[str, LocalServerSettings], locks: dict[str, asyncio.Lock], store: CredentialStore | None) -> list[str]:
+async def run_unload_idle(
+    workspace_path: Path,
+    settings_for: dict[str, LocalServerSettings],
+    locks: dict[str, asyncio.Lock],
+    store: CredentialStore | None,
+) -> list[str]:
     """``unload_idle`` with the runner's per-server locks deciding which servers are mid-ask."""
     busy = {pid for pid, lock in locks.items() if lock.locked()}
     return await unload_idle(workspace_path, settings_for, busy, store)

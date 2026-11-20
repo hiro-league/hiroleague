@@ -51,7 +51,7 @@ def _wait_signed_in(console: Console, tool: str, workspace: str | None) -> None:
             out = PlanSignInTool().execute(tool=tool, action="state", workspace=workspace)
             if out.state != "waiting":
                 if out.state == "done":
-                    console.print(f"[green]Signed in.[/green]")
+                    console.print("[green]Signed in.[/green]")
                 else:
                     console.print(f"[yellow]{out.state}:[/yellow] {out.message or ''}")
                     raise typer.Exit(1)
@@ -120,6 +120,7 @@ def register(plan_app: typer.Typer, local_app: typer.Typer, console: Console) ->
         except (WorkspaceError, ValueError) as exc:
             _fail(console, exc)
         except Exception as exc:  # NotInstalled / PlanToolError: the tool can't run here
+            log.warning("hiro ai plan sign-in failed", tool=tool, error=str(exc), exc_info=True)
             _fail(console, exc)
         if out.state != "waiting":
             console.print(f"[yellow]{out.state}:[/yellow] {out.message or ''}")
@@ -146,6 +147,7 @@ def register(plan_app: typer.Typer, local_app: typer.Typer, console: Console) ->
         try:
             out = PlanSignOutTool().execute(tool=tool, workspace=workspace)
         except Exception as exc:  # unknown tool, not installed, tool failed
+            log.warning("hiro ai plan sign-out failed", tool=tool, error=str(exc), exc_info=True)
             _fail(console, exc)
         console.print("[green]Signed out.[/green]" if out.signed_out else f"[yellow]{out.message}[/yellow]")
 
@@ -178,6 +180,7 @@ def register(plan_app: typer.Typer, local_app: typer.Typer, console: Console) ->
         try:
             out = PlanTestTool().execute(tool=tool, workspace=workspace)
         except Exception as exc:  # unknown tool, not installed, timeout
+            log.warning("hiro ai plan test failed", tool=tool, error=str(exc), exc_info=True)
             _fail(console, exc)
         if out.ok:
             console.print(f"[green]{out.answer}[/green] [dim]({out.model or '?'}, {out.ms} ms)[/dim]")
@@ -225,6 +228,7 @@ def register(plan_app: typer.Typer, local_app: typer.Typer, console: Console) ->
                 context=context, batch=batch, workspace=workspace,
             )
         except Exception as exc:  # bad kind, out-of-bounds value (validation), workspace
+            log.warning("hiro ai local set failed", error=str(exc), exc_info=True)
             _fail(console, exc)
         console.print(
             f"{r.provider_id} at {r.base_url or '—'}: unload idle after {r.unload_idle_min} min · "

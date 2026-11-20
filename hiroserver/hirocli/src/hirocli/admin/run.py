@@ -53,8 +53,8 @@ def build_admin_context(ctx: ServerContext) -> "AdminContext":
                 workspace_id = ws_id
                 workspace_name = entry.name
                 break
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("Could not find the hosting workspace in the registry — the admin shows no workspace selected", error=str(exc), exc_info=True)
 
     return AdminContext(
         hosting_workspace_id=workspace_id,

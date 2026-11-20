@@ -95,8 +95,8 @@ class DevicesChannel(ChannelPlugin):
         if self._gateway_ws is not None:
             try:
                 await self._gateway_ws.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug("Could not close the gateway socket on stop — already gone", error=str(exc))
             self._gateway_ws = None
 
     async def send(self, message: UnifiedMessage) -> None:

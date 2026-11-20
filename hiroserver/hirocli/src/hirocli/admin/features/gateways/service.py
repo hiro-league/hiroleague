@@ -16,6 +16,9 @@ from hirocli.tools.gateway import (
 
 from hirocli.admin.shared.result import Result
 from hirocli.admin.shared.stderr_log import stderr_log_info
+from hiro_commons.log import Logger
+
+log = Logger.get("ADMIN.GATEWAYS")
 
 
 class GatewayService:
@@ -25,6 +28,7 @@ class GatewayService:
         try:
             result = GatewayStatusTool().execute()
         except Exception as exc:
+            log.warning("⚠️ Gateways list failed — HiroAdmin · gateways", error=str(exc), exc_info=True)
             return Result.failure(str(exc))
         rows: list[dict[str, Any]] = []
         for inst in result.instances:
@@ -40,6 +44,7 @@ class GatewayService:
         try:
             r = GatewayStartTool().execute(instance=instance_name, verbose=verbose)
         except Exception as exc:
+            log.warning("⚠️ Gateway start failed — HiroAdmin · gateways", instance_name=instance_name, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
         return Result.success((r.already_running, r.pid))
 
@@ -50,6 +55,7 @@ class GatewayService:
         try:
             r = GatewayStopTool().execute(instance=instance_name)
         except Exception as exc:
+            log.warning("⚠️ Gateway stop failed — HiroAdmin · gateways", instance_name=instance_name, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
         return Result.success(r.was_running)
 
@@ -82,6 +88,7 @@ class GatewayService:
                 elevated_task=elevated_task,
             )
         except Exception as exc:
+            log.warning("⚠️ Gateway setup failed — HiroAdmin · gateways", name=name, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
         msg_parts = [f"Port: {result.port}"]
         if result.autostart_registered:
@@ -107,6 +114,7 @@ class GatewayService:
                 elevated_task=elevated_task,
             )
         except Exception as exc:
+            log.warning("⚠️ Gateway teardown failed — HiroAdmin · gateways", instance_name=instance_name, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
         parts: list[str] = []
         if result.stopped:

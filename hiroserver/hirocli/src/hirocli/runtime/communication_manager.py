@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from hiro_channel_sdk.models import UnifiedMessage
+from hiro_commons import tasks
 from hiro_commons.log import Logger
 
 from .graph_event_subscriber import GraphEventSubscriber
@@ -132,14 +133,14 @@ class CommunicationManager:
             return
 
         if not await_persisted:
-            asyncio.create_task(
+            tasks.keep(
                 self._agent_manager.handle(msg),
                 name=f"agent-{msg.routing.id}",
             )
             return
 
         persisted = asyncio.Event()
-        asyncio.create_task(
+        tasks.keep(
             self._agent_manager.handle(msg, persisted_event=persisted),
             name=f"agent-{msg.routing.id}",
         )

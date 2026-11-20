@@ -805,7 +805,7 @@ class GraphEventSubscriber:
             )
             abs_path: Path = data_dir(self._ctx.workspace_path) / media_path
             blob_id = blob_id_for_file(abs_path)
-            size = abs_path.stat().st_size
+            size = (await asyncio.to_thread(abs_path.stat)).st_size
             ref = attachment_ref(reply_id, 0)
             insert_attachment(
                 self._ctx.workspace_path,

@@ -65,7 +65,7 @@ from .constants import (
     RECONNECT_BACKOFF_MAX,
 )
 from .models import ContentItem, EventPayload, MessageRouting, UnifiedMessage
-from .access import ExtensionFeature, ExtensionRight
+from .access import ExtensionFeature
 
 log = Logger.get("EXTENSION")
 

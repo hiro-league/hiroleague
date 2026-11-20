@@ -144,7 +144,8 @@ class InfraEventHandlers:
                 expires_at = datetime.fromisoformat(
                     expires_at_raw.replace("Z", "+00:00")
                 ).astimezone(UTC)
-            except Exception:
+            except Exception as exc:
+                log.debug("Could not read the attestation's expiry — the device is stored without one", error=str(exc))
                 expires_at = None
 
         upsert_approved_device(

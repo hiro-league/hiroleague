@@ -75,9 +75,16 @@ from hirocli.services.knowledge.live_registry import register_live_service, unre
 from hirocli.services.knowledge.preview import FilePreviewResult, read_file_preview
 
 if TYPE_CHECKING:
+    from hiro_memory.knowledge.models import KnowledgeAnswerComparison
+
     from hirocli.domain.preferences import WorkspacePreferences
 
 log = Logger.get("SVC.KNOWLEDGE")
+
+
+def _resolved_paths(paths: Sequence[str]) -> list[str]:
+    """The ingest's paths, absolute (resolving touches the disk, so it runs off the event loop)."""
+    return [str(Path(p).expanduser().resolve()) for p in paths if str(p).strip()]
 
 
 @dataclass
@@ -197,8 +204,8 @@ class KnowledgeService(KnowledgeIndex):
         unregister_live_service(self)
 
     async def scan_folder(self, folder: str, *, recursive: bool = True) -> ScanFolderResult:
-        root = Path(folder).expanduser().resolve()
-        if not root.exists() or not root.is_dir():
+        root = await asyncio.to_thread(lambda: Path(folder).expanduser().resolve())
+        if not await asyncio.to_thread(root.is_dir):
             raise FileNotFoundError(f"Folder not found: {root}")
         return await asyncio.to_thread(self.scanner.scan, root, recursive=recursive)
 
@@ -225,7 +232,7 @@ class KnowledgeService(KnowledgeIndex):
     ) -> KnowledgeJobResult:
         await asyncio.to_thread(self.catalog.validate_category_assignment, category_id, subcategory_id)
         job_id = str(uuid.uuid4())
-        clean_paths = [str(Path(p).expanduser().resolve()) for p in paths if str(p).strip()]
+        clean_paths = await asyncio.to_thread(_resolved_paths, paths)
         resolved_file_concurrency = self._resolve_file_concurrency(file_concurrency)
         params = {
             "paths": clean_paths,

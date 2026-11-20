@@ -18,6 +18,9 @@ from hirocli.tools.provider import (
 )
 
 from hirocli.admin.shared.result import Result
+from hiro_commons.log import Logger
+
+log = Logger.get("ADMIN.PROVIDERS")
 
 
 class ProvidersPageService:
@@ -29,6 +32,7 @@ class ProvidersPageService:
         try:
             raw = ProviderListConfiguredTool().execute(workspace=workspace_id)
         except Exception as exc:
+            log.warning("⚠️ Providers list failed — HiroAdmin · providers", workspace_id=workspace_id, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
         return Result.success(list(raw.providers))
 
@@ -65,6 +69,7 @@ class ProvidersPageService:
                 )
             return Result.success(sorted(addable, key=lambda x: x["id"]))
         except Exception as exc:
+            log.warning("⚠️ Addable providers list failed — HiroAdmin · providers", workspace_id=workspace_id, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
 
     def add_api_key(
@@ -88,6 +93,13 @@ class ProvidersPageService:
                 workspace=workspace_id,
             )
         except Exception as exc:
+            log.warning(
+                "⚠️ Provider API key add failed — HiroAdmin · providers",
+                workspace_id=workspace_id,
+                provider_id=provider_id,
+                error=str(exc),
+                exc_info=True,
+            )
             return Result.failure(str(exc))
         return Result.success(None)
 
@@ -110,6 +122,13 @@ class ProvidersPageService:
                 workspace=workspace_id,
             )
         except Exception as exc:
+            log.warning(
+                "⚠️ Provider endpoint set failed — HiroAdmin · providers",
+                workspace_id=workspace_id,
+                provider_id=provider_id,
+                error=str(exc),
+                exc_info=True,
+            )
             return Result.failure(str(exc))
         return Result.success(None)
 
@@ -136,6 +155,13 @@ class ProvidersPageService:
                 workspace=workspace_id,
             )
         except Exception as exc:
+            log.warning(
+                "⚠️ Provider endpoint check failed — HiroAdmin · providers",
+                workspace_id=workspace_id,
+                provider_id=provider_id,
+                error=str(exc),
+                exc_info=True,
+            )
             return Result.failure(str(exc))
         return Result.success(asdict(result))
 
@@ -148,6 +174,13 @@ class ProvidersPageService:
         try:
             raw = ProviderRemoveTool().execute(provider_id=pid, workspace=workspace_id)
         except Exception as exc:
+            log.warning(
+                "⚠️ Provider remove failed — HiroAdmin · providers",
+                workspace_id=workspace_id,
+                provider_id=provider_id,
+                error=str(exc),
+                exc_info=True,
+            )
             return Result.failure(str(exc))
         return Result.success(bool(raw.removed))
 
@@ -160,5 +193,6 @@ class ProvidersPageService:
             store = CredentialStore(Path(entry.path), entry.id)
             n = store.import_detected_env_keys()
         except Exception as exc:
+            log.warning("⚠️ Provider key scan failed — HiroAdmin · providers", workspace_id=workspace_id, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
         return Result.success(int(n))

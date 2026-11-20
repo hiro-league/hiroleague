@@ -17,7 +17,6 @@ from hiro_commons.log import Logger
 from rich.console import Console
 from rich.table import Table
 
-from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
 
 from ..domain.channel_config import load_channel_config
 from ..domain.workspace import WorkspaceError, resolve_workspace
@@ -43,7 +42,7 @@ def register(channel_app: typer.Typer, console: Console) -> None:
             result = ChannelListTool().execute(workspace=workspace)
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         if not result.channels:
             console.print(
@@ -91,7 +90,7 @@ def register(channel_app: typer.Typer, console: Console) -> None:
             )
         except RuntimeError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         if result.output:
             console.print(result.output)
@@ -147,7 +146,7 @@ def register(channel_app: typer.Typer, console: Console) -> None:
             )
         except (WorkspaceError, ValueError) as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         console.print(
             f"[green]Channel '{result.name}' configured.[/green] "
@@ -190,7 +189,7 @@ def register(channel_app: typer.Typer, console: Console) -> None:
                 result = ChannelConfigShowTool().execute(channel_name=name, workspace=workspace)
         except (WorkspaceError, ValueError) as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         if not result.config:
             console.print("[dim]No config set.[/dim]")
@@ -223,7 +222,7 @@ def register(channel_app: typer.Typer, console: Console) -> None:
             result = ChannelEnableTool().execute(channel_name=name, workspace=workspace)
         except (WorkspaceError, ValueError) as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         console.print(f"[green]Channel '{result.name}' enabled.[/green]")
 
     @channel_app.command("disable")
@@ -242,7 +241,7 @@ def register(channel_app: typer.Typer, console: Console) -> None:
             result = ChannelDisableTool().execute(channel_name=name, workspace=workspace)
         except (WorkspaceError, ValueError) as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         console.print(f"[yellow]Channel '{result.name}' disabled.[/yellow]")
 
     @channel_app.command("remove")
@@ -265,7 +264,7 @@ def register(channel_app: typer.Typer, console: Console) -> None:
             result = ChannelRemoveTool().execute(channel_name=name, workspace=workspace)
         except (WorkspaceError, ValueError) as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         if result.removed:
             console.print(f"[green]Channel '{result.name}' configuration removed.[/green]")
@@ -291,7 +290,7 @@ def register(channel_app: typer.Typer, console: Console) -> None:
                 f"[red]Could not reach Hiro server at {url}: {exc}[/red]\n"
                 "[dim]Is Hiro running? Try [bold]hiro status[/bold].[/dim]"
             )
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         channels: list[dict[str, str]] = data.get("channels", [])
         if not channels:
@@ -318,4 +317,4 @@ def _resolve_workspace_path(workspace: str | None, console: Console) -> Path:
         return Path(entry.path)
     except WorkspaceError as exc:
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc

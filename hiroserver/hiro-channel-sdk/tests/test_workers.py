@@ -1,8 +1,7 @@
-"""Background workers (hiro_channel_sdk/workers.py; Phase 9b: HomeHiro's copy moved here): tasks kept and awaited, loops that survive failures, and the
-retry wait of `run()`, which starts over after a good run (B16)."""
+"""Background workers (hiro_channel_sdk/workers.py; Phase 9b: HomeHiro's copy moved here): tasks kept and awaited, loops that survive failures, and
+the retry wait of `run()`, which starts over after a good run (B16)."""
 
 import asyncio
-import inspect
 import logging
 
 import pytest

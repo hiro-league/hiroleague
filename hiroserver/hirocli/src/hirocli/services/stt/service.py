@@ -71,7 +71,7 @@ class STTService:
                 self._model_to_provider[model_info.model_id] = provider
                 self._models.append(model_info)
             log.info(
-                f"✅ STT provider loaded: {provider.name}",                
+                f"✅ STT provider loaded: {provider.name}",
                 models=[m.model_id for m in provider.supported_models()],
             )
 

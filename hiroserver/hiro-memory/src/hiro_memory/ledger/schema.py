@@ -91,7 +91,7 @@ def graph_logged(
     spec = GraphLoggedSpec(frozenset(captures or ()), flush=flush, on_error=on_error)
 
     def decorate(fn: Callable[..., Any]) -> Callable[..., Any]:
-        setattr(fn, "_graph_logged_spec", spec)
+        fn._graph_logged_spec = spec
         return fn
 
     return decorate

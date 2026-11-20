@@ -16,6 +16,7 @@
 #   - ui-kit: the shared UI kit's own check (svelte-check, ESLint, vitest);
 #   - build-kit: the shared build, check and deploy scripts read by bash (`bash -n`: no syntax error reaches a deploy);
 #   - build-kit: hiro-work's tests (build-kit/work: the environments' commands);
+#   - hiroserver: ruff, the lint rules every Hiro League repo follows (build-kit/ruff-rules.toml), on every package;
 #   - hiroserver: the pytest suite, one part per area of the uv workspace, each with the packages it depends on (the
 #     kit needs the SDK, which needs commons), so a change runs only the areas it reaches. The extension kit, the memory
 #     library (hiro-memory) and hirocli run on every core with pytest-xdist (scripts/run-tests.sh: Ctrl-C won't stop
@@ -50,6 +51,9 @@ part "build-kit: hiro-work tests" "build-kit/work build-kit/check-engine.sh data
     bash -c "cd '${REPO_ROOT}/hiroserver' && uv run python -m pytest ../build-kit/work -q -p no:cacheprovider"
 # What every area reads: the workspace's own settings and lock, and the runner
 ws="hiroserver/pyproject.toml hiroserver/uv.lock scripts/run-tests.sh"
+# The lint every Hiro League repo follows (build-kit/ruff-rules.toml, which each app's pyproject extends too), over
+# every package of the core
+part "hiroserver: ruff" "hiroserver build-kit/ruff-rules.toml"     bash -c "cd '${REPO_ROOT}/hiroserver' && uv run ruff check"
 part "hiroserver: commons and SDK tests" "hiroserver/hiro-commons hiroserver/hiro-channel-sdk ${ws}" \
     "${REPO_ROOT}/scripts/run-tests.sh" -q hiro-commons hiro-channel-sdk
 part "hiroserver: extension kit tests" "hiroserver/hiro-extension-kit hiroserver/hiro-channel-sdk hiroserver/hiro-commons ${ws}" \

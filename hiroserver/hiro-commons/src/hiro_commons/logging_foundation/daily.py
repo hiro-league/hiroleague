@@ -1,23 +1,33 @@
-"""A part's own log file: one file a day, `<name>-<YYYY-MM-DD>.jsonl` in its logs folder, kept KEEP_DAYS days.
-(A child process's raw output uses the same rule with `.log`: `<name>-<child>-<YYYY-MM-DD>.log`.)
+"""A part's own log file: one file a day, `<name>-<YYYY-MM-DD>.jsonl` in its logs folder, kept KEEP_DAYS days in plain
+files, then KEEP_MONTHS months in a compressed archive. (A child process's raw output uses the same rule with `.log`:
+`<name>-<child>-<YYYY-MM-DD>.log`.)
 
 The day is in the file's name, so nothing is ever renamed (on Windows a file a reader has open can't be), and a reader
 knows which days a file holds without opening it. The day is the house's (local time); the lines inside say UTC.
-At the first line of a new day the writer opens that day's file and deletes the files older than KEEP_DAYS days.
+At the first line of a new day the writer opens that day's file and moves the files older than KEEP_DAYS days into the
+archive: `archive/<name>-<YYYY-MM>.jsonl.gz` in the logs folder, one file a month, each day added to it as one more
+gzip member (a gzip reader reads them as one stream, in the order they were added). Archives older than KEEP_MONTHS
+months are deleted. The archive folder is what the nightly backup keeps of a part's logs.
 """
 
 from __future__ import annotations
 
+import gzip
 import logging
 import re
+import shutil
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import IO
 
 KEEP_DAYS = 30
+KEEP_MONTHS = 12
 SUFFIX = ".jsonl"
 CHILD_SUFFIX = ".log"
+ARCHIVE = "archive"
 _DAY = re.compile(r"^(?P<name>.+)-(?P<day>\d{4}-\d{2}-\d{2})(?P<suffix>\.[a-z]+)$")
+_MONTH = re.compile(r"^(?P<name>.+)-(?P<month>\d{4}-\d{2})(?P<suffix>\.[a-z]+)\.gz$")
+log = logging.getLogger("hiro.logging.daily")
 
 
 def file_name(name: str, day: date, suffix: str = SUFFIX) -> str:
@@ -43,18 +53,60 @@ def files(folder: Path, name: str, suffix: str = SUFFIX) -> list[tuple[date, Pat
     return sorted(found, reverse=True)
 
 
-def prune(folder: Path, name: str, today: date, keep_days: int = KEEP_DAYS, suffix: str = SUFFIX) -> list[Path]:
-    """Delete `name`'s files older than `keep_days` days (today counts as one); the ones deleted."""
+def archive_name(name: str, month: date, suffix: str = SUFFIX) -> str:
+    return f"{name}-{month.strftime('%Y-%m')}{suffix}.gz"
+
+
+def archives(folder: Path, name: str, suffix: str = SUFFIX) -> list[tuple[date, Path]]:
+    """`name`'s monthly archives (the first of their month, and the file), newest first."""
+    where = folder / ARCHIVE
+    if not where.is_dir():
+        return []
+    found = []
+    for p in where.glob(f"{name}-*{suffix}.gz"):
+        m = _MONTH.match(p.name)
+        if m and m["name"] == name and m["suffix"] == suffix:
+            try:
+                found.append((date.fromisoformat(m["month"] + "-01"), p))
+            except ValueError:
+                continue
+    return sorted(found, reverse=True)
+
+
+def _months_back(day: date, months: int) -> date:
+    """The first of the month `months` months before `day`'s month."""
+    total = day.year * 12 + (day.month - 1) - months
+    return date(total // 12, total % 12 + 1, 1)
+
+
+def prune(folder: Path, name: str, today: date, keep_days: int = KEEP_DAYS, suffix: str = SUFFIX,
+          keep_months: int = KEEP_MONTHS) -> list[Path]:
+    """Move `name`'s files older than `keep_days` days (today counts as one) into their month's archive, then delete
+    the archives older than `keep_months` months; the day files moved."""
     oldest = today - timedelta(days=keep_days - 1)
-    gone = []
-    for d, path in files(folder, name, suffix):
-        if d < oldest:
+    moved = []
+    for d, path in sorted(files(folder, name, suffix)):  # oldest first: a month's members stay in order
+        if d >= oldest:
+            continue
+        target = folder / ARCHIVE / archive_name(name, d, suffix)
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("rb") as src, gzip.open(target, "ab") as dst:
+                shutil.copyfileobj(src, dst)
+            path.unlink()
+            moved.append(path)
+        except OSError as exc:
+            # In use (Windows) or gone already: the next day tries again. A member written twice (the copy done, the
+            # delete refused) is the one cost, and only on a retry.
+            log.warning("Logs: couldn't archive %s (%s); trying again tomorrow", path.name, exc)
+    first_kept = _months_back(today, keep_months - 1)
+    for month, path in archives(folder, name, suffix):
+        if month < first_kept:
             try:
                 path.unlink()
-                gone.append(path)
-            except OSError:
-                pass  # in use or gone already: the next day tries again
-    return gone
+            except OSError as exc:
+                log.warning("Logs: couldn't delete the old archive %s (%s)", path.name, exc)
+    return moved
 
 
 class DailyFile(logging.Handler):
@@ -74,7 +126,7 @@ class DailyFile(logging.Handler):
         return self.folder / file_name(self.name_, self._day) if self._day else None
 
     def _today(self) -> date:
-        return datetime.now().date()
+        return datetime.now().astimezone().date()  # the house's day (the lines say UTC)
 
     def _open(self, day: date) -> None:
         if self._stream is not None:

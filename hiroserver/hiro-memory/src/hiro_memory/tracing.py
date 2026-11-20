@@ -48,7 +48,8 @@ def _tracing_enabled() -> bool:
     (``LANGSMITH_TRACING`` / ``LANGCHAIN_TRACING_V2``). Any import/attr error ⇒ off."""
     try:
         from langsmith.utils import tracing_is_enabled
-    except Exception:
+    except Exception as exc:
+        log.debug("langsmith is not importable; tracing is off", error=str(exc))
         return False
     try:
         return bool(tracing_is_enabled())

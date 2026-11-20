@@ -173,7 +173,8 @@ def save_preferences(
                 previous = WorkspacePreferences.model_validate_json(
                     f.read_text(encoding="utf-8")
                 )
-            except Exception:
+            except Exception as exc:
+                logger.warning("Could not read the previous preferences %s — saving without the change checks: %s", f, exc, exc_info=True)
                 previous = None
 
     effective_changes = compute_effective_changes(previous, prefs)

@@ -35,7 +35,7 @@ def entry(minutes_ago: float, level: str, scope: str, body: str, **attributes) -
 
 
 def day_file(folder, days_ago: int = 0):
-    return folder / f"testapp-{(datetime.now() - timedelta(days=days_ago)).date().isoformat()}.jsonl"
+    return folder / f"testapp-{(datetime.now().astimezone() - timedelta(days=days_ago)).date().isoformat()}.jsonl"
 
 
 def write(path, *lines: str, mode: str = "w") -> None:
@@ -135,8 +135,8 @@ def test_only_the_log_files_can_be_downloaded(client, folder):
     got = client.get("/api/logs/files").json()
     assert got["keep_days"] == 30
     assert [(f["name"], f["day"]) for f in got["files"]] == [
-        (day_file(folder).name, datetime.now().date().isoformat()),
-        (day_file(folder, 2).name, (datetime.now() - timedelta(days=2)).date().isoformat()),
+        (day_file(folder).name, datetime.now().astimezone().date().isoformat()),
+        (day_file(folder, 2).name, (datetime.now().astimezone() - timedelta(days=2)).date().isoformat()),
         ("crash.log", None),
     ]
     assert got["files"][-1]["size"] == 0

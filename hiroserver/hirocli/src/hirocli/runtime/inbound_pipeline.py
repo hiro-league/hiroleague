@@ -26,6 +26,7 @@ from hiro_channel_sdk.constants import (
 )
 from hiro_channel_sdk.log_scope_fields import unified_message_log_scope
 from hiro_channel_sdk.models import UnifiedMessage
+from hiro_commons import tasks
 from hiro_commons.log import Logger, log_scope
 
 from .comm_log import LOG_IN, comm_extras, comm_kind, comm_peer_label
@@ -197,8 +198,7 @@ class InboundPipeline:
             )
             return
 
-        import asyncio
-        asyncio.create_task(
+        tasks.keep(
             self._safe_handle_request(msg),
             name=f"request-{msg.routing.id}",
         )
@@ -223,8 +223,7 @@ class InboundPipeline:
             )
             return
 
-        import asyncio
-        asyncio.create_task(
+        tasks.keep(
             self._safe_handle_event(msg),
             name=f"event-{msg.routing.id}",
         )

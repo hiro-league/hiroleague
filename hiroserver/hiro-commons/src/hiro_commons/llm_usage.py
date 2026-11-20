@@ -16,6 +16,10 @@ import numbers
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from .log import Logger
+
+log = Logger.get("LLM.USAGE")
+
 __all__ = [
     "gemini_usage_aggregate_fallback",
     "modality_token_count",
@@ -126,7 +130,8 @@ def _usage_detail_rows(details: Any) -> list[Any]:
     if isinstance(details, Sequence):
         try:
             return list(details)
-        except Exception:
+        except Exception as exc:
+            log.debug("Usage details could not be read as a list; counted as none", error=str(exc))
             return []
     try:
         return list(details)
@@ -152,7 +157,8 @@ def _modality_label(raw: Any) -> str:
     if isinstance(val, bytes):
         try:
             val = val.decode("ascii")
-        except Exception:
+        except Exception as exc:
+            log.debug("Modality label is not ASCII; using its repr", error=str(exc))
             val = str(val)
     label = str(val).strip().upper()
     if "." in label:

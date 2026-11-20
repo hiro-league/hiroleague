@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker
+from jsonschema.exceptions import ValidationError as SchemaValidationError
 from pydantic import ValidationError
 from referencing import Registry, Resource
 
@@ -107,7 +108,7 @@ def test_invalid_fixtures_fail_schema_and_pydantic(
 ) -> None:
     payload = _load_json(FIXTURES_DIR / fixture_name)
 
-    with pytest.raises(Exception):
+    with pytest.raises(SchemaValidationError):
         unified_message_validator.validate(payload)
     with pytest.raises(ValidationError):
         UnifiedMessage.model_validate(payload)

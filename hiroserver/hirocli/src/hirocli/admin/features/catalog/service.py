@@ -11,6 +11,9 @@ from hirocli.tools.llm_catalog import (
 )
 
 from hirocli.admin.shared.result import Result
+from hiro_commons.log import Logger
+
+log = Logger.get("ADMIN.CATALOG")
 
 
 class CatalogBrowserService:
@@ -24,6 +27,7 @@ class CatalogBrowserService:
                 else LlmCatalogListProvidersTool().execute()
             )
         except Exception as exc:
+            log.warning("⚠️ Catalog providers list failed — HiroAdmin · catalog", hosting=hosting, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
         return Result.success(list(raw.providers))
 
@@ -48,6 +52,13 @@ class CatalogBrowserService:
         try:
             raw = LlmCatalogListModelsTool().execute(**kwargs)
         except Exception as exc:
+            log.warning(
+                "⚠️ Catalog models list failed — HiroAdmin · catalog",
+                provider_id=provider_id,
+                model_kind=model_kind,
+                error=str(exc),
+                exc_info=True,
+            )
             return Result.failure(str(exc))
         return Result.success((raw.catalog_version, list(raw.models)))
 
@@ -56,6 +67,7 @@ class CatalogBrowserService:
         try:
             cat = reload_model_catalog()
         except Exception as exc:
+            log.warning("⚠️ Catalog reload failed — HiroAdmin · catalog", error=str(exc), exc_info=True)
             return Result.failure(str(exc))
         return Result.success(
             {

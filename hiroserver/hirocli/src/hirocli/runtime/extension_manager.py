@@ -69,6 +69,7 @@ from hiro_channel_sdk.extension import (
 )
 from hiro_channel_sdk.models import UnifiedMessage
 from hiro_commons.keys import load_public_key_b64
+from hiro_commons import tasks
 from hiro_commons.log import Logger
 from hiro_commons.nonces import generate_nonce
 from hiro_commons.signing import verify_signature
@@ -445,12 +446,12 @@ class ExtensionManager:
                     pending[1].set_exception(exc)
         elif msg.message_type == MESSAGE_TYPE_REQUEST:
             # Answered in its own task so a slow handler doesn't hold up other frames.
-            asyncio.create_task(self._answer(conn, msg), name=f"extension-request-{msg.request_id}")
+            tasks.keep(self._answer(conn, msg), name=f"extension-request-{msg.request_id}")
         elif msg.message_type == MESSAGE_TYPE_EVENT and msg.event is not None:
             log.info(f"⬇️ Extension event — {conn.name} · {msg.event.type}", extension_id=conn.extension_id)
             handler = self._event_handlers.get(msg.event.type)
             if handler is not None:
-                asyncio.create_task(
+                tasks.keep(
                     self._run_event_handler(handler, conn, msg.event.type, msg.event.data),
                     name=f"extension-event-{msg.event.type}",
                 )

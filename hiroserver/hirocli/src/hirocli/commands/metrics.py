@@ -18,12 +18,13 @@ import typer
 from rich.console import Console
 from rich.live import Live
 from rich.table import Table
-from rich.panel import Panel
-from rich.columns import Columns
 from rich.text import Text
 
 from ..domain.workspace import WorkspaceError, resolve_workspace
 from ..domain.config import load_config
+from hiro_commons.log import Logger
+
+log = Logger.get("CLI.METRICS")
 
 
 def _api_url(workspace: str | None, path: str) -> str:
@@ -168,10 +169,10 @@ def register(metrics_app: typer.Typer, console: Console) -> None:
             data = _get_json(url)
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         except Exception as exc:
             console.print(f"[red]Cannot reach server:[/red] {exc}")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         table = Table(title="Metrics Collector Status", show_header=False, min_width=35)
         table.add_column("Key", style="bold")
@@ -198,7 +199,7 @@ def register(metrics_app: typer.Typer, console: Console) -> None:
             snap = _get_json(url)
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         except urllib.error.HTTPError as exc:
             if exc.code == 404:
                 console.print("[yellow]Metrics collection is disabled. Enable with --metrics flag or admin UI.[/yellow]")
@@ -206,10 +207,10 @@ def register(metrics_app: typer.Typer, console: Console) -> None:
                 console.print("[yellow]No metrics collected yet — waiting for first sample.[/yellow]")
             else:
                 console.print(f"[red]Server error:[/red] {exc}")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         except Exception as exc:
             console.print(f"[red]Cannot reach server:[/red] {exc}")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         console.print(_build_snapshot_display(snap))
 
@@ -229,7 +230,7 @@ def register(metrics_app: typer.Typer, console: Console) -> None:
             base_url = _api_url(workspace, "/metrics")
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         interval = max(interval, 1.0)
 
@@ -245,6 +246,7 @@ def register(metrics_app: typer.Typer, console: Console) -> None:
                     return Text("Waiting for first sample...", style="dim")
                 return Text(f"Server error: {exc}", style="red")
             except Exception as exc:
+                log.debug("Could not reach the server for metrics — shown on screen", url=base_url, error=str(exc))
                 return Text(f"Cannot reach server: {exc}", style="red")
 
             ts = snap.get("timestamp", 0)

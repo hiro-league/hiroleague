@@ -7,8 +7,11 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Any, Protocol, Sequence
 
+from hiro_commons.log import Logger
 from pydantic import BaseModel, Field as PydanticField
 from qdrant_client import models as qm
+
+log = Logger.get("SVC.KNOWLEDGE.GRAPH")
 
 
 class QueryRewrite(BaseModel):
@@ -105,7 +108,8 @@ def _detect_language(text: str) -> str:
             return detect(text)
         except LangDetectException:
             return "unknown"
-    except Exception:
+    except Exception as exc:
+        log.debug("langdetect unavailable; guessing the language from the script", error=str(exc))
         if any("\u0600" <= ch <= "\u06ff" for ch in text):
             return "ar"
         return "unknown"

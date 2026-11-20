@@ -4,7 +4,7 @@ hiro-commons, cover the line's shape, the levels, the days and what must not esc
 
 import json
 import logging
-from datetime import date
+from datetime import datetime
 
 import pytest
 from hiro_commons.log import Logger
@@ -20,7 +20,7 @@ def log_dir(tmp_path):
 
 def read(folder) -> list[dict]:
     logs.close()  # writes what is queued
-    path = folder / f"testapp-{date.today().isoformat()}.jsonl"
+    path = folder / f"testapp-{datetime.now().astimezone().date().isoformat()}.jsonl"
     return [json.loads(t) for t in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
 
 

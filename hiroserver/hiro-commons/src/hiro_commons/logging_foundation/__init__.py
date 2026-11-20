@@ -27,7 +27,8 @@ What a process gets:
 
 Third-party libraries that are chatty at INFO (QUIET) are held back to WARNING.
 
-The core's own logger (hiro_commons.log) is untouched by this: the core moves onto the foundation in a later phase.
+The core's processes come here through the core's own logger (hiro_commons.log: `Logger.start()`), which keeps the
+core's detail: its FINEINFO level, its message scope fields, its level per area and its colour console.
 """
 
 from __future__ import annotations
@@ -50,7 +51,8 @@ from . import bridge, daily, line
 from .daily import KEEP_DAYS, DailyFile
 from .line import Line, parse
 
-__all__ = ["setup", "close", "where", "flush", "watch_loop", "child_log", "self_test", "levels_from", "Line", "parse", "daily", "line", "KEEP_DAYS", "LOGGERS", "CRASH_FILE"]
+__all__ = ["setup", "close", "where", "flush", "watch_loop", "child_log", "self_test", "levels_from", "Line", "parse", "daily", "line",
+           "KEEP_DAYS", "LOGGERS", "CRASH_FILE"]
 
 LOGGERS = ("", "uvicorn")  # the root logger, and uvicorn's, which keeps its lines to itself (not its access log)
 QUIET = {"httpx": logging.WARNING, "httpcore": logging.WARNING}  # httpx logs every request at INFO
@@ -121,9 +123,11 @@ def levels_from(text: str | None) -> dict[str, str]:
 
 
 def setup(folder: Path, *, name: str, service: str, levels: Mapping[str, str] | None = None, console: bool = True,
-          keep_days: int = KEEP_DAYS) -> Path:
+          keep_days: int = KEEP_DAYS, console_format: logging.Formatter | None = None) -> Path:
     """Set up this process's logging (again: replaces the first setup, writes nothing twice). `name` names the files
-    (`homehiro-2026-11-19.jsonl`); `service` is the process in each line (`home`). The file of today, once written."""
+    (`homehiro-2026-11-19.jsonl`); `service` is the process in each line (`home`). `levels` may name the root area ""
+    (the libraries' level, and every area's that has none of its own). `console_format` replaces uvicorn's look on the
+    console (the core keeps its colour lines). The file of today, once written."""
     global log
     close()
     log = logging.getLogger(f"{name}.logs")
@@ -138,7 +142,7 @@ def setup(folder: Path, *, name: str, service: str, levels: Mapping[str, str] | 
     if console and not any(isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
                            for h in root.handlers):
         stream = logging.StreamHandler()
-        stream.setFormatter(_ConsoleFormat(CONSOLE_FORMAT))
+        stream.setFormatter(console_format or _ConsoleFormat(CONSOLE_FORMAT))
         writers.append(stream)
     listener = QueueListener(q, *writers, respect_handler_level=True)
     listener.start()
@@ -206,7 +210,7 @@ def child_log(child: str) -> IO[str]:
     if _state.file is None:
         raise RuntimeError("logging_foundation.child_log() before setup()")
     folder, name = _state.file.folder, f"{_state.file.name_}-{child}"
-    today = datetime.now().date()
+    today = datetime.now().astimezone().date()  # the house's day
     daily.prune(folder, name, today, _state.file.keep_days, daily.CHILD_SUFFIX)
     return (folder / daily.file_name(name, today, daily.CHILD_SUFFIX)).open("a", encoding="utf-8")
 

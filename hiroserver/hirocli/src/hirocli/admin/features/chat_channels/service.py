@@ -164,6 +164,12 @@ class ChatChannelsService:
                 rows.append(d)
             return Result.success(rows)
         except Exception as exc:
+            _log.warning(
+                "⚠️ Conversation channels list failed — HiroAdmin · conversation_channel",
+                workspace_id=workspace_id,
+                error=str(exc),
+                exc_info=True,
+            )
             return Result.failure(str(exc))
 
     def create_channel(
@@ -186,6 +192,12 @@ class ChatChannelsService:
                 workspace=workspace_id,
             )
         except Exception as exc:
+            _log.warning(
+                "⚠️ Conversation channel create failed — HiroAdmin · conversation_channel",
+                workspace_id=workspace_id,
+                error=str(exc),
+                exc_info=True,
+            )
             return Result.failure(str(exc))
         return Result.success(out.channel)
 
@@ -209,6 +221,13 @@ class ChatChannelsService:
                 character_id=character_id,
             )
         except Exception as exc:
+            _log.warning(
+                "⚠️ Conversation channel update failed — HiroAdmin · conversation_channel",
+                channel_id=channel_id,
+                workspace_id=workspace_id,
+                error=str(exc),
+                exc_info=True,
+            )
             return Result.failure(str(exc))
         return Result.success(out.channel)
 
@@ -218,6 +237,13 @@ class ChatChannelsService:
         try:
             ConversationChannelDeleteTool().execute(channel_id, workspace=workspace_id)
         except Exception as exc:
+            _log.warning(
+                "⚠️ Conversation channel delete failed — HiroAdmin · conversation_channel",
+                channel_id=channel_id,
+                workspace_id=workspace_id,
+                error=str(exc),
+                exc_info=True,
+            )
             return Result.failure(str(exc))
         return Result.success(channel_id)
 
@@ -266,6 +292,13 @@ class ChatChannelsService:
         try:
             write_channel_thumbnail_from_file(wp, channel_id, path)
         except Exception as exc:
+            _log.warning(
+                "⚠️ Conversation channel photo upload failed — HiroAdmin · conversation_channel",
+                channel_id=channel_id,
+                workspace_id=workspace_id,
+                error=str(exc),
+                exc_info=True,
+            )
             return Result.failure(str(exc))
         notify_conversation_channel_changed(wp, channel_id)
         return Result.success(None)
@@ -298,6 +331,12 @@ class ChatChannelsService:
                     limit=limit,
                 )
         except Exception as exc:
+            _log.warning(
+                "⚠️ Conversation messages list failed — HiroAdmin · conversation_channel",
+                workspace_id=workspace_id,
+                error=str(exc),
+                exc_info=True,
+            )
             return Result.failure(str(exc))
         return Result.success(messages)
 

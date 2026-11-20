@@ -991,7 +991,7 @@ async def read_graph_snapshot(
     from graphiti_core.nodes import EntityNode, EpisodicNode
 
     path = Path(db_path)
-    if not path.exists():
+    if not await asyncio.to_thread(path.exists):
         return [], [], {}, {}
     nodes: list[Any] = []
     edges: list[Any] = []
@@ -1050,7 +1050,7 @@ async def read_graph_group_ids(
     file does not exist.
     """
     path = Path(db_path)
-    if not path.exists():
+    if not await asyncio.to_thread(path.exists):
         return [], None
     # The knowledge partition is the NAMED kb_main group, not graphiti's empty default.
     default_gid = KNOWLEDGE_GROUP_ID
@@ -1078,7 +1078,7 @@ async def distinct_group_ids_with_prefix(
     eval corpus picker's ``has_graph`` flag.
     """
     path = Path(db_path)
-    if not prefix or not path.exists():
+    if not prefix or not await asyncio.to_thread(path.exists):
         return set()
     query = (
         "MATCH (e:Episodic) WHERE e.group_id STARTS WITH $prefix "
@@ -1115,7 +1115,7 @@ async def read_episode_valid_at(
 
     ids = [str(u) for u in uuids if u]
     path = Path(db_path)
-    if not ids or not path.exists():
+    if not ids or not await asyncio.to_thread(path.exists):
         return {}
     out: dict[str, str | None] = {}
     async with _snapshot_read_driver(
@@ -1159,7 +1159,7 @@ async def read_episode_chunks(
 
     ids = [str(u) for u in uuids if u]
     path = Path(db_path)
-    if not ids or not path.exists():
+    if not ids or not await asyncio.to_thread(path.exists):
         return {}
     out: dict[str, dict[str, Any]] = {}
     async with _snapshot_read_driver(
@@ -1218,7 +1218,7 @@ async def read_graph_episodes(
 
     gid = (group_id or "").strip()
     path = Path(db_path)
-    if not gid or not path.exists():
+    if not gid or not await asyncio.to_thread(path.exists):
         return []
     out: list[dict[str, Any]] = []
     async with _snapshot_read_driver(

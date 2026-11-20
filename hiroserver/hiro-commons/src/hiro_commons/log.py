@@ -1,49 +1,52 @@
-"""Shared Hiro structured logging.
+"""The core's logger: a thin layer over the logging foundation (hiro_commons.logging_foundation) that keeps the core's
+own detail, field for field.
 
-Two-step initialisation
------------------------
-1. ``Logger.set_level("DEBUG")``  — store the desired level (idempotent).
-2. ``Logger.setup(console=True)`` — wire the structlog pipeline (one-time).
+What it keeps:
+- **FINEINFO** (15), between DEBUG and INFO, with `.fineinfo()` on every logger.
+- **The message scope** (`log_scope`): device_id, msg_id, method, text_preview, traffic_class and traffic_subclass,
+  stamped on every line logged inside it (across asyncio tasks too), as fields of the line.
+- **The core's level and its level per area**: `set_level` (the workspace's `log_level`) for every core area, and
+  `set_module_levels` (`module_log_levels`: `{"AGENT": "DEBUG", "COMM": "WARNING"}`) for the areas that start with a
+  prefix, the longest prefix winning, above or below the core's level. Libraries stay at WARNING.
+- **The colour console** of a foreground run (`[1:15:46] [INF] [COMM________] message key=value`).
+- **Files of their own** for rows that aren't log lines (`add_file_sink`: the memory library's run ledger,
+  `graph.log`): an area such a file takes never reaches the log.
 
-Order matters: *set_level before setup*.  Calling ``set_level`` multiple
-times is harmless — last call wins.
+What the foundation gives every core process (as every app): one JSON line per record with OpenTelemetry's field
+names, its own daily file kept 30 days then archived, the queue that never blocks a caller, and every safety net.
 
-Module-prefix routing
----------------------
-File sinks support ``include_prefix`` / ``exclude_prefix`` filters so that
-events are routed to the correct log file without any per-call boilerplate:
+Starting a process (once its folder is known):
 
-* ``CLI.*`` modules  →  ``cli.log``
-* Everything else    →  ``server.log``
+    Logger.set_level(config.log_level)
+    Logger.set_module_levels(config.module_log_levels)
+    Logger.start(log_dir, name="server", service="core", console=foreground)
 
-Channel plugins run in separate processes, each with their own
-``channel-<name>.log`` created by ``log_setup.init()``.
+`name` names its files (`server-2026-11-20.jsonl`): `server` (the server), `cli` (each `hiro` command),
+`channel-<name>` (a channel plugin), `gateway`. At start, the old CSV file of that name (`server.log` and its rotated
+copies) moves into `archive/csv/` in the folder, as it is.
 
-``Logger.open_log_dir(log_dir)`` opens both routed sinks in one call
-and is idempotent — safe to call from both the CLI callback and the
-server startup path.
+Code logs as it always has: `log = Logger.get("COMM")`, then `log.info("...", key=value)`; standard
+`logging.getLogger(__name__)` lands in the same file. Tests that only need loggers call `Logger.setup(console=False)`:
+the loggers work (into standard logging, which pytest captures), and no file is opened.
 """
 
 from __future__ import annotations
 
 import contextvars
 import csv
-import datetime
 import io
 import logging
 import logging.handlers
-import sys
-import traceback
+import os
+import shutil
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Mapping
 
-import colorama
 import structlog
 
 from .constants.timing import LOG_ROTATION_BACKUP_COUNT, LOG_ROTATION_MAX_BYTES
-
-colorama.init(autoreset=True)
 
 # ---------------------------------------------------------------------------
 # Custom FINEINFO level (15) — between DEBUG (10) and INFO (20).
@@ -83,44 +86,21 @@ structlog.PrintLogger.fineinfo = structlog.PrintLogger.msg  # type: ignore[attr-
 __all__ = [
     "FINEINFO",
     "Logger",
-    "setup",
     "get_logger",
-    "set_level",
-    "set_module_levels",
-    "disable",
-    "enable",
     "log_scope",
+    "CORE_PACKAGES",
+    "ARCHIVE_CSV",
 ]
 
-_LEVEL_ABBREV = {
-    "DEBUG": "DBG",
-    "FINEINFO": "FNI",
-    "INFO": "INF",
-    "WARNING": "WRN",
-    "ERROR": "ERR",
-    "CRITICAL": "CRT",
-}
-
-_LEVEL_COLORS = {
-    "DEBUG": colorama.Fore.BLUE,
-    "FINEINFO": colorama.Fore.CYAN,
-    "INFO": colorama.Fore.GREEN,
-    "WARNING": colorama.Fore.YELLOW,
-    "ERROR": colorama.Fore.RED,
-    "CRITICAL": colorama.Fore.MAGENTA,
-}
-
-_MODULE_PALETTE = [
-    colorama.Fore.CYAN,
-    colorama.Fore.MAGENTA,
-    colorama.Fore.YELLOW,
-    colorama.Fore.GREEN,
-]
-
-_INDENT_LEVEL: contextvars.ContextVar[int] = contextvars.ContextVar(
-    "indent_level", default=0
+# The core's own packages whose modules log with standard logging (`logging.getLogger(__name__)`): they follow the
+# core's level, as its structlog areas do. Every other standard logger (the libraries) stays at WARNING.
+CORE_PACKAGES = (
+    "hirocli", "hiroleague", "hirogateway", "hiro_commons", "hiro_memory", "hiro_channel_sdk", "hiro_channel_devices",
+    "hiro_channel_whatsapp", "hiro_channel_echo", "hiro",
 )
-_INDENT_UNIT: str = "--"
+# The memory library's run ledger rows (its own CSV file, graph.log): never log lines, even with no ledger file open.
+LEDGER_PREFIX = "AGENT.GRAPH.LEDGER"
+ARCHIVE_CSV = Path("archive") / "csv"  # where the old CSV log files rest, in the logs folder
 
 # ---------------------------------------------------------------------------
 # Structured log scope — propagated automatically across asyncio tasks.
@@ -146,13 +126,13 @@ _TRAFFIC_SUBCLASS: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "log_traffic_subclass", default=None
 )
 
-_LEVELS: Mapping[str, int] = {
-    name: level for name, level in logging._nameToLevel.items()
-}
+_LEVELS: Mapping[str, int] = dict(logging._nameToLevel.items())
 
-# (min_level, handler, renderer, include_prefix, exclude_prefixes)
+# Files of their own (the run ledger): (min_level, handler, renderer, include_prefix, exclude_prefixes). The
+# foundation's structlog bridge reads it: an area a file opened for it alone takes is that file's row, not a log line.
 _FILE_SINKS: list[tuple[int, logging.Handler, object, str | None, tuple[str, ...] | None]] = []
 _MODULE_OVERRIDES: dict[str, int] = {}
+_sink_log = logging.getLogger("hiro_commons.log")
 
 
 def _resolve_level(level: str | int | None) -> int:
@@ -161,176 +141,6 @@ def _resolve_level(level: str | int | None) -> int:
     if isinstance(level, int):
         return level
     return _LEVELS.get(str(level).upper(), logging.INFO)
-
-
-def _pick_module_color(name: str) -> str:
-    if not name:
-        return colorama.Fore.WHITE
-    index = sum(ord(c) for c in name) % len(_MODULE_PALETTE)
-    return _MODULE_PALETTE[index]
-
-
-def _epoch_to_time_str(epoch: float | str) -> str:
-    try:
-        return datetime.datetime.fromtimestamp(float(epoch)).strftime("%H:%M:%S")
-    except Exception:
-        return str(epoch)
-
-
-class _ColourRenderer:
-    def __call__(self, logger, method_name, event_dict):
-        ts = _epoch_to_time_str(event_dict.pop("ts", 0))
-        level = event_dict.pop("level", "").upper()
-        module = event_dict.pop("module", "")
-        module_raw = module
-        if len(module_raw) > 12:
-            module_disp = module_raw[:12]
-        else:
-            module_disp = module_raw.ljust(12, "_")
-
-        message = event_dict.pop("event", "")
-        indent_level: int = _INDENT_LEVEL.get()
-        indent_prefix = _INDENT_UNIT * max(indent_level, 0)
-        if indent_prefix:
-            message = f"{indent_prefix}{message}"
-
-        lvl_abbr = _LEVEL_ABBREV.get(level, level[:3])
-        lvl_color = _LEVEL_COLORS.get(level, colorama.Fore.WHITE)
-        module_color = _pick_module_color(module)
-        kv_str = " ".join(f"{k}={v}" for k, v in event_dict.items())
-
-        parts = [
-            f"{colorama.Style.DIM}[{ts}]",
-            f"{lvl_color}[{lvl_abbr}]",
-            f"{module_color}[{module_disp}]",
-            colorama.Style.RESET_ALL + message,
-        ]
-
-        if kv_str:
-            parts.append(colorama.Style.DIM + " " + kv_str)
-        parts.append(colorama.Style.RESET_ALL)
-        return " ".join(parts)
-
-
-class _PlainRenderer:
-    def __call__(self, logger, method_name, event_dict):
-        ts = _epoch_to_time_str(event_dict.pop("ts", 0))
-        level = event_dict.pop("level", "").upper()
-        module = event_dict.pop("module", "")
-        module_raw = module
-        if len(module_raw) > 12:
-            module_disp = module_raw[:12]
-        else:
-            module_disp = module_raw.ljust(12, "_")
-
-        message = event_dict.pop("event", "")
-        indent_level: int = _INDENT_LEVEL.get()
-        indent_prefix = _INDENT_UNIT * max(indent_level, 0)
-        if indent_prefix:
-            message = f"{indent_prefix}{message}"
-
-        lvl_abbr = _LEVEL_ABBREV.get(level, level[:3])
-        kv_str = " ".join(f"{k}={v}" for k, v in event_dict.items())
-
-        parts = [
-            f"[{ts}]",
-            f"[{lvl_abbr}]",
-            f"[{module_disp}]",
-            message,
-        ]
-        if kv_str:
-            parts.append(" " + kv_str)
-        return " ".join(parts)
-
-
-class _CsvRenderer:
-    """Renders log events as CSV rows for structured file logging.
-
-    Columns: timestamp,level,module,message,extra
-    timestamp is a Unix epoch float (e.g. 1742312005.437821) — gives
-    sub-second precision for correct ordering of same-second events.
-    Extra contains remaining key=value pairs joined by spaces.
-    A CSV header line is written once when the file sink is first opened.
-    """
-
-    HEADER = "timestamp,level,module,message,extra"
-
-    def __call__(self, logger, method_name, event_dict):
-        ts = event_dict.pop("ts", 0)
-        level = event_dict.pop("level", "").upper()
-        module = event_dict.pop("module", "")
-        message = event_dict.pop("event", "")
-        extra = " ".join(f"{k}={v}" for k, v in event_dict.items())
-
-        buf = io.StringIO()
-        writer = csv.writer(buf)
-        writer.writerow([ts, level, module, message, extra])
-        return buf.getvalue().rstrip("\r\n")
-
-
-class _FlatCsvRenderer:
-    """Render a flat structured event dict using a caller-supplied column order."""
-
-    def __init__(self, columns: list[str]) -> None:
-        self.columns = list(columns)
-        buf = io.StringIO()
-        csv.writer(buf).writerow(self.columns)
-        self.header = buf.getvalue().rstrip("\r\n")
-
-    def __call__(self, logger, method_name, event_dict):
-        buf = io.StringIO()
-        writer = csv.writer(buf)
-        writer.writerow([event_dict.get(column, "") for column in self.columns])
-        return buf.getvalue().rstrip("\r\n")
-
-
-class _NullRenderer:
-    """Discards all console output; used when console=False."""
-
-    def __call__(self, logger, method_name, event_dict):
-        raise structlog.DropEvent()
-
-
-class _StdlibBridge(logging.Handler):
-    """Bridge stdlib logging records into the Hiro structured logger.
-
-    Used by ``silence_stdlib()`` for per-library overrides with a fixed
-    module tag.
-    """
-
-    def __init__(self, module: str, level: int = logging.WARNING):
-        super().__init__(level)
-        self._module = module
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            log = structlog.get_logger(module=self._module)
-            level = record.levelname.lower()
-            log_method = getattr(log, level, log.warning)
-            log_method(record.getMessage(), stdlib_logger=record.name)
-        except Exception:
-            pass
-
-
-class _StdlibCatchAll(logging.Handler):
-    """Catch-all bridge on the stdlib root logger.
-
-    Installed by ``Logger.setup()`` to capture WARNING+ from *any*
-    third-party library and re-emit through the structlog pipeline with
-    proper formatting and file-sink routing.  The module tag is derived
-    from the top-level package name (e.g. ``httpcore.connection`` →
-    ``HTTPCORE``).
-    """
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            module = record.name.split(".")[0].upper()
-            log = structlog.get_logger(module=module)
-            level = record.levelname.lower()
-            log_method = getattr(log, level, log.warning)
-            log_method(record.getMessage(), stdlib_logger=record.name)
-        except Exception:
-            pass
 
 
 def _inject_scope(logger, method_name, event_dict):
@@ -369,44 +179,30 @@ def _inject_scope(logger, method_name, event_dict):
     return event_dict
 
 
-def _module_level_filter(logger, method_name, event_dict):
-    """Drop events below configured per-module level overrides."""
-    if not _MODULE_OVERRIDES:
-        return event_dict
+class _FlatCsvRenderer:
+    """Render a flat structured event dict using a caller-supplied column order (a file of its own's rows)."""
 
-    module = str(event_dict.get("module", ""))
-    level_name = str(event_dict.get("level", "")).upper()
-    event_level = logging._nameToLevel.get(level_name, logging.INFO)
+    def __init__(self, columns: list[str]) -> None:
+        self.columns = list(columns)
+        buf = io.StringIO()
+        csv.writer(buf).writerow(self.columns)
+        self.header = buf.getvalue().rstrip("\r\n")
 
-    for prefix in sorted(_MODULE_OVERRIDES.keys(), key=len, reverse=True):
-        if module == prefix or module.startswith(prefix + ".") or module.startswith(prefix):
-            if event_level < _MODULE_OVERRIDES[prefix]:
-                raise structlog.DropEvent()
-            break
-    return event_dict
+    def __call__(self, logger, method_name, event_dict):
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow([event_dict.get(column, "") for column in self.columns])
+        return buf.getvalue().rstrip("\r\n")
 
 
 def _emit_to_file_sinks(logger, method_name, event_dict):
+    """Write the event as a row of each file of its own that takes its area (the foundation's bridge runs this before
+    it hands the event to standard logging)."""
+    if not _FILE_SINKS:
+        return event_dict
     level_name = str(event_dict.get("level", "")).upper()
     event_level = logging._nameToLevel.get(level_name, logging.INFO)
     module = str(event_dict.get("module", ""))
-
-    exc_info = None
-    try:
-        supplied = event_dict.get("exc_info")
-        if supplied is True:
-            exc_info = sys.exc_info()
-        elif isinstance(supplied, tuple) and len(supplied) == 3:
-            exc_info = supplied
-        elif supplied and isinstance(supplied, BaseException):
-            exc_info = (type(supplied), supplied, supplied.__traceback__)
-        if exc_info is None:
-            cur_exc = sys.exc_info()
-            if cur_exc and cur_exc[0] is not None:
-                exc_info = cur_exc
-    except Exception:
-        exc_info = None
-
     for min_level, handler, renderer, include_pfx, exclude_pfxs in list(_FILE_SINKS):
         if event_level < min_level:
             continue
@@ -415,43 +211,81 @@ def _emit_to_file_sinks(logger, method_name, event_dict):
         if exclude_pfxs is not None and any(module.startswith(p) for p in exclude_pfxs):
             continue
         try:
-            copy_for_file = dict(event_dict)
-            rendered = renderer(None, method_name, copy_for_file)
-            if event_level >= logging.ERROR and exc_info is not None:
-                try:
-                    tb_lines = traceback.format_exception(*exc_info)
-                    tb_one_line = " | ".join(
-                        line.strip() for line in tb_lines if line and line.strip()
-                    )
-                    if tb_one_line:
-                        rendered = f"{rendered} exception={tb_one_line}"
-                except Exception:
-                    pass
-
-            record = logging.LogRecord(
-                name=module,
-                level=event_level,
-                pathname="",
-                lineno=0,
-                msg=rendered,
-                args=(),
-                exc_info=None,
-            )
-            handler.handle(record)
+            rendered = renderer(None, method_name, dict(event_dict))
+            handler.handle(logging.LogRecord(name=module, level=event_level, pathname="", lineno=0, msg=rendered,
+                                             args=(), exc_info=None))
         except Exception:
-            pass
+            # A row that couldn't be written: said in the log (a standard logger, so it can't loop back here)
+            _sink_log.warning("A row for %s couldn't be written to its file", module, exc_info=True)
     return event_dict
 
 
-def _strip_exception_for_console(logger, method_name, event_dict):
-    try:
-        event_dict.pop("exc_info", None)
-        event_dict.pop("exception", None)
-        event_dict.pop("stack", None)
-        event_dict.pop("stack_info", None)
-    except Exception:
-        pass
-    return event_dict
+def _enabled(module: str, level: int) -> bool:
+    """The core's rule for its structlog areas: the area's own level when a prefix names it (the longest prefix
+    wins), else the core's level. The run ledger's rows are never log lines."""
+    if module.startswith(LEDGER_PREFIX):
+        return False
+    for prefix in sorted(_MODULE_OVERRIDES, key=len, reverse=True):
+        if module.startswith(prefix):
+            return level >= _MODULE_OVERRIDES[prefix]
+    return level >= Logger._level
+
+
+_LEVEL_ABBREV = {"DEBUG": "DBG", "FINEINFO": "FNI", "INFO": "INF", "WARNING": "WRN", "ERROR": "ERR", "CRITICAL": "CRT"}
+
+
+class _ColourFormat(logging.Formatter):
+    """The core's console line, as it always looked: `[time] [LVL] [MODULE______] message key=value`, coloured (a
+    foreground run; the file keeps the whole record, the console a short line, without its traceback)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        import colorama
+
+        colorama.just_fix_windows_console()
+        f, s = colorama.Fore, colorama.Style
+        self._dim, self._reset = s.DIM, s.RESET_ALL
+        self._levels = {"DEBUG": f.BLUE, "FINEINFO": f.CYAN, "INFO": f.GREEN, "WARNING": f.YELLOW, "ERROR": f.RED,
+                        "CRITICAL": f.MAGENTA}
+        self._palette = [f.CYAN, f.MAGENTA, f.YELLOW, f.GREEN]
+        self._white = f.WHITE
+
+    def format(self, record: logging.LogRecord) -> str:
+        ts = time.strftime("%H:%M:%S", time.localtime(record.created))
+        level = record.levelname.upper()
+        module = record.name
+        shown = module[:12] if len(module) > 12 else module.ljust(12, "_")
+        colour = self._palette[sum(ord(c) for c in module) % len(self._palette)] if module else self._white
+        fields = getattr(record, "hiro_fields", None) or {}
+        kv = " ".join(f"{k}={v}" for k, v in fields.items() if not k.startswith(("exception.", "code.")))
+        parts = [f"{self._dim}[{ts}]", f"{self._levels.get(level, self._white)}[{_LEVEL_ABBREV.get(level, level[:3])}]",
+                 f"{colour}[{shown}]", self._reset + record.getMessage()]
+        if kv:
+            parts.append(self._dim + " " + kv)
+        parts.append(self._reset)
+        return " ".join(parts)
+
+
+def archive_csv(folder: Path, name: str) -> list[Path]:
+    """Move the old CSV log file `name.log` (and its rotated copies `name.log.1`...) into `archive/csv/`, as they are.
+    Once per file: a name already there gets the time it moved added to it. The files moved."""
+    folder = Path(folder)
+    moved = []
+    for path in sorted(folder.glob(f"{name}.log*")):
+        tail = path.name[len(name):]
+        if not path.is_file() or not (tail == ".log" or (tail.startswith(".log.") and tail[5:].isdigit())):
+            continue
+        target = folder / ARCHIVE_CSV / path.name
+        if target.exists():
+            target = target.with_name(f"{path.name}.{time.strftime('%Y%m%d-%H%M%S')}")
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(path), str(target))
+            moved.append(target)
+        except OSError as exc:
+            # Another process still writes it (an old one on Windows): the next start moves it.
+            _sink_log.warning("Logs: the old %s stays where it is for now (%s)", path.name, exc)
+    return moved
 
 
 # ---------------------------------------------------------------------------
@@ -460,110 +294,84 @@ def _strip_exception_for_console(logger, method_name, event_dict):
 
 
 class Logger:
-    """Central logging facility for Hiro.
+    """The core's logging, over the foundation.
 
     Usage::
 
-        Logger.set_level("DEBUG")        # 1. set level (idempotent)
-        Logger.setup(console=True)       # 2. wire pipeline (one-time)
-        Logger.open_log_dir(log_dir)     # 3. open file sinks (idempotent)
+        Logger.set_level("DEBUG")                         # 1. the core's level (idempotent)
+        Logger.set_module_levels({"COMM": "WARNING"})     # 2. levels per area (optional)
+        Logger.start(log_dir, name="server", service="core", console=True)   # 3. the file, the nets
 
-    ``Logger.get("MODULE")`` returns a lazy proxy and can be called at
-    module level before any of the above — the proxy resolves on first
-    actual log call, using whatever configuration is active at that point.
+    ``Logger.get("MODULE")`` returns a lazy proxy and can be called at module level before any of the above.
     """
 
     _level: int = logging.INFO
     _setup_done: bool = False
+    _console: bool = False
+    _started: tuple[Path, str] | None = None
 
     # -- Level ---------------------------------------------------------------
 
     @classmethod
     def set_level(cls, level: str | int) -> None:
-        """Set the global log level.  Idempotent; last call wins.
-
-        Call *before* ``setup()`` for guaranteed correctness.  If called
-        after ``setup()``, file sink thresholds are updated immediately.
-        """
+        """The core's level, for every core area without one of its own. Idempotent; last call wins, at once."""
         cls._level = _resolve_level(level)
-        if cls._setup_done:
-            global _FILE_SINKS
-            _FILE_SINKS = [
-                (cls._level, handler, renderer, inc, exc)
-                for (_, handler, renderer, inc, exc) in _FILE_SINKS
-            ]
-            for entry in _FILE_SINKS:
-                entry[1].setLevel(cls._level)
+        if cls._started is not None:
+            for package in CORE_PACKAGES:
+                logging.getLogger(package).setLevel(cls._level)
 
     @classmethod
     def set_module_levels(cls, overrides: dict[str, str]) -> None:
-        """Per-module level overrides (e.g. ``{"AGENT": "DEBUG"}``).
-
-        Modules matching a prefix are held to the specified minimum level,
-        independent of the global level.
-        """
+        """Levels per area (e.g. ``{"AGENT": "DEBUG"}``): an area that starts with a prefix follows the prefix's level
+        (the longest prefix wins), above or below the core's level."""
         for name, level_str in overrides.items():
             _MODULE_OVERRIDES[name] = _resolve_level(level_str)
 
-    # -- Pipeline setup ------------------------------------------------------
+    # -- Setup ---------------------------------------------------------------
 
     @classmethod
-    def setup(cls, *, console: bool = True, json: bool = False) -> None:
-        """One-time processor pipeline setup.
+    def setup(cls, *, console: bool = True) -> None:
+        """Wire the core's loggers into standard logging, with the core's rule for its areas; no file yet (tests, and
+        a process before its folder is known). ``start()`` does this too."""
+        from .logging_foundation import bridge
 
-        Reads the current ``_level`` (set via ``set_level``).  Safe to call
-        multiple times — second and subsequent calls are no-ops.
-        """
-        if cls._setup_done:
-            return
-
-        # The stdlib root logger stays at WARNING so third-party
-        # DEBUG/INFO chatter is suppressed at the source.  A catch-all
-        # bridge re-emits WARNING+ through structlog with proper
-        # formatting and file-sink routing.  The default stdout handler
-        # is removed — only our structlog pipeline writes to the console.
-        logging.basicConfig(
-            level=logging.WARNING,
-            format="%(message)s",
-            stream=sys.stdout,
-            force=True,
-        )
-        root = logging.getLogger()
-        for h in root.handlers[:]:
-            root.removeHandler(h)
-        root.addHandler(_StdlibCatchAll(level=logging.WARNING))
-
-        def _add_module(logger, method_name, event_dict):
-            if "module" not in event_dict and logger and getattr(logger, "name", None):
-                event_dict["module"] = logger.name
-            return event_dict
-
-        processors = [
-            structlog.processors.TimeStamper(fmt=None, utc=True, key="ts"),
-            structlog.processors.add_log_level,
-            _add_module,
-            _inject_scope,
-            _module_level_filter,
-            _emit_to_file_sinks,
-            _strip_exception_for_console,
-            structlog.processors.StackInfoRenderer(),
-            structlog.processors.format_exc_info,
-        ]
-
-        if not console:
-            processors.append(_NullRenderer())
-        elif json:
-            processors.append(structlog.processors.JSONRenderer())
-        else:
-            processors.append(_ColourRenderer())
-
-        structlog.configure(
-            processors=processors,
-            wrapper_class=structlog.make_filtering_bound_logger(cls._level),
-            context_class=dict,
-            cache_logger_on_first_use=True,
-        )
+        cls._console = console
+        bridge.decide_with(_enabled)
+        bridge.wire()
         cls._setup_done = True
+
+    @classmethod
+    def start(cls, folder: Path, *, name: str, service: str, console: bool | None = None) -> Path:
+        """This process's logging on the foundation: its own daily file in `folder` (`<name>-<day>.jsonl`), the
+        safety nets, the core's levels and its colour console (`console`: the setup()'s choice when not given). The
+        old CSV file of that name moves into `archive/csv/` first. Again with the same folder and name: nothing
+        changes. The file of today."""
+        from . import logging_foundation
+
+        folder = Path(folder)
+        if console is None:
+            console = cls._console
+        if cls._started == (folder, name):
+            return folder / logging_foundation.daily.file_name(name, _today())
+        moved = archive_csv(folder, name)
+        level = logging.getLevelName(cls._level)
+        levels = {"": "WARNING", **{package: level for package in CORE_PACKAGES}}
+        today = logging_foundation.setup(folder, name=name, service=service, levels=levels, console=console,
+                                         console_format=_ColourFormat() if console else None)
+        cls.setup(console=console)
+        cls._started = (folder, name)
+        if moved:
+            _sink_log.info("Logs: the old CSV files moved to %s", folder / ARCHIVE_CSV,
+                           extra={"files": [p.name for p in moved]})
+        return today
+
+    @classmethod
+    def close(cls) -> None:
+        """Write what is queued and close the file (tests; the foundation does it at exit by itself)."""
+        from . import logging_foundation
+
+        logging_foundation.close()
+        cls._started = None
 
     # -- Logger retrieval ----------------------------------------------------
 
@@ -583,101 +391,35 @@ class Logger:
         # config when get() is called at module-import time (before setup).
         return structlog.get_logger(module=name)
 
-    # -- File sinks ----------------------------------------------------------
+    # -- Files of their own --------------------------------------------------
 
     @classmethod
     def add_file_sink(
         cls,
         path: str,
         *,
+        csv_columns: list[str] | tuple[str, ...],
         level: str | int | None = None,
-        rotate: bool = True,
-        mode: str = "a",
         max_bytes: int = LOG_ROTATION_MAX_BYTES,
         backup_count: int = LOG_ROTATION_BACKUP_COUNT,
-        use_json: bool = False,
-        use_csv: bool = False,
-        csv_columns: list[str] | tuple[str, ...] | None = None,
         include_prefix: str | None = None,
         exclude_prefix: str | tuple[str, ...] | None = None,
     ) -> logging.Handler:
-        """Mirror log events into a file.
-
-        *level* defaults to the global level set by ``set_level()``.
-        Pass an explicit level only for sinks that should be MORE
-        restrictive (e.g. an error-only file).
-        """
-        import os
-
+        """A CSV file of its own for rows that aren't log lines (the run ledger), with these columns, rotated by size.
+        Opened for an area alone (`include_prefix`), that area's events are its rows and never log lines."""
         directory = os.path.dirname(path)
-        if directory and not os.path.exists(directory):
+        if directory:
             os.makedirs(directory, exist_ok=True)
-
-        is_new_file = mode == "w" or not os.path.exists(path)
-
         min_level = _resolve_level(level) if level is not None else cls._level
-        if rotate:
-            handler: logging.Handler = logging.handlers.RotatingFileHandler(
-                path,
-                mode=mode,
-                maxBytes=max_bytes,
-                backupCount=backup_count,
-                encoding="utf-8",
-            )
-        else:
-            handler = logging.FileHandler(path, mode=mode, encoding="utf-8")
-
+        handler: logging.Handler = logging.handlers.RotatingFileHandler(
+            path, mode="a", maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8")
         handler.setLevel(min_level)
         handler.setFormatter(logging.Formatter("%(message)s"))
-
-        if use_json:
-            renderer = structlog.processors.JSONRenderer()
-        elif use_csv:
-            renderer = (
-                _FlatCsvRenderer(list(csv_columns))
-                if csv_columns is not None
-                else _CsvRenderer()
-            )
-            header = (
-                renderer.header
-                if isinstance(renderer, _FlatCsvRenderer)
-                else _CsvRenderer.HEADER
-            )
-            if is_new_file:
-                try:
-                    with open(path, mode, encoding="utf-8") as fh:
-                        fh.write(header + "\n")
-                except OSError:
-                    pass
-            elif isinstance(renderer, _FlatCsvRenderer):
-                try:
-                    with open(path, encoding="utf-8") as fh:
-                        lines = fh.readlines()
-                    if not lines:
-                        with open(path, "w", encoding="utf-8") as fh:
-                            fh.write(header + "\n")
-                    else:
-                        old_columns = next(csv.reader([lines[0].rstrip("\r\n")]))
-                        if (
-                            old_columns != renderer.columns
-                            and old_columns == renderer.columns[: len(old_columns)]
-                        ):
-                            lines[0] = header + "\n"
-                            with open(path, "w", encoding="utf-8") as fh:
-                                fh.writelines(lines)
-                except OSError:
-                    pass
-        else:
-            renderer = _PlainRenderer()
-
+        renderer = _FlatCsvRenderer(list(csv_columns))
+        _write_header(Path(path), renderer)
         if isinstance(exclude_prefix, str):
             exclude_prefix = (exclude_prefix,)
-
         _FILE_SINKS.append((min_level, handler, renderer, include_prefix, exclude_prefix))
-        # File sink handlers are NOT attached to the stdlib root logger.
-        # _emit_to_file_sinks calls handler.handle() directly from the
-        # structlog pipeline, keeping third-party stdlib noise out of our
-        # CSV log files.
         return handler
 
     @classmethod
@@ -685,105 +427,37 @@ class Logger:
         global _FILE_SINKS
         _FILE_SINKS = [entry for entry in _FILE_SINKS if entry[1] is not handler]
 
-    _log_dir: Path | None = None
 
-    @classmethod
-    def open_log_dir(cls, log_dir: Path) -> None:
-        """Open routed file sinks for a workspace log directory (idempotent).
-
-        Creates two CSV sinks with module-prefix routing:
-        - ``server.log``  — all events *except* ``CLI.*`` modules.
-        - ``cli.log``     — only ``CLI.*`` modules.
-
-        Both sinks inherit the global level from ``set_level()``.
-        """
-        log_dir = Path(log_dir)
-        if cls._log_dir == log_dir:
+def _write_header(path: Path, renderer: _FlatCsvRenderer) -> None:
+    """A new file gets the header; a file whose header is a shorter run of the same columns (a column added since) gets
+    the new header, its rows kept."""
+    try:
+        if not path.exists() or path.stat().st_size == 0:
+            path.write_text(renderer.header + "\n", encoding="utf-8")
             return
-        log_dir.mkdir(parents=True, exist_ok=True)
-        cls._log_dir = log_dir
+        with path.open(encoding="utf-8") as fh:
+            lines = fh.readlines()
+        old_columns = next(csv.reader([lines[0].rstrip("\r\n")]))
+        if old_columns != renderer.columns and old_columns == renderer.columns[: len(old_columns)]:
+            lines[0] = renderer.header + "\n"
+            with path.open("w", encoding="utf-8") as fh:
+                fh.writelines(lines)
+    except OSError as exc:
+        _sink_log.warning("The header of %s couldn't be written (%s)", path.name, exc)
 
-        cls.add_file_sink(
-            str(log_dir / "server.log"),
-            use_csv=True,
-            exclude_prefix=("CLI.", "AGENT.GRAPH.LEDGER"),
-        )
-        cls.add_file_sink(
-            str(log_dir / "cli.log"),
-            use_csv=True,
-            include_prefix="CLI.",
-        )
 
-    # -- Stdlib bridging -----------------------------------------------------
+def _today():
+    """The house's day (the daily files are named by it)."""
+    from datetime import datetime
 
-    @classmethod
-    def silence_stdlib(
-        cls,
-        logger_name: str,
-        *,
-        module: str,
-        level: str | int = "WARNING",
-    ) -> None:
-        """Redirect a stdlib logger into the Hiro structured logger.
-
-        Messages below *level* are suppressed.  Messages at or above
-        *level* are re-emitted through ``Logger.get(module)`` so they
-        appear in the console and file sinks with proper formatting.
-
-        Propagation is disabled to prevent bare-text duplicates on the
-        root logger.
-        """
-        numeric = _resolve_level(level)
-        stdlib_logger = logging.getLogger(logger_name)
-        stdlib_logger.setLevel(numeric)
-        stdlib_logger.addHandler(_StdlibBridge(module, numeric))
-        stdlib_logger.propagate = False
-
-    # -- On/off --------------------------------------------------------------
-
-    @classmethod
-    def disable(cls):
-        logging.disable(logging.CRITICAL)
-
-    @classmethod
-    def enable(cls):
-        logging.disable(logging.NOTSET)
-
-    # -- Indentation helpers -------------------------------------------------
-
-    @classmethod
-    def set_indent_unit(cls, unit: str):
-        global _INDENT_UNIT
-        _INDENT_UNIT = unit
-
-    @classmethod
-    def push(cls, steps: int = 1):
-        _INDENT_LEVEL.set(_INDENT_LEVEL.get() + steps)
-
-    @classmethod
-    def pop(cls, steps: int = 1):
-        _INDENT_LEVEL.set(max(_INDENT_LEVEL.get() - steps, 0))
-
-    @classmethod
-    @contextmanager
-    def indent(cls, steps: int = 1):
-        token = _INDENT_LEVEL.set(_INDENT_LEVEL.get() + steps)
-        try:
-            yield
-        finally:
-            _INDENT_LEVEL.reset(token)
+    return datetime.now().astimezone().date()
 
 
 # ---------------------------------------------------------------------------
 # Module-level convenience aliases
 # ---------------------------------------------------------------------------
 
-setup = Logger.setup
 get_logger = Logger.get
-set_level = Logger.set_level
-set_module_levels = Logger.set_module_levels
-disable = Logger.disable
-enable = Logger.enable
 
 
 @contextmanager
@@ -799,8 +473,8 @@ def log_scope(
     """Open a structured logging scope for one device / message / request.
 
     Every log line emitted within this context — including inside asyncio tasks
-    spawned from it — is automatically stamped with the supplied fields in the
-    ``extra`` column.  Explicit values passed at call sites always win over the
+    spawned from it — is automatically stamped with the supplied fields (the line's
+    fields).  Explicit values passed at call sites always win over the
     scope (the processor only injects when the key is absent).
 
     Fields:
@@ -844,3 +518,4 @@ def log_scope(
     finally:
         for var, token in reversed(tokens):
             var.reset(token)
+

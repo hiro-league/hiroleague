@@ -8,14 +8,16 @@ from typing import TYPE_CHECKING
 from qdrant_client import QdrantClient
 
 from hiro_commons.constants.storage import DB_DIR
+from hiro_commons.log import Logger
 
 from hiro_memory.knowledge.catalog_store import CatalogStore
 from hiro_memory.knowledge.constants import COLLECTION_NAME
 from hirocli.services.knowledge.constants import DB_FILENAME, QDRANT_DIR
-from hiro_memory.knowledge.runtime_owner import is_owner_token_alive
 
 if TYPE_CHECKING:
     from hirocli.services.knowledge.service import KnowledgeService
+
+log = Logger.get("SVC.KNOWLEDGE")
 
 _LIVE_SERVICES: dict[str, list[KnowledgeService]] = {}
 _LIVE_OWNER_TOKENS: dict[str, set[str]] = {}
@@ -79,7 +81,8 @@ def count_knowledge_points(workspace_path: Path) -> int:
             if not client.collection_exists(COLLECTION_NAME):
                 continue
             return int(client.count(COLLECTION_NAME, exact=True).count)
-        except Exception:
+        except Exception as exc:
+            log.debug("Could not count points in a live knowledge store — trying the next one", error=str(exc))
             continue
     if services:
         db_path = Path(workspace_path) / DB_DIR / DB_FILENAME
@@ -97,5 +100,6 @@ def count_knowledge_points(workspace_path: Path) -> int:
             return max(sql_count, int(client.count(COLLECTION_NAME, exact=True).count))
         finally:
             client.close()
-    except Exception:
+    except Exception as exc:
+        log.debug("Could not open the knowledge vector store to count points — using the catalog's count", error=str(exc))
         return sql_count

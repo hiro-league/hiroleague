@@ -1,5 +1,6 @@
-"""An app's address as a LAN name the HiroLeague core sets up (hiroleague docs/site-names-design.md): the claim (hiroleague.py `claim_site_name`, PUT /api/hiroleague/site-name) against a fake core
-answering `sites.claim`: yes, taken, invalid, and not connected. (The label rules are test_site_name.py.)
+"""An app's address as a LAN name the HiroLeague core sets up (hiroleague docs/site-names-design.md): the claim
+(hiroleague.py `claim_site_name`, PUT /api/hiroleague/site-name) against a fake core answering `sites.claim`: yes, taken,
+invalid, and not connected. (The label rules are test_site_name.py.)
 
 Shared-code plan, step 1: HomeHiro's, NetHiro's and TrainHiro's tests each had this file; it is tested once, here."""
 

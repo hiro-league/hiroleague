@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from hiro_commons.log import Logger
+
+log = Logger.get("AGENT.GRAPH.LEDGER")
+
 
 def slug(value: str) -> str:
     raw = str(value or "").strip().lower().replace(" ", "_")
@@ -36,7 +40,8 @@ def to_int(value: Any) -> int:
         if value in ("", None):
             return 0
         return max(0, int(value))
-    except Exception:
+    except Exception as exc:
+        log.debug("Ledger value is not a number; counted as 0", value=repr(value)[:40], error=str(exc))
         return 0
 
 
@@ -45,5 +50,6 @@ def to_float(value: Any) -> float:
         if value in ("", None):
             return 0.0
         return max(0.0, float(value))
-    except Exception:
+    except Exception as exc:
+        log.debug("Ledger value is not a number; counted as 0", value=repr(value)[:40], error=str(exc))
         return 0.0

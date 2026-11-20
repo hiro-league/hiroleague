@@ -10,8 +10,11 @@ from platformdirs import user_data_dir
 from pydantic import BaseModel
 
 from hiro_commons.constants.storage import REGISTRY_FILENAME
+from hiro_commons.log import Logger
 
 from .constants import APP_NAME, DEFAULT_INSTANCE_NAME, ENV_INSTANCE
+
+log = Logger.get("GATEWAY")
 
 
 class GatewayInstanceError(Exception):
@@ -48,7 +51,7 @@ def load_registry() -> GatewayRegistry:
         try:
             return GatewayRegistry.model_validate_json(rp.read_text(encoding="utf-8"))
         except Exception:
-            pass
+            log.warning("Could not read the gateway instance registry; using an empty one", path=str(rp), exc_info=True)
     return GatewayRegistry()
 
 

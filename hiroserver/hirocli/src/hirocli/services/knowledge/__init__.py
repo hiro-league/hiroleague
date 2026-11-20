@@ -29,7 +29,11 @@ def create_knowledge_service(
     provider = prefs_provider
     if provider is None and prefs is not None:
         snapshot = prefs.model_copy(deep=True)
-        provider = lambda: snapshot
+
+        def _snapshot_provider() -> WorkspacePreferences:
+            return snapshot
+
+        provider = _snapshot_provider
 
     effective_prefs = provider() if provider is not None else load_preferences(workspace_path)
     embedder = resolve_knowledge_embedder(

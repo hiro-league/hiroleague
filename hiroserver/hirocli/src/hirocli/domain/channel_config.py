@@ -14,7 +14,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from hiro_commons.process import find_workspace_root
 
 from .db import db_path, ensure_db
 

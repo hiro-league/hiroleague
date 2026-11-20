@@ -93,7 +93,7 @@ def fields_of(record: logging.LogRecord) -> dict[str, Any]:
 def body_of(record: logging.LogRecord) -> str:
     try:
         return record.getMessage()
-    except Exception:  # a call whose arguments don't fit its message: keep both rather than lose the line
+    except (TypeError, ValueError, KeyError):  # a call whose arguments don't fit its message: keep both rather than lose the line
         return f"{record.msg} {record.args!r}"
 
 

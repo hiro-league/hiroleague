@@ -46,7 +46,7 @@ from hiro_channel_sdk.constants import (
 from hiro_commons.constants.timing import DEFAULT_AUTH_TIMEOUT_SECONDS, DEFAULT_PAIRING_WAIT_SECONDS
 
 from .auth import GatewayAuthManager
-from .config import GatewayState, load_state, save_state
+from .config import load_state, save_state
 from .constants import PAIRING_REQUEST_ID_BYTES, WS_REASON_MAX_LENGTH
 
 log = Logger.get("RELAY")
@@ -256,8 +256,8 @@ def _relay_log_scope_fields(
             um = UnifiedMessage.model_validate(payload)
             direction = "outbound" if is_from_server else "inbound"
             return unified_message_log_scope(um, direction=direction)
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("Relayed payload is not a unified message; logging it from the envelope", error=str(exc))
     device_id = sender_id if not is_from_server else (target_id or sender_id)
     return device_id, _fallback_message_id_from_envelope(msg), None, None, None, None
 
@@ -341,8 +341,8 @@ async def register(device_id: str, ws: ServerConnection, *, role: str = "") -> b
             log.warning(f"⚠️ Duplicate connection rejected — {label}", device_id=device_id)
             try:
                 await ws.close(code=WS_CLOSE_DUPLICATE_DEVICE, reason="device already connected")
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug("Could not close the duplicate connection — already gone", device_id=device_id, error=str(exc))
             return False
         _registry[device_id] = ws
         if role:

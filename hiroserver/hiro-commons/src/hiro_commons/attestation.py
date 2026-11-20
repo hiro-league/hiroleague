@@ -13,8 +13,11 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 )
 
 from .constants.domain import DEFAULT_ATTESTATION_EXPIRY_DAYS
+from .log import Logger
 from .signing import sign_bytes, verify_signature
 from .timestamps import parse_iso8601_utc, utc_iso, utc_now
+
+log = Logger.get("SIGNING")
 
 
 @dataclass(frozen=True)
@@ -76,7 +79,8 @@ def parse_device_attestation_blob(attestation_blob: str) -> DeviceAttestation:
     if isinstance(issued_at, str) and issued_at:
         try:
             issued_at_dt = parse_iso8601_utc(issued_at)
-        except Exception:
+        except Exception as exc:
+            log.debug("Attestation issued_at is not a valid time; using now", error=str(exc))
             issued_at_dt = utc_now()
     else:
         issued_at_dt = utc_now()

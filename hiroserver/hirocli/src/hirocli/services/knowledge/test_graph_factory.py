@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from hirocli.domain.preferences import WorkspacePreferences
 from hirocli.services.knowledge.graph_factory import build_graph_service

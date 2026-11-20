@@ -9,7 +9,6 @@ plugin the same way (see channels/hiro-channel-echo/src/.../main.py).
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 import typer
@@ -54,7 +53,7 @@ def run(
     plugin = WhatsAppChannel(log_dir=log_dir)
     log_setup.init(f"channel-{plugin.info.name}", Path(log_dir), level=log_level)
     transport = PluginTransport(plugin, hiro_ws)
-    asyncio.run(transport.run())
+    log_setup.run(transport.run())
 
 
 if __name__ == "__main__":

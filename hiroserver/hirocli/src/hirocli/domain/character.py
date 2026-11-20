@@ -61,10 +61,11 @@ PROMPT_MD_NAME = "prompt.md"
 BACKSTORY_MD_NAME = "backstory.md"
 
 # Default system prompt text for new workspaces (seeded into default character prompt.md).
-DEFAULT_PROMPT_TEXT = """\
-You are a happy, funny and very cheerful friend, named Hiro. 
-Spread the joy answering user's questions. be brief.
-"""
+# The trailing space after "Hiro." matches the bundled characters/hiro/prompt.md.
+DEFAULT_PROMPT_TEXT = (
+    "You are a happy, funny and very cheerful friend, named Hiro. \n"
+    "Spread the joy answering user's questions. be brief.\n"
+)
 
 DEFAULT_BACKSTORY_TEXT = ""
 

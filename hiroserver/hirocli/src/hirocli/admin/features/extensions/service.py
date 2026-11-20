@@ -20,6 +20,9 @@ from hirocli.tools.extension import (
     ExtensionListTool,
     ExtensionRemoveTool,
 )
+from hiro_commons.log import Logger
+
+log = Logger.get("ADMIN.EXTENSIONS")
 
 
 class ExtensionService:
@@ -30,7 +33,8 @@ class ExtensionService:
             return None
         try:
             entry, _ = resolve_workspace(workspace_id)
-        except Exception:
+        except Exception as exc:
+            log.debug("Workspace not found — no extensions folder for it", workspace_id=workspace_id, error=str(exc))
             return None
         return Path(entry.path)
 
@@ -40,6 +44,7 @@ class ExtensionService:
         try:
             result = ExtensionListTool().execute(workspace=workspace_id)
         except Exception as exc:
+            log.warning("⚠️ Extensions list failed — HiroAdmin · extensions", workspace_id=workspace_id, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
         return Result.success(list(result.extensions))
 
@@ -49,6 +54,7 @@ class ExtensionService:
         try:
             return Result.success(ExtensionAddTool().execute(workspace=workspace_id))
         except Exception as exc:
+            log.warning("⚠️ Extension pairing code failed — HiroAdmin · extensions", workspace_id=workspace_id, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
 
     def remove_extension(self, extension_id: str, workspace_id: str | None) -> Result[str]:
@@ -59,6 +65,13 @@ class ExtensionService:
         try:
             result = ExtensionRemoveTool().execute(extension_id=extension_id, workspace=workspace_id)
         except Exception as exc:
+            log.warning(
+                "⚠️ Extension remove failed — HiroAdmin · extensions",
+                extension_id=extension_id,
+                workspace_id=workspace_id,
+                error=str(exc),
+                exc_info=True,
+            )
             return Result.failure(str(exc))
         if not result.removed:
             return Result.failure(f"Extension '{extension_id}' was not found or already removed.")
@@ -70,4 +83,5 @@ class ExtensionService:
         try:
             return Result.success(ExtensionAddressTool().execute(host=host, workspace=workspace_id))
         except Exception as exc:
+            log.warning("⚠️ Extension address failed — HiroAdmin · extensions", workspace_id=workspace_id, host=host, error=str(exc), exc_info=True)
             return Result.failure(str(exc))

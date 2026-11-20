@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from hiro_commons import tasks
 from hiro_commons.log import Logger
 
 log = Logger.get("DOMAIN.BUS")
@@ -142,7 +143,7 @@ class DomainEventBus:
             subscriber_count=len(handlers),
         )
         for handler in handlers:
-            asyncio.create_task(
+            tasks.keep(
                 self._run_handler(handler, event),
                 name=f"domain-event-{event.type}",
             )

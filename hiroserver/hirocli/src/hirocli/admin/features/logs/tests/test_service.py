@@ -12,12 +12,13 @@ from hirocli.tools.logs import _read_tail_rows
 def test_layout_info_channels_gateway_cli(tmp_path) -> None:
     log_dir = tmp_path / "logs"
     log_dir.mkdir()
-    (log_dir / "channel-alpha.log").write_text("", encoding="utf-8")
-    (log_dir / "channel-beta.log").write_text("", encoding="utf-8")
-    (log_dir / "cli.log").write_text("", encoding="utf-8")
+    (log_dir / "channel-alpha-2026-11-19.jsonl").write_text("", encoding="utf-8")
+    (log_dir / "channel-beta-2026-11-20.jsonl").write_text("", encoding="utf-8")
+    (log_dir / "server-channel-alpha-2026-11-20.log").write_text("", encoding="utf-8")  # a plugin's own output
+    (log_dir / "cli-2026-11-20.jsonl").write_text("", encoding="utf-8")
     gw_dir = tmp_path / "gw"
     gw_dir.mkdir()
-    (gw_dir / "gateway.log").write_text("", encoding="utf-8")
+    (gw_dir / "gateway-2026-11-20.jsonl").write_text("", encoding="utf-8")
 
     r = LogsService().layout_info(log_dir, gw_dir)
     assert r.ok and r.data is not None
@@ -266,17 +267,21 @@ def test_clear_all_truncates_workspace_gateway_and_stderr_logs(tmp_path) -> None
     gateway_log_dir.mkdir(parents=True)
 
     files = [
-        log_dir / "server.log",
-        log_dir / "cli.log",
-        log_dir / "channel-alpha.log",
+        log_dir / "server-2026-11-20.jsonl",
+        log_dir / "cli-2026-11-19.jsonl",
+        log_dir / "channel-alpha-2026-11-20.jsonl",
+        log_dir / "server-channel-alpha-2026-11-20.log",
         log_dir / "stderr.log",
-        gateway_log_dir / "gateway.log",
+        gateway_log_dir / "gateway-2026-11-20.jsonl",
         gateway / "stderr.log",
     ]
     for path in files:
         path.write_text("old log\n", encoding="utf-8")
     keep = log_dir / "not-a-log.txt"
     keep.write_text("keep\n", encoding="utf-8")
+    (log_dir / "archive").mkdir()
+    archived = log_dir / "archive" / "server-2026-10.jsonl.gz"
+    archived.write_bytes(b"kept")
 
     with (
         patch(
@@ -299,3 +304,4 @@ def test_clear_all_truncates_workspace_gateway_and_stderr_logs(tmp_path) -> None
     assert sorted(result.data.cleared_files) == sorted(str(path) for path in files)
     assert all(path.read_text(encoding="utf-8") == "" for path in files)
     assert keep.read_text(encoding="utf-8") == "keep\n"
+    assert archived.read_bytes() == b"kept"

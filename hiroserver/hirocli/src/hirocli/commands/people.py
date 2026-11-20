@@ -37,7 +37,7 @@ def _run(console: Console, call: Callable[[], Any]) -> Any:
         return call()
     except (PeopleError, WorkspaceError) as exc:
         console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
 
 
 def ask_password(console: Console) -> str:

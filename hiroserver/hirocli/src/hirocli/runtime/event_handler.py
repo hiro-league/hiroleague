@@ -14,7 +14,7 @@ specific event types as the application grows.
 
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable
+from typing import Awaitable, Callable
 
 from hiro_channel_sdk.models import UnifiedMessage
 from hiro_commons.log import Logger

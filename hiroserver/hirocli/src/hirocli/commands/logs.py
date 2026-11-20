@@ -67,7 +67,7 @@ def register(logs_app: typer.Typer, console: Console) -> None:
             )
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         if not result.rows:
             console.print("[dim]No matching log entries found.[/dim]")
@@ -141,7 +141,7 @@ def register(logs_app: typer.Typer, console: Console) -> None:
             )
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
         if not result.rows:
             console.print("[dim]No log entries found.[/dim]")

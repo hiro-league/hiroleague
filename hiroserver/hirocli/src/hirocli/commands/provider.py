@@ -384,7 +384,7 @@ def register(provider_app: typer.Typer, console: Console) -> None:
             )
         except (WorkspaceError, ValueError, RuntimeError) as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         console.print(
             f"[green]Stored API key for[/green] [bold]{result.provider_id}[/bold] "
             f"in workspace [bold]{result.workspace}[/bold]."
@@ -425,7 +425,7 @@ def register(provider_app: typer.Typer, console: Console) -> None:
             )
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         if result.removed:
             console.print(f"[green]Removed[/green] provider [bold]{provider_id}[/bold].")
         else:
@@ -442,7 +442,7 @@ def register(provider_app: typer.Typer, console: Console) -> None:
             print_provider_summary_table(console, workspace=workspace)
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
 
     @provider_app.command("scan-env")
     def provider_scan_env(
@@ -496,7 +496,7 @@ def register(provider_app: typer.Typer, console: Console) -> None:
                     store = CredentialStore(Path(entry.path), entry.id)
                 except WorkspaceError as exc:
                     console.print(f"[red]{exc}[/red]")
-                    raise typer.Exit(1)
+                    raise typer.Exit(1) from exc
             before_ids = {p.provider_id for p in store.list_configured()}
             n = store.import_detected_env_keys()
             console.print(f"[green]Imported[/green] {n} provider credential(s) from the environment.")
@@ -529,7 +529,7 @@ def register(provider_app: typer.Typer, console: Console) -> None:
             entry, _ = resolve_workspace(workspace)
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         store = CredentialStore(Path(entry.path), entry.id)
         ordered = [m.provider_id for m in store.list_configured()]
         if not ordered:
@@ -574,7 +574,7 @@ def register(provider_app: typer.Typer, console: Console) -> None:
             )
         except (WorkspaceError, ValueError) as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         console.print(
             f"[green]Set endpoint[/green] for [bold]{result.provider_id}[/bold] → {result.base_url}"
         )
@@ -606,7 +606,7 @@ def register_models_command(app: typer.Typer, console: Console) -> None:
             )
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         if not result.models:
             console.print("[dim]No available models match the filter.[/dim]")
             return

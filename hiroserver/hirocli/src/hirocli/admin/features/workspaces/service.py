@@ -22,6 +22,9 @@ from hirocli.tools.workspace import (
 
 from hirocli.admin.shared.result import Result
 from hirocli.admin.shared.stderr_log import stderr_log_info
+from hiro_commons.log import Logger
+
+log = Logger.get("ADMIN.WORKSPACES")
 
 _MSG_STOP_HOSTING = (
     "Cannot stop the workspace running this Admin UI. "
@@ -44,11 +47,13 @@ class WorkspaceService:
         try:
             ws_result = WorkspaceListTool().execute()
         except Exception as exc:
+            log.warning("⚠️ Workspaces list failed — HiroAdmin · workspaces", error=str(exc), exc_info=True)
             return Result.failure(str(exc))
         status_by_id: dict[str, Any] = {}
         try:
             status_by_id = {ws.id: ws for ws in StatusTool().execute().workspaces}
-        except Exception:
+        except Exception as exc:
+            log.warning("Could not read the servers' status — the workspace list shows no connection details", error=str(exc), exc_info=True)
             status_by_id = {}
         rows: list[dict[str, Any]] = []
         for ws in ws_result.workspaces:
@@ -57,7 +62,8 @@ class WorkspaceService:
             try:
                 pid = read_pid(ws_path, PID_FILENAME)
                 running = is_running(pid)
-            except Exception:
+            except Exception as exc:
+                log.debug("Could not read the workspace's PID file — shown as not running", workspace_id=ws["id"], error=str(exc))
                 pid = None
                 running = False
             rows.append(
@@ -80,6 +86,7 @@ class WorkspaceService:
         try:
             WorkspaceCreateTool().execute(name=name.strip(), path=path)
         except Exception as exc:
+            log.warning("⚠️ Workspace create failed — HiroAdmin · workspaces", name=name, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
         return Result.success(f"Workspace '{name.strip()}' created.")
 
@@ -89,6 +96,7 @@ class WorkspaceService:
         try:
             r = WorkspaceRemoveTool().execute(workspace=workspace_id, purge=purge)
         except Exception as exc:
+            log.warning("⚠️ Workspace remove failed — HiroAdmin · workspaces", workspace_id=workspace_id, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
         return Result.success(f"Workspace '{r.name}' removed.")
 
@@ -113,6 +121,7 @@ class WorkspaceService:
         except (WorkspaceError, ValueError) as exc:
             return Result.failure(str(exc))
         except Exception as exc:
+            log.warning("⚠️ Workspace update failed — HiroAdmin · workspaces", workspace_id=workspace_id, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
         msgs: list[str] = []
         if result.renamed:
@@ -131,6 +140,7 @@ class WorkspaceService:
         try:
             result = StartTool().execute(workspace=workspace_id)
         except Exception as exc:
+            log.warning("⚠️ Workspace start failed — HiroAdmin · workspaces", workspace_id=workspace_id, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
         return Result.success((result.workspace, result.already_running, result.pid))
 
@@ -140,6 +150,7 @@ class WorkspaceService:
         try:
             result = StopTool().execute(workspace=workspace_id)
         except Exception as exc:
+            log.warning("⚠️ Workspace stop failed — HiroAdmin · workspaces", workspace_id=workspace_id, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
         return Result.success(f"'{result.workspace}' stopped.")
 
@@ -147,6 +158,7 @@ class WorkspaceService:
         try:
             RestartTool().execute(workspace=workspace_id, admin=admin)
         except Exception as exc:
+            log.warning("⚠️ Workspace restart failed — HiroAdmin · workspaces", workspace_id=workspace_id, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
         return Result.success(None)
 
@@ -174,6 +186,7 @@ class WorkspaceService:
                 )
             )
         except Exception as exc:
+            log.warning("⚠️ Workspace setup failed — HiroAdmin · workspaces", workspace_id=workspace_id, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
 
     def get_public_key(self, workspace_id: str) -> Result[str]:
@@ -182,6 +195,7 @@ class WorkspaceService:
         except (WorkspaceError, ValueError) as exc:
             return Result.failure(str(exc))
         except Exception as exc:
+            log.warning("⚠️ Workspace public key read failed — HiroAdmin · workspaces", workspace_id=workspace_id, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
         return Result.success(r.public_key_b64)
 
@@ -191,6 +205,7 @@ class WorkspaceService:
         except (WorkspaceError, ValueError) as exc:
             return Result.failure(str(exc))
         except Exception as exc:
+            log.warning("⚠️ Workspace key regenerate failed — HiroAdmin · workspaces", workspace_id=workspace_id, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
         return Result.success(r.public_key_b64)
 
@@ -219,5 +234,6 @@ class WorkspaceService:
             else:
                 subprocess.Popen(["xdg-open", str(resolved)], start_new_session=True)  # noqa: S603
         except Exception as exc:
+            log.warning("⚠️ Open folder failed — HiroAdmin · workspaces", folder=str(resolved), error=str(exc), exc_info=True)
             return Result.failure(f"Could not open folder: {exc}")
         return Result.success(None)

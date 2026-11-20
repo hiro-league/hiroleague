@@ -103,7 +103,7 @@ def register(catalog_app: typer.Typer, console: Console) -> None:
             result = LlmCatalogGetModelTool().execute(model_id=model_id)
         except ValueError as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         console.print(f"[bold]Catalog v{result.catalog_version}[/bold]")
         console.print("[bold]Model[/bold]")
         console.print_json(data=result.model)
@@ -117,7 +117,7 @@ def register(catalog_app: typer.Typer, console: Console) -> None:
             cat = reload_model_catalog()
         except Exception as exc:
             console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         n_prov = len(cat.list_providers())
         n_mod = len(cat.list_models())
         console.print(

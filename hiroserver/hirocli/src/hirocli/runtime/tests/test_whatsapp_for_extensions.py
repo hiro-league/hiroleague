@@ -156,7 +156,11 @@ class _AnsweringWs:
 
     async def send(self, raw: str) -> None:
         req = json.loads(raw)
-        reply = {"jsonrpc": "2.0", "id": req["id"], "error": {"code": -32000, "message": "WhatsApp isn't connected", "data": {"reason": WHATSAPP_ERROR_NOT_CONNECTED}}}
+        reply = {
+            "jsonrpc": "2.0",
+            "id": req["id"],
+            "error": {"code": -32000, "message": "WhatsApp isn't connected", "data": {"reason": WHATSAPP_ERROR_NOT_CONNECTED}},
+        }
         asyncio.get_running_loop().call_soon(
             lambda: asyncio.ensure_future(self.manager._handle_response("whatsapp", reply))
         )

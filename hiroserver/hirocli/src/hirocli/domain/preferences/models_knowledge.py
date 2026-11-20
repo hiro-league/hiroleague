@@ -86,8 +86,16 @@ class KnowledgeRerankerPreferences(BaseModel):
 
 
 class KnowledgeRetrievalPreferences(BaseModel):
-    top_k: int = Field(default=20, ge=1, le=100, title="Search/fused results (top K)", description="Fused results from hybrid search or direct results from dense only search (after applying minimum score).")
-    min_score: float = pref_field(step=0.05, default=0.0, ge=0.0, le=1.0, title="Minimum score (Dense only)", description="Applies only to dense (Vector search) branch.")
+    top_k: int = Field(
+        default=20,
+        ge=1,
+        le=100,
+        title="Search/fused results (top K)",
+        description="Fused results from hybrid search or direct results from dense only search (after applying minimum score).",
+    )
+    min_score: float = pref_field(
+        step=0.05, default=0.0, ge=0.0, le=1.0, title="Minimum score (Dense only)", description="Applies only to dense (Vector search) branch."
+    )
     # Hybrid retrieval: fuse the dense vector with a BM25 sparse vector via Qdrant RRF.
     # Sparse vectors are always stored at ingest, so this is a pure query-time toggle
     # (flipping it needs no re-ingest). When enabled, ``min_score`` applies as the cosine
@@ -97,7 +105,13 @@ class KnowledgeRetrievalPreferences(BaseModel):
     # not a preference: the Qdrant collection is hardwired to BM25's IDF scoring and switching would
     # need a full re-ingest, so it was removed from the editable preference surface.
     # Candidates pulled per branch before fusion; should be >= top_k so RRF has overlap.
-    prefetch_limit: int = Field(default=40, ge=1, le=500, title="Candidates per branch", description="Results to return for dense (Vector) or sparse (BM25) separately, before RRF fusion (Hybrid Only).")
+    prefetch_limit: int = Field(
+        default=40,
+        ge=1,
+        le=500,
+        title="Candidates per branch",
+        description="Results to return for dense (Vector) or sparse (BM25) separately, before RRF fusion (Hybrid Only).",
+    )
     reranker: KnowledgeRerankerPreferences = Field(default_factory=KnowledgeRerankerPreferences)
 
 
