@@ -41,6 +41,8 @@ class DomainEventType:
     PROVIDERS_CHANGED = "providers.changed"
     # The family list or its roles changed (Phase 6): extensions are told to read it again.
     PEOPLE_CHANGED = "people.changed"
+    # A device was paired or removed: the gateway is told which devices may still connect.
+    DEVICES_CHANGED = "devices.changed"
 
 
 @dataclass(frozen=True)

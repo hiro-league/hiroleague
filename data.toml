@@ -164,6 +164,13 @@ live = "own"
 envs = "none"
 why = "the running core's own files"
 
+[[item]]
+path = "gateway"
+kind = "folder"
+live = "own"
+envs = "none"
+why = "the core's own gateway's state (whether the core is connected, its last sign-in error): this run's, not data"
+
 # In env1..env5: what is turned off, unless the task asks for that real system
 [[switch]]
 path = "providers.json"

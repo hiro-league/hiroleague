@@ -223,7 +223,7 @@ def ensure_mandatory_devices_channel(workspace_path: Path, config: Config) -> No
         command=existing.command if existing and existing.command else [f"hiro-channel-{MANDATORY_CHANNEL_NAME}"],
         config={
             **(existing.config if existing else {}),
-            "gateway_url": config.gateway_url,
+            "gateway_url": config.gateway_connect_url(),
             "device_id": config.device_id,
             "master_key_path": str(master_key_path(workspace_path, config)),
             "ping_interval": (

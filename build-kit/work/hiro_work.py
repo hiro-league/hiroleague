@@ -76,7 +76,8 @@ APPS = [a.repo for a in appfile.APPS if a.copy_data]
 # The apps `up` runs: every app
 SERVED = [a.repo for a in appfile.APPS]
 # The core's other listeners come with its server: their port names start it too (`up 0 core-admin` = `up 0 core`)
-PORT_ALIASES = {"core-admin": "core", "core-socket": "core", "core-http": "core", "core-plugin": "core"}
+PORT_ALIASES = {"core-admin": "core", "core-socket": "core", "core-http": "core", "core-plugin": "core",
+                "core-gateway": "core"}
 _lists: data.Lists | None = None
 
 
@@ -680,6 +681,9 @@ def configure(env: int, task: str | None = None) -> None:
         cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
         cfg.update(http_port=p["core-http"], plugin_port=p["core-plugin"], admin_port=p["core-admin"],
                    extension_port=p["core-socket"])
+        # Device chat: the core runs its own gateway on the environment's port, and devices pair to it there (the
+        # device web app on this PC; a phone reaches only live's, by its LAN name)
+        cfg.update(gateway_builtin=True, gateway_port=p["core-gateway"], gateway_url=f"ws://127.0.0.1:{p['core-gateway']}")
         # Left out rather than null: the core's config takes these as text when present (extension_host absent =
         # loopback; no LAN names in env1..env5)
         for key in ("extension_host", *(("site_names_ip", "site_names_caddy_file", "site_names_caddy_reload")
@@ -1527,6 +1531,13 @@ def servers(env: int) -> dict[str, Server]:
                        p["core-admin"], {"HIRO_ADMIN_UI_EXTERNAL": "1", "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}),
         "core-ui": Server("core-ui", core / "admin_frontend", f"npm.cmd run dev -- --port {p['core-ui']} --strictPort",
                           p["core-ui"], {"HIRO_ADMIN_ORIGIN": f"http://127.0.0.1:{p['core-admin']}"}),
+        # The device web app (device chat's Flutter app), only when named: `up <env> device-web`. It pairs with the
+        # environment's own gateway (ws://127.0.0.1:7N17, the address the admin's pairing code gives). Its generated
+        # code (freezed, riverpod, drift) is out of git, so the code generator runs first (quick once it has run).
+        "device-web": Server("device-web", core / "device_apps",
+                             "flutter.bat pub get && dart.bat run build_runner build --delete-conflicting-outputs && "
+                             f"flutter.bat run -d web-server --web-hostname 127.0.0.1 --web-port {p['device-web']} "
+                             "--dart-define=HIRO_ENV=dev", p["device-web"]),
     }
     if env:  # the provider keys in the PC's environment, blanked unless the task asks for AI (data.py)
         out["core"].env[switches.ENV] = str(data_dir(env) / switches.FILE)
@@ -1739,8 +1750,8 @@ def servers_down(env: int, names: list[str] | None = None) -> None:
     child). Only this environment's ports are touched."""
     chosen = pick_servers(env, names) if names else list(servers(env).values())
     port_list = [s.port for s in chosen]
-    if any(s.name == "core" for s in chosen):  # the core's other three listeners
-        port_list += [ports(env)[k] for k in ("core-socket", "core-http", "core-plugin")]
+    if any(s.name == "core" for s in chosen):  # the core's other listeners, its gateway's too
+        port_list += [ports(env)[k] for k in ("core-socket", "core-http", "core-plugin", "core-gateway")]
     for s in chosen:
         pid_file = RUN / f"env{env}" / f"{s.name}.pid"
         if pid_file.exists():

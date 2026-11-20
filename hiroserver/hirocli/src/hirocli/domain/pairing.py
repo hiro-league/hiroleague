@@ -27,6 +27,7 @@ from hiro_commons.timestamps import utc_iso
 
 from .config import workspace_run_dir
 from .db import db_path, ensure_db
+from .events import DomainEvent, DomainEventType, get_domain_event_bus
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +182,7 @@ def save_approved_devices(workspace_path: Path, devices: list[ApprovedDevice]) -
                 ),
             )
         conn.commit()
+    _devices_changed(workspace_path)
 
 
 def upsert_approved_device(workspace_path: Path, device: ApprovedDevice) -> None:
@@ -208,6 +210,7 @@ def upsert_approved_device(workspace_path: Path, device: ApprovedDevice) -> None
             ),
         )
         conn.commit()
+    _devices_changed(workspace_path)
 
 
 def revoke_approved_device(workspace_path: Path, device_id: str) -> bool:
@@ -218,7 +221,25 @@ def revoke_approved_device(workspace_path: Path, device_id: str) -> bool:
             "DELETE FROM devices WHERE device_id = ?", (device_id,)
         )
         conn.commit()
-        return cursor.rowcount > 0
+        removed = cursor.rowcount > 0
+    if removed:
+        _devices_changed(workspace_path)
+    return removed
+
+
+def paired_device_ids(workspace_path: Path) -> set[str]:
+    """The devices that may connect: paired and not past their pass's expiry."""
+    now = datetime.now(UTC)
+    return {
+        d.device_id for d in load_approved_devices(workspace_path)
+        if d.expires_at is None or d.expires_at > now
+    }
+
+
+def _devices_changed(workspace_path: Path) -> None:
+    get_domain_event_bus().publish(
+        DomainEvent(type=DomainEventType.DEVICES_CHANGED, workspace_path=workspace_path, payload={})
+    )
 
 
 def get_device_name(workspace_path: Path, device_id: str) -> str | None:

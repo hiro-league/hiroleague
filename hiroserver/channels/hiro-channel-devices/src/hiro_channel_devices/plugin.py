@@ -136,7 +136,11 @@ class DevicesChannel(ChannelPlugin):
 
         while True:
             try:
-                await self._run_gateway_connection(url)
+                connected = await self._run_gateway_connection(url)
+                if connected:
+                    # A connection that worked starts the waits over: before, one early failure left every later
+                    # drop waiting the longest delay.
+                    backoff = BACKOFF_BASE
                 log.warning("🔁 Gateway disconnected, reconnecting", delay=f"{backoff:.0f}s")
             except asyncio.CancelledError:
                 raise
@@ -150,7 +154,8 @@ class DevicesChannel(ChannelPlugin):
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, BACKOFF_MAX)
 
-    async def _run_gateway_connection(self, url: str) -> None:
+    async def _run_gateway_connection(self, url: str) -> bool:
+        """One connection to the gateway; True when it signed in (and later ended)."""
         log.info("🔌 Connecting to gateway", url=url)
         async with websockets.connect(url, ping_interval=self._ping_interval) as ws:
             await self._authenticate_with_gateway(ws)
@@ -168,6 +173,7 @@ class DevicesChannel(ChannelPlugin):
                 pass
             finally:
                 self._gateway_ws = None
+        return True
 
     async def _authenticate_with_gateway(
         self, ws: websockets.WebSocketClientProtocol
@@ -333,6 +339,9 @@ class DevicesChannel(ChannelPlugin):
         await self.emit_event("device_disconnected", event_data)
 
     async def on_event(self, event: str, data: dict) -> None:
+        if event == "allowed_devices":
+            await self._send_allowed_devices(data)
+            return
         if event != "pairing_response":
             return
         ws = self._gateway_ws
@@ -368,3 +377,17 @@ class DevicesChannel(ChannelPlugin):
             outbound["reason"] = reason if isinstance(reason, str) and reason else "rejected"
 
         await ws.send(json.dumps(outbound))
+
+    async def _send_allowed_devices(self, data: dict) -> None:
+        """The server's list of paired devices, on to the gateway: it refuses and cuts off any device not on it."""
+        ids = data.get("device_ids")
+        if not isinstance(ids, list):
+            log.warning("⚠️ Allowed devices event without a device_ids list")
+            return
+        ws = self._gateway_ws
+        if ws is None:
+            # The server sends the list again when the gateway connects (gateway_connected).
+            log.debug("Gateway not connected — the paired devices go when it connects")
+            return
+        log.info("🔐 Sending the paired devices to the gateway", count=len(ids))
+        await ws.send(json.dumps({"type": "allowed_devices", "device_ids": [str(i) for i in ids]}))

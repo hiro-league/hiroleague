@@ -1,13 +1,13 @@
 {
   "devices": {
     "label": "Devices",
-    "active": false,
+    "active": true,
     "note": "Device pairing + the mandatory gateway-backed devices channel."
   },
   "gateway": {
     "label": "Gateway",
     "active": false,
-    "note": "Hiro Gate relay for remote device connectivity."
+    "note": "Managing hirogate instances run apart from the core."
   },
   "image_lab": {
     "label": "Image Lab",

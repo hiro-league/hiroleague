@@ -16,10 +16,13 @@ from hiro_commons.log import Logger
 
 from hirocli.constants import DEVICE_ID_PREFIX, DEVICE_ID_SUFFIX_LENGTH
 from hirocli.domain.config import mark_connected, mark_disconnected
+from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
+from hirocli.domain.events import DomainEvent, DomainEventType, get_domain_event_bus
 from hirocli.domain.pairing import (
     ApprovedDevice,
     clear_pairing_session,
     load_pairing_session,
+    paired_device_ids,
     upsert_approved_device,
 )
 
@@ -42,6 +45,22 @@ class InfraEventHandlers:
 
     def set_channel_manager(self, cm: ChannelManager) -> None:
         self._channel_manager = cm
+        # A device paired or removed (the admin, the CLI): the gateway hears the new list at once.
+        get_domain_event_bus().subscribe(DomainEventType.DEVICES_CHANGED, self._on_devices_changed)
+
+    async def _on_devices_changed(self, event: DomainEvent) -> None:
+        if event.workspace_path == self._ctx.workspace_path:
+            await self.send_allowed_devices()
+
+    async def send_allowed_devices(self) -> None:
+        """Tell the gateway, through the devices channel, which devices may connect: it refuses and cuts off the rest,
+        so a device removed in the admin stops at once instead of when its 30-day pass runs out."""
+        if self._channel_manager is None:
+            return
+        ids = sorted(paired_device_ids(self._ctx.workspace_path))
+        await self._channel_manager.send_event_to_channel(
+            MANDATORY_CHANNEL_NAME, "allowed_devices", {"device_ids": ids},
+        )
 
     def set_resource_change_broadcaster(self, broadcaster: ResourceChangeBroadcaster) -> None:
         self._resource_change_broadcaster = broadcaster
@@ -160,6 +179,8 @@ class InfraEventHandlers:
             ),
         )
         clear_pairing_session(self._ctx.workspace_path)
+        # The gateway must list the new device before the device signs in with its pass, a moment after this answer.
+        await self.send_allowed_devices()
         await self._channel_manager.send_event_to_channel(
             "devices", "pairing_response",
             {
@@ -173,6 +194,7 @@ class InfraEventHandlers:
     async def handle_gateway_connected(self, data: dict[str, Any]) -> None:
         gateway_url = str(data.get("gateway_url") or self._ctx.config.gateway_url)
         mark_connected(self._ctx.workspace_path, gateway_url)
+        await self.send_allowed_devices()
 
     async def handle_gateway_disconnected(self, data: dict[str, Any]) -> None:
         mark_disconnected(self._ctx.workspace_path)

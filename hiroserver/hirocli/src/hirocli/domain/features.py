@@ -40,26 +40,24 @@ _FEATURES: tuple[FeatureSpec, ...] = (
     FeatureSpec(
         id="devices",
         label="Devices",
-        # Device pairing + the mandatory "devices" channel (the gateway-backed
-        # bridge for remote phones/desktops). Hidden for first public builds that
-        # rely only on the admin chat page + WhatsApp. Unlike the other flags this
-        # one also gates RUNTIME behavior: when off, the devices channel is never
-        # seeded/enabled, so ChannelManager does not spawn it and no gateway
-        # connection is attempted. Admin chat + WhatsApp are unaffected.
-        active=False,
+        # Device pairing + the mandatory "devices" channel: phones and the device web
+        # app chat with Hiro through the gateway (Hiro Gate relay). Unlike the other
+        # flags this one also gates RUNTIME behavior: when on, the core runs its own
+        # gateway beside it (runtime/builtin_gateway.py, unless the workspace names a
+        # gateway run elsewhere) and spawns the devices channel, which connects to it;
+        # when off, neither runs. Admin chat + WhatsApp never depend on it.
+        active=True,
         note="Device pairing + the mandatory gateway-backed devices channel.",
     ),
     FeatureSpec(
         id="gateway",
         label="Gateway",
-        # Hiro Gate relay (remote/off-LAN device connectivity) — the Server-page
-        # "Gateways" tab + dashboard gateway cards. Only useful together with the
-        # devices channel, so it is hidden alongside `devices` for first public
-        # builds. Purely a surface gate (the gateway is a separate, opt-in process
-        # that `hiro start` never launches); hiding it just unmounts its admin API
-        # + UI. Admin chat + WhatsApp never touch the gateway.
+        # Managing gateways run apart from the core (hirogate instances: an
+        # off-LAN relay on another machine) — the Server-page "Gateways" tab +
+        # dashboard gateway cards. Purely a surface gate. Device chat doesn't need
+        # it: with `devices` on, the core runs its own gateway beside it.
         active=False,
-        note="Hiro Gate relay for remote device connectivity.",
+        note="Managing hirogate instances run apart from the core.",
     ),
     FeatureSpec(
         id="image_lab",

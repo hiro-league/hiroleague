@@ -4,7 +4,7 @@
 #   repo         its repo's folder name (C:\hiro\envN\<repo>, ~/<repo> on Simone)
 #   name         its extension name, declared to the core (home, net...): its key everywhere (design.md, rule 6)
 #   title        what people call it
-#   api_port     its API's port in an environment's block: 7N<api_port> (two digits, 03 to 49; the core has 00-02, 13-14)
+#   api_port     its API's port in an environment's block: 7N<api_port> (two digits, 03 to 49; the core has 00-02, 13-14, 17 and 18)
 #   ui_port      its UI's port (Vite) in the block: 7N<ui_port>
 #   backend      the folder its API runs in, and where `uv sync` installs
 #   api          its API's command ({port} = its port)

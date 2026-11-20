@@ -5,9 +5,13 @@ Connections are authenticated with a nonce challenge:
 2) peer responds with {"type":"auth_response", ...}
 3) on success, the socket is registered with its authenticated device_id
 
-Messages are JSON objects with an optional `target_device_id` field:
-  - Present  -> unicast to that specific device
-  - Absent   -> broadcast to all OTHER connected devices
+Where a message goes depends on who sent it:
+  - From a device  -> to HiroServer (the desktop) only, whatever it names. Devices never reach each other: other
+                      devices see a message through HiroServer, which mirrors it to the devices it chooses.
+  - From HiroServer -> `target_device_id` present: unicast to that device; absent: broadcast to every device.
+
+HiroServer also tells the gateway which devices are still paired (`allowed_devices`): a device not on the list is
+refused at sign-in and cut off when the list drops it, so removing a device in the admin takes effect at once.
 
 Message envelope:
 {
@@ -78,6 +82,9 @@ _auth_manager: GatewayAuthManager | None = None
 _desktop_ws: ServerConnection | None = None
 _pairing_pending: Dict[str, ServerConnection] = {}
 _pairing_lock = asyncio.Lock()
+# The devices HiroServer says are paired. None until it first says so: a device may sign in before HiroServer
+# connects (it receives nothing then), and is cut off when the list arrives without it.
+_allowed_devices: set[str] | None = None
 PAIRING_WAIT_SECONDS = DEFAULT_PAIRING_WAIT_SECONDS
 
 _instance_path: "Path | None" = None
@@ -441,7 +448,7 @@ async def relay_message(sender_id: str, raw: str) -> None:
         traffic_class=scope_traffic_class,
         traffic_subclass=scope_traffic_subclass,
     ):
-        route = "unicast" if target_id else "broadcast"
+        route = "to server" if not is_from_server else ("unicast" if target_id else "broadcast")
         log_extras: dict[str, Any] = {}
         if hint:
             log_extras["content_hint"] = hint
@@ -454,7 +461,14 @@ async def relay_message(sender_id: str, raw: str) -> None:
         out = json.dumps(msg)
 
         async with _registry_lock:
-            if target_id:
+            if not is_from_server:
+                # A device's frame goes to HiroServer only: a broadcast here once reached every other device,
+                # other family members' phones included. HiroServer mirrors a user message to the devices itself.
+                recipients = [(did, ws) for did, ws in _registry.items() if _device_roles.get(did) == AUTH_ROLE_DESKTOP]
+                if not recipients:
+                    log.warning(f"⚠️ Message dropped — HiroServer not connected · {kind}")
+                    return
+            elif target_id:
                 target_ws = _registry.get(target_id)
                 if target_ws is None:
                     log.warning(
@@ -635,6 +649,28 @@ async def _handle_pairing_response_from_desktop(msg: dict[str, object]) -> None:
         await pending_ws.close(code=WS_CLOSE_NORMAL, reason="pairing complete")
 
 
+async def _set_allowed_devices(msg: dict[str, object]) -> None:
+    """Keep HiroServer's list of paired devices, and cut off any connected device that is no longer on it."""
+    global _allowed_devices
+    ids = msg.get("device_ids")
+    if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+        log.warning("⚠️ Allowed devices ignored — device_ids must be a list of ids")
+        return
+    _allowed_devices = set(ids)
+    async with _registry_lock:
+        dropped = [
+            (did, ws) for did, ws in _registry.items()
+            if _device_roles.get(did) == AUTH_ROLE_DEVICE and did not in _allowed_devices
+        ]
+    log.info("🔐 Paired devices updated", allowed=len(_allowed_devices), cut_off=len(dropped))
+    for did, ws in dropped:
+        log.warning(f"🔌 Device cut off — {_device_label(did)} · no longer paired", device_id=did)
+        try:
+            await ws.close(code=WS_CLOSE_AUTH_FAILED, reason="device no longer paired")
+        except Exception as exc:
+            log.debug("Could not close the removed device's socket — already gone", device_id=did, error=str(exc))
+
+
 async def handle_connection(ws: ServerConnection) -> None:
     """Handle a single WebSocket connection lifetime."""
     nonce = generate_nonce()
@@ -681,6 +717,12 @@ async def handle_connection(ws: ServerConnection) -> None:
         await ws.close(code=WS_CLOSE_AUTH_FAILED, reason=reason[:WS_REASON_MAX_LENGTH])
         return
 
+    if role == AUTH_ROLE_DEVICE and _allowed_devices is not None and device_id not in _allowed_devices:
+        # Its pass is still signed, but HiroServer no longer lists it: it was removed in the admin.
+        log.warning(f"⚠️ Auth rejected — {handshake_name or device_id} · device no longer paired", device_id=device_id)
+        await ws.close(code=WS_CLOSE_AUTH_FAILED, reason="device no longer paired")
+        return
+
     # Seed the name cache immediately so all subsequent relay logs show the name.
     if handshake_name and role != AUTH_ROLE_DESKTOP:
         _device_names[device_id] = handshake_name
@@ -703,6 +745,9 @@ async def handle_connection(ws: ServerConnection) -> None:
                     maybe = None
                 if isinstance(maybe, dict) and maybe.get("type") == "pairing_response":
                     await _handle_pairing_response_from_desktop(maybe)
+                    continue
+                if isinstance(maybe, dict) and maybe.get("type") == "allowed_devices":
+                    await _set_allowed_devices(maybe)
                     continue
             await relay_message(device_id, message)
     except websockets.ConnectionClosed:

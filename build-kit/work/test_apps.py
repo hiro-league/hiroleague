@@ -7,9 +7,9 @@ import apps
 
 def test_every_app_has_two_ports_and_no_two_share_one():
     p = apps.ports(3)
-    assert len(set(p.values())) == len(p) == 5 + 2 * len(apps.APPS)
-    assert (p["core-admin"], p["core-socket"], p["core-ui"], p["core-http"], p["core-plugin"]) == (
-        7300, 7301, 7302, 7313, 7314)
+    assert len(set(p.values())) == len(p) == 7 + 2 * len(apps.APPS)
+    assert (p["core-admin"], p["core-socket"], p["core-ui"], p["core-http"], p["core-plugin"], p["core-gateway"]) == (
+        7300, 7301, 7302, 7313, 7314, 7317)
     assert all(7300 <= port < 7350 for port in p.values())
 
 

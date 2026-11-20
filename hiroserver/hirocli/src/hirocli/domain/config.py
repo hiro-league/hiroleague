@@ -8,7 +8,7 @@ Workspace layout:
     config.json              ← boot config (this module)
     preferences.json         ← single source of truth for LLM, voice, and
                                audio settings (domain/preferences.py)
-    master_key.pem           ← ECDSA private key (domain/crypto.py)
+    master_key.pem           ← Ed25519 private key (domain/crypto.py)
     workspace.db             ← SQLite: characters, devices, channel_plugins (domain/db.py)
     data/
       data.db                ← SQLite: users, channels, messages (domain/data_store.py)
@@ -54,7 +54,13 @@ log = Logger.get("CONFIG")
 
 class Config(BaseModel):
     device_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    # Device chat's relay (Hiro Gate). gateway_url is the address devices are given when they pair (the QR code):
+    # on a LAN server the gateway's LAN name, e.g. ws://gate.hiro.local. With gateway_builtin the core runs its own
+    # gateway beside it while Devices is on, on 127.0.0.1:gateway_port, and its devices channel connects there;
+    # without it, gateway_url names a gateway run elsewhere (hirogate), and the devices channel connects to that.
     gateway_url: str = f"ws://localhost:{DEFAULT_GATEWAY_PORT}"
+    gateway_builtin: bool = True
+    gateway_port: int = DEFAULT_GATEWAY_PORT
     http_host: str = DEFAULT_LOCALHOST
     http_port: int = PORT_RANGE_START + PORT_OFFSET_HTTP
     plugin_port: int = PORT_RANGE_START + PORT_OFFSET_PLUGIN
@@ -91,6 +97,12 @@ class Config(BaseModel):
     # Set by setup; used by teardown to pick the correct removal path without user input.
     # Values: "elevated" | "schtasks" | "registry" | "skipped" | "failed" | None
     autostart_method: str | None = None
+
+    def gateway_connect_url(self) -> str:
+        """Where the core's devices channel connects: its own gateway when built in, else gateway_url."""
+        if self.gateway_builtin:
+            return f"ws://{DEFAULT_LOCALHOST}:{self.gateway_port}"
+        return self.gateway_url
 
     def effective_extension_port(self) -> int:
         """The extension socket's port: the configured one, else the slot's (plugin port + 1)."""

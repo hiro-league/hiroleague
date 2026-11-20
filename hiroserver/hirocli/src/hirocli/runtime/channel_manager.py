@@ -58,6 +58,7 @@ from hiro_channel_sdk import message_story
 from hiro_channel_sdk.models import UnifiedMessage
 
 from ..domain.channel_config import ChannelConfig, list_enabled_channels, load_channel_config
+from ..domain.pairing import paired_device_ids
 from .. import rpc_helpers as rpc
 
 # Shared comm-log helpers (arrows, kind, content_hint) — same vocabulary as CommunicationManager.
@@ -326,6 +327,17 @@ class ChannelManager:
     # Helpers
     # ------------------------------------------------------------------
 
+    def _from_unpaired_device(self, channel_name: str, params: dict[str, Any]) -> bool:
+        """A devices-channel frame from a device no longer paired (removed in the admin, or past its pass): refused.
+        The gateway cuts such a device off too; this holds when a gateway run elsewhere doesn't."""
+        if channel_name != MANDATORY_CHANNEL_NAME:
+            return False
+        sender_id = str(params.get("routing", {}).get("sender_id") or "")
+        if sender_id in paired_device_ids(self._ctx.workspace_path):
+            return False
+        log.warning(f"⚠️ {LOG_IN} Refused — {sender_id or 'unknown'} is not a paired device", channel=channel_name)
+        return True
+
     def _device_label(self, device_id: str) -> str:
         """Return paired device_name when set, else device_id (compact for narrow log UIs).
 
@@ -405,6 +417,9 @@ class ChannelManager:
                                 version=params.get("version", "?"),
                             )
                         await self._push_config(channel_name)
+
+                    case _ if method == METHOD_RECEIVE and self._from_unpaired_device(channel_name, params):
+                        pass  # refused and logged by the check
 
                     case _ if method == METHOD_RECEIVE:
                         sender_id = params.get("routing", {}).get("sender_id", "")
@@ -598,7 +613,8 @@ class ChannelManager:
         cfg = load_channel_config(self._ctx.workspace_path, channel_name)
         payload = dict(cfg.config) if cfg else {}
         if channel_name == MANDATORY_CHANNEL_NAME:
-            payload.setdefault("gateway_url", self._ctx.config.gateway_url)
+            # Always the config's address, not a stored one: the built-in gateway's port changes with the workspace.
+            payload["gateway_url"] = self._ctx.config.gateway_connect_url()
             payload.setdefault("device_id", self._ctx.config.device_id)
             payload.setdefault("ping_interval", DEFAULT_PING_INTERVAL_SECONDS)
         # §5.6 — swap any secret markers for real keyring values right before the push,

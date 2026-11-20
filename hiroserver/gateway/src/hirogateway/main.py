@@ -83,7 +83,28 @@ def _run_gateway(
     config = load_config(instance_path)
     if log_dir_override:
         config.log_dir = log_dir_override
-    log_dir = resolve_log_dir(instance_path, config)
+    _run_relay(
+        entry.name,
+        instance_path,
+        host=entry.host,
+        port=entry.port,
+        desktop_public_key=config.desktop_public_key,
+        log_dir=resolve_log_dir(instance_path, config),
+        verbose=verbose,
+    )
+
+
+def _run_relay(
+    name: str,
+    instance_path: Path,
+    *,
+    host: str,
+    port: int,
+    desktop_public_key: str,
+    log_dir: Path,
+    verbose: bool,
+) -> None:
+    """Run the relay in the foreground: from a registry instance (`start`) or a folder its owner gives (`serve`)."""
     log_setup.init(
         "gateway",
         log_dir,
@@ -91,11 +112,11 @@ def _run_gateway(
         foreground=True,
     )
     log = Logger.get("GATEWAY")
-    auth_manager = GatewayAuthManager(desktop_public_key_b64=config.desktop_public_key)
+    auth_manager = GatewayAuthManager(desktop_public_key_b64=desktop_public_key)
     configure_auth(auth_manager)
     configure_instance_path(instance_path)
-    log.info("✅ Gateway trust root configured", instance=entry.name)
-    log_setup.run(_serve(entry.host, entry.port))
+    log.info("✅ Gateway trust root configured", instance=name)
+    log_setup.run(_serve(host, port))
 
 
 async def _serve(host: str, port: int) -> None:
@@ -185,6 +206,31 @@ def start(
             f"[green]Gateway started[/green] (PID {result.pid}). "
             f"WS: ws://{result.host}:{result.port}"
         )
+
+
+@cli.command()
+def serve(
+    folder: Path = typer.Option(..., "--dir", help="Folder for the gateway's state file (its owner's choice)."),
+    desktop_pubkey: str = typer.Option(..., "--desktop-pubkey", help="The desktop's Ed25519 public key (base64)."),
+    port: int = typer.Option(..., "--port", "-p", help="Port to listen on."),
+    host: str = typer.Option("127.0.0.1", "--host", "-H", help="Address to listen on."),
+    log_dir: str = typer.Option("", "--log-dir", help="Log folder (default: <dir>/logs)."),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Run a gateway in the foreground with no registry instance: how HiroServer runs its own beside it."""
+    folder.mkdir(parents=True, exist_ok=True)
+    try:
+        _run_relay(
+            "built-in",
+            folder,
+            host=host,
+            port=port,
+            desktop_public_key=desktop_pubkey,
+            log_dir=Path(log_dir) if log_dir else folder / "logs",
+            verbose=verbose,
+        )
+    except KeyboardInterrupt:
+        pass
 
 
 @cli.command()

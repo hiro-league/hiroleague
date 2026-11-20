@@ -207,6 +207,8 @@ async def _main(
         plugin_port=ctx.config.plugin_port,
         admin_port=ctx.config.admin_port,
         gateway_url=ctx.config.gateway_url,
+        gateway_builtin=ctx.config.gateway_builtin,
+        gateway_port=ctx.config.gateway_port,
         log_dir=str(ctx.log_dir),
     )
 
@@ -309,8 +311,12 @@ async def _main(
     from hirocli.runtime.loop_sentinel import run_loop_stall_sentinel
     from hirocli.services.ai_ask.background import run_ai_background
 
+    from hirocli.runtime.builtin_gateway import BuiltinGateway
+
     coros: list = [
         run_http_server(ctx),
+        # Device chat's relay, beside the server while Devices is on; the devices channel connects to it.
+        BuiltinGateway(ctx).run(),
         channel_manager.run(),
         extension_manager.run(),
         ctx.site_names.run(),

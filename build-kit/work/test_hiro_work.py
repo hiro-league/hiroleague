@@ -13,13 +13,14 @@ def task(id, env, repos, state="working"):
     return hw.Task(id=id, title=id, env=env, repos=repos, state=state)
 
 
-def test_each_environment_owns_17_consecutive_ports():
+def test_each_environment_owns_19_consecutive_ports():
     assert hw.ports(0)["core-admin"] == 7000
     assert hw.ports(2)["core-socket"] == 7201
     assert hw.ports(5)["codehiro-ui"] == 7512
     assert hw.ports(1)["core-plugin"] == 7114
     assert hw.ports(4)["evalhiro-ui"] == 7416
-    assert sorted(hw.ports(3).values()) == list(range(7300, 7317))
+    assert hw.ports(4)["core-gateway"] == 7417
+    assert sorted(hw.ports(3).values()) == list(range(7300, 7319))
 
 
 def test_reserves_keep_the_core_first_and_a_kit_change_reserves_the_apps():
@@ -94,11 +95,11 @@ def test_launch_json_lists_each_repos_servers_on_the_environments_own_ports(tmp_
         monkeypatch.setattr(hw, name, tmp_path / name.lower())
     configs = hw.launch_configs(3)
     assert sorted(configs) == sorted(["hiroleague", *hw.SERVED])  # aicam has no servers in the table
-    assert [c["name"] for c in configs["hiroleague"]] == ["core", "core-ui"]
+    assert [c["name"] for c in configs["hiroleague"]] == ["core", "core-ui", "device-web"]
     ports = [c["port"] for repo in configs.values() for c in repo]
     p = hw.ports(3)  # the core's server is its admin API; its other listeners come with it
     apps = [p[f"{a}-{side}"] for a in hw.SERVED for side in ("api", "ui")]
-    assert sorted(ports) == sorted([p["core-admin"], p["core-ui"], *apps])
+    assert sorted(ports) == sorted([p["core-admin"], p["core-ui"], p["device-web"], *apps])
     homehiro_api = configs["homehiro"][0]  # the pane opens what `up` started; it never starts a server itself
     assert homehiro_api == {"name": "homehiro-api", "url": f"http://127.0.0.1:{p['homehiro-api']}",
                             "port": p["homehiro-api"]}
