@@ -517,6 +517,35 @@ def test_a_commit_needs_a_task_that_reserves_its_repo(tmp_path, monkeypatch):
     hw.cmd_fresh(type("A", (), {"path": str(tmp_path / "elsewhere")})())  # not an environment's repo
 
 
+def test_a_commits_hook_reads_the_other_repos_as_they_are(tmp_path, monkeypatch):
+    """A commit in a worktree runs its hook with GIT_DIR and GIT_INDEX_FILE pointing at the committing repo: read
+    through them, every other repo looked changed, and none was brought up to env0's before the check."""
+    monkeypatch.setattr(hw, "ROOT", tmp_path)
+    monkeypatch.setattr(hw, "TASKS", tmp_path / "tasks")
+    monkeypatch.setattr(hw, "REPOS", ["hiroleague", "codehiro"])
+    monkeypatch.setattr(hw, "MAIN", {})
+    hw.TASKS.mkdir()
+    for repo in ("hiroleague", "codehiro"):
+        d = _repo(tmp_path / "env0" / repo)
+        (d / f"{repo}.txt").write_text(repo, encoding="utf-8")  # each repo its own files, as the real ones
+        hw.git(d, "add", f"{repo}.txt")
+        hw.git(d, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "one")
+        hw.git(d, "worktree", "add", "-q", "--detach", str(tmp_path / "env1" / repo), "main")
+    hw.git(tmp_path / "env0" / "hiroleague", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q",
+           "--allow-empty", "-m", "two")
+    hw.save(task("t", 1, ["codehiro"]))
+    committing = tmp_path / "env1" / "codehiro"
+    gitdir = hw.git(committing, "rev-parse", "--absolute-git-dir")
+    # What git 2.53 exports to a pre-commit hook in a worktree
+    with monkeypatch.context() as hook:
+        hook.setenv("GIT_DIR", gitdir)
+        hook.setenv("GIT_INDEX_FILE", f"{gitdir}/index")
+        hook.setenv("GIT_PREFIX", "")
+        hw.cmd_fresh(type("A", (), {"path": str(committing)})())
+    core0, core1 = (hw.git(tmp_path / f"env{e}" / "hiroleague", "rev-parse", "HEAD") for e in (0, 1))
+    assert core1 == core0  # brought up, not "has uncommitted files"
+
+
 def test_start_fetches_env0s_repos_side_by_side_as_one_timed_step(tmp_path, monkeypatch):
     read = _events(tmp_path, monkeypatch)
     monkeypatch.setattr(hw, "ROOT", tmp_path)

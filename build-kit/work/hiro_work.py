@@ -1142,6 +1142,11 @@ def task_for_dir(path: Path) -> tuple[int, str, Task | None] | None:
 def cmd_fresh(a) -> None:
     """The commit hook's step (build-kit/git-hooks/pre-commit): a commit belongs to a task that reserves the repo here;
     other tasks on the same repos are named; the environment's other repos follow env0 before the check runs."""
+    # git's own variables are dropped, as copy_off does: a commit in a worktree runs its hook with GIT_DIR and
+    # GIT_INDEX_FILE set to the committing repo, and they win over `git -C <other repo>`. Read through them, every
+    # other repo looked changed ("has uncommitted files") and none followed env0 before the check.
+    for name in [n for n in os.environ if n.startswith("GIT_") and n != "GIT_EXEC_PATH"]:
+        del os.environ[name]
     found = task_for_dir(Path(a.path))
     if found is None:
         return  # not a Hiro environment's repo
