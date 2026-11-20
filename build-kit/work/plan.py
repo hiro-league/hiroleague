@@ -21,6 +21,7 @@ task the file names. The file:
 
     {"name": "Chores board",                        the work's name, as tasks say it in --part-of
      "doc": "https://claude.ai/artifact/...",       the plan doc
+     "design": "https://claude.ai/artifact/...",    optional: the plan's design doc, when it made one
      "about": "A board where the kids tick chores", optional: what the plan is for, in a sentence
      "tasks": ["chores-board"],                     optional: tasks that are this plan's, by id
      "needs_michel": "Answer Q2",                   optional: what waits on Michel
@@ -59,7 +60,7 @@ KEPT = (*SHIPPED, "merged")
 # How a phase's state reads in hiro-work's own lines
 SAYS = {"next": "Next", "paused": "Paused", "working": "Being worked on", "cancelled": "Cancelled"}
 # The plan's fields a send carries, besides its phases
-FIELDS = ("doc", "about", "tasks", "needs_michel", "side_by_side")
+FIELDS = ("doc", "design", "about", "tasks", "needs_michel", "side_by_side")
 MAX_PHASES = 12
 MAX_WORDS = 200
 TASK_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -91,12 +92,15 @@ def checked(raw: object) -> dict:
     """The plan a file holds, as the event carries it; Stop names the first thing wrong."""
     if not isinstance(raw, dict):
         raise hw.Stop("The file must hold one plan: a JSON object (hiro-work plan --help).")
-    unknown = sorted(set(raw) - {"name", "doc", "about", "tasks", "needs_michel", "side_by_side", "phases"})
+    unknown = sorted(set(raw) - {"name", "doc", "design", "about", "tasks", "needs_michel", "side_by_side", "phases"})
     if unknown:
         raise hw.Stop(f"Not a plan's field: {', '.join(unknown)}.")
     doc = words(raw.get("doc"), "The plan's doc", 320, needed=True)
     if not DOC.match(doc):
         raise hw.Stop("The plan's doc must be its Claude Doc's link (https://claude.ai/...).")
+    design = words(raw.get("design"), "The plan's design doc", 320)
+    if design and not DOC.match(design):
+        raise hw.Stop("The plan's design doc must be its Claude Doc's link (https://claude.ai/...).")
     phases = raw.get("phases")
     if not isinstance(phases, list) or not 1 <= len(phases) <= MAX_PHASES:
         raise hw.Stop(f"A plan has 1 to {MAX_PHASES} phases.")
@@ -119,6 +123,7 @@ def checked(raw: object) -> dict:
     return {
         "plan": words(raw.get("name"), "The plan's name", 80, needed=True),
         "doc": doc,
+        "design": design,
         "about": words(raw.get("about"), "The plan's about", 300),
         "tasks": task_ids(raw.get("tasks"), "The plan's tasks"),
         "needs_michel": words(raw.get("needs_michel"), "needs_michel"),

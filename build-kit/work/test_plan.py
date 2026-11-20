@@ -40,12 +40,14 @@ def events(tmp_path) -> list[dict]:
 
 
 def test_a_send_is_one_event_holding_the_whole_plan(log):
-    assert send(log, a_plan(needs_michel="  Answer   Q2 ", tasks=["chores-board"], about="Kids tick chores")) == 0
+    design = "https://claude.ai/artifact/DesignDoc123"
+    assert send(log, a_plan(needs_michel="  Answer   Q2 ", tasks=["chores-board"], about="Kids tick chores", design=design)) == 0
     (e,) = events(log)
     assert (e["step"], e["phase"], e["task"], e["plan"]) == ("plan-sent", "end", None, "Chores board")
     assert e["needs_michel"] == "Answer Q2"  # spaces tidied
     assert e["tasks"] == ["chores-board"]
     assert e["about"] == "Kids tick chores"
+    assert e["design"] == design
     assert e["phases"][1] == {"name": "Kids tick them off", "state": "review", "says": "", "needs": "1",
                               "tasks": ["chores-tick"]}
 
@@ -54,6 +56,7 @@ def test_a_send_is_one_event_holding_the_whole_plan(log):
     "broken, says",
     [
         (a_plan(doc="http://example.com/x"), "Claude Doc"),
+        (a_plan(design="http://example.com/x"), "design doc must be its Claude Doc"),
         (a_plan(name=" "), "name is missing"),
         (a_plan(phases=[]), "1 to 12 phases"),
         (a_plan(phases=[{"name": "A", "state": "done"}]), "its state must be one of"),
