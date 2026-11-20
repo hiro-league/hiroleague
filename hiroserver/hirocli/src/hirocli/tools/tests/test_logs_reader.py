@@ -122,12 +122,15 @@ def test_the_last_session_starts_at_the_newest_startup_line(log_dir):
 def test_a_messages_filter_brings_its_whole_story_with_each_steps_time(log_dir):
     message_id = "6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7"
     sid = message_id.replace("-", "")
-    hop = json.loads(_line("gateway.relay took 3 ms", scope="RELAY", step="gateway.relay", elapsed_ms=3.2, outcome="ok"))
+    # Fixed, ordered times: rows are sorted by time, and a fine clock (Linux) tells lines made a moment apart apart
+    now = datetime.now(timezone.utc)
+    hop = json.loads(_line("gateway.relay took 3 ms", scope="RELAY", step="gateway.relay", elapsed_ms=3.2, outcome="ok",
+                           at=now + timedelta(milliseconds=1)))
     hop.update(TraceId=sid, SpanId="00f067aa0ba902b7")
-    ask = json.loads(_line("AI ask answered", scope="AI.ASK", elapsed_ms=812))
+    ask = json.loads(_line("AI ask answered", scope="AI.ASK", elapsed_ms=812, at=now + timedelta(milliseconds=2)))
     ask.update(TraceId=sid, SpanId="1111111111111111")
-    _write(_today_file(log_dir, "server"), _line("📥 Inbound message", msg_id=message_id), json.dumps(hop),
-           json.dumps(ask), _line("another message", msg_id="m-2"))
+    _write(_today_file(log_dir, "server"), _line("📥 Inbound message", msg_id=message_id, at=now), json.dumps(hop),
+           json.dumps(ask), _line("another message", msg_id="m-2", at=now + timedelta(milliseconds=3)))
     got = logs.LogSearchTool().execute(msg_id=message_id)
     assert [r["message"] for r in got.rows] == ["📥 Inbound message", "gateway.relay took 3 ms", "AI ask answered"]
     step_row = got.rows[1]
