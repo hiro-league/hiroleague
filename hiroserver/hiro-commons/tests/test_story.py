@@ -155,3 +155,58 @@ def test_in_the_core_a_steps_end_follows_the_cores_level_per_area(tmp_path, monk
         Logger._level = saved[0]
         core_log._MODULE_OVERRIDES.clear()
         core_log._MODULE_OVERRIDES.update(saved[1])
+
+
+# ---- named stories (the logging plan's phase 6a): a kind, a declared name, a title
+
+ROUND = story.Declared("test.health_checks", "round", "Health checks")
+
+
+def test_a_declared_story_needs_a_kind_from_the_list_and_a_proper_name():
+    with pytest.raises(ValueError):
+        story.Declared("test.thing", "chat", "Thing")
+    with pytest.raises(ValueError):
+        story.Declared("Thing", "round", "Thing")
+    story.declare(ROUND)
+    story.declare(ROUND)  # the same again is fine
+    with pytest.raises(ValueError):
+        story.declare(story.Declared("test.health_checks", "job", "Health checks"))
+    assert story.declared()["test.health_checks"] == ROUND
+
+
+def test_a_named_story_writes_its_first_and_end_lines_at_info_with_its_kind_and_title(folder):
+    foundation.setup(folder, name="testapp", service="test", console=False)
+    story.declare(ROUND)
+    with story.begin("checks.round", area="testapp.checks", level=logging.DEBUG) as first:
+        assert story.named("test.health_checks", title="42 checks") is first
+        with story.step("router", area="testapp.checks", level=logging.DEBUG):
+            story.retitle("42 checks, the router went down")
+    start, end = lines(folder)
+    assert start["SeverityText"] == "INFO" and start["Body"] == "Health checks: 42 checks"
+    assert start["Attributes"]["story.kind"] == "round" and start["Attributes"]["story.name"] == "test.health_checks"
+    assert start["SpanId"] == first.step_id
+    assert end["SeverityText"] == "INFO" and end["Attributes"]["step"] == "checks.round"
+    assert end["Attributes"]["story.title"] == "42 checks, the router went down"
+    assert end["Attributes"]["story.label"] == "Health checks"
+
+
+def test_an_undeclared_or_storyless_name_names_nothing(folder):
+    foundation.setup(folder, name="testapp", service="test", console=False)
+    assert story.named("test.never_declared") is None  # outside any story
+    with story.begin("x", line=False):
+        assert story.named("test.never_declared") is None
+        assert story.named("test.never_declared") is None  # warned once only
+    (warning,) = lines(folder)
+    assert warning["SeverityText"] == "WARNING" and warning["Attributes"]["story.name"] == "test.never_declared"
+
+
+def test_is_named_says_whether_the_current_story_is_named_here(folder):
+    foundation.setup(folder, name="testapp", service="test", console=False)
+    story.declare(ROUND)
+    assert not story.is_named()  # outside any story
+    with story.begin("tick", line=False):
+        assert not story.is_named()  # a quiet round
+        with story.step("inner", line=False):
+            story.named("test.health_checks")
+            assert story.is_named()
+        assert story.is_named()  # the same story, a step above the named one

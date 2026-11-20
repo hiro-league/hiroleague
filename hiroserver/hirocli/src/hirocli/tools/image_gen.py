@@ -117,7 +117,15 @@ class GenerateImageTool(Tool):
         )
         return _to_tool_result(workspace_path, result, resolved, final_prompt)
 
-    async def execute_async(self, **kwargs: Any) -> GenerateImageResult:
+    async def execute_async(self, **kwargs: Any) -> Any:
+        """The logging plan's phase 6a: one generate_image is a named story (IMAGE step `image.generate`), under the
+        admin request that asked, or of its own from the CLI."""
+        from ..runtime import stories
+
+        with stories.started(stories.GENERATE_IMAGE, "image.generate", title=str(kwargs.get("prompt", ""))[:60] or None, area="IMAGE"):
+            return await self._execute_async(**kwargs)
+
+    async def _execute_async(self, **kwargs: Any) -> GenerateImageResult:
         """Async path (HTTP /invoke, agent) — no thread hop for the HTTP call."""
         prompt: str = kwargs["prompt"]
         try:

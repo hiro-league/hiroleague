@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from hiro_channel_sdk import ExtensionFeature, ExtensionSearchUse, ExtensionUse, ExtensionVoiceUse
+from hiro_commons.logging_foundation.story import Declared
 
 from .auth.identity import Caller
 from .auth.rules import Rule
@@ -76,6 +77,10 @@ class Extension:
     # "frigate", "ai"...): the ones it reaches itself, each behind `switchboard.gate` in its client (the contract's
     # test), and the ones it reaches through the core. The banner on a test environment's pages says their modes.
     systems: Sequence[str] = ()
+    # The stories its features start and name (the logging plan's phase 6a): each with its kind (conversation, event,
+    # round, action, job) and what people call it. The code names one with `story.named("<name>", title=...)` or a
+    # round's `story_name=`; the contract's test checks the two agree. The core's admin lists them by these.
+    stories: Sequence[Declared] = ()
     outputs: bool = True  # False: nothing is sent or spoken (OUTPUTS=off, a dev copy): whatsapp.py logs it instead
     # Where each role's rights were copied from once, when this app took a feature over from another (Phase 9b, 9c:
     # "home"), and that feature's name for the log line ("System health"). None: nothing to copy.

@@ -23,6 +23,7 @@ import websockets
 from websockets.asyncio.server import ServerConnection
 from websockets.exceptions import ConnectionClosed
 from hiro_commons import logging_foundation
+from hiro_commons.logging_foundation import story
 from hiro_commons.log import Logger, log_scope
 from hiro_commons.process import (
     is_running,
@@ -755,7 +756,10 @@ class ChannelManager:
         ch.pending[req_id] = fut
         log.info(f"{LOG_OUT} Channel call — ({channel_name}) · {name}")
         try:
-            await ch.ws.send(rpc.build_request(METHOD_CALL, {"name": name, "params": params or {}}, request_id=req_id))
+            # The current story goes with the call, so the plugin's lines for it (a WhatsApp send) join it
+            call: dict[str, Any] = {"name": name, "params": params or {}}
+            story.inject(call)
+            await ch.ws.send(rpc.build_request(METHOD_CALL, call, request_id=req_id))
             return await asyncio.wait_for(fut, timeout=timeout)
         except asyncio.TimeoutError as exc:
             raise ChannelCallError(

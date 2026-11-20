@@ -269,6 +269,43 @@ class LogsService:
             _log.warning("⚠️ Logs filter by scope failed — HiroAdmin · logs", error=str(exc), exc_info=True)
             return Result.failure(str(exc))
 
+    def stories(
+        self,
+        workspace: str | None,
+        *,
+        since: str | None = None,
+        kind: str | None = None,
+        name: str | None = None,
+        source: str | None = None,
+        problems: bool = False,
+        limit: int | None = None,
+    ) -> Result[dict[str, Any]]:
+        """The named stories of a span across every part, newest first (the logging plan's phase 6a): what the admin's
+        Stories tab lists."""
+        from dataclasses import asdict
+
+        from hirocli.tools.logs import LogStoriesTool
+
+        try:
+            result = LogStoriesTool().execute(since=since, kind=kind, name=name, source=source,
+                                              problems=problems or None, limit=limit, workspace=workspace)
+            return Result.success(asdict(result))
+        except Exception as exc:
+            _log.warning("⚠️ Logs stories failed — HiroAdmin · logs", error=str(exc), exc_info=True)
+            return Result.failure(str(exc))
+
+    def story(self, workspace: str | None, story_id: str) -> Result[dict[str, Any]]:
+        """One story across every part: what it is, its steps and its lines in order (the logging plan's phase 6a)."""
+        from dataclasses import asdict
+
+        from hirocli.tools.logs import LogStoryTool
+
+        try:
+            return Result.success(asdict(LogStoryTool().execute(story_id=story_id, workspace=workspace)))
+        except Exception as exc:
+            _log.warning("⚠️ Logs story failed — HiroAdmin · logs", error=str(exc), exc_info=True)
+            return Result.failure(str(exc))
+
     def discover_methods(self, workspace: str | None) -> Result[list[str]]:
         """Return RPC ``method`` names for the admin dropdown.
 

@@ -174,16 +174,24 @@ class Worker:
         with suppress(RuntimeError):  # (no running loop: a test calling it directly)
             self.problem_at = asyncio.get_running_loop().time()
 
-    def every(self, seconds: float, fn: Callable[[], Any], name: str, first_after: float = 0.0) -> asyncio.Task:
-        """Run `fn` (plain or async) after `first_after` seconds, then again `seconds` after each run ends."""
-        return self.spawn(self._every(seconds, fn, name, first_after), name)
+    def every(self, seconds: float, fn: Callable[[], Any], name: str, first_after: float = 0.0,
+              story_name: str | None = None) -> asyncio.Task:
+        """Run `fn` (plain or async) after `first_after` seconds, then again `seconds` after each run ends.
 
-    async def _every(self, seconds: float, fn: Callable[[], Any], name: str, first_after: float) -> None:
+        Each round is a story of its own. `story_name`: a declared story (the logging plan's phase 6a) each round is
+        named as, so it's listed; `fn` may give it a better title with `story.retitle(...)`. Without it a round keeps
+        its id and isn't listed (a quiet tick)."""
+        return self.spawn(self._every(seconds, fn, name, first_after, story_name), name)
+
+    async def _every(self, seconds: float, fn: Callable[[], Any], name: str, first_after: float,
+                     story_name: str | None = None) -> None:
         await asyncio.sleep(first_after)
         while True:
             round_ = _in_round.set(True)
             try:
                 with story.begin(f"{self.name}.{name}", area=log.name, level=logging.DEBUG):
+                    if story_name:
+                        story.named(story_name)
                     try:
                         result = fn()
                         if inspect.isawaitable(result):

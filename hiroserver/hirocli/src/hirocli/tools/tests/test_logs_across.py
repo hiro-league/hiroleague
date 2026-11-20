@@ -183,3 +183,41 @@ def test_a_span_reads_as_words_or_an_iso_time():
     assert logs.moment("2026-11-20T13:15:00+00:00") == datetime(2026, 11, 20, 13, 15, tzinfo=timezone.utc).timestamp()
     with pytest.raises(ValueError):
         logs.moment("yesterday-ish")
+
+
+# --- named stories (the logging plan's phase 6a) -------------------------------------------------------------------
+
+ROUND = "1" * 32
+ASK = "2" * 32
+QUIET = "3" * 32
+
+
+def test_the_stories_of_a_span_list_only_named_ones_with_their_parts_time_and_problems(log_dir):
+    named = {"story.kind": "round", "story.name": "net.health_checks", "story.label": "Health checks"}
+    _own_file(
+        log_dir, "app-net",
+        _line("Health checks: Health checks", service="net", ago=30, story=ROUND, **named,
+              **{"story.title": "Health checks"}),
+        _line("Router down", level="WARNING", service="net", ago=29, story=ROUND),
+        _line("checks.round took 3 s", service="net", ago=27, story=ROUND, step="checks.round", elapsed_ms=3000,
+              outcome="ok", **named, **{"story.title": "42 checks, the router went down"}),
+        _line("a quiet tick", service="net", ago=20, story=QUIET),  # a story nobody named: not listed
+    )
+    _own_file(log_dir, "server", _line("Told Michel", ago=28, story=ROUND))
+    _own_file(
+        log_dir, "app-home",
+        _line("Ask a camera: cam3", service="home", ago=10, story=ASK, **{"story.kind": "action",
+              "story.name": "home.ask_camera", "story.label": "Ask a camera", "story.title": "cam3"}),
+    )
+    got = logs.LogStoriesTool().execute(since="1h")
+    assert got.total == 2 and got.by_kind == {"action": 1, "round": 1}
+    newest, oldest = got.stories
+    assert newest["story_id"] == ASK and newest["kind"] == "action" and newest["problems"] == 0
+    assert oldest["title"] == "42 checks, the router went down" and oldest["outcome"] == "ok"
+    assert oldest["problems"] == 1 and oldest["sources"] == ["app-net", "server"]
+    assert 2500 <= oldest["took_ms"] <= 3500
+    assert [s["story_id"] for s in logs.LogStoriesTool().execute(kind="round").stories] == [ROUND]
+    assert [s["story_id"] for s in logs.LogStoriesTool().execute(problems=True).stories] == [ROUND]
+    assert [s["story_id"] for s in logs.LogStoriesTool().execute(source="server").stories] == [ROUND]
+    story = logs.LogStoryTool().execute(story_id=ROUND)
+    assert story.kind == "round" and story.label == "Health checks" and story.title.startswith("42 checks")

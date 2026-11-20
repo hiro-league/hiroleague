@@ -260,6 +260,45 @@ def register(logs_app: typer.Typer, console: Console) -> None:
                 console.print(f"        {message}", markup=False, highlight=False)
         console.print("[dim]Follow one with: hiro logs story <story id> (each line's story id is in --json).[/dim]")
 
+    @logs_app.command("stories")
+    def logs_stories(
+        since: str = typer.Option("1h", "--since", help="Start of the span: back from now (1h, 30m, 2d) or an ISO time."),
+        until: Optional[str] = typer.Option(None, "--until", help="End of the span (default: now)."),
+        kind: Optional[str] = typer.Option(None, "--kind", "-k", help="conversation, event, round, action or job."),
+        name: Optional[str] = typer.Option(None, "--name", help="One story name (net.health_checks)."),
+        source: Optional[str] = typer.Option(None, "--source", "-s", help="Only stories through this part (app-home)."),
+        problems: bool = typer.Option(False, "--problems", help="Only stories with a warning or worse."),
+        limit: Optional[int] = typer.Option(None, "--limit", "-n", help="Stories at most (default 100)."),
+        workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help="Workspace name (default: registry default)."),
+        as_json: bool = typer.Option(False, "--json", help="Print the result as JSON (for agents)."),
+    ) -> None:
+        """The stories of a span, newest first: each with its kind, name, title, parts, time and problems."""
+        from ..tools.logs import LogStoriesTool
+
+        _console_safe()
+
+        try:
+            result = LogStoriesTool().execute(since=since, until=until, kind=kind, name=name, source=source,
+                                              problems=problems or None, limit=limit, workspace=workspace)
+        except (WorkspaceError, ValueError) as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+        if as_json:
+            _print_json(result)
+            return
+        console.print(f"[bold]Stories[/bold] {result.span}")
+        if not result.total:
+            console.print("[dim]No named stories.[/dim]")
+            return
+        console.print("  " + " · ".join(f"[cyan]{k}[/cyan] {n}" for k, n in result.by_kind.items()))
+        for st in result.stories:
+            trouble = f" [yellow]{st['problems']} problem(s)[/yellow]" if st["problems"] else ""
+            console.print(
+                f"[dim]{st['when']}[/dim] [cyan]{st['kind']}[/cyan] [bold]{st['label']}[/bold] {st['title']} "
+                f"[dim]{st['took_ms']} ms · {' → '.join(st['sources'])} · {st['story_id']}[/dim]{trouble}",
+                highlight=False,
+            )
+
     @logs_app.command("story")
     def logs_story(
         story_id: str = typer.Argument(..., help="The story's id, a traceparent, or a chat message's id."),
@@ -283,6 +322,8 @@ def register(logs_app: typer.Typer, console: Console) -> None:
         if not result.rows:
             console.print(f"[dim]No lines for story {result.story_id}.[/dim]")
             return
+        if result.kind:
+            console.print(f"[bold]{result.label}[/bold] ({result.kind}): {result.title}", highlight=False)
         console.print(
             f"[bold]Story {result.story_id}[/bold] · {result.started} · {result.took_ms} ms · "
             f"through {', '.join(result.sources)} · {result.problems} problem(s)"

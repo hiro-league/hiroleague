@@ -13,6 +13,7 @@ import io
 from pathlib import Path
 from typing import Any
 
+from hiro_channel_sdk import message_story
 from hiro_channel_sdk.base import ChannelCallNotSupported, ChannelCallRefused, ChannelPlugin
 from hiro_channel_sdk.capabilities import (
     ACTION_LOGOUT,
@@ -410,7 +411,10 @@ class WhatsAppChannel(ChannelPlugin):
             ),
             content=[content],
         )
-        await self.emit(um)
+        # The message's story starts here (the logging plan): its id is the message's own, and the frame carries this
+        # step on to the core, as the devices plugin's does
+        with message_story.hop("whatsapp.receive", um.routing.metadata, um.routing.id, area="WHATSAPP", kind=kind):
+            await self.emit(um)
 
 
 def _b64_param(params: dict[str, Any], key: str) -> bytes | None:

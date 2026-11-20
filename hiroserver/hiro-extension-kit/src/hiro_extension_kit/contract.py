@@ -198,6 +198,27 @@ class AppContract:
         assert declared - THROUGH_CORE - gated == set(),             "declared in Extension(systems=...), but no client calls switchboard.gate for it"
         assert asked - declared == set(), "the code asks the switchboard about these: declare them in Extension(systems=...)"
 
+    # --- the stories it names ---
+
+    def test_every_story_it_names_is_declared_and_every_declared_one_is_named(self):
+        """The logging plan's phase 6a: a story is listed only when its feature names it with a declared name. So every
+        name the code gives (`story.named("<name>", ...)`, a round's `story_name="<name>"`) is in
+        `Extension(stories=...)`, every declared story is named somewhere in the code, and each belongs to this app
+        (its name starts with the app's own: "net.health_checks")."""
+        import re
+
+        from . import identity
+        from .extension import ext
+
+        declared = {d.name for d in ext().stories}
+        assert all(n.startswith(f"{ext().name}.") for n in declared), f"a story's name starts with '{ext().name}.'"
+        names = re.compile(r"""(?:story\.named\(|story_name\s*=)\s*["']([a-z0-9_.]+)["']""")
+        named: set[str] = set()
+        for path in identity.app().package.rglob("*.py"):
+            named |= set(names.findall(path.read_text(encoding="utf-8")))
+        assert named - declared == set(), "named in the code but not declared in Extension(stories=...)"
+        assert declared - named == set(), "declared in Extension(stories=...) but never named in the code"
+
     # --- the port it serves on ---
 
     def test_it_declares_the_port_it_listens_on(self):

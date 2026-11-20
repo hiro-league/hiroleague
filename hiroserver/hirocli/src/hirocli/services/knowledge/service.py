@@ -256,7 +256,7 @@ class KnowledgeService(KnowledgeIndex):
             },
         )
         task = asyncio.create_task(
-            self._run_ingest_job(job_id, clean_paths, params),
+            self._run_ingest_job_story(job_id, clean_paths, params),
             name=f"knowledge-ingest-{job_id}",
         )
         self._tasks[job_id] = task
@@ -1044,6 +1044,15 @@ class KnowledgeService(KnowledgeIndex):
             raise KeyError(f"Unknown knowledge document: {document_id}")
         tags = await asyncio.to_thread(self.catalog.tags_for_document, document_id)
         return document_from_row(row, tags=tags)
+
+    async def _run_ingest_job_story(self, job_id: str, paths: list[str], params: dict[str, Any]) -> None:
+        """The job as a named story of its own (the logging plan's phase 6a): it runs on after the request that
+        started it has its answer."""
+        from ...runtime import stories
+
+        with stories.started(stories.KNOWLEDGE_INGEST, "knowledge.ingest", area="KNOWLEDGE", own=True,
+                             title=f"{len(paths)} files", job_id=job_id):
+            await self._run_ingest_job(job_id, paths, params)
 
     async def _run_ingest_job(self, job_id: str, paths: list[str], params: dict[str, Any]) -> None:
         totals = {"requested": len(paths), "skipped": 0, "ingested": 0, "failed": 0, "chunks": 0}

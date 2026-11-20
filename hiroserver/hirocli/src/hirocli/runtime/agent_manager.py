@@ -30,6 +30,7 @@ from hiro_channel_sdk.log_scope_fields import (
     unified_message_log_scope,
 )
 from hiro_channel_sdk import message_story
+from hiro_commons.logging_foundation import story
 from hiro_channel_sdk.models import UnifiedMessage
 from hiro_commons.log import Logger, log_scope
 
@@ -45,6 +46,7 @@ from hiro_memory.ledger import RunAccumulator, current_run
 from ..domain.people import find_by_number
 from ..services.ai_usage.from_ledger import usage_person, usage_profile
 from hiro_memory.tracing import langsmith_run_id
+from . import stories
 from .comm_log import (
     LOG_IN,
     comm_extras,
@@ -313,15 +315,17 @@ class AgentManager:
             ):
                 continue
             try:
-                await sweep_idle_conversations(
-                    memory,
-                    workspace_path=self._ctx.workspace_path,
-                    idle_flush_hours=int(getattr(ext, "idle_flush_hours", 12)),
-                    window_turns=int(getattr(ext, "window_turns", 4)),
-                    session_gap_minutes=int(getattr(ext, "session_gap_minutes", 120)),
-                    chunk_min_tokens=int(getattr(ext, "chunk_min_tokens", 1000)),
-                    user_name=(getattr(mem_prefs, "user_name", "") or "").strip(),
-                )
+                # Each sweep is a named round (the logging plan's phase 6a)
+                with stories.started(stories.MEMORY_SWEEP, "memory.sweep", area="AGENT", own=True):
+                    await sweep_idle_conversations(
+                        memory,
+                        workspace_path=self._ctx.workspace_path,
+                        idle_flush_hours=int(getattr(ext, "idle_flush_hours", 12)),
+                        window_turns=int(getattr(ext, "window_turns", 4)),
+                        session_gap_minutes=int(getattr(ext, "session_gap_minutes", 120)),
+                        chunk_min_tokens=int(getattr(ext, "chunk_min_tokens", 1000)),
+                        user_name=(getattr(mem_prefs, "user_name", "") or "").strip(),
+                    )
             except Exception:
                 log.warning("⚠️ memory idle sweep — tick failed (skipped)", exc_info=True)
 
@@ -363,6 +367,9 @@ class AgentManager:
                 # (the ledger's chat-<message id>) carries the same story id.
                 with message_story.hop("agent.run", msg.routing.metadata, _mid or msg.routing.id, area="AGENT",
                                        run_id=f"chat-{msg.routing.id}"):
+                    # The logging plan's phase 6a: the turn is a named story (a conversation), whoever sent it
+                    peer = comm_peer_label(msg, self._ctx)
+                    story.named(stories.CHAT_TURN.name, title=f'{peer}: "{_pv}"' if _pv else f"{peer} · {comm_kind(msg)}")
                     await self._handle_inner(msg, persisted_event=persisted_event)
             except Exception as exc:
                 log.error(

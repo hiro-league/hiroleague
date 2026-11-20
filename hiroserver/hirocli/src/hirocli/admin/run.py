@@ -78,6 +78,10 @@ async def run_admin_ui(ctx: ServerContext) -> None:
     admin_app.state.ctx = ctx
     # Phase 6: the admin has its own sign-in; /api needs a signed-in session (but /api/auth/*).
     admin_app.add_middleware(RequireSignIn, ctx=ctx)
+    # Every request a story (outermost, so the sign-in check's lines carry it too): the logging plan's phase 6a
+    from hirocli.admin.stories import AdminStories
+
+    admin_app.add_middleware(AdminStories)
     include_admin_svelte_api(admin_app)
 
     # Dev "external UI" mode (HIRO_ADMIN_UI_EXTERNAL=1, set by dev-sync-fast.sh --external-ui):

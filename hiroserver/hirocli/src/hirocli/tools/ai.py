@@ -255,7 +255,15 @@ class AiTryTool(Tool):
         # Sync callers (CLI, worker threads) have no running loop of their own.
         return asyncio.run(self.execute_async(**kwargs))
 
-    async def execute_async(
+    async def execute_async(self, **kwargs: Any) -> Any:
+        """The logging plan's phase 6a: one try_profile is a named story (AI.TRY step `ai.try`), under the
+        admin request that asked, or of its own from the CLI."""
+        from ..runtime import stories
+
+        with stories.started(stories.TRY_PROFILE, "ai.try", title=kwargs.get("profile_id") or "a draft profile", area="AI.TRY"):
+            return await self._execute_async(**kwargs)
+
+    async def _execute_async(
         self,
         prompt: str,
         profile_id: str | None = None,

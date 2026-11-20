@@ -377,7 +377,15 @@ class VoiceTryTool(Tool):
     def execute(self, **kwargs: Any) -> VoiceTryResult:
         return asyncio.run(self.execute_async(**kwargs))
 
-    async def execute_async(
+    async def execute_async(self, **kwargs: Any) -> Any:
+        """The logging plan's phase 6a: one try_voice is a named story (VOICE step `voice.try`), under the
+        admin request that asked, or of its own from the CLI."""
+        from ..runtime import stories
+
+        with stories.started(stories.TRY_VOICE, "voice.try", title=kwargs.get("profile_id") or "a draft voice", area="VOICE"):
+            return await self._execute_async(**kwargs)
+
+    async def _execute_async(
         self,
         text: str,
         profile_id: str | None = None,

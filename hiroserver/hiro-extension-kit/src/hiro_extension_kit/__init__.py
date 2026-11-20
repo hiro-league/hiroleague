@@ -17,6 +17,7 @@ depends on nothing heavy; this package is the app around it and needs FastAPI, S
 from pathlib import Path
 
 from hiro_channel_sdk import workers as sdk_workers
+from hiro_commons.logging_foundation import story
 
 from . import extension as _extension
 from . import identity
@@ -31,6 +32,7 @@ def setup(*, name: str, title: str, package: Path, data_dir: Path, static_dir: P
     me = identity.setup(name=name, title=title, package=package, data_dir=data_dir, static_dir=static_dir)
     if extension is not None:
         _extension.setup(extension)
+        story.declare(*extension.stories)  # the stories its features name (the logging plan's phase 6a)
     from . import errors  # after identity: its logger is the app's
 
     sdk_workers.configure(failed=errors.failed)

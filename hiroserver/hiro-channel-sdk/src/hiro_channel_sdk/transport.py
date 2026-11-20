@@ -19,12 +19,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Any
 from uuid import uuid4
 
 import websockets
 from websockets.exceptions import ConnectionClosed
 from hiro_commons.log import Logger
+from hiro_commons.logging_foundation import story
 
 from . import rpc
 from .base import ChannelCallNotSupported, ChannelCallRefused, ChannelPlugin
@@ -205,7 +207,10 @@ class PluginTransport:
                     if not isinstance(call_params, dict):
                         raise ValueError(f"{METHOD_CALL} params.params must be an object")
                     try:
-                        result = await self._plugin.on_call(name, call_params)
+                        # Inside the core's story when it sent one (the logging plan): the plugin's lines join it
+                        with story.begin(f"call.{name}", parent=req.params.get(story.TRACEPARENT), area="CHANNEL",
+                                         level=logging.DEBUG, line=False):
+                            result = await self._plugin.on_call(name, call_params)
                     except ChannelCallNotSupported as exc:
                         error = {"code": JSONRPC_ERROR_METHOD_NOT_FOUND, "message": str(exc)}
                     except ChannelCallRefused as exc:

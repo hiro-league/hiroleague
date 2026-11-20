@@ -1148,6 +1148,11 @@ class LogProblemsTool(Tool):
 @dataclass
 class LogStoryResult:
     story_id: str = ""
+    # What it is, when its feature named it (the logging plan's phase 6a): its kind, declared name, label and title
+    kind: str = ""
+    name: str = ""
+    label: str = ""
+    title: str = ""
     sources: list[str] = field(default_factory=list)  # the parts it went through, in the order it reached them
     started: str = ""  # its first line's time, in words
     took_ms: int = 0  # from its first line to its last
@@ -1186,6 +1191,9 @@ class LogStoryTool(Tool):
             if r["source"] not in result.sources:
                 result.sources.append(r["source"])
             fields = {k: v for k, v in (r.get("fields") or [])}
+            if fields.get("story.kind"):  # its named lines: the start, then its end (which may carry a better title)
+                result.kind, result.name = fields["story.kind"], fields.get("story.name", "")
+                result.label, result.title = fields.get("story.label", ""), fields.get("story.title", result.title)
             if "step" in fields and "elapsed_ms" in fields:
                 step = {"step": fields["step"], "source": r["source"], "elapsed_ms": _number(fields["elapsed_ms"]),
                         "outcome": fields.get("outcome", ""), "when": _when(float(r["timestamp"])),
@@ -1199,6 +1207,103 @@ class LogStoryTool(Tool):
         result.problems = len(_apply_level_filter(rows, _PROBLEM_LEVEL))
         result.rows = [brief(r) for r in rows[:n]]
         return result
+
+
+_STORY_MARKS = ('"story.kind"',)  # a named story's first line and its end line (the logging plan's phase 6a)
+_DEFAULT_STORIES = 100
+
+
+@dataclass
+class LogStoriesResult:
+    span: str = ""  # the span in words
+    total: int = 0  # named stories in the span that match
+    by_kind: dict[str, int] = field(default_factory=dict)
+    # Newest first: story_id, kind, name, label, title, source (the part that named it), when (words), timestamp,
+    # took_ms (its first line to its last), outcome (its named step's), problems (its lines at WARNING or above),
+    # sources (the parts it went through, in order)
+    stories: list[dict[str, Any]] = field(default_factory=list)
+    truncated: bool = False
+
+
+class LogStoriesTool(Tool):
+    name = "log_stories"
+    description = (
+        "The stories of a span of time, newest first: everything one starting event caused, as its feature named it. "
+        "Each has a kind (conversation, event, round, action, job), a name (\"Health checks\"), a title for this one "
+        "time, the parts it went through, how long it took, how it ended and its problems. Open one with log_story."
+    )
+    params = {
+        "since": ToolParam(str, "Start of the span: back from now ('1h', '2d') or an ISO time (default '1h')",
+                           required=False),
+        "until": ToolParam(str, "End of the span: back from now or an ISO time (default: now)", required=False),
+        "kind": ToolParam(str, "Only this kind: conversation, event, round, action or job", required=False),
+        "name": ToolParam(str, "Only this story name ('net.health_checks')", required=False),
+        "source": ToolParam(str, "Only stories that went through this part ('app-home', 'server', 'device')",
+                            required=False),
+        "problems": ToolParam(bool, "Only stories with a warning or worse", required=False),
+        "limit": ToolParam(int, f"How many stories at most (default {_DEFAULT_STORIES})", required=False),
+        "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
+    }
+
+    def execute(
+        self,
+        since: str | None = None,
+        until: str | None = None,
+        kind: str | None = None,
+        name: str | None = None,
+        source: str | None = None,
+        problems: bool | None = None,
+        limit: int | None = None,
+        workspace: str | None = None,
+    ) -> LogStoriesResult:
+        now = time.time()
+        start = moment(since or _DEFAULT_SPAN, now=now)
+        end = moment(until, now=now) or now
+        assert start is not None
+        streams = [s for s in _collect_log_files(_resolve_log_dir(workspace), _resolve_gateway_log_dir(), "all")
+                   if s.plain is None]  # a plain stderr line has no story
+        found: dict[str, dict[str, Any]] = {}
+        for r in _streams_rows(streams, _STORY_MARKS, start):
+            if float(r["timestamp"]) > end or not r.get("story_id"):
+                continue
+            f = {k: v for k, v in (r.get("fields") or [])}
+            s = found.setdefault(r["story_id"], {"story_id": r["story_id"], "kind": f.get("story.kind", ""),
+                                                 "name": f.get("story.name", ""), "label": f.get("story.label", ""),
+                                                 "title": f.get("story.title", ""), "source": r["source"],
+                                                 "timestamp": r["timestamp"], "outcome": ""})
+            if "step" in f:  # its named step's end: how it ended, and the title it ended with
+                s["outcome"] = f.get("outcome", "")
+                s["title"] = f.get("story.title", s["title"])
+            s["timestamp"] = min(float(s["timestamp"]), float(r["timestamp"]))
+        wanted = [s for s in found.values()
+                  if (not kind or s["kind"] == kind) and (not name or s["name"] == name)]
+        # Its problems and the parts it went through come from all its lines: one pass over the span's raw lines,
+        # parsing only the ones that name a wanted story
+        ids = {s["story_id"] for s in wanted}
+        lines_of: dict[str, list[dict[str, Any]]] = {}
+        if ids:
+            for r in _streams_rows(streams, tuple(f'"TraceId":"{i}"' for i in ids), start):
+                if r.get("story_id") in ids:
+                    lines_of.setdefault(r["story_id"], []).append(r)
+        for s in wanted:
+            rows = sorted(lines_of.get(s["story_id"], []), key=lambda r: float(r["timestamp"]))
+            s["sources"] = list(dict.fromkeys(r["source"] for r in rows)) or [s["source"]]
+            s["problems"] = len(_apply_level_filter(rows, _PROBLEM_LEVEL))
+            first = float(rows[0]["timestamp"]) if rows else float(s["timestamp"])
+            last = float(rows[-1]["timestamp"]) if rows else first
+            s["timestamp"], s["took_ms"] = first, round((last - first) * 1000)
+            s["when"] = _when(first)
+        if source:
+            wanted = [s for s in wanted if source in s["sources"]]
+        if problems:
+            wanted = [s for s in wanted if s["problems"]]
+        wanted.sort(key=lambda s: -float(s["timestamp"]))
+        by_kind: dict[str, int] = {}
+        for s in wanted:
+            by_kind[s["kind"]] = by_kind.get(s["kind"], 0) + 1
+        n = limit if limit is not None else _DEFAULT_STORIES
+        return LogStoriesResult(span=f"{_when(start)} to {_when(end)}", total=len(wanted), by_kind=by_kind,
+                                stories=wanted[:n], truncated=len(wanted) > n)
 
 
 def _number(value: Any) -> float | int | str:

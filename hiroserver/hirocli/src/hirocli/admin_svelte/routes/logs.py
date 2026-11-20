@@ -107,3 +107,28 @@ async def clear_logs(workspace_id: SelectedWorkspaceIdDep) -> Any:
     if not result.ok or result.data is None:
         return _api_data(result)
     return {"cleared_files": result.data.cleared_files}
+
+
+@logs_router.get("/logs/stories")
+async def list_log_stories(
+    workspace_id: SelectedWorkspaceIdDep,
+    since: str | None = None,
+    kind: str | None = None,
+    name: str | None = None,
+    source: str | None = None,
+    problems: bool = False,
+    limit: int | None = None,
+) -> Any:
+    """The named stories of a span across every part (the logging plan's phase 6a)."""
+    result = await run_in_threadpool(
+        partial(LogsService().stories, workspace_id, since=since, kind=kind, name=name, source=source,
+                problems=problems, limit=limit)
+    )
+    return _api_data(result)
+
+
+@logs_router.get("/logs/stories/{story_id}")
+async def get_log_story(story_id: str, workspace_id: SelectedWorkspaceIdDep) -> Any:
+    """One story across every part (the logging plan's phase 6a)."""
+    result = await run_in_threadpool(LogsService().story, workspace_id, story_id)
+    return _api_data(result)

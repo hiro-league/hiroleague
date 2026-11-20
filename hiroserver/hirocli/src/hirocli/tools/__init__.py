@@ -40,6 +40,7 @@ _LAZY_EXPORTS: dict[str, str] = {
     "LogProblemsTool": ".logs",
     "LogSearchTool": ".logs",
     "LogStoryTool": ".logs",
+    "LogStoriesTool": ".logs",
     "LogTailTool": ".logs",
     # llm catalog
     "LlmCatalogGetModelTool": ".llm_catalog",
@@ -326,7 +327,7 @@ def all_tools() -> list[Tool]:
         LlmCatalogListModelsTool,
         LlmCatalogListProvidersTool,
     )
-    from .logs import LogProblemsTool, LogSearchTool, LogStoryTool, LogTailTool
+    from .logs import LogProblemsTool, LogSearchTool, LogStoriesTool, LogStoryTool, LogTailTool
     from .media import DescribeImageTool, TranscribeTool
     from .memory import MemoryClearTool, MemoryListTool
     from .policy import PolicyGetTool
@@ -479,6 +480,7 @@ def all_tools() -> list[Tool]:
         LogTailTool(),
         LogProblemsTool(),
         LogStoryTool(),
+        LogStoriesTool(),
         LlmCatalogListProvidersTool(),
         LlmCatalogListModelsTool(),
         LlmCatalogGetModelTool(),
@@ -585,7 +587,7 @@ if TYPE_CHECKING:  # pragma: no cover
         LlmCatalogListModelsTool,
         LlmCatalogListProvidersTool,
     )
-    from .logs import LogProblemsTool, LogSearchTool, LogStoryTool, LogTailTool  # noqa: F401
+    from .logs import LogProblemsTool, LogSearchTool, LogStoriesTool, LogStoryTool, LogTailTool  # noqa: F401
     from .media import DescribeImageTool, TranscribeTool  # noqa: F401
     from .memory import MemoryClearTool, MemoryListTool  # noqa: F401
     from .policy import PolicyGetTool  # noqa: F401

@@ -107,3 +107,23 @@ def test_a_task_spawned_inside_a_story_stays_in_it():
 
     asyncio.run(main())
     assert seen == [STORY]
+
+
+def test_a_round_given_a_declared_story_name_is_named_each_time():
+    story.declare(story.Declared("test.ticks", "round", "Ticks"))
+    named: list[str | None] = []
+
+    async def main() -> None:
+        w = Worker()
+        w.start()
+
+        def tick() -> None:
+            story.retitle("one tick")  # the round's own code may give it a better title
+            named.append(story.current_id())
+
+        w.every(0.02, tick, "tick", story_name="test.ticks")
+        await asyncio.sleep(0.05)
+        await w.stop()
+
+    asyncio.run(main())
+    assert named and None not in named

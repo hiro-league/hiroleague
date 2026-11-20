@@ -297,7 +297,15 @@ class KnowledgeGraphIngestBatchTool(Tool):
             )
         )
 
-    async def execute_async(
+    async def execute_async(self, **kwargs: Any) -> Any:
+        """The logging plan's phase 6a: one graph_ingest is a named story (KNOWLEDGE step `graph.ingest`), under the
+        admin request that asked, or of its own from the CLI."""
+        from ..runtime import stories
+
+        with stories.started(stories.GRAPH_INGEST, "graph.ingest", title=f"{len(kwargs.get('document_ids') or [])} documents", area="KNOWLEDGE"):
+            return await self._execute_async(**kwargs)
+
+    async def _execute_async(
         self,
         document_ids: list[str],
         source_role: str = "user_document",
