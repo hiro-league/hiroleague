@@ -653,10 +653,13 @@ def _apply_query_filter(rows: list[dict], query: str | None) -> list[dict]:
     if not query:
         return rows
     q = query.lower()
+    # A story's id (32 hex digits) finds that story's lines too: they carry it as their TraceId, not in their text
+    story_id = q.strip() if _HEX32.match(q.strip()) else None
     return [
         r
         for r in rows
         if q in r.get("message", "").lower() or q in r.get("extra", "").lower()
+        or (story_id is not None and r.get("story_id") == story_id)
     ]
 
 

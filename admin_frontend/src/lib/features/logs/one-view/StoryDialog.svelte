@@ -13,7 +13,7 @@
   // Loading, Notice and EmptyState; the Logs tab's level icon and colours. New: the start blocks, the steps' tree and
   // bars (StorySteps), the parts' path.
   import { base } from '$app/paths';
-  import { ArrowRight, CircleCheck, CircleMinus, CircleX, Copy, TriangleAlert, User, Workflow } from '@lucide/svelte';
+  import { ArrowRight, CircleCheck, CircleMinus, CircleX, Copy, List, TriangleAlert, User, Workflow } from '@lucide/svelte';
   import * as Dialog from '$kit/components/ui/dialog/index.js';
   import * as Tabs from '$kit/components/ui/tabs/index.js';
   import * as Table from '$kit/components/ui/table/index.js';
@@ -28,7 +28,7 @@
   import { dateTime } from '$kit/format/time';
   import { cn } from '$lib/utils';
   import { getLogStory, type BriefLogLine, type LogStory, type StoryStepLine } from '$lib/api/logs';
-  import { getGraphRunsByStory } from '$lib/api/graph-runs';
+  import { getGraphRun, getGraphRunsByStory, type GraphRunInspectResponse } from '$lib/api/graph-runs';
   import LogLevelIcon from '../shared/LogLevelIcon.svelte';
   import { logLevelAccentClass, logLevelTextClass } from '../shared/logs-classes';
   import KindIcon from './KindIcon.svelte';
@@ -43,6 +43,8 @@
 
   let story = $state<LogStory | null>(null);
   let runIds = $state<string[]>([]);
+  // A conversation's graph run: its nodes are the thinking, its run row holds the reply (the ledger's output preview)
+  let run = $state<GraphRunInspectResponse | null>(null);
   let loading = $state(true);
   let failure = $state<string | null>(null);
   let tab = $state('story');
@@ -53,13 +55,16 @@
     const asked = storyId;
     tab = 'story';
     openLine = null;
+    run = null;
     loading = true;
     failure = null;
     Promise.all([getLogStory(asked), getGraphRunsByStory(asked).catch(() => ({ run_ids: [] as string[] }))])
-      .then(([s, runs]) => {
+      .then(async ([s, runs]) => {
         if (asked !== storyId) return;
         story = s;
         runIds = runs.run_ids;
+        const last = runs.run_ids.at(-1);
+        run = last ? await getGraphRun(last).catch(() => null) : null;
       })
       .catch((e) => (failure = errorMessage(e)))
       .finally(() => (loading = false));
@@ -79,6 +84,10 @@
     Object.entries(startLine ? fieldsOf(startLine) : {}).filter(([k]) => !k.startsWith('story.'))
   );
   const asks = $derived((story?.rows ?? []).filter((r) => fieldsOf(r).step === 'ai.ask' || (fieldsOf(r).model && fieldsOf(r).cost)));
+
+  const runNodes = $derived((run?.rows ?? []).filter((r) => r.row_kind === 'node'));
+  const reply = $derived(run?.aggregate?.output_preview ?? '');
+  const logsHref = $derived(`${base}/logs?tab=logs&msg_id=${encodeURIComponent(storyId)}`); // the Logs tab, this story's lines
 
   const tree = $derived.by<Tree[]>(() => {
     const steps = story?.steps ?? [];
@@ -180,7 +189,8 @@
               {#if i > 0}<ArrowRight size={11} />{/if}<span class="inline-flex items-center gap-1"><PartIcon source={src} size={11} />{partLabel(src)}</span>
             {/each}
           </span>
-          <button type="button" class="ml-auto inline-flex items-center gap-1 font-mono hover:text-foreground" title="Copy the story id" onclick={() => void copyId(s.story_id)}>{s.story_id.slice(0, 8)}<Copy size={11} /></button>
+          <a class="ml-auto inline-flex items-center gap-1 hover:text-foreground" href={logsHref} title="The Logs tab, filtered to this story's lines"><List size={12} />See its lines in Logs</a>
+          <button type="button" class="inline-flex items-center gap-1 font-mono hover:text-foreground" title="Copy the story id" onclick={() => void copyId(s.story_id)}>{s.story_id.slice(0, 8)}<Copy size={11} /></button>
         </Dialog.Description>
       </Dialog.Header>
 
@@ -219,10 +229,33 @@
                 <div class="max-w-[75%] rounded-lg bg-muted px-3 py-2 text-[0.82rem]">{s.title}</div>
               </div>
               <div class="ml-6 rounded-md border border-dashed px-3 py-2">
-                <p class="mb-1.5 text-xs text-muted-foreground">What it went through</p>
-                {#if tree.length}{@render steps(tree, 0)}{:else}<p class="text-xs text-muted-foreground">No timed steps.</p>{/if}
+                {#if runNodes.length}
+                  <p class="mb-1.5 text-xs text-muted-foreground">What it thought (its graph run)</p>
+                  <ul class="space-y-1.5">
+                    {#each runNodes as n, i (i)}
+                      <li class="text-[0.82rem]">
+                        <div class="flex flex-wrap items-center gap-x-2">
+                          {@render outcomeIcon(n.status === 'error' || n.error_code ? 'error' : 'ok')}
+                          <span class="font-mono text-xs">{n.node}</span>
+                          {#if n.model}<span class="text-xs text-muted-foreground">· {n.model}</span>{/if}
+                          {#if n.elapsed_ms}<span class="text-xs tabular-nums text-muted-foreground">· {duration(Number(n.elapsed_ms))}</span>{/if}
+                          {#if Number(n.input_tokens) || Number(n.output_tokens)}<span class="text-xs tabular-nums text-muted-foreground">· {n.input_tokens} in / {n.output_tokens} out</span>{/if}
+                        </div>
+                        {#if n.output_preview}<p class="ml-6 text-xs text-muted-foreground">{n.output_preview}</p>{/if}
+                      </li>
+                    {/each}
+                  </ul>
+                {:else}
+                  <p class="mb-1.5 text-xs text-muted-foreground">What it went through</p>
+                  {#if tree.length}{@render steps(tree, 0)}{:else}<p class="text-xs text-muted-foreground">No timed steps.</p>{/if}
+                  <p class="mt-2 text-xs text-muted-foreground">No graph run joins this story: the agent didn't run (no AI here, or it failed before).</p>
+                {/if}
               </div>
-              {#if endLine}
+              {#if reply}
+                <div class="flex justify-end">
+                  <div class="max-w-[75%] whitespace-pre-wrap rounded-lg bg-primary/10 px-3 py-2 text-[0.82rem]">{reply}</div>
+                </div>
+              {:else if endLine}
                 <div class="flex justify-end">
                   <div class={cn('max-w-[75%] rounded-lg px-3 py-2 text-[0.82rem]', fieldsOf(endLine).outcome === 'error' ? 'bg-destructive/10' : 'bg-primary/10')}>
                     {fieldsOf(endLine).outcome === 'error' ? `It failed: ${fieldsOf(endLine).error ?? ''}` : `Answered after ${duration(Number(fieldsOf(endLine).elapsed_ms ?? 0))}`}
@@ -317,7 +350,12 @@
             {#each runIds as id (id)}
               <li class="flex items-center gap-3 px-3 py-2 text-[0.82rem]">
                 <Workflow size={14} class="shrink-0 text-muted-foreground" />
-                <span class="min-w-0 flex-1"><span class="font-medium">Graph run</span><span class="ml-2 font-mono text-xs text-muted-foreground">{id}</span></span>
+                <span class="min-w-0 flex-1">
+                  <span class="font-medium">Graph run</span><span class="ml-2 font-mono text-xs text-muted-foreground">{id}</span>
+                  {#if run?.aggregate && id === runIds.at(-1)}
+                    <span class="ml-2 text-xs text-muted-foreground">{runNodes.length} nodes · {run.aggregate.cost_usd ? `$${run.aggregate.cost_usd}` : 'no cost'} · its memory and knowledge traces open there</span>
+                  {/if}
+                </span>
                 <Button variant="outline" size="sm" class="h-7" href={`${base}/logs?tab=runs&story=${encodeURIComponent(s.story_id)}`}>Open</Button>
               </li>
             {/each}

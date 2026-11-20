@@ -49,6 +49,8 @@
     })
   );
   const methodOptions = $derived(ctrl.logMethods.map((m) => ({ value: m, label: m })));
+  // The message filter holds a chat message's id or a story's (32 hex digits): both find that story's lines
+  const scopeIsStory = $derived(/^[0-9a-f]{32}$/.test(prefs.scopeMsgId.trim()));
 </script>
 
 <div class="grid min-w-0 gap-3">
@@ -115,7 +117,7 @@
         <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
           <div class="flex min-w-0 items-center gap-2">
             <span class="shrink-0 font-sans text-sm font-semibold text-muted-foreground">
-              Message:
+              {scopeIsStory ? 'Story:' : 'Message:'}
             </span>
             <span
               class="min-w-0 truncate font-mono text-sm text-foreground"

@@ -222,3 +222,11 @@ def test_the_stories_of_a_span_list_only_named_ones_with_their_parts_time_and_pr
     assert [s["story_id"] for s in logs.LogStoriesTool().execute(source="server").stories] == [ROUND]
     story = logs.LogStoryTool().execute(story_id=ROUND)
     assert story.kind == "round" and story.label == "Health checks" and story.title.startswith("42 checks")
+
+
+def test_searching_a_story_id_finds_its_lines(log_dir):
+    _own_file(log_dir, "app-net", _line("Router down", level="WARNING", service="net", story=ROUND),
+              _line("unrelated", service="net"))
+    _own_file(log_dir, "server", _line("Told Michel", story=ROUND))
+    rows = logs.LogSearchTool().execute(query=ROUND, source="all").rows
+    assert sorted(r["message"] for r in rows) == ["Router down", "Told Michel"]
