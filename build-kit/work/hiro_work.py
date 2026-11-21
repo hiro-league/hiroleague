@@ -2092,6 +2092,14 @@ def merged_left(listing: str, main: str, keep: tuple[str, ...] = ()) -> list[str
     return out
 
 
+def win_path(p: Path | str) -> str:
+    """A path as the sweep compares it: Windows slashes, lower case.
+
+    A fix: git lists worktrees with forward slashes, which the sweep turns into Windows ones; a path it compared without
+    the same change made env0 and the docs desk look like stray worktrees on Linux (Simone's deploy check)."""
+    return str(p).replace("/", "\\").lower()
+
+
 def cmd_sweep(a) -> None:
     say("Left behind (nothing is removed here):")
     findings: list[dict] = []
@@ -2104,7 +2112,7 @@ def cmd_sweep(a) -> None:
     import plan
 
     open_plans = plan.whole_branches()
-    desk = str(docs.DESK).lower()  # the docs desk is hiro-docs' one worktree outside the environments
+    desk = win_path(docs.DESK)  # the docs desk is hiro-docs' one worktree outside the environments
     for repo in REPOS:
         d = repo_dir(0, repo)
         for block in git(d, "worktree", "list", "--porcelain").split("\n\n"):
@@ -2113,7 +2121,7 @@ def cmd_sweep(a) -> None:
                 "branch refs/heads/plan/")), "")
             if on:  # a plan's branch is never checked out: a merge into it refuses while one is
                 found("plan", repo, f"{path} has {on} checked out", f"git -C {path} switch --detach {on}")
-            if path.lower() in (str(d).lower(), desk) or path.lower().startswith(str(ROOT).lower() + "\\env"):
+            if path.lower() in (win_path(d), desk) or path.lower().startswith(win_path(ROOT) + "\\env"):
                 continue
             found("worktree", repo, f"worktree outside C:\\hiro\\env1-5: {path}", f"git -C {d} worktree remove {path}")
         for b in git(d, "for-each-ref", "--format=%(refname:short)", "refs/heads/plan/").split():
