@@ -29,6 +29,7 @@ target says where its work goes: dev/main, or its plan's branch. A plan's branch
     hiro-work copy-list [--check]   every repo's copy list (data.toml): what a copy holds, and how (data.py)
     hiro-work deploy [repo ...] [--dry-run]  the deploy: push and deploy, when Michel says (deploy.py)
     hiro-work audit latest | RUN | list      the doc audit's runs, and start / report to record one (audit.py)
+    hiro-work docs open | publish -m "..." | undo   the docs desk: the standard's documents, with no task (docs.py)
 
 State lives in C:\hiro\tasks (one JSON file per task) and every step is logged to C:\hiro\logs\events.jsonl (with
 its time) for CodeHiro's Work area, where ship.py sends it. Standard library only: it runs on the system Python.
@@ -2099,9 +2100,11 @@ def cmd_sweep(a) -> None:
         say(f"  {repo}: {what}")
         findings.append({"kind": kind, "where": repo, "what": what, "since": None, "fix": fix})
 
+    import docs
     import plan
 
     open_plans = plan.whole_branches()
+    desk = str(docs.DESK).lower()  # the docs desk is hiro-docs' one worktree outside the environments
     for repo in REPOS:
         d = repo_dir(0, repo)
         for block in git(d, "worktree", "list", "--porcelain").split("\n\n"):
@@ -2110,7 +2113,7 @@ def cmd_sweep(a) -> None:
                 "branch refs/heads/plan/")), "")
             if on:  # a plan's branch is never checked out: a merge into it refuses while one is
                 found("plan", repo, f"{path} has {on} checked out", f"git -C {path} switch --detach {on}")
-            if path.lower() == str(d).lower() or path.lower().startswith(str(ROOT).lower() + "\\env"):
+            if path.lower() in (str(d).lower(), desk) or path.lower().startswith(str(ROOT).lower() + "\\env"):
                 continue
             found("worktree", repo, f"worktree outside C:\\hiro\\env1-5: {path}", f"git -C {d} worktree remove {path}")
         for b in git(d, "for-each-ref", "--format=%(refname:short)", "refs/heads/plan/").split():
@@ -2279,6 +2282,8 @@ def main(argv: list[str] | None = None) -> int:
     audit.add_parser(sub)
     import plan
     plan.add_parser(sub)
+    import docs
+    docs.add_parser(sub)
     a = p.parse_args(argv)
     if a.cmd in LONG_COMMANDS:
         ignore_console_interrupt()
