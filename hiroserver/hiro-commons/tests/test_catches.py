@@ -1,5 +1,5 @@
 """The shared silent-catch scan: a broad `except` that neither logs nor raises again is found; the apps' contract,
-Code reports and the core's own tests all run it."""
+CodeHiro and the core's own tests all run it."""
 
 import textwrap
 

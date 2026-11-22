@@ -10,7 +10,7 @@ const APPS: Record<string, string> = {
   train: 'TrainHiro',
   eval: 'EvalHiro',
   study: 'StudyHiro',
-  reports: 'Code reports'
+  reports: 'CodeHiro'
 };
 
 export type PartKind = 'server' | 'gateway' | 'cli' | 'channel' | 'app' | 'device';

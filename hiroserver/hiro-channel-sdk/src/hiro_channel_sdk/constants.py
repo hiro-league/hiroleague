@@ -257,7 +257,7 @@ OFFER_KIND_SIGN_IN: str = "sign_in"
 OFFER_KIND_SITE: str = "site"
 AUTH_CODE_SECONDS: int = 60
 
-# The code reports keep a report for the core and each extension, from each one's repo (hiro-code-reports' R4).
+# CodeHiro keeps a report for the core and each extension, from each one's repo (hiro-code-reports' R4).
 #   core.info         also answers {repo}: the core's own repo, CORE_REPO.
 #   extensions.list   extension -> core, {} -> {"extensions": [{extension_id, name, version, description, repo,
 #                     connected}]}: every paired extension, as it last described itself (live while connected), repo

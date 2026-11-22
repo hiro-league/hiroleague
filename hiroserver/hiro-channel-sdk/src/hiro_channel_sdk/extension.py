@@ -152,8 +152,8 @@ class ExtensionInfo(BaseModel):
     # embedding or a reranker profile.
     embed_uses: list[ExtensionSearchUse] = Field(default_factory=list)
     rerank_uses: list[ExtensionSearchUse] = Field(default_factory=list)
-    # The git repo it is built from, by name ("homehiro": ~/homehiro.git on the server); "" = not said. The code reports
-    # keep a report for each extension's repo (extensions.list).
+    # The git repo it is built from, by name ("homehiro": ~/homehiro.git on the server); "" = not said. CodeHiro
+    # keeps a report for each extension's repo (extensions.list).
     repo: str = ""
     # Phase 9a: its features and the rights in each; the core's admin grants them per role (access.py).
     features: list[ExtensionFeature] = Field(default_factory=list)

@@ -317,7 +317,7 @@ def live_copies(hw: ModuleType) -> Path:
 
 
 def env0_group(hw: ModuleType, group: str) -> Path:
-    """A group's data folder in env0 (Code reports keeps env0's in its repo's data/)."""
+    """A group's data folder in env0 (CodeHiro keeps env0's in its repo's data/)."""
     return hw.data_dir(0) / "core" / "default" if group == CORE else hw.app_data(0, appfile.BY_REPO[group])
 
 

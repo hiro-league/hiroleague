@@ -1,7 +1,7 @@
 // The side menu in two levels. Groups (level 1) hold pages (level 2); a page's tabs are small icons on its
 // row, shown while the row is hovered (menu-row.svelte), each a link to `?tab=`, and the page's own link opens its
 // first tab. A tab may hold sub-tabs (Settings' groups): the address names the sub-tab, and the tab's icon opens its
-// first one. A group may instead list one page's tabs as its pages (`tabsOf`: Code reports' Work), each row a link
+// first one. A group may instead list one page's tabs as its pages (`tabsOf`: CodeHiro's Work), each row a link
 // to its tab, the group's title the page's name. Which pages and tabs a user gets comes from pages.ts and the same
 // rules the pages use for their tabs. Pure, with tests (lib/app/menu.test.ts).
 // UI kit, step 1: the menu itself (its groups, pages and tabs) is the app's own, in lib/app/menu.ts; this file is

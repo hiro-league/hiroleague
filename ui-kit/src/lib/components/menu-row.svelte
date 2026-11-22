@@ -15,7 +15,7 @@
 <script lang="ts">
 	// A side-menu row with shortcuts: the row's button (children), and its tabs as small icons at the row's end,
 	// shown only while the row is hovered or one of them has focus, over the end of the name (it fades under them).
-	// The kit's pages use it (app-sidebar), and so does an app's own part of the menu (Code reports' projects).
+	// The kit's pages use it (app-sidebar), and so does an app's own part of the menu (CodeHiro's projects).
 	// On a touch screen they don't show: the page's own tabs are a tap away.
 	import type { Snippet } from 'svelte';
 	import * as Tooltip from '$kit/components/ui/tooltip/index.js';

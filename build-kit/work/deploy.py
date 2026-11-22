@@ -61,7 +61,7 @@ NO_HOOK = (AICAM, DOCS)
 # Where each deploy is checked on Simone (127.0.0.1 there): the core's /status, each app's /api/health
 CORE_HEALTH = "http://127.0.0.1:18080/status"
 # What runs: the core's release folder (<time>-<commit>, deploy/deploy.sh) behind this link; each app's container (named
-# as its repo, compose.yaml) runs an image labelled with its commit (the build kit's and Code reports' Dockerfile)
+# as its repo, compose.yaml) runs an image labelled with its commit (the build kit's and CodeHiro's Dockerfile)
 CORE_CURRENT = "/opt/hiroleague/current"
 REVISION_LABEL = "org.opencontainers.image.revision"
 # Kinds whose deploy is a hook that builds and starts something, so what runs can lag the bare repo

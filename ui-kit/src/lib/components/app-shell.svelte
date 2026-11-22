@@ -10,7 +10,7 @@
 	//   overlays  - what floats over every page (a chat window, toasts)
 	//   noPages   - what someone signed in sees when their role has no page here (the HiroLeague core shows its
 	//               apps to a role that doesn't open its settings). Left out: the first page says it isn't theirs.
-	//   menuExtra - the app's own part of the side menu, items that change (Code reports' projects), after the menu
+	//   menuExtra - the app's own part of the side menu, items that change (CodeHiro's projects), after the menu
 	//               group `menuExtraAfter` names (left out: after the last group). Built from the kit's Sidebar pieces.
 	// `mainClass` adds to the page area's classes (its padding, a fixed height for a page that scrolls inside).
 	import type { Snippet } from 'svelte';

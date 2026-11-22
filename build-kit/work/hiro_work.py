@@ -614,7 +614,7 @@ def write_env_dev(env: int) -> None:
     board = {switches.ENV: (data_dir(env) / switches.FILE).as_posix(), **switches.app_env(modes_of(env))}
     for app in APPS:
         src = repo_dir(0, app) / ".env.dev"
-        if not src.exists():  # an app with no .env.dev (Code reports) takes its settings from up (apps.toml api_env)
+        if not src.exists():  # an app with no .env.dev (CodeHiro) takes its settings from up (apps.toml api_env)
             continue
         lines = src.read_text(encoding="utf-8").splitlines()
         forced = {**ENV_DEV_FORCED, **sign_in_env(env), **board, "DATA_DIR": (data_dir(env) / app).as_posix(),

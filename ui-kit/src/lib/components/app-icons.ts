@@ -9,7 +9,7 @@ export const APP_ICONS = {
 	'scan-face': ScanFace, // TrainHiro
 	'flask-conical': FlaskConical, // EvalHiro
 	'graduation-cap': GraduationCap, // StudyHiro
-	chart: ChartColumn // the code reports
+	chart: ChartColumn // CodeHiro
 } as const;
 
 export const appIcon = (name: string) => APP_ICONS[name as keyof typeof APP_ICONS] ?? AppWindow;

@@ -5,7 +5,7 @@ on the server: the core publishes the name and points the web proxy at the app.
 
 ## What people see
 
-In the app's address setting (HomeHiro: Settings → HiroLeague → HomeHiro's address; the code reports: HiroLeague
+In the app's address setting (HomeHiro: Settings → HiroLeague → HomeHiro's address; CodeHiro: HiroLeague
 settings → its own address) the person types either:
 
 - a **subdomain**: `reports` → `reports.hiro.local` (the field shows `.hiro.local` after it), or

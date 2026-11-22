@@ -312,7 +312,7 @@ async def handle_core_info(params: dict[str, Any], ctx: RequestContext) -> dict[
         "workspace": ctx.server_ctx.workspace_name,
         # Phase 7b: the admin's web port, so an extension can link to the core's admin (its Edit links).
         "admin_port": ctx.server_ctx.config.admin_port,
-        # The core's own repo (the code reports keep a report for it, as for each extension's).
+        # The core's own repo (CodeHiro keeps a report for it, as for each extension's).
         "repo": CORE_REPO,
     }
 
@@ -341,7 +341,7 @@ _REGISTERED_HANDLERS: Final[tuple[tuple[str, Any, frozenset[str]], ...]] = (
     *USES_REQUEST_HANDLERS,  # Phase 7b: ai.uses.set / voice.uses.set (an extension picks its own uses' profiles)
     *SIGN_IN_REQUEST_HANDLERS,  # Phase 8: auth.code (an extension redeems the one-time sign-in code)
     *SITE_NAMES_REQUEST_HANDLERS,  # sites.claim: an app's LAN name, set up by the core
-    *EXTENSIONS_REQUEST_HANDLERS,  # extensions.list: every paired extension and its repo (the code reports)
+    *EXTENSIONS_REQUEST_HANDLERS,  # extensions.list: every paired extension and its repo (CodeHiro)
     *ASK_REQUEST_HANDLERS,  # Phase 9b: extensions.ask (one extension asks another, through the core)
     *LOGS_REQUEST_HANDLERS,  # logs.send: an app's log lines into the core's log store (the logging plan, phase 5)
     *DEVICE_PROBLEM_HANDLERS,  # logs.report: the device app's problems into the log store (the logging plan, phase 8)

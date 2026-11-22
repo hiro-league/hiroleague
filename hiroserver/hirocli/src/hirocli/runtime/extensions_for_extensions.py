@@ -1,6 +1,6 @@
 """Every paired extension and its repo, for extensions (``extensions.list``).
 
-The code reports keep a report for the core and for each extension, each from its own repo (hiro-code-reports'
+CodeHiro keeps a report for the core and for each extension, each from its own repo (hiro-code-reports'
 R4). An extension names its repo in what it says about itself (``ExtensionInfo.repo``); the core keeps that with
 the paired extension (the ``extensions`` table's ``info``) and answers it here, live while the extension is
 connected, else as it last said. Contract: hiro_channel_sdk.constants.

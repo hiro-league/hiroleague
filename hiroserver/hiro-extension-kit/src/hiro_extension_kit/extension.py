@@ -49,7 +49,7 @@ class Extension:
     name: str  # its name in the core ("net"): the core's sign-in page is asked `?for=net`, other apps ask `net.*`
     version: str  # the app's version, declared to the core
     description: str  # one line, shown in the core's admin
-    repo: str  # its repo ("nethiro"): the code reports keep a report for it (the core's extensions.list)
+    repo: str  # its repo ("nethiro"): CodeHiro keeps a report for it (the core's extensions.list)
     port: int  # where it listens on the core's machine (its Dockerfile's uvicorn port): sent with a name claim
     site_title: str  # its Apps card in the core ("Network")
     site_icon: str  # the card's icon ("network")

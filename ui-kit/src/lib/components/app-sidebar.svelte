@@ -28,7 +28,7 @@
 	interface Props {
 		width: number; // the menu's width in pixels
 		onwidth: (px: number) => void;
-		/** The app's own part of the menu, items that change (Code reports' projects): after the group `extraAfter`
+		/** The app's own part of the menu, items that change (CodeHiro's projects): after the group `extraAfter`
 		 * names, else after the last group. Kit pieces (Sidebar.Group and its menu), so it looks like the rest. */
 		extra?: Snippet;
 		extraAfter?: string;

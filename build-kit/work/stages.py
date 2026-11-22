@@ -5,7 +5,7 @@ copy, the start) instead of one block.
 It reads the lines the deploy scripts already print (git prints a hook's lines with "remote: " before them):
 
 - the core's deploy (deploy/deploy.sh): "hiroleague: <what it does now>";
-- an app's (build-kit/deploy.sh, Code reports' own deploy.sh): Docker's build first ("#12 [ui 5/7] RUN npm ci",
+- an app's (build-kit/deploy.sh, CodeHiro's own deploy.sh): Docker's build first ("#12 [ui 5/7] RUN npm ci",
   "#12 2.31 <output>", "#12 DONE 15.7s"), then "<app>: <what it does now>", and Compose starting its container;
 - the check engine, inside the core's deploy: "started: <part>", and when the part ends its block,
   "==> <part>" ... "passed in N s" or "FAILED in N s".

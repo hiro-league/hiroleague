@@ -1,4 +1,4 @@
-"""extensions.list: every paired extension and its repo, for the code reports."""
+"""extensions.list: every paired extension and its repo, for CodeHiro."""
 
 from __future__ import annotations
 

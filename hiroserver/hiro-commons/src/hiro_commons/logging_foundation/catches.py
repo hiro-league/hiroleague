@@ -8,7 +8,7 @@ raise again somewhere in its own code: an error it swallows is lost for good. ru
 form (`except: pass`, `except: continue`); this scan catches the rest (`except Exception: return None`). ruff's own
 blind-except rule can't tell `failed()` is a log line, so the scan is ours.
 
-Every Hiro League repo runs it: each app through the backend kit's contract, Code reports in its tests, the core in
+Every Hiro League repo runs it: each app through the backend kit's contract, CodeHiro in its tests, the core in
 hiro-commons' tests over each of its packages.
 """
 

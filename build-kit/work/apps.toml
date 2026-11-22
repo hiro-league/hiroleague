@@ -86,7 +86,7 @@ copy_data = true
 [[app]]
 repo = "codehiro"
 name = "reports"
-title = "Code reports"
+title = "CodeHiro"
 api_port = 11
 ui_port = 12
 backend = "scc_report"
