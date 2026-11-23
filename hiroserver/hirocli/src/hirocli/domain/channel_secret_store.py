@@ -1,7 +1,7 @@
 """Channel plugin secrets (design §5.6).
 
 A channel config field declared ``secret: true`` in the plugin's schema (§5.1) is
-NOT stored in ``channel_plugins.config``. Its value goes to the OS keyring
+NOT stored in the channel's ``config`` (extension_records). Its value goes to the OS keyring
 (``ChannelSecretStore``); the config row keeps only a ``SECRET_MARKER`` presence
 sentinel. At push time ``resolve_channel_secrets`` swaps markers for real values
 so the plugin receives usable config while the database never holds the secret.
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 _SERVICE_PREFIX = "hiroleague"
 
-# Presence sentinel written into channel_plugins.config in place of a secret value.
+# Presence sentinel written into the channel's config in place of a secret value.
 # The real value lives only in the keyring; this just records "a secret is set".
 SECRET_MARKER: dict[str, bool] = {"__secret__": True}
 

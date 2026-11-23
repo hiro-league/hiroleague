@@ -1,8 +1,8 @@
 """The Hiro League apps, read from apps.toml beside this file: the one place hiro-work, the deploy and the data
 copies learn about an app. A new app adds its row there (hiro-docs standards/new-extension.md).
 
-Each environment's block of ports is 7N00-7N49 (env N): the core has 00 (admin API), 01 (extension socket), 02 (admin
-UI), 13 (HTTP status API), 14 (channel plugins) and 17 (its gateway, for device chat); 18 is the device web app
+Each environment's block of ports is 7N00-7N49 (env N): the core has 00 (admin API), 01 (extension socket: the channel
+plugins and the apps), 02 (admin UI), 13 (HTTP status API) and 17 (its gateway, for device chat); 18 is the device web app
 (device-web, the Flutter app for device chat); each app has the two its row names.
 """
 
@@ -14,7 +14,7 @@ from pathlib import Path
 
 FILE = Path(__file__).with_name("apps.toml")
 BLOCK = 50  # ports per environment: 7N00-7N49
-CORE_PORTS = {"core-admin": 0, "core-socket": 1, "core-ui": 2, "core-http": 13, "core-plugin": 14, "core-gateway": 17,
+CORE_PORTS = {"core-admin": 0, "core-socket": 1, "core-ui": 2, "core-http": 13, "core-gateway": 17,
               "device-web": 18}
 
 

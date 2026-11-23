@@ -1,14 +1,13 @@
 """Phase 4: an extension's WhatsApp messages go out through the core.
 
 The three extension-only requests (whatsapp.send / check / status) against a fake
-ChannelManager, a message to the owner landing in the owner's conversation and in
-Hiro's thread, and ChannelManager.call_channel keeping the plugin's refusal reason.
+extension manager, and a message to the owner landing in the owner's conversation and
+in Hiro's thread. (A plugin's refusal keeping its reason: test_extension_manager_channels.py.)
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -22,7 +21,7 @@ from hiro_channel_sdk.constants import (
 from hirocli.domain.channel_config import ChannelConfig, save_channel_config
 from hirocli.domain.conversation_channel import resolve_default_channel
 from hirocli.domain.message_store import list_messages
-from hirocli.runtime.channel_manager import ChannelCallError, ChannelManager, _ConnectedChannel
+from hirocli.runtime.extension_manager import ChannelCallError
 from hirocli.runtime.request_handler import RequestRefused
 from hirocli.runtime.whatsapp_for_extensions import (
     handle_whatsapp_check,
@@ -50,6 +49,9 @@ class FakeChannels:
     def get_connected_channels(self) -> list[str]:
         return ["devices", "whatsapp"] if self.connected else ["devices"]
 
+    def snapshot(self) -> dict[str, dict[str, Any]]:
+        return {}  # no app connected: logs name the sender by its id
+
 
 class FakeAgent:
     def __init__(self) -> None:
@@ -63,9 +65,8 @@ class FakeAgent:
 def _ctx(workspace: Path, channels: FakeChannels | None, agent: FakeAgent | None = None) -> SimpleNamespace:
     server_ctx = SimpleNamespace(
         workspace_path=workspace,
-        channel_manager=channels,
         agent_manager=agent,
-        extension_manager=None,
+        extension_manager=channels,
         channel_status={},
     )
     msg = SimpleNamespace(routing=SimpleNamespace(sender_id="ext-home"))
@@ -146,40 +147,3 @@ def test_status_reports_the_plugins_last_state(workspace: Path) -> None:
     }
     stopped = _ctx(workspace, FakeChannels(connected=False))
     assert asyncio.run(handle_whatsapp_status({}, stopped))["running"] is False
-
-
-class _AnsweringWs:
-    """A plugin socket that answers every channel.call with a refusal."""
-
-    def __init__(self, manager: ChannelManager) -> None:
-        self.manager = manager
-
-    async def send(self, raw: str) -> None:
-        req = json.loads(raw)
-        reply = {
-            "jsonrpc": "2.0",
-            "id": req["id"],
-            "error": {"code": -32000, "message": "WhatsApp isn't connected", "data": {"reason": WHATSAPP_ERROR_NOT_CONNECTED}},
-        }
-        asyncio.get_running_loop().call_soon(
-            lambda: asyncio.ensure_future(self.manager._handle_response("whatsapp", reply))
-        )
-
-
-def test_call_channel_keeps_the_plugins_reason() -> None:
-    manager = ChannelManager(SimpleNamespace(config=SimpleNamespace(plugin_port=0)))  # type: ignore[arg-type]
-
-    async def scenario() -> ChannelCallError:
-        manager._channels["whatsapp"] = _ConnectedChannel(
-            name="whatsapp", version="0", description="", ws=_AnsweringWs(manager)  # type: ignore[arg-type]
-        )
-        with pytest.raises(ChannelCallError) as refused:
-            await manager.call_channel("whatsapp", "send", {"to": OWNER})
-        with pytest.raises(ChannelCallError) as absent:
-            await manager.call_channel("telegram", "send", {})
-        assert absent.value.reason == "not_running"
-        return refused.value
-
-    refused = asyncio.run(scenario())
-    assert refused.reason == WHATSAPP_ERROR_NOT_CONNECTED
-    assert str(refused) == "WhatsApp isn't connected"

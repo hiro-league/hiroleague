@@ -1,6 +1,6 @@
 """ServerContext — shared runtime state for all server components.
 
-Every runtime component (ChannelManager, CommunicationManager, AgentManager,
+Every runtime component (ExtensionManager, CommunicationManager, AgentManager,
 HTTP server, admin UI, etc.) receives a single ServerContext instead of
 individual workspace_path / config / stop_event parameters.
 
@@ -27,7 +27,6 @@ log = Logger.get("CTX")
 
 if TYPE_CHECKING:
     from hirocli.domain.memory import MemoryService
-    from hirocli.runtime.channel_manager import ChannelManager
     from hirocli.runtime.extension_manager import ExtensionManager
     from hirocli.runtime.agent_manager import AgentManager
     from hirocli.runtime.knowledge_manager import KnowledgeManager
@@ -36,8 +35,7 @@ if TYPE_CHECKING:
 class DeviceNameResolver:
     """Shared cache for device_id → friendly name lookups.
 
-    Previously duplicated independently inside both CommunicationManager
-    and ChannelManager with identical logic.
+    Shared by CommunicationManager and the ExtensionManager.
     """
 
     def __init__(self, workspace_path: Path) -> None:
@@ -81,11 +79,8 @@ class ServerContext:
     preference_reactor: PreferenceReactor = field(init=False)
     memory_service: "MemoryService | None" = field(default=None, init=False)
     knowledge_manager: "KnowledgeManager | None" = field(default=None, init=False)
-    # Set by the composition root after the ChannelManager is built; lets admin
-    # routes drive live channel actions (enable/disable, logout, reconnect).
-    channel_manager: "ChannelManager | None" = field(default=None, init=False)
-    # Set by the composition root; lets admin routes list connected extensions,
-    # run the test call and disconnect a removed one.
+    # Set by the composition root: the one extension manager. Lets admin routes list connected extensions, run the
+    # test call, disconnect a removed one, and drive live channel actions (enable/disable, logout, reconnect).
     extension_manager: "ExtensionManager | None" = field(default=None, init=False)
     # Apps' LAN names: claims, mDNS publishing and the Caddy file (runtime/site_names.py).
     site_names: Any = field(default=None, init=False)

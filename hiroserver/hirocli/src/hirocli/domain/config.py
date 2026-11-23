@@ -41,7 +41,6 @@ from hiro_commons.constants.network import (
     PORT_OFFSET_ADMIN,
     PORT_OFFSET_EXTENSION,
     PORT_OFFSET_HTTP,
-    PORT_OFFSET_PLUGIN,
     PORT_RANGE_START,
 )
 from hiro_commons.constants.storage import CONFIG_FILENAME, LOGS_DIR, MASTER_KEY_FILENAME, RUN_DIR
@@ -63,14 +62,13 @@ class Config(BaseModel):
     gateway_port: int = DEFAULT_GATEWAY_PORT
     http_host: str = DEFAULT_LOCALHOST
     http_port: int = PORT_RANGE_START + PORT_OFFSET_HTTP
-    plugin_port: int = PORT_RANGE_START + PORT_OFFSET_PLUGIN
     admin_port: int = PORT_RANGE_START + PORT_OFFSET_ADMIN
     # Extensions (programs that connect on their own, HomeHiro first) sign in on this
     # address. 127.0.0.1 = same machine only; set the Docker bridge or LAN address to
     # reach an extension in a normal Docker network or on another machine. The socket
     # isn't encrypted: on the LAN its messages can be read (sign-in still holds).
     extension_host: str = DEFAULT_LOCALHOST
-    # None = the workspace slot's extension port, derived from plugin_port (see
+    # None = the workspace slot's extension port, derived from http_port (see
     # effective_extension_port), so existing workspaces need no re-setup.
     extension_port: int | None = None
     # Apps' LAN names (docs/site-names-design.md), set with `hiro extension names`. Empty ip = this machine isn't
@@ -105,10 +103,10 @@ class Config(BaseModel):
         return self.gateway_url
 
     def effective_extension_port(self) -> int:
-        """The extension socket's port: the configured one, else the slot's (plugin port + 1)."""
+        """The extension socket's port: the configured one, else the slot's (live: 18082)."""
         if self.extension_port:
             return self.extension_port
-        return self.plugin_port - PORT_OFFSET_PLUGIN + PORT_OFFSET_EXTENSION
+        return self.http_port - PORT_OFFSET_HTTP + PORT_OFFSET_EXTENSION
 
 
 class State(BaseModel):

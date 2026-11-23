@@ -1,40 +1,32 @@
 """Channel SDK protocol constants.
 
-Authoritative source for the JSON-RPC wire protocol, WebSocket close codes,
-auth roles, message content types, and reconnect policy used by all Hiro
-channel packages and the Hiro/Gateway servers.
+Authoritative source for the extension socket's wire names (sign-in frames, requests and events), WebSocket close
+codes, auth roles, message content types, and reconnect policy used by every Hiro extension (channel plugins and
+apps) and the Hiro/Gateway servers.
 """
 
 from __future__ import annotations
 
 # ---------------------------------------------------------------------------
-# JSON-RPC
+# What a channel plugin answers, as an extension the core starts
 # ---------------------------------------------------------------------------
 
-JSONRPC_VERSION: str = "2.0"
-JSONRPC_ERROR_METHOD_NOT_FOUND: int = -32601
-JSONRPC_ERROR_INTERNAL: int = -32603
-JSONRPC_ERROR_CALL_REFUSED: int = -32000  # channel.call refused on purpose; data.reason says why
+# The core's requests to an extension it starts (a channel plugin); the plugin runner (runner.py) answers them.
+#   extension.configure  {config} -> {}: its settings, sent after every sign-in (empty when it has none: a
+#                        plugin starts on them), and again when they are saved while it runs.
+#   extension.status     {} -> {name, version, status}
+#   extension.stop       {} -> {}: stop and end the process.
+METHOD_EXTENSION_CONFIGURE: str = "extension.configure"
+METHOD_EXTENSION_STATUS: str = "extension.status"
+METHOD_EXTENSION_STOP: str = "extension.stop"
 
-# ---------------------------------------------------------------------------
-# Channel RPC methods
-# ---------------------------------------------------------------------------
-
-METHOD_REGISTER: str = "channel.register"
-METHOD_RECEIVE: str = "channel.receive"
-METHOD_EVENT: str = "channel.event"
-METHOD_SEND: str = "channel.send"
-METHOD_CONFIGURE: str = "channel.configure"
-METHOD_STOP: str = "channel.stop"
-METHOD_STATUS: str = "channel.status"
-# core → plugin: a named request the plugin answers (params {"name", "params"}).
-# Unlike channel.send (a reply the core hands over and forgets), the core waits for
-# the answer: Phase 4's sends for an extension report "sent" or why not.
-METHOD_CALL: str = "channel.call"
-
-# Calls the WhatsApp plugin answers (channel.call names).
+# A plugin's own methods are requests too. The WhatsApp plugin's:
 WHATSAPP_CALL_SEND: str = "send"    # {to, text?, image_b64?, voice_b64?, voice_seconds?, waveform_b64?} → {"sent": true}
 WHATSAPP_CALL_CHECK: str = "check"  # {numbers: [...]} → {"answers": [{query, on_whatsapp, jid}]}
+
+# The pairing code the core makes for an extension it starts, in the process's environment (never on its command
+# line): used once, the first time, or when its key is lost.
+ENV_PAIRING_CODE: str = "HIRO_PAIRING_CODE"
 
 # ---------------------------------------------------------------------------
 # WebSocket close codes (Hiro application range 4000–4999)
@@ -46,15 +38,13 @@ WS_CLOSE_PAIRING_FIELD_MISSING: int = 4004
 WS_CLOSE_DESKTOP_NOT_CONNECTED: int = 4006
 WS_CLOSE_PAIRING_TIMEOUT: int = 4008
 WS_CLOSE_DUPLICATE_DEVICE: int = 4009
-WS_CLOSE_CHANNEL_REPLACED: int = 4010
 WS_CLOSE_EXTENSION_DENIED: int = 4011    # extension sign-in or pairing refused
 WS_CLOSE_EXTENSION_REPLACED: int = 4012  # a newer connection of the same extension took over
 WS_CLOSE_EXTENSION_REMOVED: int = 4013   # the extension was removed in the core's admin
 
 # ---------------------------------------------------------------------------
-# Extensions — programs that connect to the core on their own (HomeHiro first)
-#
-# Unlike a channel plugin, the core doesn't start an extension, so it signs in:
+# Extensions — every program that plugs into the core: a channel plugin (the core starts it) or an app (it
+# starts itself). Each signs in on the one extension socket:
 #   1. core → extension   {"type": "auth_challenge", "nonce": "<hex>"}
 #   2. extension → core   {"type": "pair", "code", "public_key", "signature", "info"}   first time
 #                         {"type": "auth", "extension_id", "signature", "info"}          after that
@@ -62,7 +52,9 @@ WS_CLOSE_EXTENSION_REMOVED: int = 4013   # the extension was removed in the core
 #   3. core → extension   {"type": "welcome", "extension_id", "core": {...}}
 #                      or {"type": "denied", "reason", "message"} and the socket closes
 # After the welcome both sides exchange UnifiedMessage frames: requests, responses
-# and events (the device language), on routing.channel EXTENSION_CHANNEL.
+# and events (the device language), on routing.channel EXTENSION_CHANNEL. A channel
+# plugin also relays other people's frames (a phone's, a WhatsApp contact's): their
+# sender is that person and their channel the plugin's; the core routes them to chat.
 # ---------------------------------------------------------------------------
 
 EXTENSION_FRAME_CHALLENGE: str = "auth_challenge"

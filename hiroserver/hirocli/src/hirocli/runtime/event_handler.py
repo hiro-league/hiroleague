@@ -4,9 +4,9 @@ Application-level events (e.g. delivery receipts, device status updates)
 arrive here after routing by CommunicationManager. Handlers are registered
 per event type and invoked when a matching event arrives.
 
-Distinct from ChannelEventHandler (infrastructure-level channel.event RPC
-signals like pairing and connectivity). This handler operates on fully
-validated UnifiedMessage objects.
+Distinct from the events a channel plugin sends as itself (pairing, connectivity),
+which go to the extension manager's event registry (infra_event_handlers.py). This
+handler operates on the events a phone or a contact sends, relayed through a channel.
 
 Initial implementation: log all inbound events. Register handlers for
 specific event types as the application grows.

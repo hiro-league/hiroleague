@@ -15,7 +15,8 @@ from hirocli.domain.config import Config
 from hirocli.domain.events import DomainEventType
 from hirocli.domain.pairing import ApprovedDevice, paired_device_ids, revoke_approved_device, upsert_approved_device
 from hirocli.runtime.builtin_gateway import BuiltinGateway, gateway_command
-from hirocli.runtime.channel_manager import ChannelManager
+from hiro_channel_sdk.models import ContentItem, MessageRouting, UnifiedMessage
+from hirocli.runtime.extension_manager import ExtensionManager, _Connection
 from hirocli.runtime.infra_event_handlers import InfraEventHandlers
 
 
@@ -57,15 +58,28 @@ def test_pairing_and_removing_a_device_say_so(tmp_path: Path, monkeypatch) -> No
 def test_the_core_refuses_a_frame_from_a_device_no_longer_paired(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(pairing, "get_domain_event_bus", _Bus)
     upsert_approved_device(tmp_path, _device("mobile-a"))
-    cm = ChannelManager.__new__(ChannelManager)
-    cm._ctx = SimpleNamespace(workspace_path=tmp_path)
+    ctx = SimpleNamespace(
+        workspace_path=tmp_path, config=Config(), device_names=SimpleNamespace(resolve=lambda device_id: device_id)
+    )
+    manager = ExtensionManager(ctx, None)  # type: ignore[arg-type]
+    chat: list[str] = []
 
-    def frame(sender: str) -> dict:
-        return {"routing": {"sender_id": sender}}
+    async def to_chat(data: dict) -> None:
+        chat.append(data["routing"]["sender_id"])
 
-    assert cm._from_unpaired_device("devices", frame("mobile-a")) is False
-    assert cm._from_unpaired_device("devices", frame("mobile-gone")) is True
-    assert cm._from_unpaired_device("whatsapp", frame("someone")) is False  # other channels have their own senders
+    manager.set_chat_handler(to_chat)
+
+    def relayed(channel: str, sender: str) -> None:
+        conn = _Connection(extension_id="x", name=channel, kind="channel", relays_chat=True, started_by_core=True,
+                           info={}, ws=None, connected_at=datetime.now(UTC), remote="")  # type: ignore[arg-type]
+        msg = UnifiedMessage(routing=MessageRouting(channel=channel, direction="inbound", sender_id=sender),
+                             content=[ContentItem(content_type="text", body="hi")])
+        asyncio.run(manager._relay_in(conn, msg.model_dump(mode="json"), msg))
+
+    relayed("devices", "mobile-a")
+    relayed("devices", "mobile-gone")
+    relayed("whatsapp", "someone")  # other channels have their own senders
+    assert chat == ["mobile-a", "someone"]
 
 
 def test_the_gateway_hears_the_paired_devices(tmp_path: Path, monkeypatch) -> None:
@@ -79,7 +93,7 @@ def test_the_gateway_hears_the_paired_devices(tmp_path: Path, monkeypatch) -> No
             sent.append(args)
 
     handlers = InfraEventHandlers(SimpleNamespace(workspace_path=tmp_path))
-    handlers._channel_manager = _Channels()
+    handlers._extensions = _Channels()
     asyncio.run(handlers.send_allowed_devices())
     assert sent == [("devices", "allowed_devices", {"device_ids": ["mobile-a", "mobile-b"]})]
 

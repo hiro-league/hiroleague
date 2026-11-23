@@ -203,7 +203,7 @@ def ensure_mandatory_devices_channel(workspace_path: Path, config: Config) -> No
 
     Gated by the ``devices`` feature: when it is hidden (first public builds that
     rely only on the admin chat + WhatsApp), the devices channel is NOT seeded or
-    enabled, so ChannelManager never spawns it and no gateway connection is
+    enabled, so ExtensionManager never spawns it and no gateway connection is
     attempted. An already-seeded row is flipped to disabled so existing
     workspaces self-heal on the next restart; a fresh workspace gets no row at all.
     """

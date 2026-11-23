@@ -61,7 +61,7 @@ flowchart TB
     ctx{{ServerContext<br/>config · prefs · keys · loop}}
 
     subgraph io[I/O & Control surfaces]
-        chan[ChannelManager<br/>WS server · plugin subprocesses]
+        chan[ExtensionManager<br/>the extension socket · plugin subprocesses]
         http[HTTP Server<br/>FastAPI control + Tool /invoke]
         adminui[Admin UI server<br/>admin_svelte routes]
         metrics[MetricsCollector]
@@ -116,7 +116,7 @@ flowchart TB
 | Component | File | What it owns |
 |---|---|---|
 | **ServerContext** | `runtime/server_context.py` | Workspace path, `Config`, keys, the event loop, `PreferencesRuntime`, `PreferenceReactor`, device-name cache. Built once; passed everywhere. |
-| **ChannelManager** | `runtime/channel_manager.py` | Local WebSocket server (`plugin_port`); spawns channel plugins as **subprocesses**, talks JSON-RPC. The `devices` plugin owns Gateway connectivity. |
+| **ExtensionManager** | `runtime/extension_manager.py`, `extension_starter.py` | The one extension socket (`extension_port`, live 18082) for every extension: the channel plugins it starts as **subprocesses** and the apps. Each signs in with its own key; frames are UnifiedMessage, routed by who the sender is (a channel plugin's relayed chat to CommunicationManager, an extension's own requests and events to their handlers). The `devices` plugin owns Gateway connectivity. |
 | **CommunicationManager** | `runtime/communication_manager.py` | Routes between channels and the agent. Owns `InboundPipeline`, `OutboundPipeline`, `GraphEventSubscriber`. |
 | **AgentManager** | `runtime/agent_manager.py` | Builds & caches the compiled chat graph; owns STT/Vision/TTS/Memory/Knowledge service handles; hot-reloads them on preference changes. |
 | **Chat Agent Graph** | `runtime/agent_graph/` | The per-message LangGraph workflow (Level 2). |
@@ -137,7 +137,7 @@ This is the hot path: a user message arriving from a device, flowing through the
 sequenceDiagram
     autonumber
     participant Gw as Gateway
-    participant CM as ChannelManager
+    participant CM as ExtensionManager
     participant Comm as CommunicationManager
     participant In as InboundPipeline
     participant AM as AgentManager
@@ -145,7 +145,7 @@ sequenceDiagram
     participant GES as GraphEventSubscriber
     participant Out as OutboundPipeline
 
-    Gw->>CM: UnifiedMessage (JSON-RPC over WS)
+    Gw->>CM: UnifiedMessage (relayed by the devices plugin, on the extension socket)
     CM->>Comm: receive(data)
     Comm->>In: validate → permission → dispatch
     Note over In: switch on message_type<br/>message · request · stream · event

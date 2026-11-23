@@ -120,7 +120,7 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
         console.print(f"  id          : [dim]{result.id}[/dim]")
         console.print(f"  path        : [bold]{result.path}[/bold]")
         console.print(f"  http_port   : [bold]{result.http_port}[/bold]")
-        console.print(f"  plugin_port : [bold]{result.plugin_port}[/bold]")
+        console.print(f"  extension_port : [bold]{result.extension_port}[/bold]")
         console.print(f"  admin_port  : [bold]{result.admin_port}[/bold]")
 
         if result.is_default:
@@ -433,7 +433,7 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
             }.get(result.autostart_method or "", "[dim]—[/dim]")
             table.add_row("Autostart", autostart_display)
         table.add_row("HTTP port", str(result.http_port))
-        table.add_row("Plugin port", str(result.plugin_port))
+        table.add_row("Extension port", str(result.extension_port))
         table.add_row("Admin port", str(result.admin_port))
         table.add_row("Port slot", str(result.port_slot))
 

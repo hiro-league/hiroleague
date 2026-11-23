@@ -1,6 +1,6 @@
 """Shared human-first logging helpers for the communication path.
 
-Used by ``CommunicationManager``, ``ChannelManager``, ``AgentManager`` (and any
+Used by ``CommunicationManager``, ``ExtensionManager``, ``AgentManager`` (and any
 future runtime peer) so every log line about a UnifiedMessage carries the same
 shape: direction arrow, peer label, kind summary, optional content hint,
 followed by opaque ids.

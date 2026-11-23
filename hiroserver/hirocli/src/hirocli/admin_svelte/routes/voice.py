@@ -199,7 +199,7 @@ async def voice_clip_send(
     if person is None or not person.whatsapp:
         return api_failure("That person has no WhatsApp number in the family list.")
     ctx = getattr(request.app.state, "ctx", None)
-    channels = getattr(ctx, "channel_manager", None) if ctx is not None else None
+    channels = getattr(ctx, "extension_manager", None) if ctx is not None else None
     if channels is None:
         return api_failure("WhatsApp isn't running in HiroLeague.")
     send = {

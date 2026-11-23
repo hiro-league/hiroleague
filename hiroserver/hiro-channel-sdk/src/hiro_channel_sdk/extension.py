@@ -1,11 +1,11 @@
-"""Extension contract — a program that runs on its own (HomeHiro first) and connects
-to the HiroLeague core: it pairs once, signs in on every connection, then exchanges
-requests, responses and events with the core.
+"""Extension contract — every program that plugs into the HiroLeague core, an app (HomeHiro...) or a channel
+plugin (WhatsApp, devices, echo): it pairs once, signs in on every connection, then exchanges requests, responses and
+events with the core.
 
-A channel plugin (transport.py) is started by the core and trusted. An extension
-is not: it pairs with a one-time code from the core's admin (sending its own public
-key) and signs the core's challenge each time it connects. The frames are listed in
-constants.py ("Extensions").
+It pairs with a one-time code (an app: from the core's admin; a channel plugin: made by the core when it starts it,
+runner.py), sending its own public key, and signs the core's challenge each time it connects. The frames are listed in
+constants.py ("Extensions"). A channel plugin also relays other people's frames both ways (``on_relay``,
+``send_frame``).
 
 Usage::
 
@@ -157,6 +157,10 @@ class ExtensionInfo(BaseModel):
     repo: str = ""
     # Phase 9a: its features and the rights in each; the core's admin grants them per role (access.py).
     features: list[ExtensionFeature] = Field(default_factory=list)
+    # A channel plugin's settings form (a JSON Schema) and how its account is linked (capabilities.py): the core's
+    # admin draws them. None = none.
+    config_schema: dict[str, Any] | None = None
+    capabilities: dict[str, Any] | None = None
 
 
 class ExtensionRequestError(Exception):
@@ -357,6 +361,8 @@ class ExtensionCredentials:
 # ---------------------------------------------------------------------------
 
 RequestHandlerFn = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
+RelayHandlerFn = Callable[[UnifiedMessage], Awaitable[None]]
+AnyRequestHandlerFn = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
 EventHandlerFn = Callable[[str, dict[str, Any]], Awaitable[None]]
 StatusCallback = Callable[[str, dict[str, Any]], Awaitable[None] | None]
 
@@ -378,13 +384,19 @@ class ExtensionClient:
         credentials: ExtensionCredentials,
         *,
         on_status: StatusCallback | None = None,
+        on_relay: RelayHandlerFn | None = None,
     ) -> None:
         self._url = url.strip()
+        # A channel plugin's: the core's frames for someone else (a reply to a phone or a WhatsApp contact), in order.
+        self._on_relay = on_relay
         self._info = info
         self._credentials = credentials
         self._on_status = on_status
         self._request_handlers: dict[str, RequestHandlerFn] = {}
         self._event_handlers: dict[str, EventHandlerFn] = {}
+        # For a method / an event type no handler names (a channel plugin's own methods and admin actions).
+        self._any_request: AnyRequestHandlerFn | None = None
+        self._any_event: EventHandlerFn | None = None
         self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self._ws: Any = None
         self._pairing_code: str | None = None
@@ -412,6 +424,14 @@ class ExtensionClient:
     def on_event(self, event_type: str, handler: EventHandlerFn) -> None:
         """Call ``handler(event_type, data)`` for the core's ``event_type`` events."""
         self._event_handlers[event_type] = handler
+
+    def register_any_request(self, handler: AnyRequestHandlerFn) -> None:
+        """Answer the core's requests no ``register_request`` names with ``handler(method, params) -> data``."""
+        self._any_request = handler
+
+    def on_any_event(self, handler: EventHandlerFn) -> None:
+        """Call ``handler(event_type, data)`` for the core's events no ``on_event`` names."""
+        self._any_event = handler
 
     # -- state -----------------------------------------------------------------
 
@@ -562,6 +582,18 @@ class ExtensionClient:
             return False
         return True
 
+    async def send_frame(self, msg: UnifiedMessage) -> bool:
+        """Send a frame as it is: a channel plugin relaying someone else's message (their sender, its channel).
+        False when not connected (frames aren't queued)."""
+        ws = self._ws
+        if ws is None or self._status != STATUS_CONNECTED:
+            return False
+        try:
+            await ws.send(msg.model_dump_json())
+        except ConnectionClosed:
+            return False
+        return True
+
     # -- internals ---------------------------------------------------------------
 
     def _sender_id(self) -> str:
@@ -686,6 +718,17 @@ class ExtensionClient:
         except ValidationError as exc:
             log.warning("⚠️ Unreadable message from the core", error=str(exc))
             return
+        if msg.routing.channel != EXTENSION_CHANNEL:
+            # The core's own frames carry the socket's channel; any other is someone else's, for a channel plugin to
+            # relay. Awaited here, not in a task: a stream's chunks and a reply's parts must stay in order.
+            if self._on_relay is None:
+                log.warning("⚠️ Ignored a frame for someone else", channel=msg.routing.channel)
+                return
+            try:
+                await self._on_relay(msg)
+            except Exception as exc:  # one bad frame never ends the connection
+                log.error("❌ Relaying a frame failed", channel=msg.routing.channel, error=str(exc), exc_info=True)
+            return
         if msg.message_type == MESSAGE_TYPE_RESPONSE:
             fut = self._pending.get(msg.request_id or "")
             if fut is not None and not fut.done():
@@ -697,7 +740,7 @@ class ExtensionClient:
             # Answered in its own task so a slow handler doesn't hold up other frames.
             self._spawn(self._answer(ws, msg))
         elif msg.message_type == MESSAGE_TYPE_EVENT and msg.event is not None:
-            handler = self._event_handlers.get(msg.event.type)
+            handler = self._event_handlers.get(msg.event.type) or self._any_event
             if handler is not None:
                 with story.begin("extension.event", parent=msg.routing.metadata, area=EXTENSION_AREA, line=False,
                                  event=msg.event.type):  # the handler's task inherits the event's story
@@ -733,12 +776,12 @@ class ExtensionClient:
             data = self._info.model_dump(mode="json", by_alias=True)
             return build_response(msg, sender_id=sender, direction="inbound", data=data)
         handler = self._request_handlers.get(method)
-        if handler is None:
+        if handler is None and self._any_request is None:
             return build_response(
                 msg, sender_id=sender, direction="inbound", error=("method_not_found", f"Unknown method: {method}")
             )
         try:
-            data = await handler(params)
+            data = await handler(params) if handler is not None else await self._any_request(method, params)
         except ExtensionRequestError as exc:
             # Phase 8: a handler answers a contract's own error code (sign_in.finish: not_linked / failed), so the
             # core can tell people why, instead of a generic internal_error.

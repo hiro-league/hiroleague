@@ -14,14 +14,14 @@ Identity model:
   Renaming only touches the ``name`` field — no cascading side-effects.
 
 Port allocation — 4 ports per slot, starting at port_range_start (default 18080):
-  http_port    = port_range_start + slot * 4
-  plugin_port  = port_range_start + slot * 4 + 1
-  (offset +2 is reserved)
-  admin_port   = port_range_start + slot * 4 + 3
+  http_port       = port_range_start + slot * 4
+  (offset +1 is unused)
+  extension_port  = port_range_start + slot * 4 + 2
+  admin_port      = port_range_start + slot * 4 + 3
 
 Example (default port_range_start=18080):
-  slot 0 → http=18080, plugin=18081, (reserved=18082), admin=18083
-  slot 1 → http=18084, plugin=18085, (reserved=18086), admin=18087
+  slot 0 → http=18080, extension=18082, admin=18083
+  slot 1 → http=18084, extension=18086, admin=18087
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ from pathlib import Path
 from platformdirs import user_data_dir
 from pydantic import BaseModel, Field
 
-from hiro_commons.constants.network import PORT_OFFSET_ADMIN, PORT_OFFSET_PLUGIN, PORT_RANGE_START, PORTS_PER_SLOT
+from hiro_commons.constants.network import PORT_OFFSET_ADMIN, PORT_OFFSET_EXTENSION, PORT_RANGE_START, PORTS_PER_SLOT
 from hiro_commons.constants.storage import REGISTRY_FILENAME
 
 from ..constants import APP_NAME, ENV_WORKSPACE
@@ -84,8 +84,8 @@ def http_port_for(registry: WorkspaceRegistry, slot: int) -> int:
     return registry.port_range_start + slot * PORTS_PER_SLOT
 
 
-def plugin_port_for(registry: WorkspaceRegistry, slot: int) -> int:
-    return registry.port_range_start + slot * PORTS_PER_SLOT + PORT_OFFSET_PLUGIN
+def extension_port_for(registry: WorkspaceRegistry, slot: int) -> int:
+    return registry.port_range_start + slot * PORTS_PER_SLOT + PORT_OFFSET_EXTENSION
 
 
 def admin_port_for(registry: WorkspaceRegistry, slot: int) -> int:

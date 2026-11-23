@@ -6,7 +6,7 @@ by AgentManager via ``comm_manager.enqueue_outbound``). The single worker
 to the sink.
 
 Asymmetry note: inbound is callback-driven (``InboundPipeline.receive`` is
-called directly by ChannelManager), so it has no worker. Symmetrising the
+called directly by ExtensionManager), so it has no worker. Symmetrising the
 inbound side with its own queue+worker is left for a future PR — see
 ``docs/communication-manager-refactor.md`` §8.
 """

@@ -26,7 +26,7 @@ from ..domain.workspace import (
     create_workspace,
     http_port_for,
     load_registry,
-    plugin_port_for,
+    extension_port_for,
     remove_workspace,
     rename_workspace,
     resolve_workspace,
@@ -55,7 +55,7 @@ class WorkspaceCreateResult:
     name: str
     path: str
     http_port: int
-    plugin_port: int
+    extension_port: int
     admin_port: int
     is_default: bool
 
@@ -85,7 +85,7 @@ class WorkspaceShowResult:
     is_default: bool
     is_configured: bool
     http_port: int
-    plugin_port: int
+    extension_port: int
     admin_port: int
     port_slot: int
     gateway_url: str | None
@@ -148,7 +148,7 @@ class WorkspaceListTool(Tool):
                 "is_default": ws_id == registry.default_workspace,
                 "is_configured": config is not None,
                 "http_port": http_port_for(registry, entry.port_slot),
-                "plugin_port": plugin_port_for(registry, entry.port_slot),
+                "extension_port": extension_port_for(registry, entry.port_slot),
                 "admin_port": admin_port_for(registry, entry.port_slot),
                 "port_slot": entry.port_slot,
                 "gateway_url": config.gateway_url if config else None,
@@ -188,7 +188,7 @@ class WorkspaceCreateTool(Tool):
             name=entry.name,
             path=entry.path,
             http_port=http_port_for(registry, entry.port_slot),
-            plugin_port=plugin_port_for(registry, entry.port_slot),
+            extension_port=extension_port_for(registry, entry.port_slot),
             admin_port=admin_port_for(registry, entry.port_slot),
             is_default=entry.id == registry.default_workspace,
         )
@@ -308,7 +308,7 @@ class WorkspaceShowTool(Tool):
             is_default=entry.id == registry.default_workspace,
             is_configured=config is not None,
             http_port=http_port_for(registry, entry.port_slot),
-            plugin_port=plugin_port_for(registry, entry.port_slot),
+            extension_port=extension_port_for(registry, entry.port_slot),
             admin_port=admin_port_for(registry, entry.port_slot),
             port_slot=entry.port_slot,
             gateway_url=config.gateway_url if config else None,

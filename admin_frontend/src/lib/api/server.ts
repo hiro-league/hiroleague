@@ -12,7 +12,7 @@ export type WorkspaceRow = {
   is_default: boolean;
   is_configured: boolean;
   http_port: number;
-  plugin_port: number;
+  extension_port: number;
   admin_port: number;
   port_slot: number;
   gateway_url: string | null;

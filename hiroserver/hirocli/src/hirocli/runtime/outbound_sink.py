@@ -2,10 +2,10 @@
 
 Defining this as a Protocol lets ``CommunicationManager`` depend on a shape
 (``send_to_channel(channel_name, message)``) rather than the concrete
-``ChannelManager``. This breaks the previous bidirectional import / setter
+``ExtensionManager``. This breaks the previous bidirectional import / setter
 injection between the two managers.
 
-``ChannelManager`` already exposes ``async def send_to_channel(...)`` and
+``ExtensionManager`` already exposes ``async def send_to_channel(...)`` and
 satisfies this protocol structurally — no inheritance needed.
 """
 

@@ -82,8 +82,7 @@ APPS = [a.repo for a in appfile.APPS if a.copy_data]
 # The apps `up` runs: every app
 SERVED = [a.repo for a in appfile.APPS]
 # The core's other listeners come with its server: their port names start it too (`up 0 core-admin` = `up 0 core`)
-PORT_ALIASES = {"core-admin": "core", "core-socket": "core", "core-http": "core", "core-plugin": "core",
-                "core-gateway": "core"}
+PORT_ALIASES = {"core-admin": "core", "core-socket": "core", "core-http": "core", "core-gateway": "core"}
 _lists: data.Lists | None = None
 
 
@@ -115,8 +114,8 @@ def data_dir(env: int) -> Path:
 
 
 def ports(env: int) -> dict[str, int]:
-    """The environment's block, 7N00-7N49 (workflow.md, Ports; apps.py). The core listens on four: its admin API, the
-    apps' extension socket, its HTTP status API and the channel plugins' socket."""
+    """The environment's block, 7N00-7N49 (workflow.md, Ports; apps.py). The core listens on its admin API, the
+    extension socket (the channel plugins and the apps), its HTTP status API and its gateway."""
     return appfile.ports(env)
 
 
@@ -694,8 +693,8 @@ def configure(env: int, task: str | None = None) -> None:
         ws = data_dir(env) / "core" / "default"
         cfg_path = ws / "config.json"
         cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
-        cfg.update(http_port=p["core-http"], plugin_port=p["core-plugin"], admin_port=p["core-admin"],
-                   extension_port=p["core-socket"])
+        cfg.update(http_port=p["core-http"], admin_port=p["core-admin"], extension_port=p["core-socket"])
+        cfg.pop("plugin_port", None)  # the channel plugins sign in on the extension socket: no port of their own
         # Device chat: the core runs its own gateway on the environment's port, and devices pair to it there (the
         # device web app on this PC; a phone reaches only live's, by its LAN name)
         cfg.update(gateway_builtin=True, gateway_port=p["core-gateway"], gateway_url=f"ws://127.0.0.1:{p['core-gateway']}")
@@ -2038,7 +2037,7 @@ def servers_down(env: int, names: list[str] | None = None) -> None:
     chosen = pick_servers(env, names) if names else list(servers(env).values())
     port_list = [s.port for s in chosen]
     if any(s.name == "core" for s in chosen):  # the core's other listeners, its gateway's too
-        port_list += [ports(env)[k] for k in ("core-socket", "core-http", "core-plugin", "core-gateway")]
+        port_list += [ports(env)[k] for k in ("core-socket", "core-http", "core-gateway")]
     for s in chosen:
         pid_file = RUN / f"env{env}" / f"{s.name}.pid"
         if pid_file.exists():

@@ -37,7 +37,7 @@ from hiro_channel_sdk.constants import (
 )
 from hiro_commons.log import Logger
 
-from .channel_manager import ChannelCallError
+from .extension_manager import ChannelCallError
 from .request_handler import EXTENSIONS_ONLY, RequestContext, RequestRefused, gate
 
 if TYPE_CHECKING:
@@ -157,7 +157,7 @@ async def handle_whatsapp_send(params: dict[str, Any], ctx: RequestContext) -> d
     send = _validated_send(params)
     server_ctx = ctx.server_ctx
     sender = sender_label(ctx)
-    channels = server_ctx.channel_manager
+    channels = server_ctx.extension_manager
     if channels is None:
         raise RequestRefused(WHATSAPP_ERROR_NOT_RUNNING, "WhatsApp isn't running in HiroLeague")
     to = send["to"]
@@ -185,7 +185,7 @@ async def handle_whatsapp_check(params: dict[str, Any], ctx: RequestContext) -> 
         raise RequestRefused("invalid_params", "No numbers to check")
     if len(numbers) > WHATSAPP_CHECK_MAX:
         raise RequestRefused("invalid_params", f"At most {WHATSAPP_CHECK_MAX} numbers at a time")
-    channels = ctx.server_ctx.channel_manager
+    channels = ctx.server_ctx.extension_manager
     if channels is None:
         raise RequestRefused(WHATSAPP_ERROR_NOT_RUNNING, "WhatsApp isn't running in HiroLeague")
     try:
@@ -202,7 +202,7 @@ async def handle_whatsapp_status(params: dict[str, Any], ctx: RequestContext) ->
     """WhatsApp as the core knows it: whether the plugin runs, and its last report."""
     del params
     server_ctx = ctx.server_ctx
-    channels = server_ctx.channel_manager
+    channels = server_ctx.extension_manager
     running = channels is not None and WHATSAPP_CHANNEL in channels.get_connected_channels()
     live = dict(server_ctx.channel_status.get(WHATSAPP_CHANNEL) or {})
     return {

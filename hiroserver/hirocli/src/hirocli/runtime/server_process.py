@@ -1,6 +1,6 @@
 """Entry point for the detached server process spawned by `hiro start`.
 
-Runs the FastAPI HTTP server and ChannelManager concurrently inside a single
+Runs the FastAPI HTTP server and the ExtensionManager concurrently inside a single
 asyncio event loop.  Gateway connectivity is owned by the mandatory
 `devices` channel plugin.
 
@@ -42,8 +42,6 @@ from hirocli.domain.data_store import ensure_data_db
 from hirocli.domain.db import ensure_db
 from hirocli.domain.events import get_domain_event_bus
 from hirocli.services import log_store
-from hirocli.runtime.channel_event_handler import ChannelEventHandler
-from hirocli.runtime.channel_manager import ChannelManager
 from hirocli.runtime.communication_manager import CommunicationManager
 from hirocli.runtime.event_handler import EventHandler
 from hirocli.runtime.extension_manager import ExtensionManager
@@ -84,8 +82,8 @@ def _build_context(
 
 def _wire_runtime(
     ctx: ServerContext,
-) -> tuple[CommunicationManager, ChannelManager, ResourceChangeBroadcaster, ExtensionManager]:
-    """Build handlers, ChannelManager, and CommunicationManager.
+) -> tuple[CommunicationManager, ResourceChangeBroadcaster, ExtensionManager]:
+    """Build handlers, the ExtensionManager, and CommunicationManager.
 
     The agent graph (formerly the adapter pipeline + post-adapt hooks) is
     owned by ``AgentManager`` now; STT/vision services are constructed
@@ -98,19 +96,19 @@ def _wire_runtime(
     from hirocli.runtime.request_methods import register_request_methods
     register_request_methods(request_handler)
 
-    infra_handlers = InfraEventHandlers(ctx)
-    channel_event_handler = ChannelEventHandler()
-    infra_handlers.register_all(channel_event_handler)
-    log.info("Registered special channel event handlers")
+    # The one extension manager: channel plugins and apps sign in on its socket and share the request dispatcher,
+    # each kind limited to the methods open to it. On ctx so admin routes can drive live channel actions
+    # (enable/disable, logout, reconnect) — same loop, so they await its coroutines directly.
+    extension_manager = ExtensionManager(ctx, request_handler)
+    ctx.extension_manager = extension_manager
 
-    channel_manager = ChannelManager(ctx)
-    # Expose on ctx so admin routes can drive live channel actions (enable/disable,
-    # logout, reconnect) — same loop, so they await its coroutines directly.
-    ctx.channel_manager = channel_manager
+    infra_handlers = InfraEventHandlers(ctx)
+    infra_handlers.register_all(extension_manager)
+    log.info("Registered special channel event handlers")
 
     comm_manager = CommunicationManager(
         ctx=ctx,
-        sink=channel_manager,
+        sink=extension_manager,
         event_handler=event_handler,
         request_handler=request_handler,
     )
@@ -121,18 +119,12 @@ def _wire_runtime(
     )
     resource_change_broadcaster.start()
 
-    channel_manager.set_message_handler(comm_manager.receive)
-    channel_manager.set_event_handler(channel_event_handler.handle)
-    # InfraEventHandlers still needs the ChannelManager for pairing responses.
-    infra_handlers.set_channel_manager(channel_manager)
+    extension_manager.set_chat_handler(comm_manager.receive)
+    # InfraEventHandlers answers the devices channel (pairing, the allowed devices) through the manager.
+    infra_handlers.set_extension_manager(extension_manager)
     infra_handlers.set_resource_change_broadcaster(resource_change_broadcaster)
 
-    # Extensions (HomeHiro first) sign in on their own socket and share the request
-    # dispatcher, limited to the methods open to extensions.
-    extension_manager = ExtensionManager(ctx, request_handler)
-    ctx.extension_manager = extension_manager
-
-    return comm_manager, channel_manager, resource_change_broadcaster, extension_manager
+    return comm_manager, resource_change_broadcaster, extension_manager
 
 
 def _register_signal_handlers(stop_event: asyncio.Event) -> None:
@@ -207,7 +199,7 @@ async def _main(
     log.info(
         f"✅ Loaded workspace '{workspace_name}' config",
         http_port=ctx.config.http_port,
-        plugin_port=ctx.config.plugin_port,
+        extension_port=ctx.config.effective_extension_port(),
         admin_port=ctx.config.admin_port,
         gateway_url=ctx.config.gateway_url,
         gateway_builtin=ctx.config.gateway_builtin,
@@ -262,7 +254,7 @@ async def _main(
     log.info("Metrics collector configured", enabled=effective_metrics, interval=ctx.config.metrics_interval)
 
     # --- Wire communication + channel stacks ---
-    comm_manager, channel_manager, resource_change_broadcaster, extension_manager = _wire_runtime(ctx)
+    comm_manager, resource_change_broadcaster, extension_manager = _wire_runtime(ctx)
     # Phase 6: extensions are told when the family list or its roles change.
     from hirocli.runtime.people_for_extensions import watch_people_changes
 
@@ -271,8 +263,8 @@ async def _main(
     from hirocli.runtime.site_names import SiteNames
 
     ctx.site_names = SiteNames(ctx)
-    http_app.state.channel_info_provider = channel_manager.get_channel_info
-    metrics_collector.set_child_pid_provider(channel_manager.get_child_processes)
+    http_app.state.channel_info_provider = extension_manager.get_channel_info
+    metrics_collector.set_child_pid_provider(extension_manager.get_child_processes)
 
     tool_registry = ToolRegistry(
         runtime=RuntimeContext(comm_manager=comm_manager, loop=ctx.loop),
@@ -301,7 +293,6 @@ async def _main(
         "Server ready — launching components",
         workspace=str(workspace_path),
         http=f"http://{ctx.config.http_host}:{ctx.config.http_port}/status",
-        plugin_ws=f"ws://127.0.0.1:{ctx.config.plugin_port}",
         extension_ws=f"ws://{ctx.config.extension_host}:{ctx.config.effective_extension_port()}",
         device_id=ctx.config.device_id,
     )
@@ -320,7 +311,6 @@ async def _main(
         run_http_server(ctx),
         # Device chat's relay, beside the server while Devices is on; the devices channel connects to it.
         BuiltinGateway(ctx).run(),
-        channel_manager.run(),
         extension_manager.run(),
         ctx.site_names.run(),
         comm_manager.serve(),

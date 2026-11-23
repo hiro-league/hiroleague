@@ -1,6 +1,6 @@
 """MetricsCollector — async service that samples system metrics on a timer.
 
-Runs as a peer of ChannelManager / CommunicationManager inside the server's
+Runs as a peer of ExtensionManager / CommunicationManager inside the server's
 asyncio.gather.  Collection happens in a thread via asyncio.to_thread so
 psutil's blocking calls never stall the event loop.
 

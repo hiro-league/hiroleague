@@ -13,9 +13,9 @@ class ChannelPlugin(ABC):
     """Contract between the Hiro server and a channel plugin.
 
     Subclass this, implement the abstract methods, then hand an instance to
-    ``PluginTransport`` to connect it to the Hiro server.
+    ``PluginRunner`` (runner.py), which signs it in on the core's extension socket.
 
-    Lifecycle (called by PluginTransport):
+    Lifecycle (called by PluginRunner):
       1. ``on_configure(config)`` — push credentials / settings from Hiro
       2. ``on_start()``           — begin listening for inbound messages
       3. ``on_stop()``            — graceful shutdown
@@ -24,10 +24,10 @@ class ChannelPlugin(ABC):
       - Implement ``send(message)`` to translate an outbound UnifiedMessage
         into a third-party API call.
       - Call ``await self.emit(message)`` from within your implementation
-        whenever an inbound message arrives; the transport forwards it to Hiro.
+        whenever an inbound message arrives; the runner forwards it to Hiro.
     """
 
-    # Injected by PluginTransport — do not set manually.
+    # Injected by PluginRunner — do not set manually.
     _emit_callback: Callable[[UnifiedMessage], Awaitable[None]] | None = None
     _event_callback: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None
 
@@ -71,7 +71,7 @@ class ChannelPlugin(ABC):
         _ = (event, data)
 
     async def on_call(self, name: str, params: dict[str, Any]) -> dict[str, Any]:
-        """Optional: answer a named request from Hiro (``channel.call``).
+        """Optional: answer one of the plugin's own methods, a request from Hiro (WhatsApp's send and check).
 
         Hiro waits for the answer, unlike ``send``. Return the result; raise to answer
         with an error (its message reaches the caller). A plugin that doesn't know
@@ -95,8 +95,8 @@ class ChannelCallRefused(Exception):
 
 
 class ChannelCallNotSupported(Exception):
-    """The plugin has no ``channel.call`` of that name."""
+    """The plugin has no method of that name."""
 
     def __init__(self, name: str) -> None:
-        super().__init__(f"This channel has no call named {name!r}")
+        super().__init__(f"This channel has no method named {name!r}")
         self.name = name

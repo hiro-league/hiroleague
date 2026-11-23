@@ -1,6 +1,6 @@
 """Phase 5: notify (Hiro tells people something) and the extension_state agent tool.
 
-notify against a fake ChannelManager and agent: exact text goes as given, style
+notify against a fake extension manager and agent: exact text goes as given, style
 "character" goes as the character wrote it, the owner's copy lands in the owner's
 conversation and Hiro's thread, and one person failing doesn't stop the others.
 extension_state against a fake ExtensionManager.
@@ -20,7 +20,7 @@ from hirocli.domain.channel_config import ChannelConfig, save_channel_config
 from hirocli.domain.conversation_channel import resolve_default_channel
 from hirocli.domain.message_store import list_messages
 from hirocli.domain.people import add_person
-from hirocli.runtime.channel_manager import ChannelCallError
+from hirocli.runtime.extension_manager import ChannelCallError
 from hirocli.runtime.notify import handle_notify
 from hirocli.runtime.request_handler import RequestRefused
 from hirocli.tools.extension_state import ExtensionStateTool
@@ -41,6 +41,9 @@ class FakeChannels:
             raise ChannelCallError("WhatsApp refused the number", "whatsapp_failed")
         return {"sent": True}
 
+    def snapshot(self) -> dict[str, dict[str, Any]]:
+        return {}  # no app connected: logs name the asker by its id
+
 
 class FakeAgent:
     def __init__(self, fail: bool = False) -> None:
@@ -60,8 +63,8 @@ class FakeAgent:
 
 
 def _ctx(workspace: Path, channels: FakeChannels | None, agent: FakeAgent | None = None) -> SimpleNamespace:
-    server_ctx = SimpleNamespace(workspace_path=workspace, channel_manager=channels, agent_manager=agent,
-                                 extension_manager=None, channel_status={})
+    server_ctx = SimpleNamespace(workspace_path=workspace, agent_manager=agent, extension_manager=channels,
+                                 channel_status={})
     return SimpleNamespace(server_ctx=server_ctx, msg=SimpleNamespace(routing=SimpleNamespace(sender_id="ext-home")),
                            workspace_path=workspace)
 

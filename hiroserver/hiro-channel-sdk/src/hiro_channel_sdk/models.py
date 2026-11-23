@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field, model_validator
 from .constants import (
     CONTENT_TYPE_FILE,
     CONTENT_TYPE_JSON,
-    JSONRPC_VERSION,
     MESSAGE_TYPE_EVENT,
     MESSAGE_TYPE_MESSAGE,
     MESSAGE_TYPE_REQUEST,
@@ -157,26 +156,9 @@ class UnifiedMessage(BaseModel):
         return self
 
 
-class RpcRequest(BaseModel):
-    """JSON-RPC 2.0 request or notification (notification when id is None)."""
-
-    jsonrpc: str = JSONRPC_VERSION
-    method: str
-    params: dict[str, Any] = Field(default_factory=dict)
-    id: str | int | None = None
-
-
-class RpcResponse(BaseModel):
-    """JSON-RPC 2.0 response."""
-
-    jsonrpc: str = JSONRPC_VERSION
-    result: Any = None
-    error: dict[str, Any] | None = None
-    id: str | int | None = None
-
-
 class ChannelInfo(BaseModel):
-    """Self-description that a channel sends on registration."""
+    """What a channel plugin says about itself: the runner (runner.py) sends it in the plugin's description
+    (ExtensionInfo) when it signs in."""
 
     name: str
     version: str = "0.1.0"

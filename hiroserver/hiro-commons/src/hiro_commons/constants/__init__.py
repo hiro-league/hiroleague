@@ -25,7 +25,6 @@ from .network import (
     DEFAULT_GATEWAY_PORT,
     DEFAULT_LOCALHOST,
     PORT_OFFSET_HTTP,
-    PORT_OFFSET_PLUGIN,
     PORT_RANGE_START,
     PORTS_PER_SLOT,
 )
@@ -67,7 +66,6 @@ __all__ = [
     "DEFAULT_GATEWAY_PORT",
     "DEFAULT_LOCALHOST",
     "PORT_OFFSET_HTTP",
-    "PORT_OFFSET_PLUGIN",
     "PORT_RANGE_START",
     "PORTS_PER_SLOT",
     # storage

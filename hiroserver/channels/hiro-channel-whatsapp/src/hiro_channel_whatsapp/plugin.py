@@ -1,4 +1,4 @@
-"""WhatsAppChannel — the ChannelPlugin the ChannelManager drives.
+"""WhatsAppChannel — the ChannelPlugin the extension manager starts (through the SDK's PluginRunner).
 
 Phase 1: link the account via QR, persist the session, and log inbound messages.
 Routing inbound → agent and sending replies arrive in Phase 2; audio in P6/P7.
@@ -99,7 +99,7 @@ class WhatsAppChannel(ChannelPlugin):
         )
 
     def _default_session(self) -> Path:
-        # The ChannelManager passes --log-dir = <workspace>/logs, so the workspace
+        # The extension manager passes --log-dir = <workspace>/logs, so the workspace
         # is its parent — keep the WhatsApp session inside the workspace.
         if self._log_dir:
             return Path(self._log_dir).parent / "channels" / "whatsapp" / "session.db"
@@ -155,7 +155,7 @@ class WhatsAppChannel(ChannelPlugin):
             send_read_receipts=self._send_read_receipts,
         )
         # Run the client loop in the background so on_start returns and the
-        # transport keeps servicing the ChannelManager connection.
+        # runner keeps servicing its connection to the core.
         self._task = asyncio.create_task(self._bridge.run())
 
     async def on_stop(self) -> None:

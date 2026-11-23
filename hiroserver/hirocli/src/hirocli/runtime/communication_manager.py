@@ -89,7 +89,7 @@ class CommunicationManager:
         *,
         await_message_flow: bool = False,
     ) -> None:
-        """Channel Manager's ``on_message`` callback target.
+        """The extension manager's chat handler (relayed chat lands here).
 
         ``await_message_flow=True`` blocks until the inbound persistence
         subscriber has run for ``message`` payloads. Used by synthetic
@@ -103,7 +103,7 @@ class CommunicationManager:
         await self._outbound.enqueue(msg)
 
     async def serve(self) -> None:
-        """Run the outbound worker. Add to ``asyncio.gather`` alongside ChannelManager."""
+        """Run the outbound worker. Add to ``asyncio.gather`` alongside the ExtensionManager."""
         log.info("✅ Communication Manager started")
         await self._outbound.run()
 

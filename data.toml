@@ -17,9 +17,11 @@ path = "db/workspace.db"
 kind = "database"
 live = "copy"
 envs = "copy"
-# Per-place rows: sign-in sessions, the paired apps and devices (their keys), the channel plugins (WhatsApp), LAN
-# names, characters (their folders are the place's own) and local model servers
-place_tables = ["admin_sessions", "extensions", "devices", "channel_plugins", "site_names", "characters", "local_models"]
+# Per-place rows: sign-in sessions, the extensions (the paired apps and the channel plugins, WhatsApp among them: their
+# keys and settings; extension_records, and the two tables it was copied from), the devices (their keys), LAN names,
+# characters (their folders are the place's own) and local model servers
+place_tables = ["admin_sessions", "extension_records", "extensions", "devices", "channel_plugins", "site_names",
+                "characters", "local_models"]
 why = "the family list, roles, rights and the AI usage log"
 
 [[item]]
@@ -141,7 +143,7 @@ path = "channels"
 kind = "folder"
 live = "own"
 envs = "none"
-why = "the WhatsApp session: never copied, two clients on one account break it"
+why = "the WhatsApp session, and each channel plugin's own key: never copied (two clients on one account break WhatsApp; a plugin pairs again with the core's code)"
 
 [[item]]
 path = "plans"
@@ -181,10 +183,17 @@ why = "no AI provider, no AI call: every ask, the core's own jobs and voices che
 
 [[switch]]
 path = "db/workspace.db"
+table = "extension_records"
+column = "enabled"
+value = 0
+why = "the WhatsApp channel off: two clients on one account break it (an app's row has no use for the switch)"
+
+[[switch]]
+path = "db/workspace.db"
 table = "channel_plugins"
 column = "enabled"
 value = 0
-why = "the WhatsApp channel off: two clients on one account break it"
+why = "the WhatsApp channel off in the table extension_records is first copied from, while a copy has none yet"
 
 # The core's server in env1..env5: environment variables
 [[env]]

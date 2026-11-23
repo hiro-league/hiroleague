@@ -1,6 +1,6 @@
 """InboundPipeline — validate → permission → dispatch by message_type.
 
-The Channel Manager's ``on_message`` callback lands here. ``receive()`` returns
+The extension manager's chat handler lands here. ``receive()`` returns
 immediately in all cases:
 
   - ``message`` → emits the immediate ``message.received`` ack, then hands

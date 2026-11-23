@@ -1,7 +1,8 @@
 """Infrastructure-level channel event handlers.
 
-Handles pairing requests, gateway connectivity tracking, and other
-infrastructure concerns dispatched by ChannelEventHandler.
+Handles pairing requests, gateway connectivity tracking, and other infrastructure
+concerns: events a channel plugin sends as itself, registered in the extension
+manager's one event registry (open to channel plugins only).
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from hirocli.constants import DEVICE_ID_PREFIX, DEVICE_ID_SUFFIX_LENGTH
 from hirocli.domain.config import mark_connected, mark_disconnected
 from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
 from hirocli.domain.events import DomainEvent, DomainEventType, get_domain_event_bus
+from hirocli.domain.extensions import KIND_CHANNEL
 from hirocli.domain.pairing import (
     ApprovedDevice,
     clear_pairing_session,
@@ -27,12 +29,13 @@ from hirocli.domain.pairing import (
 )
 
 if TYPE_CHECKING:
-    from hirocli.runtime.channel_event_handler import ChannelEventHandler
-    from hirocli.runtime.channel_manager import ChannelManager
+    from hirocli.runtime.extension_manager import ExtensionManager
     from hirocli.runtime.resource_change_broadcaster import ResourceChangeBroadcaster
     from hirocli.runtime.server_context import ServerContext
 
 log = Logger.get("INFRA")
+
+_CHANNELS_ONLY: frozenset[str] = frozenset({KIND_CHANNEL})
 
 
 class InfraEventHandlers:
@@ -40,11 +43,11 @@ class InfraEventHandlers:
 
     def __init__(self, ctx: ServerContext) -> None:
         self._ctx = ctx
-        self._channel_manager: ChannelManager | None = None
+        self._extensions: ExtensionManager | None = None
         self._resource_change_broadcaster: ResourceChangeBroadcaster | None = None
 
-    def set_channel_manager(self, cm: ChannelManager) -> None:
-        self._channel_manager = cm
+    def set_extension_manager(self, manager: ExtensionManager) -> None:
+        self._extensions = manager
         # A device paired or removed (the admin, the CLI): the gateway hears the new list at once.
         get_domain_event_bus().subscribe(DomainEventType.DEVICES_CHANGED, self._on_devices_changed)
 
@@ -55,30 +58,33 @@ class InfraEventHandlers:
     async def send_allowed_devices(self) -> None:
         """Tell the gateway, through the devices channel, which devices may connect: it refuses and cuts off the rest,
         so a device removed in the admin stops at once instead of when its 30-day pass runs out."""
-        if self._channel_manager is None:
+        if self._extensions is None:
             return
         ids = sorted(paired_device_ids(self._ctx.workspace_path))
-        await self._channel_manager.send_event_to_channel(
+        await self._extensions.send_event_to_channel(
             MANDATORY_CHANNEL_NAME, "allowed_devices", {"device_ids": ids},
         )
 
     def set_resource_change_broadcaster(self, broadcaster: ResourceChangeBroadcaster) -> None:
         self._resource_change_broadcaster = broadcaster
 
-    def register_all(self, handler: ChannelEventHandler) -> None:
-        handler.register("pairing_request", self.handle_pairing_request)
-        handler.register("gateway_connected", self.handle_gateway_connected)
-        handler.register("gateway_disconnected", self.handle_gateway_disconnected)
-        handler.register("device_connected", self.handle_device_connected)
-        handler.register("device_disconnected", self.handle_device_disconnected)
+    def register_all(self, manager: ExtensionManager) -> None:
+        manager.register_event_handler("pairing_request", self.handle_pairing_request, _CHANNELS_ONLY)
+        manager.register_event_handler("gateway_connected", self.handle_gateway_connected, _CHANNELS_ONLY)
+        manager.register_event_handler("gateway_disconnected", self.handle_gateway_disconnected, _CHANNELS_ONLY)
+        manager.register_event_handler("device_connected", self.handle_device_connected, _CHANNELS_ONLY)
+        manager.register_event_handler("device_disconnected", self.handle_device_disconnected, _CHANNELS_ONLY)
         # §5.4 — channels surface pairing (QR/token) + connection status generically;
         # cache the latest per channel on the shared ctx for the admin routes to read.
-        # The emitting channel name is injected into the event data by ChannelManager.
-        handler.register("channel.pairing", self.handle_channel_pairing)
-        handler.register("channel.status", self.handle_channel_status)
+        manager.register_event_handler("channel.pairing", self.handle_channel_pairing, _CHANNELS_ONLY)
+        manager.register_event_handler("channel.status", self.handle_channel_status, _CHANNELS_ONLY)
 
-    async def handle_channel_pairing(self, data: dict[str, Any]) -> None:
-        channel = str(data.get("channel") or "")
+    def _channel_name(self, extension_id: str) -> str:
+        """The name of the channel plugin that sent the event (the manager knows who signed in)."""
+        return self._extensions.name_of(extension_id) if self._extensions is not None else ""
+
+    async def handle_channel_pairing(self, extension_id: str, _event: str, data: dict[str, Any]) -> None:
+        channel = self._channel_name(extension_id)
         # QR channels push the pairing code here; token/oauth channels omit it (the
         # code is user-entered, not server-issued).
         code = str(data.get("qr") or data.get("code") or "")
@@ -89,8 +95,8 @@ class InfraEventHandlers:
         st["qr_at"] = datetime.now(UTC).isoformat()
         st["pairing_kind"] = str(data.get("kind") or "qr")
 
-    async def handle_channel_status(self, data: dict[str, Any]) -> None:
-        channel = str(data.get("channel") or "")
+    async def handle_channel_status(self, extension_id: str, _event: str, data: dict[str, Any]) -> None:
+        channel = self._channel_name(extension_id)
         if not channel:
             return
         state = str(data.get("state") or "")
@@ -109,8 +115,8 @@ class InfraEventHandlers:
         if state in ("connected", "paired"):
             st.pop("qr", None)
 
-    async def handle_pairing_request(self, data: dict[str, Any]) -> None:
-        if self._channel_manager is None:
+    async def handle_pairing_request(self, _extension_id: str, _event: str, data: dict[str, Any]) -> None:
+        if self._extensions is None:
             return
         request_id = data.get("request_id")
         pairing_code = data.get("pairing_code")
@@ -121,13 +127,13 @@ class InfraEventHandlers:
         if not isinstance(request_id, str) or not request_id:
             return
         if not isinstance(pairing_code, str) or not pairing_code:
-            await self._channel_manager.send_event_to_channel(
+            await self._extensions.send_event_to_channel(
                 "devices", "pairing_response",
                 {"request_id": request_id, "status": "rejected", "reason": "invalid_pairing_code"},
             )
             return
         if not isinstance(device_public_key, str) or not device_public_key:
-            await self._channel_manager.send_event_to_channel(
+            await self._extensions.send_event_to_channel(
                 "devices", "pairing_response",
                 {"request_id": request_id, "status": "rejected", "reason": "invalid_device_public_key"},
             )
@@ -135,14 +141,14 @@ class InfraEventHandlers:
 
         session = load_pairing_session(self._ctx.workspace_path)
         if session is None:
-            await self._channel_manager.send_event_to_channel(
+            await self._extensions.send_event_to_channel(
                 "devices", "pairing_response",
                 {"request_id": request_id, "status": "rejected", "reason": "no_active_pairing_session"},
             )
             return
 
         if (not session.is_valid()) or (session.code != pairing_code):
-            await self._channel_manager.send_event_to_channel(
+            await self._extensions.send_event_to_channel(
                 "devices", "pairing_response",
                 {"request_id": request_id, "status": "rejected", "reason": "pairing_code_invalid_or_expired"},
             )
@@ -181,7 +187,7 @@ class InfraEventHandlers:
         clear_pairing_session(self._ctx.workspace_path)
         # The gateway must list the new device before the device signs in with its pass, a moment after this answer.
         await self.send_allowed_devices()
-        await self._channel_manager.send_event_to_channel(
+        await self._extensions.send_event_to_channel(
             "devices", "pairing_response",
             {
                 "request_id": request_id,
@@ -191,18 +197,18 @@ class InfraEventHandlers:
             },
         )
 
-    async def handle_gateway_connected(self, data: dict[str, Any]) -> None:
+    async def handle_gateway_connected(self, _extension_id: str, _event: str, data: dict[str, Any]) -> None:
         gateway_url = str(data.get("gateway_url") or self._ctx.config.gateway_url)
         mark_connected(self._ctx.workspace_path, gateway_url)
         await self.send_allowed_devices()
 
-    async def handle_gateway_disconnected(self, data: dict[str, Any]) -> None:
+    async def handle_gateway_disconnected(self, _extension_id: str, _event: str, _data: dict[str, Any]) -> None:
         mark_disconnected(self._ctx.workspace_path)
         if self._resource_change_broadcaster is not None:
             await self._resource_change_broadcaster.clear_connected_devices()
             log.fineinfo("🔌 Recipients cleared — HiroServer · gateway:down")
 
-    async def handle_device_connected(self, data: dict[str, Any]) -> None:
+    async def handle_device_connected(self, _extension_id: str, _event: str, data: dict[str, Any]) -> None:
         device_id = data.get("device_id")
         if not isinstance(device_id, str) or not device_id:
             return
@@ -213,7 +219,7 @@ class InfraEventHandlers:
                 device_id=device_id,
             )
 
-    async def handle_device_disconnected(self, data: dict[str, Any]) -> None:
+    async def handle_device_disconnected(self, _extension_id: str, _event: str, data: dict[str, Any]) -> None:
         device_id = data.get("device_id")
         if not isinstance(device_id, str) or not device_id:
             return

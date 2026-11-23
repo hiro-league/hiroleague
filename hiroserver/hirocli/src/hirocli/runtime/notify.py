@@ -33,7 +33,7 @@ from hiro_channel_sdk.constants import (
 from hiro_commons.log import Logger
 
 from ..domain.people import get_person
-from .channel_manager import ChannelCallError
+from .extension_manager import ChannelCallError
 from .request_handler import EXTENSIONS_ONLY, RequestContext, RequestRefused, gate
 from .whatsapp_for_extensions import (
     SEND_TIMEOUT_S,
@@ -152,7 +152,7 @@ async def notify(
             continue
         try:
             body = await _body(server_ctx, who, text.strip(), style, is_owner)
-            channels = server_ctx.channel_manager
+            channels = server_ctx.extension_manager
             if channels is None:
                 raise ChannelCallError("WhatsApp isn't running in HiroLeague", "not_running")
             await channels.call_channel(

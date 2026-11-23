@@ -36,8 +36,9 @@ EmitOutbound = Callable[[UnifiedMessage], Awaitable[None]]
 
 # Who sent a request. Each method says which callers may use it, so an extension
 # that is signed in can't read chat history just because it is connected.
-CALLER_DEVICE = "device"        # the app, through a channel (the devices plugin)
-CALLER_EXTENSION = "extension"  # a program signed in on the extension socket
+CALLER_DEVICE = "device"        # the phone app, through a channel (the devices plugin)
+CALLER_EXTENSION = "extension"  # an app signed in on the extension socket
+CALLER_CHANNEL = "channel"      # a channel plugin's own request (none open to it yet)
 DEVICES_ONLY: frozenset[str] = frozenset({CALLER_DEVICE})
 EXTENSIONS_ONLY: frozenset[str] = frozenset({CALLER_EXTENSION})
 ALL_CALLERS: frozenset[str] = frozenset({CALLER_DEVICE, CALLER_EXTENSION})

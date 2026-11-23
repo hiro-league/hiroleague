@@ -13,14 +13,14 @@ def task(id, env, repos, state="working"):
     return hw.Task(id=id, title=id, env=env, repos=repos, state=state)
 
 
-def test_each_environment_owns_19_consecutive_ports():
+def test_each_environment_owns_its_first_19_ports_but_14():
     assert hw.ports(0)["core-admin"] == 7000
     assert hw.ports(2)["core-socket"] == 7201
     assert hw.ports(5)["codehiro-ui"] == 7512
-    assert hw.ports(1)["core-plugin"] == 7114
     assert hw.ports(4)["evalhiro-ui"] == 7416
     assert hw.ports(4)["core-gateway"] == 7417
-    assert sorted(hw.ports(3).values()) == list(range(7300, 7319))
+    # 14 was the channel plugins' own port: they sign in on the extension socket (01)
+    assert sorted(hw.ports(3).values()) == [p for p in range(7300, 7319) if p != 7314]
 
 
 def test_reserves_keep_the_core_first_and_a_kit_change_reserves_the_apps():

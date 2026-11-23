@@ -5,8 +5,8 @@ its pairing style, which admin actions it supports, whether it reports a live
 status, and its lifecycle states. The server and admin UI drive onboarding from
 this descriptor generically, instead of shipping per-channel routes and UI.
 
-The descriptor travels as plain JSON on ``channel.register`` (see
-``ChannelInfo.capabilities``); build it with ``ChannelCapabilities(...)`` and
+The descriptor travels as plain JSON in the plugin's description at sign-in (see
+``ChannelInfo.capabilities`` and ``ExtensionInfo.capabilities``); build it with ``ChannelCapabilities(...)`` and
 ``.model_dump()`` so every channel declares it the same way.
 """
 

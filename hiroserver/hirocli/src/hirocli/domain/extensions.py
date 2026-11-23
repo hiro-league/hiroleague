@@ -1,15 +1,19 @@
-"""Paired extensions and their pairing code.
+"""The extensions and the admin's pairing code.
 
-An extension is a program that runs on its own (HomeHiro first) and signs in on
-the workspace's extension socket (see runtime/extension_manager.py). Pairing is
-like the app's: the admin creates a short-lived code; the extension sends it with
-its own public key; the core keeps the public key here and checks a signed
-challenge on every later connection.
+An extension is any program that plugs into the core on its machine and signs in on
+the workspace's one extension socket (see runtime/extension_manager.py): an app
+(HomeHiro...), or a channel plugin the core starts (WhatsApp, devices, echo). Each
+pairs once: it sends a code with its own public key; the core keeps the public key
+here and checks a signed challenge on every later connection.
 
-- The pairing code is short-lived and lives under the ephemeral run dir:
+- The admin's pairing code (for an app) is short-lived and lives under the ephemeral run dir:
   <workspace>/run/extension_pairing_session.json (separate from the devices'
-  code, so a code shown for the app can't pair an extension and vice versa).
-- Paired extensions are durable rows in the ``extensions`` table of workspace.db.
+  code, so a code shown for the phone app can't pair an extension and vice versa).
+  The code for a channel plugin is made by the manager when it starts it (in memory).
+- Every extension is one row of ``extension_records`` in workspace.db. Its kind is set
+  once, at pairing, from who made the code: KIND_APP (the admin's) or KIND_CHANNEL
+  (the manager's), and with it whether it may relay chat and whether the core starts it.
+  A channel plugin's own settings are channel_config.py's, on the same rows.
 
 All functions are workspace-scoped and synchronous (CLI and admin threads); the
 runtime calls them from a worker thread.
@@ -37,13 +41,24 @@ logger = logging.getLogger(__name__)
 
 _PAIRING_SESSION_FILENAME = "extension_pairing_session.json"
 
+KIND_APP = "app"          # starts itself, pairs with the admin's code
+KIND_CHANNEL = "channel"  # a channel plugin: the core starts it and makes its code; it relays other people's chat
+
+TABLE = "extension_records"
+
 
 class PairedExtension(BaseModel):
+    """One extension's row. A channel plugin not yet paired has no key (``public_key`` "") and no ``paired_at``."""
+
     extension_id: str
     name: str = ""
-    public_key: str
-    paired_at: datetime
+    kind: str = KIND_APP
+    public_key: str = ""
+    paired_at: datetime | None = None
     last_seen: datetime | None = None
+    # Its kind's attributes: it may send frames for someone else (a phone, a WhatsApp contact), and the core starts it.
+    relays_chat: bool = False
+    started_by_core: bool = False
     # What the extension last said about itself (version, description, offers, uses).
     info: dict[str, Any] = Field(default_factory=dict)
     # Phase 7a: the use ids it declared before its uses last changed (the Uses page marks
@@ -117,7 +132,7 @@ def clear_extension_pairing(workspace_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Paired extensions — workspace.db extensions table
+# The extensions — workspace.db extension_records table
 # ---------------------------------------------------------------------------
 
 
@@ -125,19 +140,26 @@ def _row_to_extension(row: sqlite3.Row) -> PairedExtension:
     return PairedExtension(
         extension_id=row["extension_id"],
         name=row["name"] or "",
-        public_key=row["public_key"],
-        paired_at=datetime.fromisoformat(row["paired_at"]),
+        kind=row["kind"] or KIND_APP,
+        public_key=row["public_key"] or "",
+        paired_at=datetime.fromisoformat(row["paired_at"]) if row["paired_at"] else None,
         last_seen=datetime.fromisoformat(row["last_seen"]) if row["last_seen"] else None,
+        relays_chat=bool(row["relays_chat"]),
+        started_by_core=bool(row["started_by_core"]),
         info=json.loads(row["info"] or "{}"),
         uses_before=json.loads(row["uses_before"] or "[]"),
     )
 
 
-def list_paired_extensions(workspace_path: Path) -> list[PairedExtension]:
+def list_paired_extensions(workspace_path: Path, *, kind: str | None = KIND_APP) -> list[PairedExtension]:
+    """The extensions of one kind (the apps by default: uses, rights, sites and asks are theirs), or every one."""
     ensure_db(workspace_path)
     with sqlite3.connect(str(db_path(workspace_path))) as conn:
         conn.row_factory = sqlite3.Row
-        rows = conn.execute("SELECT * FROM extensions ORDER BY paired_at").fetchall()
+        if kind is None:
+            rows = conn.execute(f"SELECT * FROM {TABLE} ORDER BY paired_at").fetchall()
+        else:
+            rows = conn.execute(f"SELECT * FROM {TABLE} WHERE kind = ? ORDER BY paired_at", (kind,)).fetchall()
     extensions: list[PairedExtension] = []
     for row in rows:
         try:
@@ -151,7 +173,7 @@ def get_paired_extension(workspace_path: Path, extension_id: str) -> PairedExten
     ensure_db(workspace_path)
     with sqlite3.connect(str(db_path(workspace_path))) as conn:
         conn.row_factory = sqlite3.Row
-        row = conn.execute("SELECT * FROM extensions WHERE extension_id = ?", (extension_id,)).fetchone()
+        row = conn.execute(f"SELECT * FROM {TABLE} WHERE extension_id = ?", (extension_id,)).fetchone()
     if row is None:
         return None
     try:
@@ -162,12 +184,13 @@ def get_paired_extension(workspace_path: Path, extension_id: str) -> PairedExten
 
 
 def add_paired_extension(workspace_path: Path, *, name: str, public_key: str, info: dict[str, Any]) -> PairedExtension:
-    """Store a newly paired extension under a new id."""
+    """Store a newly paired app under a new id (paired with the admin's code)."""
     ensure_db(workspace_path)
     now = datetime.now(UTC)
     extension = PairedExtension(
         extension_id=uuid.uuid4().hex,
         name=name,
+        kind=KIND_APP,
         public_key=public_key,
         paired_at=now,
         last_seen=now,
@@ -175,12 +198,14 @@ def add_paired_extension(workspace_path: Path, *, name: str, public_key: str, in
     )
     with sqlite3.connect(str(db_path(workspace_path))) as conn:
         conn.execute(
-            "INSERT INTO extensions (extension_id, name, public_key, paired_at, last_seen, info) VALUES (?, ?, ?, ?, ?, ?)",
+            f"INSERT INTO {TABLE} (extension_id, name, kind, public_key, paired_at, last_seen, info, relays_chat, "
+            "started_by_core) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0)",
             (
                 extension.extension_id,
                 extension.name,
+                KIND_APP,
                 extension.public_key,
-                utc_iso(extension.paired_at),
+                utc_iso(now),
                 utc_iso(now),
                 json.dumps(extension.info),
             ),
@@ -189,40 +214,61 @@ def add_paired_extension(workspace_path: Path, *, name: str, public_key: str, in
     return extension
 
 
+def pair_started_extension(
+    workspace_path: Path, *, name: str, public_key: str, info: dict[str, Any]
+) -> PairedExtension | None:
+    """Keep the key of a channel plugin the core started (paired with the manager's code), on its row, by name: a
+    plugin that lost its key pairs again and keeps its id. None when no such row exists (removed meanwhile)."""
+    ensure_db(workspace_path)
+    now = utc_iso(datetime.now(UTC))
+    with sqlite3.connect(str(db_path(workspace_path))) as conn:
+        cursor = conn.execute(
+            f"UPDATE {TABLE} SET public_key = ?, paired_at = ?, last_seen = ?, info = ? "
+            "WHERE name = ? AND started_by_core = 1",
+            (public_key, now, now, json.dumps(info), name),
+        )
+        conn.commit()
+        if cursor.rowcount == 0:
+            return None
+    return next((e for e in list_paired_extensions(workspace_path, kind=None)
+                 if e.name == name and e.started_by_core), None)
+
+
 def touch_paired_extension(workspace_path: Path, extension_id: str, *, info: dict[str, Any] | None = None) -> None:
     """Record that the extension was seen now (and what it said about itself)."""
     ensure_db(workspace_path)
     with sqlite3.connect(str(db_path(workspace_path))) as conn:
         if info is None:
             conn.execute(
-                "UPDATE extensions SET last_seen = ? WHERE extension_id = ?",
+                f"UPDATE {TABLE} SET last_seen = ? WHERE extension_id = ?",
                 (utc_iso(datetime.now(UTC)), extension_id),
             )
         else:
             # Phase 7a: when the declared uses change, keep the previous ids so the Uses page
             # can mark the new ones; an unchanged list keeps the earlier "before" list.
-            row = conn.execute("SELECT info FROM extensions WHERE extension_id = ?", (extension_id,)).fetchone()
+            row = conn.execute(f"SELECT info FROM {TABLE} WHERE extension_id = ?", (extension_id,)).fetchone()
             try:
                 old_ids = _use_ids(json.loads(row[0] or "{}")) if row is not None else []
             except json.JSONDecodeError:
                 old_ids = []
             new_ids = _use_ids(info)
             conn.execute(
-                "UPDATE extensions SET last_seen = ?, info = ?, name = ? WHERE extension_id = ?",
+                f"UPDATE {TABLE} SET last_seen = ?, info = ?, name = ? WHERE extension_id = ?",
                 (utc_iso(datetime.now(UTC)), json.dumps(info), str(info.get("name") or ""), extension_id),
             )
             if sorted(old_ids) != sorted(new_ids):
                 conn.execute(
-                    "UPDATE extensions SET uses_before = ? WHERE extension_id = ?",
+                    f"UPDATE {TABLE} SET uses_before = ? WHERE extension_id = ?",
                     (json.dumps(old_ids), extension_id),
                 )
         conn.commit()
 
 
 def remove_paired_extension(workspace_path: Path, extension_id: str) -> bool:
-    """Forget an extension's key. Returns True when a row was removed."""
+    """Forget an app: its row and its key. Returns True when a row was removed. (A channel plugin is removed with
+    channel_config.delete_channel_config.)"""
     ensure_db(workspace_path)
     with sqlite3.connect(str(db_path(workspace_path))) as conn:
-        cursor = conn.execute("DELETE FROM extensions WHERE extension_id = ?", (extension_id,))
+        cursor = conn.execute(f"DELETE FROM {TABLE} WHERE extension_id = ? AND kind = ?", (extension_id, KIND_APP))
         conn.commit()
         return cursor.rowcount > 0

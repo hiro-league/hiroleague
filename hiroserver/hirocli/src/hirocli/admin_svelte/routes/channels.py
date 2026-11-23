@@ -7,7 +7,7 @@ capabilities at registration (§5.1/§5.2); these routes stay channel-agnostic a
 read that descriptor instead of hardcoding per-channel behavior.
 
 Config writes and status/pairing reads go through the shared ServerContext
-(``channel_status`` cache written by InfraEventHandlers, ``channel_manager`` for
+(``channel_status`` cache written by InfraEventHandlers, ``extension_manager`` for
 live actions). All endpoints return the ``{ok, error, data}`` envelope.
 """
 
@@ -51,9 +51,9 @@ def _ctx(request: Request) -> Any:
     return getattr(request.app.state, "ctx", None)
 
 
-def _channel_manager(request: Request) -> Any:
+def _extensions(request: Request) -> Any:
     ctx = _ctx(request)
-    return getattr(ctx, "channel_manager", None) if ctx is not None else None
+    return getattr(ctx, "extension_manager", None) if ctx is not None else None
 
 
 def _status_for(request: Request, name: str) -> dict[str, Any] | None:
@@ -169,10 +169,10 @@ async def channel_config_set(
     # changes like the allow-list take effect immediately, no restart. No-op if the
     # channel isn't running; failure here must not fail the save.
     applied = False
-    cm = _channel_manager(request)
+    cm = _extensions(request)
     if cm is not None:
         try:
-            await cm._push_config(name)
+            await cm.push_config(name)
             applied = True
         except Exception as exc:
             log.warning(
@@ -260,7 +260,7 @@ async def enable_channel(
         await run_in_threadpool(ChannelEnableTool().execute, name, workspace_id)
     except (ValueError, RuntimeError) as exc:
         return api_failure(str(exc))
-    cm = _channel_manager(request)
+    cm = _extensions(request)
     if cm is not None:
         await cm.activate(name)
     return {"enabled": True}
@@ -275,7 +275,7 @@ async def disable_channel(
         await run_in_threadpool(ChannelDisableTool().execute, name, workspace_id)
     except (ValueError, RuntimeError) as exc:
         return api_failure(str(exc))
-    cm = _channel_manager(request)
+    cm = _extensions(request)
     if cm is not None:
         await cm.deactivate(name)
     ctx = _ctx(request)
@@ -292,7 +292,7 @@ async def uninstall_channel(
     # config so it leaves the managed list (returns to the "Install a channel" picker),
     # then `uv tool uninstall` the package. Package uninstall is best-effort — the
     # channel is already gone, so a leftover package must not fail the operation.
-    cm = _channel_manager(request)
+    cm = _extensions(request)
     if cm is not None:
         await cm.deactivate(name)  # stop + reap the subprocess if running; no-op otherwise
     try:
@@ -321,7 +321,7 @@ async def channel_action(name: str, action: str, request: Request) -> Any:
     # Generic admin action (§5.2/§5.4): forwarded to the plugin as a channel.<action>
     # event (e.g. logout, reconnect). Rejected if the channel declares an action set
     # that doesn't include it.
-    cm = _channel_manager(request)
+    cm = _extensions(request)
     if cm is None:
         return api_failure("Channel manager not available (is the server running?).")
     ctx = _ctx(request)

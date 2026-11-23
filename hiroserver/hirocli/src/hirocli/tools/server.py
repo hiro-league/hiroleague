@@ -24,7 +24,6 @@ from ..domain.workspace import (
     admin_port_for,
     http_port_for,
     load_registry,
-    plugin_port_for,
     remove_workspace,
     resolve_workspace,
     WorkspaceError,
@@ -125,7 +124,6 @@ class SetupTool(Tool):
             gateway_url=gateway_url,
             http_host=existing.http_host,
             http_port=http_port or http_port_for(registry, entry.port_slot),
-            plugin_port=plugin_port_for(registry, entry.port_slot),
             admin_port=admin_port_for(registry, entry.port_slot),
             # Carry the extension address forward so re-running setup keeps it.
             extension_host=existing.extension_host,

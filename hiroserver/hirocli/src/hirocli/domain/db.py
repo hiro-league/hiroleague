@@ -1,8 +1,8 @@
 """Workspace database module.
 
 Manages workspace.db (SQLite) — the authoritative store for system config
-entities: characters, devices, channel_plugins. User content (channels, messages)
-lives in data.db — see domain/data_store.py.
+entities: characters, devices, the extensions (channel plugins and apps). User
+content (channels, messages) lives in data.db — see domain/data_store.py.
 
 Two interfaces are provided:
 - ensure_db / db_path — synchronous helpers used by domain functions and CLI
@@ -30,6 +30,7 @@ columns always set by application code at insert time.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -37,6 +38,8 @@ from pathlib import Path
 import aiosqlite
 
 from hiro_commons.constants.storage import DB_DIR, WORKSPACE_DB_FILENAME
+
+_log = logging.getLogger(__name__)
 
 # Per-process cache: paths for which ensure_db has already run successfully.
 # Keyed by the resolved string workspace path.
@@ -76,8 +79,8 @@ _DDL = [
         workspace_dir TEXT NOT NULL DEFAULT ''
     )
     """,
-    # Paired extensions (programs that sign in on the extension socket, HomeHiro
-    # first): the public half of each one's key, and what it last said about itself.
+    # Unread since the one extension manager: extension_records holds the channel plugins and the apps. These two
+    # stay as they were at the copy (_copy_into_extension_records), so the previous release finds its data.
     """
     CREATE TABLE IF NOT EXISTS extensions (
         extension_id  TEXT PRIMARY KEY,
@@ -211,6 +214,20 @@ _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
     ("channel_plugins", "command",       "TEXT NOT NULL DEFAULT '[]'"),
     ("channel_plugins", "config",        "TEXT NOT NULL DEFAULT '{}'"),
     ("channel_plugins", "workspace_dir", "TEXT NOT NULL DEFAULT ''"),
+    # extension_records (the one extension manager's list); created by _copy_into_extension_records
+    ("extension_records", "name",            "TEXT NOT NULL DEFAULT ''"),
+    ("extension_records", "kind",            "TEXT NOT NULL DEFAULT 'app'"),
+    ("extension_records", "public_key",      "TEXT NOT NULL DEFAULT ''"),
+    ("extension_records", "paired_at",       "TEXT NOT NULL DEFAULT ''"),
+    ("extension_records", "last_seen",       "TEXT"),
+    ("extension_records", "info",            "TEXT NOT NULL DEFAULT '{}'"),
+    ("extension_records", "uses_before",     "TEXT NOT NULL DEFAULT '[]'"),
+    ("extension_records", "relays_chat",     "INTEGER NOT NULL DEFAULT 0"),
+    ("extension_records", "started_by_core", "INTEGER NOT NULL DEFAULT 0"),
+    ("extension_records", "enabled",         "INTEGER NOT NULL DEFAULT 1"),
+    ("extension_records", "command",         "TEXT NOT NULL DEFAULT '[]'"),
+    ("extension_records", "config",          "TEXT NOT NULL DEFAULT '{}'"),
+    ("extension_records", "workspace_dir",   "TEXT NOT NULL DEFAULT ''"),
     # extensions
     ("extensions", "name",       "TEXT NOT NULL DEFAULT ''"),
     ("extensions", "public_key", "TEXT NOT NULL DEFAULT ''"),
@@ -254,6 +271,112 @@ _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
 ]
 
 
+# The one extension manager's list: every channel plugin and app, one row each. Kept until Michel removes the
+# extension. Created, with its rows copied from extensions and channel_plugins, in one transaction.
+_EXTENSION_RECORDS_DDL = """
+    CREATE TABLE extension_records (
+        extension_id    TEXT PRIMARY KEY,
+        name            TEXT NOT NULL DEFAULT '',
+        kind            TEXT NOT NULL DEFAULT 'app',
+        public_key      TEXT NOT NULL DEFAULT '',
+        paired_at       TEXT NOT NULL DEFAULT '',
+        last_seen       TEXT,
+        info            TEXT NOT NULL DEFAULT '{}',
+        uses_before     TEXT NOT NULL DEFAULT '[]',
+        relays_chat     INTEGER NOT NULL DEFAULT 0,
+        started_by_core INTEGER NOT NULL DEFAULT 0,
+        enabled         INTEGER NOT NULL DEFAULT 1,
+        command         TEXT NOT NULL DEFAULT '[]',
+        config          TEXT NOT NULL DEFAULT '{}',
+        workspace_dir   TEXT NOT NULL DEFAULT ''
+    )
+"""
+# An extension the core starts is one per name.
+_EXTENSION_RECORDS_INDEX = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS extension_records_started_name "
+    "ON extension_records (name) WHERE started_by_core = 1"
+)
+
+
+class ExtensionCopyError(RuntimeError):
+    """The copy into extension_records didn't hold every row: nothing was written."""
+
+
+def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)).fetchone() is not None
+
+
+def _add_missing_columns(conn: sqlite3.Connection) -> None:
+    """Add any column in _EXPECTED_COLUMNS that its table lacks (a table not made yet is skipped)."""
+    table_existing: dict[str, set[str]] = {}
+    for table, col_name, col_def in _EXPECTED_COLUMNS:
+        if table not in table_existing:
+            table_existing[table] = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if not table_existing[table]:
+            continue  # not created yet
+        if col_name not in table_existing[table]:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_def}")
+            table_existing[table].add(col_name)
+
+
+def _copy_into_extension_records(conn: sqlite3.Connection) -> tuple[int, int] | None:
+    """Make extension_records the first time, holding every row of extensions (apps, their ids and keys kept) and of
+    channel_plugins (channel plugins: a new id, no key yet; each pairs at its first start).
+
+    One transaction: the table, its rows, then the counts compared; on a mismatch it is rolled back and nothing is
+    left. extensions and channel_plugins are only read. Returns (apps, channels) copied, or None when the table was
+    already there.
+    """
+    if _table_exists(conn, "extension_records"):
+        return None
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if _table_exists(conn, "extension_records"):  # another process made it meanwhile
+            conn.execute("ROLLBACK")
+            return None
+        conn.execute(_EXTENSION_RECORDS_DDL)
+        conn.execute(_EXTENSION_RECORDS_INDEX)
+        conn.execute(
+            """
+            INSERT INTO extension_records
+                (extension_id, name, kind, public_key, paired_at, last_seen, info, uses_before,
+                 relays_chat, started_by_core, enabled)
+            SELECT extension_id, name, 'app', public_key, paired_at, last_seen, info, uses_before, 0, 0, 1
+            FROM extensions
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO extension_records
+                (extension_id, name, kind, public_key, paired_at, info,
+                 relays_chat, started_by_core, enabled, command, config, workspace_dir)
+            SELECT lower(hex(randomblob(16))), name, 'channel', '', '', '{}', 1, 1, enabled, command, config, workspace_dir
+            FROM channel_plugins
+            """
+        )
+        apps = conn.execute("SELECT COUNT(*) FROM extensions").fetchone()[0]
+        channels = conn.execute("SELECT COUNT(*) FROM channel_plugins").fetchone()[0]
+        copied_apps = conn.execute(
+            "SELECT COUNT(*) FROM extension_records r JOIN extensions e ON e.extension_id = r.extension_id "
+            "AND e.public_key = r.public_key WHERE r.kind = 'app'"
+        ).fetchone()[0]
+        copied_channels = conn.execute(
+            "SELECT COUNT(*) FROM extension_records r JOIN channel_plugins c ON c.name = r.name "
+            "AND c.config = r.config AND c.enabled = r.enabled WHERE r.kind = 'channel'"
+        ).fetchone()[0]
+        total = conn.execute("SELECT COUNT(*) FROM extension_records").fetchone()[0]
+        if (copied_apps, copied_channels, total) != (apps, channels, apps + channels):
+            raise ExtensionCopyError(
+                f"extension_records would hold {copied_apps}/{apps} apps and {copied_channels}/{channels} channel "
+                f"plugins ({total} rows): rolled back"
+            )
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    return apps, channels
+
+
 # ---------------------------------------------------------------------------
 # Path helper
 # ---------------------------------------------------------------------------
@@ -286,23 +409,22 @@ def ensure_db(workspace_path: Path) -> None:
     # Ensure the consolidated db/ folder exists before SQLite opens the file.
     db_path(workspace_path).parent.mkdir(parents=True, exist_ok=True)
 
-    with sqlite3.connect(str(db_path(workspace_path))) as conn:
+    # isolation_level=None: each statement commits by itself, and the copy runs its own transaction.
+    conn = sqlite3.connect(str(db_path(workspace_path)), isolation_level=None)
+    try:
         for ddl in _DDL:
             conn.execute(ddl)
-
-        # Add any columns that exist in _EXPECTED_COLUMNS but not in the table.
-        # PRAGMA table_info is called once per table, not once per column.
-        table_existing: dict[str, set[str]] = {}
-        for table, col_name, col_def in _EXPECTED_COLUMNS:
-            if table not in table_existing:
-                table_existing[table] = {
-                    row[1] for row in conn.execute(f"PRAGMA table_info({table})")
-                }
-            if col_name not in table_existing[table]:
-                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_def}")
-                table_existing[table].add(col_name)
-
-        conn.commit()
+        _add_missing_columns(conn)
+        copied = _copy_into_extension_records(conn)
+        _add_missing_columns(conn)
+    finally:
+        conn.close()
+    if copied is not None:
+        _log.info(
+            "Extensions: the one list was made — %d app(s) and %d channel plugin(s) copied, counts match",
+            copied[0],
+            copied[1],
+        )
 
     _initialized.add(key)
 

@@ -3,7 +3,7 @@ at registration (design §5.1/§5.2).
 
 The server cannot import a plugin package (plugins run in isolated environments),
 so a plugin ships its JSON Schema and capability descriptor over the wire on
-``channel.register``. The ChannelManager persists them here so the config Tools
+its description at sign-in. The extension manager persists them here so the config Tools
 and admin routes can validate writes and render the UI generically — even across
 restarts, or from the CLI while the server is down.
 

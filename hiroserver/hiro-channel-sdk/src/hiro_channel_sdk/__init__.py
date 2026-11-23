@@ -6,10 +6,9 @@ Exports the key building blocks every plugin author needs:
   - ContentItem      — single content piece within UnifiedMessage
   - EventPayload     — event payload for message_type "event"
   - ChannelPlugin    — abstract base class to implement
-  - PluginTransport  — handles WS connection to the Hiro server, JSON-RPC dispatch
-  - ExtensionClient  — connects a program that runs on its own (an extension) to the core
-  - rpc              — JSON-RPC 2.0 helpers (build / parse)
-  - constants        — protocol constants (RPC methods, WS close codes, etc.)
+  - ExtensionClient  — connects an extension (a channel plugin or an app) to the core's extension socket
+  - PluginRunner     — runs a ChannelPlugin as an extension the core starts, over ExtensionClient
+  - constants        — protocol constants (sign-in frames, methods, WS close codes, etc.)
 """
 
 from importlib.metadata import PackageNotFoundError
@@ -43,8 +42,8 @@ from .extension import (
     ExtensionOffers,
     ExtensionRequestError,
 )
-from .models import ChannelInfo, ContentItem, EventPayload, MessageRouting, RpcRequest, RpcResponse, UnifiedMessage
-from .transport import PluginTransport
+from .models import ChannelInfo, ContentItem, EventPayload, MessageRouting, UnifiedMessage
+from .runner import PluginRunner
 
 # Version from this package's own installed metadata (source of truth =
 # pyproject.toml); stdlib-only, no sibling-package import.
@@ -71,10 +70,8 @@ __all__ = [
     "ContentItem",
     "EventPayload",
     "MessageRouting",
-    "RpcRequest",
-    "RpcResponse",
     "UnifiedMessage",
-    "PluginTransport",
+    "PluginRunner",
     "ExtensionClient",
     "ExtensionCredentials",
     "ExtensionInfo",
