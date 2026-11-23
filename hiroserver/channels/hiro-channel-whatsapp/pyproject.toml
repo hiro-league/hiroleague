@@ -38,6 +38,10 @@ dependencies = [
     # the one this plugin uses; 0.6.1–0.10.0 came out in a two-day burst (Nov 2–3),
     # too new to trust. wa_client.py logs sha_match on every voice note download, so a
     # return of the media defect shows in the plugin's log.
+    # 0.5.2 also tags every one-to-one message sent to a phone number as a business bot unless the process STARTS
+    # with NEONIZE_BOT_TAG=off (its Go code reads the start environment only); WhatsApp accepts a tagged message from
+    # a personal account and delivers it nowhere. The core starts the plugin with it (hirocli domain/channel_catalog.py).
+    # Later neonize has the tag off by default.
     "neonize==0.5.2",
     # qrcode: render the pairing QR as ASCII into the plugin log (P1 has no UI yet).
     "qrcode>=7",

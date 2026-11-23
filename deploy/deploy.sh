@@ -7,6 +7,7 @@
 #   1. checks first: ./scripts/check.sh; a failure stops here with nothing changed;
 #   2. builds the admin UI and installs this commit with uv into a new release folder
 #      $HIRO_HOME/releases/<time>-<commit>; the service runs $HIRO_HOME/current/bin/hiro, a link;
+#      then installs the WhatsApp plugin's own uv tool again, when it is installed from this checkout;
 #   3. stops the service, copies the workspace databases (hiro-db-snapshot, as root: SQLite through
 #      its backup, the Kuzu graph as files, which only works while the server is stopped);
 #   4. points `current` at the new release, starts the service, polls its /status;
@@ -106,6 +107,30 @@ fi
 "${RELEASE_DIR}/bin/hiro" --help >/dev/null 2>&1 \
   || { cleanup_release; die "the new release's 'hiro' does not run: nothing was changed."; }
 chmod -R a+rX "$RELEASE_DIR" "${HIRO_HOME}/python" 2>/dev/null || true
+
+# --- 2b. The WhatsApp plugin's own tool (the running service is still untouched) --------------
+# The WhatsApp plugin runs from a uv tool of its own, outside the release (neonize needs packages the core's
+# environment can't hold), installed editable from this checkout: its code follows the checkout, its packages
+# don't. A package the SDK or the commons gains then stops the plugin at import while the core stays healthy
+# (2026-11-20: opentelemetry; WhatsApp was down for three days, unnoticed). So every deploy installs the tool
+# again and proves it starts. Only a tool installed from this checkout; skipped where there is none.
+WA_SRC="${REPO_ROOT}/hiroserver/channels/hiro-channel-whatsapp"
+WA_TOOLS="$(uv tool dir 2>/dev/null || true)"
+WA_RECEIPT="${WA_TOOLS}/hiro-channel-whatsapp/uv-receipt.toml"
+if [ -n "$WA_TOOLS" ] && [ -f "$WA_RECEIPT" ] && grep -qF "editable = \"${WA_SRC}\"" "$WA_RECEIPT"; then
+  say "installing the WhatsApp plugin's tool again (its packages follow this commit)"
+  if ! uv tool install --python "$HIRO_PYTHON" --reinstall "${REFRESH[@]}" --editable "$WA_SRC"; then
+    cleanup_release
+    die "the WhatsApp plugin's tool could not be installed: the core is untouched (the running release goes on). The tool may be half installed: run 'uv tool install --reinstall --editable ${WA_SRC}' and deploy again."
+  fi
+  WA_BIN="$(uv tool dir --bin 2>/dev/null || true)"
+  if ! "${WA_BIN}/hiro-channel-whatsapp" --help >/dev/null 2>&1; then
+    cleanup_release
+    die "the WhatsApp plugin does not start after its install ('${WA_BIN}/hiro-channel-whatsapp --help' fails): the core is untouched (the running release goes on). Run that command to see why, then deploy again."
+  fi
+else
+  say "the WhatsApp plugin's tool isn't installed from this checkout: nothing to install again"
+fi
 
 switch_current() {  # $1 = release folder; atomic: a new link renamed over the old one
   ln -sfn "$1" "${CURRENT}.new"

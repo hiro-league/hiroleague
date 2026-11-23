@@ -1,7 +1,8 @@
 """The extension manager's starter: the processes of the extensions the core starts (the channel plugins).
 
 It starts a plugin with the extension socket's address, its key folder (``<workspace>/channels/<name>/``) and, in its
-process's environment, the pairing code the manager made for it (never on its command line); it ends an older process
+process's environment, the pairing code the manager made for it (never on its command line) and the variables its
+catalog entry names; it ends an older process
 of the same plugin by its recorded pid, and stops them all at shutdown. It never starts an app: an app starts itself.
 Signing in, settings and frames are the manager's (extension_manager.py).
 """
@@ -19,6 +20,7 @@ from hiro_commons import logging_foundation
 from hiro_commons.log import Logger
 from hiro_commons.process import is_running, kill_process, read_channel_pid, remove_channel_pid, write_channel_pid
 
+from ..domain.channel_catalog import channel_env
 from ..domain.channel_config import ChannelConfig
 
 if TYPE_CHECKING:
@@ -74,7 +76,9 @@ class ExtensionStarter:
             "--log-dir", str(self._ctx.log_dir),
             "--log-level", self._ctx.config.log_level,
         ]
-        env = {**os.environ, ENV_PAIRING_CODE: pairing_code}
+        # Its start environment: the server's, what its catalog entry sets (a library that reads the environment
+        # before the plugin's own code runs), and its pairing code.
+        env = {**os.environ, **channel_env(cfg.name), ENV_PAIRING_CODE: pairing_code}
         self.kill_previous(cfg.name)
         log.info(f"🔌 Starting extension — {cfg.name}", cmd=cmd)
         self._close_output(cfg.name)
