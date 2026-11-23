@@ -1,5 +1,27 @@
 # HiroLeague: the core
 
+**Hiro** is a self-hosted platform for a household's AI apps, and the framework those apps are built with. **Hiro
+League** is the whole: the core and its extensions.
+
+The core holds what every app needs and none should build twice: the people and their roles, one sign-in, AI models and
+their budgets, voices, memory, messaging over WhatsApp and the family's devices, and Hiro, the assistant people talk to.
+
+An **extension** is an app built on the core with its two kits, one for the backend and one for the UI. It owns one
+area, with its own pages and data, and takes everything else from the core. Extensions reach each other only through
+the core. Some are built in, and others come from the community.
+
+**Built today:** the core and its admin, the two kits, the device app, and six extensions: HomeHiro, NetHiro, CodeHiro,
+TrainHiro, StudyHiro and EvalHiro.
+
+**Where it's going:**
+- extensions from the community, and CodeHiro published;
+- personal business, beside the household;
+- Hiro searching your chats, email and files;
+- a life coach;
+- news and social media filtered to what matters to you;
+- 3D avatars you can speak to;
+- pages and tools built from a prompt.
+
 The core of Hiro League: the family list, roles and the one sign-in; WhatsApp, AI and voices; the admin; the SDK and the
 two kits. What it is for people: [the introduction](../hiro-docs/mintdocs/hiro/get-started/introduction.mdx).
 
