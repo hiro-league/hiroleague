@@ -1,4 +1,4 @@
-import type { DeviceRow } from '$lib/api/channels-devices';
+import type { DeviceRow } from '$lib/api/devices';
 
 /** ISO timestamp → admin table display (UTC suffix, space-separated date/time). */
 export function formatDeviceTimestamp(value: string | null): string {

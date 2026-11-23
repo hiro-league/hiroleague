@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
 from hiro_commons.constants.network import DEFAULT_LOCALHOST
 from hiro_commons.log import Logger
 
@@ -22,6 +23,7 @@ from ..domain.config import Config, load_config, save_config
 from ..domain.channel_catalog import catalog_channel
 from ..domain.channel_config import list_channel_configs
 from ..domain.channel_descriptor import load_channel_descriptor
+from ..domain.features import feature_active
 from ..domain.extensions import (
     KIND_CHANNEL,
     PairedExtension,
@@ -175,6 +177,11 @@ def _uses(info: dict[str, Any]) -> list[str]:
     ]
 
 
+def _hidden(ext: PairedExtension) -> bool:
+    """The phones' channel is left out of the list while the `devices` feature is hidden (features.py)."""
+    return ext.kind == KIND_CHANNEL and ext.name == MANDATORY_CHANNEL_NAME and not feature_active(MANDATORY_CHANNEL_NAME)
+
+
 def extension_row(ext: PairedExtension, workspace_path: Path, enabled: dict[str, bool]) -> dict[str, Any]:
     """One row of the one list, for an app or a channel; what is live (connected, linked) the caller adds."""
     channel = ext.kind == KIND_CHANNEL
@@ -221,6 +228,7 @@ class ExtensionListTool(Tool):
             extensions=[
                 extension_row(ext, workspace_path, enabled)
                 for ext in list_paired_extensions(workspace_path, kind=None)
+                if not _hidden(ext)
             ]
         )
 

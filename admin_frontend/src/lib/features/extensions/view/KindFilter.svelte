@@ -1,8 +1,8 @@
 <script lang="ts">
-  // mockup: the one list's kind filter, a toggle per kind, several at once; none picked shows every kind.
+  // The one list's kind filter: a toggle per kind, several at once; none picked shows every kind.
   // Built on shadcn-svelte's Toggle Group (multiple), as CodeHiro's state filter is.
   import * as ToggleGroup from '$kit/components/ui/toggle-group/index.js';
-  import type { ExtensionKind } from './one-list-mock';
+  import type { ExtensionKind } from '../shared/extension-rows';
 
   interface Props {
     picked: ExtensionKind[];

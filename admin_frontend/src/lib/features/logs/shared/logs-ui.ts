@@ -10,7 +10,7 @@ import {
   type LogsLayout,
   type TrafficClass
 } from '$lib/api/logs';
-import type { DeviceRow } from '$lib/api/channels-devices';
+import type { DeviceRow } from '$lib/api/devices';
 import { CAT } from '$kit/ui/category';
 import { partLabel } from '../one-view/parts';
 

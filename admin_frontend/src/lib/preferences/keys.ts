@@ -2,7 +2,6 @@ export const PREF_KEYS = {
   sidebarCollapsed: 'hiro.admin.sidebar.collapsed',
   selectedWorkspace: 'hiro.admin.selectedWorkspace',
   serverActiveTab: 'hiro.admin.server.activeTab',
-  channelsDevicesActiveTab: 'hiro.admin.channelsDevices.activeTab',
   chatChannelsActiveTab: 'hiro.admin.chatChannels.activeTab',
   /** "Ask for voice reply" checkbox on Messages tab (local UX preference). */
   chatChannelsVoiceReply: 'hiro.admin.chatChannels.voiceReply',
@@ -70,7 +69,6 @@ export const PREF_KEYS = {
 } as const;
 
 export type ServerTabPreference = 'workspaces' | 'gateways' | 'metrics';
-export type ChannelsDevicesTabPreference = 'channels' | 'devices';
 export type ChatChannelsTabPreference = 'channels' | 'messages';
 export type ChatOverlayMode = 'full' | 'partial';
 // Merged the former 'active-providers' tab into 'providers' — one providers list shows both

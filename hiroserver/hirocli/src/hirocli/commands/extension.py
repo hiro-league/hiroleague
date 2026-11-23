@@ -64,7 +64,7 @@ def register(extension_app: typer.Typer, console: Console) -> None:
     def extension_list(
         workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help=_WORKSPACE_HELP),
     ) -> None:
-        """List paired extensions."""
+        """List every extension: its channel plugins and its apps."""
         from ..tools.extension import ExtensionListTool
 
         try:
@@ -74,10 +74,11 @@ def register(extension_app: typer.Typer, console: Console) -> None:
             raise typer.Exit(1) from exc
 
         if not result.extensions:
-            console.print("[dim]No paired extensions yet. Pair one with `hiro extension add`.[/dim]")
+            console.print("[dim]No extensions yet. Pair an app with `hiro extension add`.[/dim]")
             return
-        table = Table(title="Paired extensions", show_header=True)
+        table = Table(title="Extensions", show_header=True)
         table.add_column("Name", style="bold")
+        table.add_column("Kind")
         table.add_column("Version")
         table.add_column("Extension ID")
         table.add_column("Paired")
@@ -85,6 +86,7 @@ def register(extension_app: typer.Typer, console: Console) -> None:
         for ext in result.extensions:
             table.add_row(
                 ext["name"] or "—",
+                ext["kind"],
                 ext["version"] or "—",
                 ext["extension_id"],
                 _human(ext["paired_at"]),

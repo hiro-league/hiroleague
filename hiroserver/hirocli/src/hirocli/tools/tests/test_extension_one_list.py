@@ -11,7 +11,7 @@ import pytest
 from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
 from hirocli.domain.channel_config import ChannelConfig, load_channel_config, save_channel_config
 from hirocli.domain.channel_descriptor import ChannelDescriptor, save_channel_descriptor
-from hirocli.domain.extensions import add_paired_extension, list_paired_extensions
+from hirocli.domain.extensions import add_paired_extension, list_paired_extensions, pair_started_extension
 from hirocli.tools import channel as channel_tools
 from hirocli.tools import extension as extension_tools
 from hirocli.tools.extension import ExtensionListTool, ExtensionRemoveTool
@@ -109,6 +109,12 @@ def test_the_mandatory_channel_is_marked(workspace) -> None:
     assert _rows()[MANDATORY_CHANNEL_NAME]["mandatory"] is True
 
 
+def test_the_phones_channel_is_left_out_while_the_devices_feature_is_hidden(workspace, monkeypatch) -> None:
+    monkeypatch.setattr(extension_tools, "feature_active", lambda feature: feature != MANDATORY_CHANNEL_NAME)
+
+    assert MANDATORY_CHANNEL_NAME not in _rows()
+
+
 def test_removing_an_app_forgets_it_and_uninstalls_nothing(workspace, monkeypatch) -> None:
     uninstalls = _Uninstalls()
     monkeypatch.setattr(extension_tools, "ChannelUninstallTool", lambda: uninstalls)
@@ -157,3 +163,15 @@ def test_the_mandatory_channel_is_refused(workspace, monkeypatch) -> None:
 def test_an_unknown_id_removes_nothing(workspace) -> None:
     assert ExtensionRemoveTool().execute("no-such-id").removed is False
     assert len(_rows()) == 3
+
+
+def test_a_channel_with_no_descriptor_file_takes_its_form_from_its_row(tmp_path, monkeypatch) -> None:
+    # A test environment has no channel folders (the WhatsApp session stays on live); the row's description has the form.
+    monkeypatch.setattr(extension_tools, "_resolve_path", lambda _ws: tmp_path)
+    save_channel_config(tmp_path, ChannelConfig(name="whatsapp", enabled=False))
+    info = {"name": "whatsapp", "version": "0.1.0", "config_schema": {"properties": {"audio_in": {"type": "boolean"}}},
+            "capabilities": {"pairing": "qr"}}
+    pair_started_extension(tmp_path, name="whatsapp", public_key="pk", info=info)
+
+    whatsapp = _rows()["whatsapp"]
+    assert whatsapp["has_settings"] is True and whatsapp["pairing"] == "qr"

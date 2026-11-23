@@ -7,7 +7,7 @@
   import { TABLE_GRID_ROW } from '$kit/ui/table-grid';
   import DevicePairingDialog from '../dialogs/DevicePairingDialog.svelte';
   import DeviceRevokeDialog from '../dialogs/DeviceRevokeDialog.svelte';
-  import { formatDeviceTimestamp } from '../shared/channels-devices-format';
+  import { formatDeviceTimestamp } from '../shared/devices-format';
   import type { DevicesController } from '../state/devices-controller.svelte';
 
   let { ctrl }: { ctrl: DevicesController } = $props();

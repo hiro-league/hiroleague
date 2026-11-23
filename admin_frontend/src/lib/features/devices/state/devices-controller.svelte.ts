@@ -6,9 +6,9 @@ import {
   revokeDevice,
   type DevicePairingData,
   type DeviceRow
-} from '$lib/api/channels-devices';
+} from '$lib/api/devices';
 import type { Notify } from '$kit/ui/toast.svelte';
-import { displayDeviceName } from '../shared/channels-devices-format';
+import { displayDeviceName } from '../shared/devices-format';
 
 export type DevicesController = ReturnType<typeof createDevicesController>;
 

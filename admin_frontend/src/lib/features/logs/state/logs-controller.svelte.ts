@@ -1,6 +1,6 @@
 import { errorMessage } from '$kit/api/client';
 import { tick, untrack } from 'svelte';
-import { listDevices, type DeviceRow } from '$lib/api/channels-devices';
+import { listDevices, type DeviceRow } from '$lib/api/devices';
 import {
   clearLogs,
   discoverLogMethods,

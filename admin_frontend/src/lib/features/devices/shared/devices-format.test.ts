@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { displayDeviceName, formatDeviceTimestamp } from './channels-devices-format';
+import { displayDeviceName, formatDeviceTimestamp } from './devices-format';
 
 describe('formatDeviceTimestamp', () => {
   it('formats ISO strings with UTC suffix', () => {

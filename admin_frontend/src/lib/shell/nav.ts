@@ -29,7 +29,8 @@ export const navItems: NavItem[] = [
   { group: 'Core', label: 'Extensions', path: '/extensions', icon: 'puzzle', right: 'open_settings' },
   // Phase 6: the family list, its roles and admin sign-ins.
   { group: 'Core', label: 'People', path: '/people', icon: 'users', right: 'open_settings' },
-  { group: 'Communication', label: 'Channels & Devices', path: '/channels-devices', icon: 'cpu', right: 'open_settings' },
+  // The family's phones; the channels they chat through are on Extensions (Unified communication, phase 2).
+  { group: 'Communication', label: 'Devices', path: '/devices', icon: 'cpu', feature: 'devices', right: 'open_settings' },
   { group: 'Communication', label: 'Characters', path: '/characters', icon: 'user', right: 'open_settings' },
   { group: 'Communication', label: 'Chat channels', path: '/chats', icon: 'message', right: 'open_settings' },
   { group: 'Operations', label: 'Knowledge', path: '/knowledge', icon: 'database', feature: 'knowledge', right: 'open_settings' },

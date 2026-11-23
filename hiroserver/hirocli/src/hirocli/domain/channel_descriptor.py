@@ -21,6 +21,8 @@ from typing import Any
 import jsonschema
 from pydantic import BaseModel
 
+from .extensions import KIND_CHANNEL, list_paired_extensions
+
 logger = logging.getLogger(__name__)
 
 _DESCRIPTOR_FILENAME = "descriptor.json"
@@ -62,12 +64,30 @@ def load_channel_descriptor(workspace_path: Path, name: str) -> ChannelDescripto
     """Load a channel's descriptor, or None if it never registered / is unreadable."""
     path = descriptor_path(workspace_path, name)
     if not path.exists():
-        return None
+        # Its folder isn't copied to a test environment (the WhatsApp session stays on live), but its row keeps the
+        # description it last signed in with, which holds the same settings form and link steps.
+        return _from_row(workspace_path, name)
     try:
         return ChannelDescriptor.model_validate_json(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         logger.warning("⚠️ Corrupt channel descriptor (name=%r): %s", name, exc)
         return None
+
+
+def _from_row(workspace_path: Path, name: str) -> ChannelDescriptor | None:
+    """The settings form and link steps from the channel's row (its description), or None when it has neither."""
+    ext = next(
+        (e for e in list_paired_extensions(workspace_path, kind=KIND_CHANNEL) if e.name == name and e.started_by_core),
+        None,
+    )
+    if ext is None:
+        return None
+    schema, capabilities = ext.info.get("config_schema"), ext.info.get("capabilities")
+    if not schema and not capabilities:
+        return None
+    return ChannelDescriptor(
+        channel=name, version=str(ext.info.get("version") or ""), config_schema=schema, capabilities=capabilities
+    )
 
 
 # ---------------------------------------------------------------------------

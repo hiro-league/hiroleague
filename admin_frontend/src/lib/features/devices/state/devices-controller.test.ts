@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { DevicePairingData, DeviceRow } from '$lib/api/channels-devices';
+import type { DevicePairingData, DeviceRow } from '$lib/api/devices';
 
-vi.mock('$lib/api/channels-devices', () => ({
+vi.mock('$lib/api/devices', () => ({
   listDevices: vi.fn(),
   generateDevicePairingCode: vi.fn(),
   revokeDevice: vi.fn()
 }));
 
-import * as api from '$lib/api/channels-devices';
+import * as api from '$lib/api/devices';
 import { createDevicesController } from './devices-controller.svelte';
 
 const deviceRow = (over: Partial<DeviceRow> = {}): DeviceRow => ({

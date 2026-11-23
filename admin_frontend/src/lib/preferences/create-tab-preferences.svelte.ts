@@ -2,7 +2,7 @@
  * Generic page-level tab preferences (URL `?tab=` + session storage).
  *
  * Replaces the four near-identical `*-preferences.svelte.ts` files in this
- * folder (catalog, server, channels-devices, characters) — they collapse to a
+ * folder (catalog, server, characters) — they collapse to a
  * one-line `createTabPreferences(...)` call once Phase 2 adoption lands.
  *
  * Graph runs' underline subtab strip with dynamic per-record tabs is
