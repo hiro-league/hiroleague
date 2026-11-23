@@ -94,9 +94,9 @@ _FEATURES: tuple[FeatureSpec, ...] = (
         active=True,
         note="The shared UI kit's components and theme, as deployed",
     ),
-    # WhatsApp is no longer a standalone feature/page — channel management (WhatsApp
-    # and every other plugin) now lives in the generic Channels & Devices page (§5.5),
-    # driven by each channel's declared schema + capabilities. No per-channel flag.
+    # WhatsApp is no feature of its own: every channel plugin is a row of the admin's
+    # Extensions page, its Settings drawn from its declared schema + capabilities (§5.5).
+    # No per-channel flag.
 )
 
 FEATURES: dict[str, FeatureSpec] = {f.id: f for f in _FEATURES}

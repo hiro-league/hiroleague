@@ -73,11 +73,11 @@ api_router.include_router(chat_channels_router)
 # mounted; per-channel visibility is gated in the UI nav by feature flag.
 api_router.include_router(channels_router)
 # Feature-gated: device pairing admin (exclusive to the devices channel). Hidden for
-# first public builds — the Channels & Devices "Devices" tab is dropped in the UI to
-# match, and the devices channel itself is not spawned (see ensure_mandatory_devices_channel).
+# first public builds — the admin's Devices page is dropped from its menu to match,
+# and the devices channel itself is not spawned (see ensure_mandatory_devices_channel).
 if feature_active("devices"):
     api_router.include_router(devices_router)
-# Extensions (HomeHiro first): pairing codes, the paired list with live status,
+# Extensions: the one list of channel plugins and apps with live status, pairing codes,
 # removal, the listen address and the core's test call. Always mounted.
 api_router.include_router(extensions_router)
 # AI profiles, uses, Try it and local servers' models (Phase 7a: the Catalog's AI tabs). Always mounted.
