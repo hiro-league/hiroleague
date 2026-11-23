@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import logging
 import random
 from functools import partial
 from pathlib import Path
@@ -757,6 +758,21 @@ def _consume_result(task: asyncio.Future[Any]) -> None:
     # Done-callback for an abandoned neonize idle() (see WhatsAppBridge._idle).
     if not task.cancelled() and task.exception() is not None:
         log.warning("⚠️ Abandoned WhatsApp client ended with an error", error=str(task.exception()))
+
+
+# The loggers the WhatsApp library writes through: neonize reads its own logger's level when a client connects and
+# tells whatsmeow (Go) to send lines from that level up; neonize hands them on as whatsmeow.<area> and Whatsmeow.Database.
+_LIBRARY_LOGGERS = ("neonize.utils.log", "whatsmeow", "Whatsmeow.Database")
+
+
+def set_library_log_level(level: str) -> None:
+    """How much of the WhatsApp library's own logging reaches this channel's log: "" (its warnings only, as every
+    library's), "INFO" or "DEBUG". Read by neonize at the next connection, so a change takes effect at Reconnect."""
+    number = logging.getLevelName(level.upper()) if level else logging.WARNING
+    if not isinstance(number, int):
+        raise ValueError(f"unknown log level {level!r}")
+    for name in _LIBRARY_LOGGERS:
+        logging.getLogger(name).setLevel(number)
 
 
 def _parse_jid(jid_str: str):

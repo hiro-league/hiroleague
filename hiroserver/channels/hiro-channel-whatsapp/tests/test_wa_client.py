@@ -332,3 +332,25 @@ def test_plugin_call_send_says_why_not(plugin_module, wa_client):
 
     with pytest.raises(ChannelCallNotSupported):
         asyncio.run(plugin.on_call("dance", {}))
+
+
+def test_the_library_log_level_reaches_neonize_and_whatsmeow(wa_client) -> None:
+    import logging
+
+    from hiro_channel_whatsapp.config import WhatsAppChannelConfig
+
+    set_library_log_level = wa_client.set_library_log_level
+    names = ("neonize.utils.log", "whatsmeow", "Whatsmeow.Database")
+    try:
+        set_library_log_level("DEBUG")
+        assert [logging.getLogger(n).level for n in names] == [logging.DEBUG] * 3
+        assert logging.getLogger("whatsmeow.Client").getEffectiveLevel() == logging.DEBUG
+        set_library_log_level("")
+        assert [logging.getLogger(n).level for n in names] == [logging.WARNING] * 3
+        with pytest.raises(ValueError):
+            set_library_log_level("LOUD")
+    finally:
+        set_library_log_level("")
+    # The admin draws the setting from the schema, with its three choices
+    prop = WhatsAppChannelConfig.model_json_schema()["properties"]["whatsmeow_log_level"]
+    assert prop["enum"] == ["", "INFO", "DEBUG"] and prop["default"] == ""

@@ -12,6 +12,8 @@ value stored before a schema field existed is tolerated.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -62,6 +64,15 @@ class WhatsAppChannelConfig(BaseModel):
         default=None,
         title="Default conversation",
         description="Conversation the owner's messages route to (default: General).",
+    )
+    whatsmeow_log_level: Literal["", "INFO", "DEBUG"] = Field(
+        default="",
+        title="WhatsApp library log level",
+        description=(
+            "Writes the WhatsApp library's own lines (whatsmeow: what it encrypts, sends and gets back) into this "
+            "channel's log, to find out why a message isn't delivered. Takes effect at the next Reconnect. Empty: "
+            "its warnings only."
+        ),
     )
     session_db_path: str | None = Field(
         default=None,

@@ -41,7 +41,7 @@ from hiro_commons.log import Logger
 
 from .audio import TranscodeError, ensure_ffmpeg_on_path, transcode_to_ogg_opus
 from .config import WhatsAppChannelConfig
-from .wa_client import WhatsAppBridge, WhatsAppNotConnected
+from .wa_client import WhatsAppBridge, WhatsAppNotConnected, set_library_log_level
 
 # Onboarding lifecycle states (design §6.3) surfaced to the admin UI, ordered
 # most-preliminary → ready.
@@ -110,6 +110,8 @@ class WhatsAppChannel(ChannelPlugin):
         self._send_read_receipts = bool(self._config.get("send_read_receipts", True))
         self._audio_out = bool(self._config.get("audio_out", True))
         self._owner_number = _normalize_number(str(self._config.get("owner_number") or ""))
+        # The WhatsApp library's own lines in this channel's log (a diagnosis setting), from the next connection on.
+        set_library_log_level(str(self._config.get("whatsmeow_log_level") or ""))
         # Allow-list is CLOSED by default (security): with nothing configured, no
         # sender may reach the agent. The owner's own number is always permitted;
         # add more via `allowed_senders`.
@@ -136,6 +138,7 @@ class WhatsAppChannel(ChannelPlugin):
             read_receipts=self._send_read_receipts,
             audio_out=self._audio_out,
             owner_set=bool(self._owner_number),
+            library_log_level=str(self._config.get("whatsmeow_log_level") or "WARNING"),
         )
 
     async def on_start(self) -> None:
