@@ -126,6 +126,8 @@ def _wire_runtime(
     # InfraEventHandlers answers the devices channel (pairing, the allowed devices) through the manager.
     infra_handlers.set_extension_manager(extension_manager)
     infra_handlers.set_resource_change_broadcaster(resource_change_broadcaster)
+    # The same sender tells the apps when their copies (family, AI and voice profiles) are stale (phase 4).
+    resource_change_broadcaster.set_extension_manager(extension_manager)
 
     return comm_manager, resource_change_broadcaster, extension_manager
 
@@ -258,10 +260,6 @@ async def _main(
 
     # --- Wire communication + channel stacks ---
     comm_manager, resource_change_broadcaster, extension_manager = _wire_runtime(ctx)
-    # Phase 6: extensions are told when the family list or its roles change.
-    from hirocli.runtime.people_for_extensions import watch_people_changes
-
-    stop_watching_people = watch_people_changes(extension_manager, workspace_path)
     # Apps' LAN names: claimed by extensions, published (mDNS) and proxied (Caddy) by the core.
     from hirocli.runtime.site_names import SiteNames
 
@@ -344,7 +342,6 @@ async def _main(
         log.debug("Server parts stopped")
     finally:
         resource_change_broadcaster.close()
-        stop_watching_people()
         if ctx.knowledge_manager is not None:
             await ctx.knowledge_manager.close()
         ctx.preference_reactor.close()

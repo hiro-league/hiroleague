@@ -2,8 +2,8 @@
 
 HomeHiro reads the core's people and roles (``people.list``), adds or changes them
 when its admin does that in HomeHiro (``people.add``, ``people.update``, ``roles.*``),
-and is told to read again when anything changes (the ``people.changed`` event to every
-connected extension). Contract: hiro_channel_sdk.constants.
+and is told to read again when anything changes (``resource.changed`` for ``people``, sent to
+every connected app by the one sender, resource_change_broadcaster.py). Contract: hiro_channel_sdk.constants.
 
 The operations are the family list's own (domain/people.py, the same ones the people
 tools call), run in a worker thread so the event loop never waits on SQLite.
@@ -14,10 +14,9 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from hiro_channel_sdk.constants import (
-    EVENT_PEOPLE_CHANGED,
     METHOD_PEOPLE_ADD,
     METHOD_PEOPLE_LIST,
     METHOD_PEOPLE_UPDATE,
@@ -29,7 +28,6 @@ from hiro_channel_sdk.constants import (
 from hiro_commons.log import Logger
 
 from ..domain.access import copy_rights, import_rights, roles_for_extension
-from ..domain.events import DomainEvent, DomainEventType, get_domain_event_bus
 from ..domain.people import (
     PeopleError,
     Person,
@@ -43,9 +41,6 @@ from ..domain.people import (
 from .ai_for_extensions import _caller_name
 from .request_handler import EXTENSIONS_ONLY, RequestContext, RequestRefused
 from .whatsapp_for_extensions import sender_label
-
-if TYPE_CHECKING:
-    from .extension_manager import ExtensionManager
 
 log = Logger.get("PEOPLE")
 
@@ -165,27 +160,3 @@ PEOPLE_REQUEST_HANDLERS: tuple[tuple[str, Any, frozenset[str]], ...] = (
     (METHOD_ROLES_IMPORT_RIGHTS, handle_roles_import_rights, EXTENSIONS_ONLY),
 )
 
-
-def watch_people_changes(extensions: ExtensionManager, workspace_path: Path) -> Callable[[], None]:
-    """Tell every connected extension when this workspace's people or roles change.
-
-    Returns the unsubscribe function (called at shutdown).
-    """
-    bus = get_domain_event_bus()
-    resolved = workspace_path.resolve()
-
-    async def on_change(event: DomainEvent) -> None:
-        try:
-            if event.workspace_path.resolve() != resolved:
-                return
-        except OSError:
-            return
-        told = []
-        for extension_id, live in extensions.snapshot().items():
-            if await extensions.send_event(extension_id, EVENT_PEOPLE_CHANGED, {}):
-                told.append(str(live.get("name") or extension_id))
-        if told:
-            log.info(f"⬆️ People changed — told {', '.join(told)}", what=event.payload.get("what"))
-
-    bus.subscribe(DomainEventType.PEOPLE_CHANGED, on_change)
-    return lambda: bus.unsubscribe(DomainEventType.PEOPLE_CHANGED, on_change)

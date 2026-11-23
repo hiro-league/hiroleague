@@ -5,10 +5,19 @@ from __future__ import annotations
 from hirocli.runtime.resource_registry import ResourceRegistry, ResourceSpec
 
 
-def test_preferences_saved_maps_to_channels_and_policy() -> None:
+def test_preferences_saved_maps_to_channels_policy_and_the_apps_profiles() -> None:
     reg = ResourceRegistry()
     names = reg.resources_for_signal("preferences_saved")
-    assert set(names) == {"channels", "policy"}
+    assert set(names) == {"channels", "policy", "ai.profiles", "voice.profiles"}
+
+
+def test_the_apps_copies_are_read_by_the_apps_the_rest_by_the_phones() -> None:
+    """Unified communication, phase 4: one list of resources, each with who reads it."""
+    reg = ResourceRegistry()
+    assert reg.resources_for_signal("people_changed") == ["people"]
+    assert reg.resources_for_signal("providers_changed") == ["ai.profiles"]
+    assert {r: reg.read_by(r) for r in ("people", "ai.profiles", "voice.profiles", "channels", "policy")} == {
+        "people": "apps", "ai.profiles": "apps", "voice.profiles": "apps", "channels": "devices", "policy": "devices"}
 
 
 def test_character_changed_maps_to_channels_and_characters() -> None:

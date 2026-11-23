@@ -2,8 +2,9 @@
 with (the core's `ai.profiles`). The app's pickers list these and
 Settings → AI from HiroLeague shows them.
 
-The list is read through the link (hiroleague.link) when it connects, every 10 minutes while connected (the `core-ai`
-worker), and when a page asks for it and the last read is older than FRESH. It is kept in memory and in the database
+The list is read through the link (hiroleague.link) when the core says `resource.changed` for `ai.profiles`, when the
+link connects and in its slow round (follow.py; the `core-ai` worker follows it), and when a page asks for it and the
+last read is older than FRESH. It is kept in memory and in the database
 (setting CACHE_KEY, with when it was read), so while the core is down, or after a restart without it, the pickers
 still list the last profiles it sent, with when that was. A read that fails keeps the last list and says why.
 
@@ -13,12 +14,13 @@ two sides can grow apart a little without breaking the pickers.
 
 import asyncio
 import json
-from contextlib import suppress
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from hiro_channel_sdk import ExtensionRequestError
+from hiro_channel_sdk.constants import RESOURCE_AI_PROFILES
 from pydantic import BaseModel
 from sqlmodel import Session
 
@@ -27,9 +29,8 @@ from .. import settings
 from .. import calls
 from ..db import engine, run_db
 from ..errors import Invalid, Unavailable, failed
-from ..events import bus
 from hiro_channel_sdk.workers import Worker
-from ..hiroleague import CONNECTED, link
+from ..hiroleague import link
 from ..extension import ext
 
 log = identity.logger("llm")
@@ -38,7 +39,6 @@ AI_PROFILES = "ai.profiles"  # the core's request (extensions only)
 AI_USES_SET = "ai.uses.set"  # Phase 7b: pick a use's profile, saved in the core
 CACHE_KEY = "core_ai_profiles"  # the last list read, as JSON {"answer", "fetched_at"} (settings table)
 FRESH = timedelta(seconds=30)  # a page's read asks the core again when the last read is older
-EVERY = 600.0  # seconds between the worker's reads while connected
 TIMEOUT = 10.0  # seconds the core may take to answer
 IMPORTED = "hh-"  # the core's import (`hiro ai import-homehiro`) kept HomeHiro's old profile ids as hh-<id>
 
@@ -319,43 +319,22 @@ def name_of(profile_id: str | None) -> str | None:
 
 
 class CoreAiReader(Worker):
-    """Reads the core's profiles when the link connects and every EVERY seconds while connected."""
+    """Keeps the core's profiles: the link reads them again when the core says they changed, when it connects, and in
+    its slow round (follow.py). A read that fails keeps the last list."""
 
     name = "core-ai"
 
     def __init__(self) -> None:
         super().__init__()
-        self._due: asyncio.Event | None = None
-        self._unsubscribe = None
+        self._unfollow: Callable[[], None] | None = None
 
     def on_start(self) -> None:
-        self._due = asyncio.Event()
-        self._unsubscribe = bus.subscribe(CONNECTED, self._now)
-        self.spawn(self._loop(), "read")
+        self._unfollow = link.follow(RESOURCE_AI_PROFILES, refresh)
 
     def on_stop(self) -> None:
-        if self._unsubscribe:
-            self._unsubscribe()
-            self._unsubscribe = None
-
-    def _now(self, _kind: str, _data: Any) -> None:
-        if self._due is not None:
-            self._due.set()
-
-    async def _loop(self) -> None:
-        assert self._due is not None
-        while True:
-            with suppress(TimeoutError):
-                await asyncio.wait_for(self._due.wait(), EVERY)
-            self._due.clear()
-            if not self.running:
-                return
-            if not link.client.connected:
-                continue  # keeps the last list; the next connect reads again
-            try:
-                await refresh()
-            except Exception as exc:  # one bad round never ends the loop; logged, the next round tries again
-                failed(log, "AI from HiroLeague: reading the core's profiles", exc)
+        if self._unfollow:
+            self._unfollow()
+            self._unfollow = None
 
 
 reader = CoreAiReader()
