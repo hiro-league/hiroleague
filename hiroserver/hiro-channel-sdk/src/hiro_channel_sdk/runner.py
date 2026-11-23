@@ -127,8 +127,8 @@ class PluginRunner:
                 self._use_code()
             else:
                 log.error(
-                    f"❌ Channel ({self._plugin.info.name}) can't sign in and has no pairing code — "
-                    "the core starts it again with a new one",
+                    f"❌ Channel ({self._plugin.info.name}) can't sign in and has no pairing code left — "
+                    "it stops; switching it on in the admin, or the core's next start, gives it a new code",
                     reason=detail.get("error"),
                 )
                 self._done.set()

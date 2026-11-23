@@ -58,6 +58,6 @@ persists on Save.
 
 - **How the core, the apps and the kits fit together** is the Hiro League design (hiro-docs `standards/design.md`),
   loaded in every session.
-- **The core's internals** (Channel Manager, Communication Manager, Agent Manager, message persistence, resource sync,
+- **The core's internals** (Extension Manager, Communication Manager, Agent Manager, message persistence, resource sync,
   the protocol...) are the mintdocs **Architecture** tab (`../hiro-docs/mintdocs/docs.json`). Those pages are older than
   the code in places: check a page against the code before relying on it.

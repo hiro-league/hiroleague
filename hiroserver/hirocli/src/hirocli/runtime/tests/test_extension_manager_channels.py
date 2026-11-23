@@ -179,7 +179,8 @@ def test_a_channel_plugin_pairs_starts_relays_and_answers(tmp_path: Path, caplog
         runner.stop()
         await asyncio.wait_for(running, 5)
         shutil.rmtree(keys)
-        again = PluginRunner(_Plugin(), f"ws://127.0.0.1:{port}", keys, pairing_code=manager._new_start_code("echo"))
+        second_code = manager._new_start_code("echo")
+        again = PluginRunner(_Plugin(), f"ws://127.0.0.1:{port}", keys, pairing_code=second_code)
         running = asyncio.create_task(again.run())
         await _wait_for(lambda: manager.get_connected_channels() == ["echo"])
         [row_again] = list_paired_extensions(workspace, kind=None)
@@ -187,9 +188,9 @@ def test_a_channel_plugin_pairs_starts_relays_and_answers(tmp_path: Path, caplog
         again.stop()
         await asyncio.wait_for(running, 5)
 
-        # A used code with no key: refused, and the runner ends (the core starts it again with a new code)
+        # The code it just paired with, again, with no key: a code works once, so it is refused and the runner ends
         shutil.rmtree(keys)
-        used = PluginRunner(_Plugin(), f"ws://127.0.0.1:{port}", keys, pairing_code="not-the-code")
+        used = PluginRunner(_Plugin(), f"ws://127.0.0.1:{port}", keys, pairing_code=second_code)
         await asyncio.wait_for(used.run(), 10)
         assert manager.get_connected_channels() == []
         assert any(r.levelname == "WARNING" and "Extension refused" in r.getMessage() and "bad_code" in r.getMessage()
