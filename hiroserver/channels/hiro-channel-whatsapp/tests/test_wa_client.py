@@ -354,3 +354,14 @@ def test_the_library_log_level_reaches_neonize_and_whatsmeow(wa_client) -> None:
     # The admin draws the setting from the schema, with its three choices
     prop = WhatsAppChannelConfig.model_json_schema()["properties"]["whatsmeow_log_level"]
     assert prop["enum"] == ["", "INFO", "DEBUG"] and prop["default"] == ""
+
+
+def test_the_business_bot_tag_is_off_before_neonize_loads() -> None:
+    # neonize's Go library reads NEONIZE_BOT_TAG when it loads: the package sets it first, so a reply isn't tagged as a
+    # business bot (which WhatsApp accepts and then delivers to no device)
+    import os
+
+    import hiro_channel_whatsapp
+
+    assert hiro_channel_whatsapp.__name__ == "hiro_channel_whatsapp"
+    assert os.environ["NEONIZE_BOT_TAG"] == "off"
