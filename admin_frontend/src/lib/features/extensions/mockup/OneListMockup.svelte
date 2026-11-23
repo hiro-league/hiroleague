@@ -1,10 +1,9 @@
 <script lang="ts">
   // mockup: the one list of every extension, channels and apps alike (Unified communication, phase 2).
-  import { Download, Link2, Link2Off, Lock, Settings2 } from '@lucide/svelte';
+  import { Link2Off, Lock, Settings2 } from '@lucide/svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import { Switch } from '$kit/components/ui/switch/index.js';
-  import MockupBadge from '$kit/ui/mockup-badge.svelte';
   import Panel from '$kit/ui/panel.svelte';
   import StatusDot from '$kit/ui/status-dot.svelte';
   import TableShell from '$kit/ui/table-shell.svelte';
@@ -14,34 +13,17 @@
   import { statusOf } from './one-list-mock';
   import type { OneListMockup } from './one-list-mockup.svelte';
 
-  interface Props {
-    list: OneListMockup;
-    /** Adding an app is today's pairing code, as it is. */
-    onAddApp: () => void;
-    addingApp: boolean;
-  }
-  let { list, onAddApp, addingApp }: Props = $props();
+  let { list }: { list: OneListMockup } = $props();
 
   const GRID = '1.6fr 100px 80px 1.3fr 190px';
 </script>
 
 <Panel
-  title="Channels and apps"
-  description={`${list.connectedCount} of ${list.rows.length} connected`}
+  title={`${list.rows.length} shown · ${list.connectedCount} connected`}
   class="grid gap-4"
 >
-  {#snippet actions()}
-    <MockupBadge title="A mockup of the one list: mock rows, and its switches and buttons change nothing" />
-    <Button variant="outline" onclick={() => list.notYet('pick a channel to install, from those not installed yet')}>
-      <Download size={15} /> Install a channel
-    </Button>
-    <Button disabled={addingApp} onclick={onAddApp}>
-      <Link2 size={15} /> Add an app
-    </Button>
-  {/snippet}
-
   {#if list.rows.length === 0}
-    <EmptyState message="Nothing is plugged in yet. Add an app with a pairing code, or install a channel." />
+    <EmptyState message={list.kinds.length ? "No extension of this kind." : "Nothing is plugged in yet. Add an app with a pairing code, or install a channel."} />
   {:else}
     <TableShell layout="grid" minWidth={820} gridColumns={GRID} stickyHead>
       {#snippet headRow()}

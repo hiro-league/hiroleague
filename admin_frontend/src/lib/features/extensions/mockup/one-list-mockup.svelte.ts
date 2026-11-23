@@ -2,15 +2,27 @@
 // rows, in this browser tab; nothing is sent to the core.
 import { ask } from '$kit/ui/confirm.svelte';
 import type { Notify } from '$kit/ui/toast.svelte';
-import { MOCK_EXTENSIONS, sortExtensions, type MockExtension } from './one-list-mock';
+import {
+  MOCK_EXTENSIONS,
+  sortExtensions,
+  type ExtensionKind,
+  type MockExtension
+} from './one-list-mock';
 
 export type OneListMockup = ReturnType<typeof createOneListMockup>;
 
 export function createOneListMockup(notify: Notify) {
   let rows = $state<MockExtension[]>(sortExtensions(MOCK_EXTENSIONS));
+  /** The kinds the list shows; none picked shows every kind. */
+  let kinds = $state<ExtensionKind[]>([]);
+  const shown = $derived(kinds.length ? rows.filter((row) => kinds.includes(row.kind)) : rows);
   let selectedId = $state<string | null>(null);
   const selected = $derived(rows.find((row) => row.extension_id === selectedId) ?? null);
-  const connectedCount = $derived(rows.filter((row) => row.connected && row.enabled !== false).length);
+  const connectedCount = $derived(shown.filter((row) => row.connected && row.enabled !== false).length);
+  const counts = $derived({
+    channel: rows.filter((row) => row.kind === 'channel').length,
+    app: rows.filter((row) => row.kind === 'app').length
+  });
 
   function open(row: MockExtension) {
     selectedId = row.extension_id;
@@ -53,8 +65,18 @@ export function createOneListMockup(notify: Notify) {
   }
 
   return {
+    /** Every row the kind toggles let through. */
     get rows() {
-      return rows;
+      return shown;
+    },
+    get kinds() {
+      return kinds;
+    },
+    setKinds: (next: ExtensionKind[]) => {
+      kinds = next;
+    },
+    get counts() {
+      return counts;
     },
     get selected() {
       return selected;

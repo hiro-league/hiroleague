@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { Download, Link2 } from '@lucide/svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
+  import MockupBadge from '$kit/ui/mockup-badge.svelte';
   import PageHeader from '$kit/ui/page-header.svelte';
   import SectionLabel from '$kit/ui/section-label.svelte';
   import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
@@ -12,16 +15,31 @@
   import { createOneListMockup } from './mockup/one-list-mockup.svelte';
   import OneListMockup from './mockup/OneListMockup.svelte';
   import ExtensionDetailMockup from './mockup/ExtensionDetailMockup.svelte';
+  import KindFilter from './mockup/KindFilter.svelte';
 
   const ctrl = createExtensionsController(toast.show);
   const oneList = createOneListMockup(toast.show);
 </script>
 
 <section class={ADMIN_PAGE_MAX_W}>
-  <PageHeader title="Extensions" description="Everything that plugs into Hiro: its channels (WhatsApp, phones) and its apps (HomeHiro…)." />
+  <!-- The page's actions and the list's filter sit in the sticky header, so they stay in reach down a long list. -->
+  <PageHeader title="Extensions" description="Everything that plugs into Hiro: its channels (WhatsApp, phones) and its apps (HomeHiro…).">
+    {#snippet adornment()}
+      <MockupBadge title="A mockup of the one list: mock rows, and its switches and buttons change nothing" />
+    {/snippet}
+    {#snippet actions()}
+      <Button variant="outline" onclick={() => oneList.notYet('pick a channel to install, from those not installed yet')}>
+        <Download size={15} /> Install a channel
+      </Button>
+      <Button disabled={ctrl.busy} onclick={() => void ctrl.generatePairingCode()}>
+        <Link2 size={15} /> Add an app
+      </Button>
+    {/snippet}
+    <KindFilter picked={oneList.kinds} counts={oneList.counts} onchange={oneList.setKinds} />
+  </PageHeader>
   <!-- grid-cols-1 (minmax(0,1fr)): a wide table scrolls inside its card instead of widening the page on a phone. -->
   <section class="grid grid-cols-1 gap-4">
-    <OneListMockup list={oneList} onAddApp={() => void ctrl.generatePairingCode()} addingApp={ctrl.busy} />
+    <OneListMockup list={oneList} />
     <SectionLabel class="mt-4">Today's page, until the one list is built</SectionLabel>
     <ExtensionsListCard {ctrl} />
     <ListenAddressCard {ctrl} />
