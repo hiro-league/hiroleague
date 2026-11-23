@@ -14,7 +14,8 @@
   // mockup: the one list (Unified communication, phase 2), above today's cards until it is built.
   import { createOneListMockup } from './mockup/one-list-mockup.svelte';
   import OneListMockup from './mockup/OneListMockup.svelte';
-  import ExtensionDetailMockup from './mockup/ExtensionDetailMockup.svelte';
+  import ExtensionAboutMockup from './mockup/ExtensionAboutMockup.svelte';
+  import ExtensionSettingsMockup from './mockup/ExtensionSettingsMockup.svelte';
   import KindFilter from './mockup/KindFilter.svelte';
 
   const ctrl = createExtensionsController(toast.show);
@@ -40,12 +41,13 @@
   <!-- grid-cols-1 (minmax(0,1fr)): a wide table scrolls inside its card instead of widening the page on a phone. -->
   <section class="grid grid-cols-1 gap-4">
     <OneListMockup list={oneList} />
+    <ListenAddressCard {ctrl} />
     <SectionLabel class="mt-4">Today's page, until the one list is built</SectionLabel>
     <ExtensionsListCard {ctrl} />
-    <ListenAddressCard {ctrl} />
   </section>
 </section>
 
 <ExtensionPairingDialog {ctrl} />
 <ExtensionRemoveDialog {ctrl} />
-<ExtensionDetailMockup list={oneList} />
+<ExtensionAboutMockup list={oneList} />
+<ExtensionSettingsMockup list={oneList} />

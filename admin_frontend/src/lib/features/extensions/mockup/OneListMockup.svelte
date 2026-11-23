@@ -10,7 +10,7 @@
   import EmptyState from '$kit/ui/empty-state.svelte';
   import { TABLE_GRID_ROW } from '$kit/ui/table-grid';
   import { dateTime } from '$kit/format/time';
-  import { statusOf } from './one-list-mock';
+  import { hasSettings, statusOf } from './one-list-mock';
   import type { OneListMockup } from './one-list-mockup.svelte';
 
   let { list }: { list: OneListMockup } = $props();
@@ -39,11 +39,11 @@
           <div class={TABLE_GRID_ROW} style:grid-template-columns={GRID}>
             <button
               type="button"
-              class="grid min-w-0 text-left"
+              class="group grid min-w-0 text-left"
               onclick={() => list.open(row)}
-              title="Open {row.label}"
+              title="About {row.label}"
             >
-              <span class="truncate font-sans text-sm font-semibold">{row.label}</span>
+              <span class="truncate font-sans text-sm font-semibold group-hover:underline">{row.label}</span>
               <span class="truncate text-xs text-muted-foreground">{row.description}</span>
             </button>
             <span>
@@ -84,9 +84,11 @@
                   />
                 {/if}
               {/if}
-              <Button size="sm" variant="outline" onclick={() => list.open(row)} title="Open {row.label}">
-                <Settings2 size={13} /> Manage
-              </Button>
+              {#if hasSettings(row)}
+                <Button size="sm" variant="outline" onclick={() => list.openSettings(row)} title="{row.label}'s settings">
+                  <Settings2 size={13} /> Settings
+                </Button>
+              {/if}
               <Button
                 size="icon"
                 variant="ghost"

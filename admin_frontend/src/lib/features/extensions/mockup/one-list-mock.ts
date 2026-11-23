@@ -10,8 +10,11 @@ export type ExtensionKind = 'channel' | 'app';
 /** A channel's link to its account (WhatsApp's QR code); absent for a channel with no account. */
 export type MockLink = { linked: boolean; account: string };
 
-/** One setting of a started extension, drawn from its settings form (`config_schema`). */
-export type MockSetting = { key: string; label: string; value: string; secret?: boolean };
+/** One setting of a started extension, drawn from its settings form (`config_schema`): a switch, a text, or a secret. */
+export type MockSetting =
+  | { key: string; label: string; kind: 'bool'; value: boolean }
+  | { key: string; label: string; kind: 'text'; value: string }
+  | { key: string; label: string; kind: 'secret'; set: boolean; value: string };
 
 /** One thing an app offers, as its description's `offers` holds it today (`knows`, `can_do`). */
 export type MockOffer = { name: string; says: string };
@@ -62,12 +65,12 @@ export const MOCK_EXTENSIONS: MockExtension[] = [
     link: { linked: true, account: "The family's WhatsApp" },
     // The titles of WhatsApp's real settings form (its config_schema); the values are made up.
     settings: [
-      { key: 'owner_number', label: 'Owner number', value: 'set', secret: true },
-      { key: 'allowed_senders', label: 'Allowed senders', value: '4 people' },
-      { key: 'send_read_receipts', label: 'Send read receipts', value: 'On' },
-      { key: 'audio_in', label: 'Accept voice notes', value: 'On' },
-      { key: 'audio_out', label: 'Reply with voice notes', value: 'On' },
-      { key: 'default_character_id', label: 'Default character', value: 'Hiro' }
+      { key: 'owner_number', label: 'Owner number', kind: 'secret', set: true, value: '' },
+      { key: 'allowed_senders', label: 'Allowed senders', kind: 'text', value: 'Every person in the family list' },
+      { key: 'send_read_receipts', label: 'Send read receipts', kind: 'bool', value: true },
+      { key: 'audio_in', label: 'Accept voice notes', kind: 'bool', value: true },
+      { key: 'audio_out', label: 'Reply with voice notes', kind: 'bool', value: true },
+      { key: 'default_character_id', label: 'Default character', kind: 'text', value: 'Hiro' }
     ]
   },
   {
@@ -213,6 +216,11 @@ export function sortExtensions(rows: MockExtension[]): MockExtension[] {
   return [...rows].sort(
     (a, b) => (a.kind === b.kind ? a.label.localeCompare(b.label) : a.kind === 'channel' ? -1 : 1)
   );
+}
+
+/** Whether a row has a Settings panel: the core keeps its settings, or it links an account. */
+export function hasSettings(row: MockExtension): boolean {
+  return row.started_by_core && (!!row.settings?.length || !!row.link);
 }
 
 export type StatusLine = { tone: 'ok' | 'off' | 'warn'; text: string };

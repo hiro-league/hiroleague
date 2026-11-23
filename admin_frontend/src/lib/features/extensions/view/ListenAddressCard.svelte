@@ -16,13 +16,8 @@
   );
 </script>
 
+<!-- What the address is for sits in the field's tooltip, not on the page. -->
 <Panel title="Where extensions connect" contentClass="grid gap-4">
-  {#snippet details()}
-    <span class="font-mono">127.0.0.1</span> reaches extensions on this machine only. Use the Docker
-    bridge address for an extension in a normal Docker network, or the LAN address for one on another
-    machine.
-  {/snippet}
-
   {#if listen}
     <div class="grid gap-1 font-sans text-sm">
       <span>Address to type in: <span class="font-mono font-semibold">{listen.address}</span></span>
@@ -51,7 +46,12 @@
       void ctrl.saveAddress();
     }}
   >
-    <Field label="Listen address" for="{uid}-host" class="md:w-72">
+    <Field
+      label="Listen address"
+      for="{uid}-host"
+      class="md:w-72"
+      help="Where the core waits for apps to connect. 127.0.0.1 reaches only apps on this machine. For an app in a Docker network or on another machine, use the Docker bridge or LAN address, then restart the server."
+    >
       <Input id="{uid}-host" bind:value={ctrl.host.value} placeholder="127.0.0.1" spellcheck="false" />
     </Field>
     <Button type="submit" variant="outline" disabled={ctrl.busy || !ctrl.host.dirty}>

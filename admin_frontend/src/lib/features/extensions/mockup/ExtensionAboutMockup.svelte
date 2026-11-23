@@ -1,7 +1,8 @@
 <script lang="ts">
-  // mockup: one extension's detail, drawn from its description. One shape for a channel and an app; the
-  // parts only one kind has (a link to an account, settings kept in the core, a site, offers) show when it has them.
-  import { ExternalLink, Link2Off, PlugZap, QrCode, SlidersHorizontal } from '@lucide/svelte';
+  // mockup: About one extension, read only, drawn from its description. One shape for a channel and an app;
+  // what only one kind has (a linked account, a site, offers, AI uses) shows when it has it. Its settings are
+  // a panel of their own, opened from the row.
+  import { ExternalLink, Link2Off, PlugZap } from '@lucide/svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import DetailSheet from '$kit/ui/detail-sheet.svelte';
@@ -13,15 +14,15 @@
 
   let { list }: { list: OneListMockup } = $props();
 
-  const row = $derived(list.selected);
-  // The sheet is open while a row is picked; closing it un-picks the row.
+  const row = $derived(list.panel === 'about' ? list.selected : null);
+  // The sheet is open while a row is picked for About; closing it un-picks the row.
   const getOpen = () => row !== null;
   const setOpen = (next: boolean) => {
     if (!next) list.close();
   };
 
   function facts(r: MockExtension): [string, string][] {
-    return [
+    const out: [string, string][] = [
       ['Name', r.name],
       ['Version', r.version],
       ['Paired', dateTime(r.paired_at)],
@@ -29,6 +30,8 @@
       ['Relays chat', r.relays_chat ? "Yes: other people's messages" : 'No'],
       ['Its settings', r.started_by_core ? 'Kept in the core' : 'Kept in the app']
     ];
+    if (r.link) out.push(['Its account', r.link.linked ? `Linked: ${r.link.account}` : 'Not linked']);
+    return out;
   }
 </script>
 
@@ -58,46 +61,6 @@
         {/each}
       </dl>
     </section>
-
-    {#if row.link}
-      <section class="grid gap-2">
-        <SectionLabel>Its account</SectionLabel>
-        <div class="flex items-center justify-between gap-3">
-          <span class="flex items-center gap-2">
-            <StatusDot tone={row.link.linked ? 'ok' : 'warn'} />
-            {row.link.linked ? `Linked: ${row.link.account}` : 'Not linked'}
-          </span>
-          <Button size="sm" variant="outline" onclick={() => list.notYet("show the account's QR code to link it")}>
-            <QrCode size={13} /> {row.link.linked ? 'Link again' : 'Link'}
-          </Button>
-        </div>
-      </section>
-    {/if}
-
-    {#if row.settings}
-      <section class="grid gap-2">
-        <SectionLabel>
-          Settings
-          {#snippet actions()}
-            {#if row.settings?.length}
-              <Button size="sm" variant="outline" onclick={() => list.notYet('open its settings form, drawn from its config_schema')}>
-                <SlidersHorizontal size={13} /> Change
-              </Button>
-            {/if}
-          {/snippet}
-        </SectionLabel>
-        {#if row.settings.length}
-          <dl class="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1.5">
-            {#each row.settings as s (s.key)}
-              <dt class="text-muted-foreground">{s.label}</dt>
-              <dd>{s.secret ? (s.value ? 'Set' : 'Not set') : s.value}</dd>
-            {/each}
-          </dl>
-        {:else}
-          <p class="text-muted-foreground">It has no settings.</p>
-        {/if}
-      </section>
-    {/if}
 
     {#if row.site}
       <section class="grid gap-2">
