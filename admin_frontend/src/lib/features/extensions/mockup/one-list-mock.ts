@@ -1,7 +1,9 @@
 // mockup: the admin's one list of extensions (Unified communication, phase 2), with mock rows.
 // Each row has the fields the extensions list (`extension_records`) and an extension's description hold
 // today: its name, kind, version, description, offers, uses; the three attributes of its kind (who starts
-// it, whether it relays chat, where its settings live); and its live connection. Nothing here is real.
+// it, whether it relays chat, where its settings live); and its live connection. Nothing here is real:
+// the labels ("Phones") and the channels' descriptions are written for the mockup, and Echo has no row
+// in today's data.
 
 export type ExtensionKind = 'channel' | 'app';
 
@@ -58,10 +60,14 @@ export const MOCK_EXTENSIONS: MockExtension[] = [
     relays_chat: true,
     enabled: true,
     link: { linked: true, account: "The family's WhatsApp" },
+    // The titles of WhatsApp's real settings form (its config_schema); the values are made up.
     settings: [
-      { key: 'bot_tag', label: 'Tag replies as a business bot', value: 'Off' },
-      { key: 'library_lines', label: "Show the WhatsApp library's own lines", value: 'Off' },
-      { key: 'session_key', label: 'Session key', value: 'set', secret: true }
+      { key: 'owner_number', label: 'Owner number', value: 'set', secret: true },
+      { key: 'allowed_senders', label: 'Allowed senders', value: '4 people' },
+      { key: 'send_read_receipts', label: 'Send read receipts', value: 'On' },
+      { key: 'audio_in', label: 'Accept voice notes', value: 'On' },
+      { key: 'audio_out', label: 'Reply with voice notes', value: 'On' },
+      { key: 'default_character_id', label: 'Default character', value: 'Hiro' }
     ]
   },
   {
