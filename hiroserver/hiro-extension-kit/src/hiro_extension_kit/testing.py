@@ -294,11 +294,20 @@ class FakeCore:
                                             {"role_id": "kid", "name": "Kid", "built_in": False}]
         self.people: list[dict[str, Any]] = []
         self.handlers: dict[str, Any] = {}  # the core's events the app listens to (the SDK's on_event)
+        self.events: list[tuple[str, dict[str, Any]]] = []  # the events the app sent the core (send_event)
         self.frames: list[Any] = []  # each request as the SDK builds it (hiro_channel_sdk.extension.build_request)
         self._n = 0
 
     def on_event(self, event_type: str, handler: Any) -> None:
         self.handlers[event_type] = handler
+
+    async def send_event(self, event_type: str, data: dict[str, Any] | None = None) -> bool:
+        """An event the app sends the core (hiroleague.tell_changed): kept when connected; False when not, as the SDK
+        answers (events aren't queued)."""
+        if not self.connected:
+            return False
+        self.events.append((event_type, dict(data or {})))
+        return True
 
     def _frame(self, method: str, params: dict[str, Any]) -> None:
         from hiro_channel_sdk.extension import build_request

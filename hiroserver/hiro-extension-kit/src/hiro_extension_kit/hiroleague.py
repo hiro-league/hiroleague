@@ -25,8 +25,9 @@ import time
 from typing import Any
 
 from hiro_channel_sdk import ExtensionClient, ExtensionCredentials, ExtensionInfo, ExtensionOffers, ExtensionRequestError
-from hiro_channel_sdk.constants import (CORE_REPO, METHOD_CORE_INFO, METHOD_SITES_CLAIM, METHOD_SITES_LIST, OFFER_KIND_SITE,
-                                        SITES_DOMAIN, SITES_ERROR_INVALID, SITES_ERROR_TAKEN)
+from hiro_channel_sdk.constants import (CORE_REPO, EVENT_TYPE_RESOURCE_CHANGED, METHOD_CORE_INFO, METHOD_SITES_CLAIM,
+                                        METHOD_SITES_LIST, OFFER_KIND_SITE, SITES_DOMAIN, SITES_ERROR_INVALID,
+                                        SITES_ERROR_TAKEN)
 from hiro_channel_sdk.extension import STATUS_CONNECTED
 from hiro_channel_sdk.log_sender import LogSender
 from hiro_channel_sdk.workers import Worker
@@ -77,6 +78,7 @@ def info_for(site_url: str) -> ExtensionInfo:
     offers = ExtensionOffers(
         knows=list(e.knows),
         can_do=list(e.can_do),
+        tells=list(e.tells),
         shows=[{"kind": OFFER_KIND_SITE, "title": e.site_title, "icon": e.site_icon, "url": site_url, "roles": []}],
     )
     return ExtensionInfo(name=e.name, version=e.version, description=e.description, offers=offers, uses=list(e.uses), voice_uses=list(e.voice_uses),
@@ -324,3 +326,19 @@ class HiroLeagueLink(Worker):
 
 
 link = HiroLeagueLink()
+
+
+async def tell_changed(resource: str, ids: list[str] | None = None) -> bool:
+    """Tell the core that something the app keeps changed (`resource.changed`: a hint, never the data), so whatever
+    keeps a copy reads it again. `resource` is one the app declares in `Extension.tells`: the core drops any other.
+    False when the core isn't connected: events aren't queued, and the core reads again when the app connects."""
+    if resource not in {str(t.get("resource") or "") for t in ext().tells}:
+        # A programming mistake in the app, caught in its own tests: the core would drop it.
+        raise ValueError(f"{resource!r} isn't in Extension.tells: declare it first")
+    data: dict[str, Any] = {"resource": resource}
+    if ids:
+        data["ids"] = list(ids)
+    sent = await link.client.send_event(EVENT_TYPE_RESOURCE_CHANGED, data)
+    log.debug("Told HiroLeague %s changed%s", resource, "" if sent else " (not connected: not sent)",
+              extra={"resource": resource, "ids": len(ids or ())})
+    return sent

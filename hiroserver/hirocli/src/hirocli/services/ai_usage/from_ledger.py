@@ -27,8 +27,9 @@ from ...domain.discovered_models import DISCOVERABLE_LOCAL_PROVIDERS
 from .store import HIRO_SOURCE, UsageCall, record
 
 # The family member a chat turn is for (a person id), set by the agent manager for the turn: its
-# calls (and the memory work it starts) are filed under them. Empty when the sender isn't known:
-# a WhatsApp number in the family list is matched now; app devices wait for Phase 10.
+# calls (and the memory work it starts) are filed under them, and the core asks an app on their
+# behalf (tools/extension_state.py: _for_person). Empty when the sender isn't known: a WhatsApp
+# number in the family list is matched now; app devices wait for Phase 10.
 usage_person: ContextVar[str] = ContextVar("usage_person", default="")
 
 # Phase 7b step 5: the AI profile a chat turn's model came from, ``(profile id, profile name)``, set by

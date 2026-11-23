@@ -59,6 +59,8 @@ class Extension:
     rules: Sequence[Rule] = ()
     knows: Sequence[dict[str, Any]] = ()  # the questions other apps may ask it (offers.knows)
     can_do: Sequence[dict[str, Any]] = ()  # what other apps may ask it to do, and sign-ins it offers (offers.can_do)
+    # What it says changed (offers.tells): {"resource", "name", "says"}, each sent with hiroleague.tell_changed()
+    tells: Sequence[dict[str, Any]] = ()
     uses: Sequence[ExtensionUse] = ()  # what it asks the core's AI for
     voice_uses: Sequence[ExtensionVoiceUse] = ()  # what it asks the core to say aloud
     embed_uses: Sequence[ExtensionSearchUse] = ()  # what it asks the core to turn into vectors (llm.search.embed)

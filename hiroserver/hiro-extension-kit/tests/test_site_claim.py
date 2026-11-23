@@ -62,7 +62,7 @@ def test_a_free_name_is_claimed_saved_and_declared(core):
     assert saved() == "http://home.hiro.local"
     status = out["status"]
     assert (status["site_url"], status["site_label"], status["site_kind"]) == ("http://home.hiro.local", "home", "subdomain")
-    assert hiroleague.link.client._info.offers.shows[0]["url"] == "http://home.hiro.local"
+    assert hiroleague.link.client._info.offers.shows[0].url == "http://home.hiro.local"
     assert core.reconnects == ["ws://127.0.0.1:18082"]  # type: ignore[attr-defined]  # the core reads the new site
 
 

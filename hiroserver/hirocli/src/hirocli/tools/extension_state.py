@@ -14,14 +14,23 @@ from time import perf_counter
 from typing import Any
 
 from hiro_channel_sdk import ExtensionRequestError
-from hiro_channel_sdk.constants import METHOD_EXTENSION_STATE
+from hiro_channel_sdk.constants import FOR_PERSON, METHOD_EXTENSION_STATE
 from hiro_commons.log import Logger
 
+from ..services.ai_usage.from_ledger import usage_person
 from .base import Tool, ToolParam
 
 log = Logger.get("EXT_STATE")
 
 _TIMEOUT_S = 15.0
+
+
+def _for_whom() -> dict[str, Any]:
+    """The params of the ask: the person chatting, when the core knows who it is (a WhatsApp sender in the family list),
+    so the app answers by their rights (unified communication, phase 3). Otherwise none: the core asks for itself
+    (the CLI, the HTTP surface, and a phone's chat until phones are tied to people)."""
+    person = usage_person.get()
+    return {FOR_PERSON: person} if person else {}
 
 
 @dataclass
@@ -86,7 +95,7 @@ class ExtensionStateTool(Tool):
         info = live.get("info") or {}
         name = str(live.get("name") or extension_id)
         try:
-            answer = await manager.request(extension_id, METHOD_EXTENSION_STATE, timeout=_TIMEOUT_S)
+            answer = await manager.request(extension_id, METHOD_EXTENSION_STATE, _for_whom(), timeout=_TIMEOUT_S)
         except ExtensionRequestError as exc:
             log.warning(f"⚠️ Extension state not read — {name}", error=exc.message, code=exc.code)
             return {"extension": name, "error": f"{name} didn't answer: {exc.message}"}

@@ -47,6 +47,7 @@ from hirocli.runtime.event_handler import EventHandler
 from hirocli.runtime.extension_manager import ExtensionManager
 from hirocli.runtime.http_server import app as http_app, run_http_server
 from hirocli.runtime.infra_event_handlers import InfraEventHandlers
+from hirocli.runtime.resource_changes_from_extensions import ResourceChangesFromExtensions
 from hirocli.runtime.request_handler import RequestHandler
 from hirocli.runtime.resource_change_broadcaster import ResourceChangeBroadcaster
 from hirocli.runtime.resource_versioning import ResourceVersionStore
@@ -105,6 +106,8 @@ def _wire_runtime(
     infra_handlers = InfraEventHandlers(ctx)
     infra_handlers.register_all(extension_manager)
     log.info("Registered special channel event handlers")
+    # An extension's own resource.changed goes to the core's bus (unified communication, phase 3).
+    ResourceChangesFromExtensions(ctx, extension_manager).register()
 
     comm_manager = CommunicationManager(
         ctx=ctx,

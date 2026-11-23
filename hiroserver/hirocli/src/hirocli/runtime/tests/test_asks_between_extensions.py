@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from hiro_channel_sdk.constants import ASK_ERROR_NOT_OFFERED, ASKED_BY
+from hiro_channel_sdk.constants import ASK_ERROR_NOT_OFFERED, ASKED_BY, FOR_PERSON
 from hiro_channel_sdk.extension import ExtensionRequestError
 
 from hirocli.domain.extensions import add_paired_extension
@@ -57,6 +57,16 @@ def test_an_ask_is_passed_on_with_who_asked(tmp_path: Path) -> None:
     extension_id, method, params, timeout = manager.asked[0]
     assert (extension_id, method, params[ASKED_BY], params["person_id"]) == ("ext-net", "net.person_usage", "home", "p1")
     assert timeout == 60.0  # capped
+
+
+def test_a_person_an_app_names_never_reaches_the_asked_app(tmp_path: Path) -> None:
+    """Only the core says who an ask is for (unified communication, phase 3): an app can't ask as someone else."""
+    manager = FakeManager({"ext-net": {"name": "net", "info": NET_INFO}}, answer={})
+    asyncio.run(handle_extensions_ask(
+        {"to": "net", "method": "net.person_usage", "params": {FOR_PERSON: "cp-owner", "person_id": "p1"}},
+        _ctx(tmp_path, manager)))
+    params = manager.asked[0][2]
+    assert FOR_PERSON not in params and params["person_id"] == "p1"
 
 
 @pytest.mark.parametrize(("live", "params", "code"), [

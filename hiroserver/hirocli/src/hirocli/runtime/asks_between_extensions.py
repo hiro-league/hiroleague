@@ -16,6 +16,7 @@ from hiro_channel_sdk.constants import (
     ASK_TIMEOUT_MAX_SECONDS,
     ASKED_BY,
     EXTENSION_REQUEST_TIMEOUT_SECONDS,
+    FOR_PERSON,
     METHOD_EXTENSIONS_ASK,
 )
 from hiro_channel_sdk.extension import ExtensionRequestError
@@ -76,8 +77,10 @@ async def handle_extensions_ask(params: dict[str, Any], ctx: RequestContext) -> 
     if method not in offered_methods(info):
         raise RequestRefused(ASK_ERROR_NOT_OFFERED, f"{to} doesn't offer {method}.")
     log.info(f"⬆️ Extension ask passed on — {asker} → {to} · {method}")
+    # Only the core names the person an ask is for: one the asking app put in never reaches the asked app.
+    passed = {k: v for k, v in inner.items() if k != FOR_PERSON}
     try:
-        return await manager.request(extension_id, method, {**inner, ASKED_BY: asker}, timeout=_timeout(params))
+        return await manager.request(extension_id, method, {**passed, ASKED_BY: asker}, timeout=_timeout(params))
     except ExtensionRequestError as exc:
         # The asked extension's own answer (or not_connected / timeout) goes back to the asker as it is.
         log.warning(f"⚠️ Extension ask not answered — {asker} → {to} · {method}", error=exc.message, code=exc.code)

@@ -69,6 +69,7 @@ from .constants import (
 )
 from .models import ContentItem, EventPayload, MessageRouting, UnifiedMessage
 from .access import ExtensionFeature
+from .offers import ExtensionOffers
 
 EXTENSION_AREA = "EXTENSION"
 log = Logger.get(EXTENSION_AREA)
@@ -88,21 +89,6 @@ _IDENTITY_FILENAME = "extension_identity.json"
 # ---------------------------------------------------------------------------
 # What an extension says about itself
 # ---------------------------------------------------------------------------
-
-
-class ExtensionOffers(BaseModel):
-    """What the extension offers the core: the hero contract's slots.
-
-    Still empty: extensions declaring what they know and can do waits until Home
-    is mature enough (the plan's Later). For now the core asks every extension
-    the same ``extension.state`` (Phase 5). Each entry will be a small dict
-    naming the request method or event and describing it.
-    """
-
-    knows: list[dict[str, Any]] = Field(default_factory=list)   # questions it answers
-    can_do: list[dict[str, Any]] = Field(default_factory=list)  # actions it takes
-    tells: list[dict[str, Any]] = Field(default_factory=list)   # events it sends
-    shows: list[dict[str, Any]] = Field(default_factory=list)   # pages it has
 
 
 class ExtensionUse(BaseModel):

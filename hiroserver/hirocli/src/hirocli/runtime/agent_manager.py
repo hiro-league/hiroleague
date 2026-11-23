@@ -1214,7 +1214,8 @@ async def _close_memory_service(service: "MemoryService | None") -> None:
 async def _sender_person(workspace_path: Any, routing_metadata: dict[str, Any]) -> str:
     """The person id of a WhatsApp sender in the family list (``sender_number``), else "" (Phase 7b: AI usage).
 
-    Only for counting: whose conversation and memory a turn uses is Phase 10's matching.
+    For counting, and for the person the core asks an app on behalf of (extension_state); whose conversation and
+    memory a turn uses is Phase 10's matching.
     """
     number = str(routing_metadata.get("sender_number") or "")
     if not number:

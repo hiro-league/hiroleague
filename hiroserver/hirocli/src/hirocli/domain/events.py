@@ -43,6 +43,9 @@ class DomainEventType:
     PEOPLE_CHANGED = "people.changed"
     # A device was paired or removed: the gateway is told which devices may still connect.
     DEVICES_CHANGED = "devices.changed"
+    # An extension said something it keeps changed (its resource.changed, unified communication phase 3): payload
+    # {extension, resource, ids}. A hint: whoever keeps a copy reads it again from the extension.
+    EXTENSION_RESOURCE_CHANGED = "extension.resource_changed"
 
 
 @dataclass(frozen=True)

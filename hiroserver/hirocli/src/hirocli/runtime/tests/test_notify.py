@@ -190,6 +190,7 @@ class FakeExtensions:
 
     async def request(self, extension_id: str, method: str, params: Any = None, *, timeout: float) -> dict[str, Any]:
         self.asked.append((extension_id, method))
+        self.params = params
         if extension_id in self.fail:
             raise ExtensionRequestError("timeout", "no answer to extension.state in 15s")
         return {"state": {"people": [{"name": "Joe", "presence": "home", "room": "Kitchen"}]}}
@@ -217,3 +218,46 @@ def test_extension_state_says_when_nothing_answers() -> None:
     assert "named 'garden'" in asyncio.run(_tool(FakeExtensions({"ext-1": HOME})).execute_async("garden")).note
     failed = asyncio.run(_tool(FakeExtensions({"ext-1": HOME}, fail={"ext-1"})).execute_async())
     assert failed.extensions == [{"extension": "home", "error": "home didn't answer: no answer to extension.state in 15s"}]
+
+
+def test_extension_state_asks_for_the_person_chatting_when_the_core_knows_them() -> None:
+    """Unified communication, phase 3: the app answers by that person's rights; no person = the core asks for itself."""
+    from hiro_channel_sdk.constants import FOR_PERSON
+
+    from hirocli.services.ai_usage.from_ledger import usage_person
+
+    extensions = FakeExtensions({"ext-1": HOME})
+    asyncio.run(_tool(extensions).execute_async())
+    assert extensions.params == {}
+
+    async def in_a_turn_of(person: str) -> None:
+        token = usage_person.set(person)
+        try:
+            await _tool(extensions).execute_async()
+        finally:
+            usage_person.reset(token)
+
+    asyncio.run(in_a_turn_of("cp-kid"))
+    assert extensions.params == {FOR_PERSON: "cp-kid"}
+    asyncio.run(in_a_turn_of(""))  # a sender the core doesn't know (a phone today)
+    assert extensions.params == {}
+
+
+def test_the_person_chatting_reaches_the_tool_the_way_hiros_agent_runs_it() -> None:
+    """Through the LangChain adapter Hiro's graph calls, as a chat turn does: the turn's person is still known there."""
+    from hiro_channel_sdk.constants import FOR_PERSON
+
+    from hirocli.services.ai_usage.from_ledger import usage_person
+    from hirocli.tools.langchain_adapter import to_langchain
+
+    extensions = FakeExtensions({"ext-1": HOME})
+
+    async def turn() -> None:
+        token = usage_person.set("cp-kid")
+        try:
+            await to_langchain(_tool(extensions)).ainvoke({})
+        finally:
+            usage_person.reset(token)
+
+    asyncio.run(turn())
+    assert extensions.params == {FOR_PERSON: "cp-kid"}

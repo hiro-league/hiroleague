@@ -60,6 +60,7 @@ PORT = 8199
 TEST_EXTENSION = extension.Extension(
     name="test", version="0.0.1", description="The kit's own tests", repo="testapp", port=PORT, site_title="Test",
     site_icon="flask", features=FEATURES, rules=RULES,
+    tells=[{"resource": "checks", "name": "System health's checks", "says": "A check passed or failed"}],
     uses=[ExtensionUse(id="sites", name="Sorting sites", json=True)],
     voice_uses=[ExtensionVoiceUse(id="speak", name="Speak")],
     embed_uses=[ExtensionSearchUse(id="embedding", name="Embedding")],

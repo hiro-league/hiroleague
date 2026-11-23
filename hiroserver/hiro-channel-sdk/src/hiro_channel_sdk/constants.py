@@ -266,6 +266,11 @@ CORE_REPO: str = "hiroleague"
 #                   connected), not_offered (to doesn't offer method), timeout, and the asked extension's own errors.
 METHOD_EXTENSIONS_ASK: str = "extensions.ask"
 ASKED_BY: str = "_asked_by"  # added to the params the asked extension gets: who asked
+# The person an ask is for (unified communication, phase 3): when the core asks an app on someone's behalf (Hiro reading
+# the home for the person chatting), it adds FOR_PERSON: "<person_id>" to the params, beside ASKED_BY; the app answers
+# with that person's rights (the kit's asked_for.py), and the core never filters the answer. Only the core sets it: one
+# an app puts in an extensions.ask never reaches the asked app. Left out = the core asks for itself.
+FOR_PERSON: str = "_for_person"
 ASK_ERROR_NOT_OFFERED: str = "not_offered"
 ASK_TIMEOUT_MAX_SECONDS: float = 60.0
 
@@ -318,6 +323,11 @@ EVENT_TYPE_MESSAGE_TRANSCRIBED: str = "message.transcribed"    # transcript is r
 EVENT_TYPE_MESSAGE_VOICED: str = "message.voiced"              # spoken audio of a text reply (text → audio modality mirror)
 EVENT_TYPE_MESSAGE_CONTENT_ADDED: str = "message.content_added"  # new supplementary content attached to a message (photos, docs, etc.)
 EVENT_TYPE_RESOURCE_CHANGED: str = "resource.changed"          # hint: named cache invalidated — pull via *.list / *.get (Tier 1+ sync substrate)
+# The same name from an extension (unified communication, phase 3): extension → core, an event sent as itself with
+# {resource, ids?}: "my <resource> changed, read it again" (a hint, never the data). The resource must be one its
+# description names in offers.tells, or the core drops it with a warning; the core puts it on its bus with the
+# extension's name, for whichever feature keeps a copy. Events aren't queued: whoever keeps a copy also reads it again
+# when the extension connects. The event of that name the core sends phones is apart and untouched.
 
 # ---------------------------------------------------------------------------
 # Message content types — content_type values used in ContentItem
