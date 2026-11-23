@@ -253,8 +253,9 @@ class ExtensionManager:
             "error": self._listen_error,
         }
 
-    def snapshot(self) -> dict[str, dict[str, Any]]:
-        """The apps connected now, by extension id (uses, rights, sites and asks are theirs)."""
+    def snapshot(self, kind: str | None = KIND_APP) -> dict[str, dict[str, Any]]:
+        """The extensions of one kind connected now, by extension id: the apps by default (uses, rights, sites and
+        asks are theirs); every kind with ``kind=None`` (the admin's one list)."""
         return {
             eid: {
                 "name": conn.name,
@@ -263,7 +264,7 @@ class ExtensionManager:
                 "remote": conn.remote,
             }
             for eid, conn in self._connections.items()
-            if conn.kind == KIND_APP
+            if kind is None or conn.kind == kind
         }
 
     def name_of(self, extension_id: str) -> str:

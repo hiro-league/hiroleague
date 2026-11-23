@@ -367,7 +367,7 @@ class ChannelDisableTool(Tool):
     def execute(self, channel_name: str, workspace: str | None = None) -> ChannelDisableResult:
         workspace_path = _resolve_path(workspace)
         # Mandatory only while the `devices` feature is active (see features.py).
-        if channel_name == MANDATORY_CHANNEL_NAME and feature_active(MANDATORY_CHANNEL_NAME):
+        if mandatory_channel(channel_name):
             raise ValueError(f"The '{MANDATORY_CHANNEL_NAME}' channel is mandatory and cannot be disabled.")
         cfg = load_channel_config(workspace_path, channel_name)
         if cfg is None:
@@ -445,6 +445,12 @@ class ChannelConfigSetTool(Tool):
         return ChannelConfigResult(name=channel_name, config=dict(cfg.config))
 
 
+def mandatory_channel(name: str) -> bool:
+    """The channel phones' chat needs: it can't be switched off or removed, while the `devices` feature is active
+    (see features.py)."""
+    return name == MANDATORY_CHANNEL_NAME and feature_active(MANDATORY_CHANNEL_NAME)
+
+
 class ChannelRemoveTool(Tool):
     surfaces = frozenset({"cli", "http"})
     name = "channel_remove"
@@ -456,8 +462,7 @@ class ChannelRemoveTool(Tool):
 
     def execute(self, channel_name: str, workspace: str | None = None) -> ChannelRemoveResult:
         workspace_path = _resolve_path(workspace)
-        # Mandatory only while the `devices` feature is active (see features.py).
-        if channel_name == MANDATORY_CHANNEL_NAME and feature_active(MANDATORY_CHANNEL_NAME):
+        if mandatory_channel(channel_name):
             raise ValueError(f"The '{MANDATORY_CHANNEL_NAME}' channel is mandatory and cannot be removed.")
         removed = delete_channel_config(workspace_path, channel_name)
         return ChannelRemoveResult(name=channel_name, removed=removed)

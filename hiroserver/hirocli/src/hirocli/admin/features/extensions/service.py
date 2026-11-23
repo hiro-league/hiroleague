@@ -1,4 +1,4 @@
-"""Extension pairing, the paired list, removal and the listen address for the admin API.
+"""Extension pairing, the one list of every extension, removal and the listen address for the admin API.
 
 A facade over the extension tools (tools/extension.py). Live state — who is
 connected, the test call, closing a removed extension's connection — comes from
@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from hirocli.admin.shared.result import Result
+from hirocli.domain.extensions import PairedExtension, list_paired_extensions
 from hirocli.domain.workspace import resolve_workspace
 from hirocli.tools.extension import (
     ExtensionAddResult,
@@ -18,6 +19,7 @@ from hirocli.tools.extension import (
     ExtensionAddressTool,
     ExtensionAddTool,
     ExtensionListTool,
+    ExtensionRemoveResult,
     ExtensionRemoveTool,
 )
 from hiro_commons.log import Logger
@@ -43,9 +45,9 @@ class ExtensionService:
             return Result.failure("No workspace selected.")
         try:
             result = ExtensionListTool().execute(workspace=workspace_id)
-        except Exception as exc:
-            log.warning("⚠️ Extensions list failed — HiroAdmin · extensions", workspace_id=workspace_id, error=str(exc), exc_info=True)
-            return Result.failure(str(exc))
+        except Exception:
+            log.warning("⚠️ Extensions list failed — HiroAdmin · extensions", workspace_id=workspace_id, exc_info=True)
+            return Result.failure("The list of extensions couldn't be read; the server's log says why.")
         return Result.success(list(result.extensions))
 
     def generate_pairing_code(self, workspace_id: str | None) -> Result[ExtensionAddResult]:
@@ -57,25 +59,36 @@ class ExtensionService:
             log.warning("⚠️ Extension pairing code failed — HiroAdmin · extensions", workspace_id=workspace_id, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
 
-    def remove_extension(self, extension_id: str, workspace_id: str | None) -> Result[str]:
+    def find(self, extension_id: str, workspace_id: str | None) -> PairedExtension | None:
+        """One extension of the list, of any kind, or None."""
+        workspace_path = self.workspace_path(workspace_id)
+        if workspace_path is None:
+            return None
+        return next(
+            (e for e in list_paired_extensions(workspace_path, kind=None) if e.extension_id == extension_id), None
+        )
+
+    def remove_extension(self, extension_id: str, workspace_id: str | None) -> Result[ExtensionRemoveResult]:
         if not workspace_id:
             return Result.failure("No workspace selected.")
         if not extension_id:
             return Result.failure("Extension ID is required.")
         try:
             result = ExtensionRemoveTool().execute(extension_id=extension_id, workspace=workspace_id)
-        except Exception as exc:
+        except ValueError as exc:
+            # The tool's refusal is written for a person (the mandatory channel).
+            return Result.failure(str(exc))
+        except Exception:
             log.warning(
                 "⚠️ Extension remove failed — HiroAdmin · extensions",
                 extension_id=extension_id,
                 workspace_id=workspace_id,
-                error=str(exc),
                 exc_info=True,
             )
-            return Result.failure(str(exc))
+            return Result.failure("The extension couldn't be removed; the server's log says why.")
         if not result.removed:
-            return Result.failure(f"Extension '{extension_id}' was not found or already removed.")
-        return Result.success("Extension removed.")
+            return Result.failure("That extension isn't in the list any more.")
+        return Result.success(result)
 
     def address(self, workspace_id: str | None, host: str | None = None) -> Result[ExtensionAddressResult]:
         if not workspace_id:

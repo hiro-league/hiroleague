@@ -1,8 +1,10 @@
-"""Extension routes: the paired list with live status, pairing codes, removal,
-the listen address, and the core's test call to an extension.
+"""Extension routes: the one list of every extension (channel plugins and apps) with live
+status, pairing codes, removal, the listen address, and the core's test call.
 
 Live state comes from the running server's ExtensionManager (``ctx.extension_manager``)
-and applies only when the selected workspace is the one this server runs.
+and a channel's link from its status (``ctx.channel_status``); both apply only when the
+selected workspace is the one this server runs. A channel's switch, settings and link
+are the channel routes' (channels.py): only an extension the core starts has them.
 """
 
 from __future__ import annotations
@@ -20,6 +22,8 @@ from hiro_channel_sdk.constants import METHOD_EXTENSION_INFO
 from hiro_channel_sdk.extension import ExtensionRequestError
 
 from hirocli.admin.features.extensions.service import ExtensionService
+from hirocli.domain.extensions import KIND_CHANNEL
+from hirocli.tools.channel import mandatory_channel
 from hirocli.admin_svelte.deps import SelectedWorkspaceIdDep
 from hirocli.admin_svelte.result_payload import _api_data, api_failure
 
@@ -28,6 +32,64 @@ extensions_router = APIRouter()
 
 class AddressBody(BaseModel):
     host: str
+
+
+class ExtensionOffer(BaseModel):
+    name: str
+    says: str
+
+
+class ExtensionRow(BaseModel):
+    """One extension of the one list: what its row and About panel show."""
+
+    extension_id: str
+    name: str
+    label: str
+    kind: str
+    version: str
+    description: str
+    paired_at: str | None
+    last_seen: str | None
+    relays_chat: bool
+    started_by_core: bool
+    enabled: bool | None
+    mandatory: bool
+    has_settings: bool
+    pairing: str
+    site: str
+    offers: list[ExtensionOffer]
+    uses: list[str]
+    connected: bool
+    connected_at: str | None
+    remote: str | None
+    # A channel with an account (pairing): whether it is linked now, and to which account.
+    linked: bool | None
+    account: str
+
+
+class ExtensionListen(BaseModel):
+    host: str = ""
+    port: int = 0
+    address: str = ""
+    changed: bool = False
+    restart_required: bool = False
+    note: str = ""
+    listening: bool | None = None
+    error: str | None = None
+    live_host: str | None = None
+
+
+class ExtensionList(BaseModel):
+    listen: ExtensionListen
+    extensions: list[ExtensionRow]
+
+
+class ExtensionRemoved(BaseModel):
+    message: str
+
+
+# The states in which a channel's account is linked (the plugin's channel.status).
+_LINKED_STATES = frozenset({"connected", "paired", "ready"})
 
 
 def _live_manager(request: Request, workspace_path: Path | None) -> Any:
@@ -43,7 +105,7 @@ def _live_manager(request: Request, workspace_path: Path | None) -> Any:
     return manager if same else None
 
 
-@extensions_router.get("/extensions")
+@extensions_router.get("/extensions", response_model=ExtensionList)
 async def list_extensions(request: Request, workspace_id: SelectedWorkspaceIdDep) -> Any:
     service = ExtensionService()
     listed = await run_in_threadpool(service.list_extensions, workspace_id)
@@ -52,10 +114,12 @@ async def list_extensions(request: Request, workspace_id: SelectedWorkspaceIdDep
     address = await run_in_threadpool(service.address, workspace_id)
     workspace_path = await run_in_threadpool(service.workspace_path, workspace_id)
     manager = _live_manager(request, workspace_path)
-    live = manager.snapshot() if manager is not None else {}
+    live = manager.snapshot(kind=None) if manager is not None else {}
+    statuses = getattr(request.app.state.ctx, "channel_status", {}) if manager is not None else {}
     extensions = []
     for ext in listed.data or []:
         conn = live.get(ext["extension_id"])
+        status = statuses.get(ext["name"], {}) if ext["kind"] == KIND_CHANNEL else {}
         extensions.append(
             {
                 **ext,
@@ -64,6 +128,8 @@ async def list_extensions(request: Request, workspace_id: SelectedWorkspaceIdDep
                 "remote": conn["remote"] if conn else None,
                 # The live connection knows the current version; the table the last one.
                 "version": (conn["info"].get("version") if conn else None) or ext["version"],
+                "linked": (status.get("state") in _LINKED_STATES) if ext["pairing"] and manager is not None else None,
+                "account": str(status.get("account") or ""),
             }
         )
     listen = asdict(address.data) if address.ok and address.data is not None else {}
@@ -84,19 +150,37 @@ async def generate_extension_pairing_code(workspace_id: SelectedWorkspaceIdDep) 
     return asdict(result.data)
 
 
-@extensions_router.delete("/extensions/{extension_id}")
+@extensions_router.delete("/extensions/{extension_id}", response_model=ExtensionRemoved)
 async def remove_extension(
     extension_id: str, request: Request, workspace_id: SelectedWorkspaceIdDep
 ) -> Any:
+    """Remove one extension: an app is forgotten (it pairs again with a new code); a channel is stopped, its
+    settings deleted and its program uninstalled. The mandatory channel is refused."""
     service = ExtensionService()
+    ext = await run_in_threadpool(service.find, extension_id, workspace_id)
+    if ext is None:
+        return api_failure("That extension isn't in the list any more.", 404)
+    channel = ext.kind == KIND_CHANNEL
+    if channel and mandatory_channel(ext.name):
+        return api_failure(f"{ext.name} can't be removed: phones' chat needs it.")
+    workspace_path = await run_in_threadpool(service.workspace_path, workspace_id)
+    manager = _live_manager(request, workspace_path)
+    if channel and manager is not None:
+        await manager.deactivate(ext.name)  # stop its process first; a no-op when it isn't running
     result = await run_in_threadpool(service.remove_extension, extension_id, workspace_id)
-    if result.ok:
-        workspace_path = await run_in_threadpool(service.workspace_path, workspace_id)
-        manager = _live_manager(request, workspace_path)
-        if manager is not None:
+    if not result.ok or result.data is None:
+        return _api_data(result)
+    if manager is not None:
+        if channel:
+            getattr(request.app.state.ctx, "channel_status", {}).pop(ext.name, None)
+        else:
             # Close it now; it is refused when it tries again.
             await manager.disconnect(extension_id)
-    return _api_data(result)
+    if not channel:
+        return {"message": f"{ext.name} removed: it pairs again with a new code."}
+    if result.data.uninstalled:
+        return {"message": f"{ext.name} removed, and its program uninstalled."}
+    return {"message": f"{ext.name} removed; its program stayed installed (the server's log says why)."}
 
 
 @extensions_router.put("/extensions/address")

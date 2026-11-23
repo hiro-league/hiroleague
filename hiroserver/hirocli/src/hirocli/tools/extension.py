@@ -16,16 +16,30 @@ from pathlib import Path
 from typing import Any
 
 from hiro_commons.constants.network import DEFAULT_LOCALHOST
+from hiro_commons.log import Logger
 
 from ..domain.config import Config, load_config, save_config
-from ..domain.extensions import list_paired_extensions, remove_paired_extension, start_extension_pairing
+from ..domain.channel_catalog import catalog_channel
+from ..domain.channel_config import list_channel_configs
+from ..domain.channel_descriptor import load_channel_descriptor
+from ..domain.extensions import (
+    KIND_CHANNEL,
+    PairedExtension,
+    list_paired_extensions,
+    remove_paired_extension,
+    start_extension_pairing,
+)
 from ..domain.site_names import list_claims
 from ..domain.workspace import resolve_workspace
 from .base import Tool, ToolParam
+from .channel import ChannelRemoveTool, ChannelUninstallTool, mandatory_channel
 
 # Addresses that mean "every interface": an extension can't dial these, so the
 # address shown to type in uses this machine's name instead.
 _ANY_ADDRESSES = frozenset({"0.0.0.0", "::", ""})
+
+
+log = Logger.get("EXTENSIONS")
 
 
 def _resolve_path(workspace: str | None) -> Path:
@@ -68,6 +82,10 @@ class ExtensionListResult:
 class ExtensionRemoveResult:
     removed: bool
     extension_id: str
+    kind: str = ""
+    name: str = ""
+    # A channel's program is uninstalled with it; False when that part failed (its row is gone all the same).
+    uninstalled: bool = False
 
 
 @dataclass
@@ -122,27 +140,87 @@ class ExtensionAddTool(Tool):
         )
 
 
+def _site(info: dict[str, Any]) -> dict[str, Any] | None:
+    """The app's site entry (kind "site") from what it offers, or None."""
+    shows = (info.get("offers") or {}).get("shows") or []
+    return next((e for e in shows if isinstance(e, dict) and e.get("kind") == "site"), None)
+
+
+def _label(ext: PairedExtension) -> str:
+    """The name people read: an app's site title, a channel's catalog label, else its name."""
+    if ext.kind == KIND_CHANNEL:
+        entry = catalog_channel(ext.name)
+        return entry.label if entry is not None else ext.name.capitalize()
+    site = _site(ext.info) or {}
+    return str(site.get("title") or ext.name)
+
+
+def _offers(info: dict[str, Any]) -> list[dict[str, str]]:
+    """What other extensions or Hiro may ask it: its knows and can_do entries, by name and what each says."""
+    offers = info.get("offers") or {}
+    out: list[dict[str, str]] = []
+    for entry in [*(offers.get("knows") or []), *(offers.get("can_do") or [])]:
+        if isinstance(entry, dict) and entry.get("name"):
+            out.append({"name": str(entry["name"]), "says": str(entry.get("says") or "")})
+    return out
+
+
+def _uses(info: dict[str, Any]) -> list[str]:
+    """The AI and voice uses it declared, by name."""
+    return [
+        str(use.get("name") or use.get("id"))
+        for key in ("uses", "voice_uses")
+        for use in info.get(key) or []
+        if isinstance(use, dict) and (use.get("name") or use.get("id"))
+    ]
+
+
+def extension_row(ext: PairedExtension, workspace_path: Path, enabled: dict[str, bool]) -> dict[str, Any]:
+    """One row of the one list, for an app or a channel; what is live (connected, linked) the caller adds."""
+    channel = ext.kind == KIND_CHANNEL
+    descriptor = load_channel_descriptor(workspace_path, ext.name) if channel else None
+    schema = (descriptor.config_schema if descriptor is not None else None) or {}
+    capabilities = (descriptor.capabilities if descriptor is not None else None) or {}
+    catalog = catalog_channel(ext.name) if channel else None
+    site = None if channel else _site(ext.info)
+    return {
+        "extension_id": ext.extension_id,
+        "name": ext.name,
+        "label": _label(ext),
+        "kind": ext.kind,
+        "version": str(ext.info.get("version") or ""),
+        "description": str(ext.info.get("description") or (catalog.description if catalog else "")),
+        "paired_at": _iso(ext.paired_at),
+        "last_seen": _iso(ext.last_seen),
+        "relays_chat": ext.relays_chat,
+        "started_by_core": ext.started_by_core,
+        # A started extension's switch; an app has none.
+        "enabled": enabled.get(ext.name) if channel else None,
+        "mandatory": channel and mandatory_channel(ext.name),
+        # Its settings form, when the core keeps its settings, and how its account is linked ("qr"), if it has one.
+        "has_settings": bool(schema.get("properties")),
+        "pairing": str(capabilities.get("pairing") or "") if channel else "",
+        "site": str(site.get("url") or "") if site else "",
+        "offers": _offers(ext.info),
+        "uses": _uses(ext.info),
+    }
+
+
 class ExtensionListTool(Tool):
     surfaces = frozenset({"cli", "http"})
     name = "extension_list"
-    description = "List the extensions paired with this workspace"
+    description = "List every extension of this workspace: its channel plugins and its apps"
     params = {
         "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
     }
 
     def execute(self, workspace: str | None = None) -> ExtensionListResult:
         workspace_path = _resolve_path(workspace)
+        enabled = {cfg.name: cfg.enabled for cfg in list_channel_configs(workspace_path)}
         return ExtensionListResult(
             extensions=[
-                {
-                    "extension_id": ext.extension_id,
-                    "name": ext.name,
-                    "version": str(ext.info.get("version") or ""),
-                    "description": str(ext.info.get("description") or ""),
-                    "paired_at": _iso(ext.paired_at),
-                    "last_seen": _iso(ext.last_seen),
-                }
-                for ext in list_paired_extensions(workspace_path)
+                extension_row(ext, workspace_path, enabled)
+                for ext in list_paired_extensions(workspace_path, kind=None)
             ]
         )
 
@@ -150,7 +228,10 @@ class ExtensionListTool(Tool):
 class ExtensionRemoveTool(Tool):
     surfaces = frozenset({"cli", "http"})
     name = "extension_remove"
-    description = "Remove a paired extension; it is refused until paired again"
+    description = (
+        "Remove an extension: an app loses its key and is refused until paired again; "
+        "a channel plugin loses its settings and its program is uninstalled"
+    )
     params = {
         "extension_id": ToolParam(str, "Extension ID to remove"),
         "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
@@ -158,8 +239,24 @@ class ExtensionRemoveTool(Tool):
 
     def execute(self, extension_id: str, workspace: str | None = None) -> ExtensionRemoveResult:
         workspace_path = _resolve_path(workspace)
-        removed = remove_paired_extension(workspace_path, extension_id)
-        return ExtensionRemoveResult(removed=removed, extension_id=extension_id)
+        ext = next((e for e in list_paired_extensions(workspace_path, kind=None) if e.extension_id == extension_id), None)
+        if ext is None:
+            return ExtensionRemoveResult(removed=False, extension_id=extension_id)
+        if ext.kind != KIND_CHANNEL:
+            removed = remove_paired_extension(workspace_path, extension_id)
+            return ExtensionRemoveResult(removed=removed, extension_id=extension_id, kind=ext.kind, name=ext.name)
+        # A channel: the core installed its program, so removing it uninstalls it too (raises for the mandatory one).
+        removed = ChannelRemoveTool().execute(ext.name, workspace).removed
+        uninstalled = False
+        try:
+            ChannelUninstallTool().execute(ext.name)
+            uninstalled = True
+        except (RuntimeError, OSError) as exc:
+            # Its row is gone already; a program left installed must not fail the removal.
+            log.warning("⚠️ Extensions: removed a channel, but its program stayed installed", channel=ext.name, error=str(exc))
+        return ExtensionRemoveResult(
+            removed=removed, extension_id=extension_id, kind=ext.kind, name=ext.name, uninstalled=uninstalled
+        )
 
 
 class ExtensionAddressTool(Tool):

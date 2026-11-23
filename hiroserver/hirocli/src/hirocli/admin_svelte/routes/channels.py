@@ -1,8 +1,9 @@
-"""Generic channel-plugin admin routes (design §5.3).
+"""What only a channel plugin has, by name (design §5.3): its live status, its account's
+pairing, its settings, the channels to install and installing one, its switch (with live
+hot spawn/stop), and its declared actions. The one list of every extension, and removing
+one, are the extension routes' (extensions.py).
 
-One parameterized surface for every channel (WhatsApp today, Telegram/… next):
-list, live status, pairing, config get/set, install, enable/disable (with live
-hot spawn/stop), and generic actions. The channel declares its config schema and
+One parameterized surface for every channel (WhatsApp today, Telegram/… next). The channel declares its config schema and
 capabilities at registration (§5.1/§5.2); these routes stay channel-agnostic and
 read that descriptor instead of hardcoding per-channel behavior.
 
@@ -22,7 +23,6 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
 from hiro_commons.process import find_workspace_root
 from hirocli.admin.features.channels.service import ChannelService
 from hirocli.admin_svelte.deps import SelectedWorkspaceIdDep
@@ -37,9 +37,7 @@ from hirocli.tools.channel import (
     ChannelDisableTool,
     ChannelEnableTool,
     ChannelInstallTool,
-    ChannelRemoveTool,
     ChannelSetupTool,
-    ChannelUninstallTool,
     installed_channel_command,
 )
 
@@ -61,21 +59,6 @@ def _status_for(request: Request, name: str) -> dict[str, Any] | None:
     if ctx is None:
         return None
     return dict(getattr(ctx, "channel_status", {}).get(name, {}))
-
-
-# ---------------------------------------------------------------------------
-# Listing
-# ---------------------------------------------------------------------------
-
-@channels_router.get("/channels")
-async def list_channels(workspace_id: SelectedWorkspaceIdDep) -> Any:
-    result = await run_in_threadpool(ChannelService().list_channels, workspace_id)
-    if not result.ok:
-        return _api_data(result)
-    return {
-            "channels": result.data or [],
-            "mandatory_channel_name": MANDATORY_CHANNEL_NAME,
-        }
 
 
 # ---------------------------------------------------------------------------
@@ -282,38 +265,6 @@ async def disable_channel(
     if ctx is not None:
         ctx.channel_status.setdefault(name, {})["state"] = "disabled"
     return {"enabled": False}
-
-
-@channels_router.post("/channels/{name}/uninstall")
-async def uninstall_channel(
-    name: str, request: Request, workspace_id: SelectedWorkspaceIdDep
-) -> Any:
-    # Uninstall is the exact inverse of Install: stop the running plugin, delete its
-    # config so it leaves the managed list (returns to the "Install a channel" picker),
-    # then `uv tool uninstall` the package. Package uninstall is best-effort — the
-    # channel is already gone, so a leftover package must not fail the operation.
-    cm = _extensions(request)
-    if cm is not None:
-        await cm.deactivate(name)  # stop + reap the subprocess if running; no-op otherwise
-    try:
-        await run_in_threadpool(ChannelRemoveTool().execute, name, workspace_id)
-    except (ValueError, RuntimeError) as exc:
-        # e.g. a mandatory channel can't be uninstalled.
-        return api_failure(str(exc))
-    uninstalled = False
-    try:
-        await run_in_threadpool(ChannelUninstallTool().execute, name)
-        uninstalled = True
-    except (RuntimeError, OSError) as exc:
-        log.warning(
-            "⚠️ Deleted channel config but package uninstall failed",
-            channel=name,
-            error=str(exc),
-        )
-    ctx = _ctx(request)
-    if ctx is not None:
-        getattr(ctx, "channel_status", {}).pop(name, None)
-    return {"uninstalled": uninstalled}
 
 
 @channels_router.post("/channels/{name}/action/{action}")
