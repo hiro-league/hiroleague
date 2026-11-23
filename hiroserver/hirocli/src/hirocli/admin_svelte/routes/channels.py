@@ -323,7 +323,7 @@ async def channel_action(name: str, action: str, request: Request) -> Any:
     # that doesn't include it.
     cm = _extensions(request)
     if cm is None:
-        return api_failure("Channel manager not available (is the server running?).")
+        return api_failure("The extension manager isn't available (is the server running?).")
     ctx = _ctx(request)
     if ctx is not None:
         d = await run_in_threadpool(load_channel_descriptor, ctx.workspace_path, name)

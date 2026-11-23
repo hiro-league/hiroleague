@@ -9,7 +9,7 @@ Workspace layout:
     preferences.json         ← single source of truth for LLM, voice, and
                                audio settings (domain/preferences.py)
     master_key.pem           ← Ed25519 private key (domain/crypto.py)
-    workspace.db             ← SQLite: characters, devices, channel_plugins (domain/db.py)
+    workspace.db             ← SQLite: characters, devices, extension_records (domain/db.py)
     data/
       data.db                ← SQLite: users, channels, messages (domain/data_store.py)
       media/<channel_id>/    ← binary content files (domain/media_store.py)
