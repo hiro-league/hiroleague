@@ -47,14 +47,14 @@ def _delete_agent_thread(workspace_path: Path, channel_id: int) -> None:
         )
 
 
-def _notify_channel_changed(workspace_path: Path, channel_id: int) -> None:
-    """Publish a channel mutation (create/update/delete or thumbnail change)."""
+def _notify_channel_changed(workspace_path: Path, channel_id: int, user_id: int | None = None) -> None:
+    """Publish a channel mutation (create/update/delete or thumbnail change). ``user_id``, its chat user, lets the
+    notice reach only that person's devices (Permissions phase 3), a deleted conversation's too."""
+    payload: dict[str, Any] = {"channel_id": channel_id}
+    if user_id is not None:
+        payload["user_id"] = user_id
     get_domain_event_bus().publish(
-        DomainEvent(
-            type=DomainEventType.CHANNEL_CHANGED,
-            workspace_path=workspace_path,
-            payload={"channel_id": channel_id},
-        )
+        DomainEvent(type=DomainEventType.CHANNEL_CHANGED, workspace_path=workspace_path, payload=payload)
     )
 
 
@@ -143,7 +143,10 @@ def _get_default_channel(
     *,
     user_id: int | None = None,
 ) -> ConversationChannel | None:
-    """Return the seeded default channel, optionally scoped to a user."""
+    """Return the seeded default channel, optionally scoped to a user.
+
+    Scoped to a user, only that user's: another person's General is never theirs (Permissions phase 3).
+    """
     ensure_data_db(workspace_path)
     with sqlite3.connect(str(data_db_path(workspace_path))) as conn:
         conn.row_factory = sqlite3.Row
@@ -157,8 +160,7 @@ def _get_default_channel(
                 """,
                 (user_id, DEFAULT_CONVERSATION_CHANNEL_NAME),
             ).fetchone()
-            if row:
-                return _row_to_channel(row)
+            return _row_to_channel(row) if row else None
 
         row = conn.execute(
             """
@@ -233,12 +235,9 @@ def create_channel(
     description: str = "",
     created_at: str | None = None,
 ) -> ConversationChannel:
-    """Create a conversation channel for the workspace default user (single-user mode).
-
-    ``user_id`` is accepted for backwards compatibility but ignored; the seeded owner is always used.
-    """
-    _ = user_id  # Single-user workspaces: binding is always ``get_default_user_id``.
-    uid = get_default_user_id(workspace_path)
+    """Create a conversation channel for a chat user: a person's own (Permissions phase 3), else the seeded user's,
+    the owner's."""
+    uid = user_id if user_id is not None else get_default_user_id(workspace_path)
     channel_type = "direct"
     ensure_data_db(workspace_path)
     timestamp = created_at or utc_iso(utc_now())
@@ -267,38 +266,28 @@ def create_channel(
         if row is None:
             raise RuntimeError("Conversation channel creation succeeded but row could not be reloaded.")
         created = _row_to_channel(row)
-        _notify_channel_changed(workspace_path, created.id)
+        _notify_channel_changed(workspace_path, created.id, created.user_id)
         return created
 
 
-def resolve_or_create_channel_for_sender(
-    workspace_path: Path,
-    *,
-    channel: str,
-    sender_id: str,
-    character_id: str | None = None,
-) -> ConversationChannel:
-    """Find or create the conversation for a channel peer (e.g. a WhatsApp sender).
-
-    Device clients supply ``chat_channel_id`` directly (they synced the channel
-    earlier). Channels like WhatsApp arrive with only a sender JID, so map
-    ``(channel, sender_id)`` to a stable, user-scoped conversation — created on
-    first contact with the default character — so messages thread consistently
-    and replies route back to the same channel.
-    """
+def person_conversation(workspace_path: Path, user_id: int) -> ConversationChannel:
+    """A person's own General conversation, made with the default character the first time they talk (Permissions
+    phase 3). A chat channel's messages land here: on WhatsApp a person has one conversation with Hiro."""
     from .character import default_character_id  # lazy: avoid import cycle
 
-    uid = get_default_user_id(workspace_path)
-    name = f"{channel}:{sender_id}"  # stable per-peer key (also the display name for now)
-    existing = _get_channel_by_name(workspace_path, name, user_id=uid)
+    existing = _get_default_channel(workspace_path, user_id=user_id)
     if existing is not None:
         return existing
-    char = character_id or default_character_id(workspace_path)
     try:
-        return create_channel(workspace_path, name=name, character_id=char, user_id=uid)
+        return create_channel(
+            workspace_path,
+            name=DEFAULT_CONVERSATION_CHANNEL_NAME,
+            character_id=default_character_id(workspace_path),
+            user_id=user_id,
+        )
     except ValueError:
-        # A concurrent inbound raced us to create the same channel; re-fetch it.
-        found = _get_channel_by_name(workspace_path, name, user_id=uid)
+        # A concurrent message raced us to create it; read it again
+        found = _get_default_channel(workspace_path, user_id=user_id)
         if found is not None:
             return found
         raise
@@ -367,7 +356,7 @@ def update_channel(
         if row is None:
             raise RuntimeError("Conversation channel update succeeded but row could not be reloaded.")
         updated = _row_to_channel(row)
-        _notify_channel_changed(workspace_path, updated.id)
+        _notify_channel_changed(workspace_path, updated.id, updated.user_id)
         return updated
 
 
@@ -467,7 +456,7 @@ def clear_channel_messages(workspace_path: Path, channel_id: int) -> int:
         channel_id,
         new_epoch,
     )
-    _notify_channel_changed(workspace_path, channel_id)
+    _notify_channel_changed(workspace_path, channel_id, channel.user_id)
     return new_epoch
 
 
@@ -476,7 +465,8 @@ def delete_channel(workspace_path: Path, channel_id: int) -> None:
 
     Raises if ``channel_id`` is the smallest id in the table (primary/default channel guard).
     """
-    if _get_channel_by_id(workspace_path, channel_id) is None:
+    deleted = _get_channel_by_id(workspace_path, channel_id)
+    if deleted is None:
         raise ValueError(f"No conversation channel with id {channel_id}.")
 
     anchor = min_channel_id(workspace_path)
@@ -505,7 +495,7 @@ def delete_channel(workspace_path: Path, channel_id: int) -> None:
     # (or just sanity for orphaned checkpoints) doesn't inherit stale memory.
     _delete_agent_thread(workspace_path, channel_id)
     remove_channel_photo_dir(workspace_path, channel_id)
-    _notify_channel_changed(workspace_path, channel_id)
+    _notify_channel_changed(workspace_path, channel_id, deleted.user_id)
 
 
 def _row_to_channel(row: sqlite3.Row) -> ConversationChannel:

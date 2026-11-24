@@ -28,16 +28,16 @@ class WhatsAppChannelConfig(BaseModel):
         default=None,
         title="Owner number",
         description=(
-            "Your own WhatsApp number (digits only). Messages from it route to the "
-            "default conversation and it is always allow-listed."
+            "Read no more: who may write to Hiro is the people on People whose roles may talk to it "
+            "(Permissions phase 3). Kept so settings saved before still load."
         ),
     )
     allowed_senders: list[str] = Field(
         default_factory=list,
         title="Allowed senders",
         description=(
-            "Phone numbers permitted to reach the agent. Empty ⇒ only the owner "
-            "number is allowed (the allow-list is closed by default)."
+            "Set by the core at each start, and when people or roles change: the numbers of the people who may "
+            "talk to Hiro. A value saved here is replaced (Permissions phase 3)."
         ),
     )
     send_read_receipts: bool = Field(

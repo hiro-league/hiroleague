@@ -16,8 +16,10 @@ Response content format (content_type "json"):
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from hiro_channel_sdk.constants import CONTENT_TYPE_JSON
@@ -42,6 +44,23 @@ CALLER_CHANNEL = "channel"      # a channel plugin's own request (none open to i
 DEVICES_ONLY: frozenset[str] = frozenset({CALLER_DEVICE})
 EXTENSIONS_ONLY: frozenset[str] = frozenset({CALLER_EXTENSION})
 ALL_CALLERS: frozenset[str] = frozenset({CALLER_DEVICE, CALLER_EXTENSION})
+
+
+# What a device's request needs (Permissions phase 3): a core permission (feature, action) its person's roles hold,
+# for their own things or everyone's; ANY_DEVICE for what every paired device of a known person may ask (its problems,
+# the core's name). A method that names none answers the owner's devices only.
+DeviceRight = tuple[str, str] | None
+ANY_DEVICE: DeviceRight = None
+OWNER_ONLY = ("", "")
+
+
+@dataclass(frozen=True)
+class DeviceAsker:
+    """The person a device's request is answered for: the device's own (a device shows only its person's
+    conversations, whatever their reach)."""
+
+    person_id: str  # "" = no family list yet: the owner
+    user_id: int  # their chat user: their conversations are this user's
 
 
 class RequestRefused(Exception):
@@ -73,6 +92,12 @@ class RequestContext:
         self.server_ctx = ctx
         self.resource_versions = resource_versions
         self.emit_outbound = emit_outbound
+        # Set for a device's request (Permissions phase 3): handlers answer for this person only
+        self.asker: DeviceAsker | None = None
+
+    def own_user(self) -> int | None:
+        """The chat user a device's request is scoped to; None for an app's (it reads no conversation)."""
+        return self.asker.user_id if self.asker is not None else None
 
 
 MethodHandler = Callable[[dict[str, Any], RequestContext], Awaitable[dict[str, Any] | None]]
@@ -101,6 +126,7 @@ class RequestHandler:
         self._resource_versions = resource_versions
         self._methods: dict[str, MethodHandler] = {}
         self._callers: dict[str, frozenset[str]] = {}
+        self._device_rights: dict[str, DeviceRight] = {}
 
     def register(
         self,
@@ -108,10 +134,12 @@ class RequestHandler:
         handler: MethodHandler,
         *,
         callers: frozenset[str] = DEVICES_ONLY,
+        device_right: DeviceRight = OWNER_ONLY,
     ) -> None:
-        """Register an async handler for the given method name and who may call it."""
+        """Register an async handler for the given method name, who may call it, and what a device's person needs."""
         self._methods[method] = handler
         self._callers[method] = callers
+        self._device_rights[method] = device_right
         log.fineinfo(f"✅ Registered request method: {method}", callers=sorted(callers))
 
     async def handle(
@@ -162,6 +190,11 @@ class RequestHandler:
                 resource_versions=self._resource_versions,
                 emit_outbound=emit_outbound,
             )
+            if caller == CALLER_DEVICE:
+                ctx.asker = await asyncio.to_thread(
+                    device_asker, self._ctx.workspace_path, msg.routing.sender_id or "",
+                    self._device_rights.get(method, OWNER_ONLY),
+                )
             result = await handler(params, ctx)
             if result is None:
                 return None
@@ -219,3 +252,32 @@ def gate(system: str, code: str, *, write: bool = True, fakes: bool = False) -> 
         return switchboard.check(system, write=write, fakes=fakes)
     except switchboard.Refused as exc:
         raise RequestRefused(code, str(exc)) from exc
+
+
+def device_asker(workspace_path: Any, device_id: str, right: DeviceRight) -> DeviceAsker:
+    """The person a device's request is for, if their roles hold what the method needs; else :class:`RequestRefused`
+    (Permissions phase 3). The owner's roles hold every right; a right for their own things is enough, since a device
+    is answered for its own person only."""
+    from hiro_channel_sdk.access import allowed
+
+    from ..domain.access import admin_access
+    from ..domain.core_features import CORE_BY_ID
+    from ..domain.talkers import device_owner, is_owner
+
+    person, user_id = device_owner(workspace_path, device_id)
+    if user_id is None:
+        raise RequestRefused("not_allowed", "This device belongs to nobody in the family list.")
+    if person is None:  # no family list yet: the owner's
+        return DeviceAsker(person_id="", user_id=user_id)
+    if right is ANY_DEVICE:
+        return DeviceAsker(person_id=person.person_id, user_id=user_id)
+    if right == OWNER_ONLY:
+        if is_owner(person):
+            return DeviceAsker(person_id=person.person_id, user_id=user_id)
+        raise RequestRefused("not_allowed", "Only the owner's devices can ask this.")
+    feature, action = right
+    roles = admin_access(workspace_path, person.role_ids).roles
+    if not allowed(roles, feature, action, CORE_BY_ID, asker=person.person_id, owners=[person.person_id]):
+        raise RequestRefused("not_allowed", f"{person.name}'s roles don't include {feature}: {action}.")
+    return DeviceAsker(person_id=person.person_id, user_id=user_id)
+

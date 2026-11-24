@@ -101,6 +101,7 @@ from hiro_commons.nonces import generate_nonce
 from hiro_commons.signing import verify_signature
 
 from ..domain.channel_config import list_enabled_channels, load_channel_config
+from ..domain.talkers import talking_numbers
 from ..domain.extensions import (
     KIND_APP,
     KIND_CHANNEL,
@@ -141,6 +142,13 @@ _FINEINFO_EVENTS = frozenset({"gateway_disconnected", "device_connected", "devic
 
 # A kind of extension -> its kind of caller (RequestHandler): a method is open to a kind only when it names it.
 _CALLER_OF_KIND = {KIND_APP: CALLER_EXTENSION, KIND_CHANNEL: CALLER_CHANNEL}
+
+
+def _takes_allowed_senders(info: dict[str, Any]) -> bool:
+    """A chat channel strangers can write to says so by declaring ``allowed_senders`` in its settings (WhatsApp): the
+    core then hands it the numbers of the people who may talk (Permissions phase 3)."""
+    schema = info.get("config_schema") or {}
+    return isinstance(schema, dict) and "allowed_senders" in (schema.get("properties") or {})
 
 EventHandler = Callable[[str, str, dict[str, Any]], Awaitable[None]]
 ChatHandler = Callable[[dict[str, Any]], Awaitable[None]]
@@ -680,6 +688,13 @@ class ExtensionManager:
             payload["gateway_url"] = self._ctx.config.gateway_connect_url()
             payload.setdefault("device_id", self._ctx.config.device_id)
             payload.setdefault("ping_interval", DEFAULT_PING_INTERVAL_SECONDS)
+        elif _takes_allowed_senders(conn.info):
+            # Permissions phase 3: a chat channel strangers can write to (its settings declare allowed_senders) lets
+            # through only the people who may talk: the core's list, sent again when people or roles change. Its own
+            # list and owner number are read no more.
+            payload.pop("owner_number", None)
+            payload["allowed_senders"] = await asyncio.to_thread(talking_numbers, workspace)
+            log.info(f"Chat channel — {conn.name}: {len(payload['allowed_senders'])} number(s) may talk to Hiro")
         # Secret markers swapped for the keyring's values right before sending: the row keeps only markers.
         payload = await asyncio.to_thread(resolve_channel_secrets, workspace, conn.name, payload)
         try:

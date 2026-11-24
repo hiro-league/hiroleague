@@ -74,7 +74,6 @@ class WhatsAppChannel(ChannelPlugin):
         # Config-driven policy (P3). Defaults: accept everyone, send read receipts.
         self._allowed_senders: set[str] = set()
         self._send_read_receipts: bool = True
-        self._owner_number: str = ""  # user's own number → routes to General/Hiro
         # P7: relay TTS replies as WhatsApp voice notes. On by default — if the
         # character speaks (TTS ran), WhatsApp gets the voice note too.
         self._audio_out: bool = True
@@ -109,27 +108,22 @@ class WhatsAppChannel(ChannelPlugin):
         self._config = dict(config or {})
         self._send_read_receipts = bool(self._config.get("send_read_receipts", True))
         self._audio_out = bool(self._config.get("audio_out", True))
-        self._owner_number = _normalize_number(str(self._config.get("owner_number") or ""))
         # The WhatsApp library's own lines in this channel's log (a diagnosis setting), from the next connection on.
         set_library_log_level(str(self._config.get("whatsmeow_log_level") or ""))
-        # Allow-list is CLOSED by default (security): with nothing configured, no
-        # sender may reach the agent. The owner's own number is always permitted;
-        # add more via `allowed_senders`.
+        # Allow-list is CLOSED by default (security): only the numbers the core sends, the people who may talk to
+        # Hiro (Permissions phase 3: the core keeps the list, from People and Roles, and checks each message again).
         raw_allowed = self._config.get("allowed_senders") or []
-        allowed = {_normalize_number(str(s)) for s in raw_allowed if str(s).strip()}
-        if self._owner_number:
-            allowed.add(self._owner_number)
-        self._allowed_senders = allowed
+        self._allowed_senders = {_normalize_number(str(s)) for s in raw_allowed if str(s).strip()}
         # on_configure is also called on a live re-push (settings saved while running),
-        # so apply anything the running bridge caches. The allow-list / owner / audio_out
+        # so apply anything the running bridge caches. The allow-list / audio_out
         # are read live from self.* at message time, but read-receipts is held by the
         # bridge — update it so a settings change takes effect without a restart.
         if self._bridge is not None:
             self._bridge.set_send_read_receipts(self._send_read_receipts)
         if not self._allowed_senders:
             log.warning(
-                "⚠️ WhatsApp allow-list is empty — NO senders permitted. Set "
-                "'owner_number' or 'allowed_senders' for the agent to receive messages."
+                "⚠️ WhatsApp allow-list is empty — NO senders permitted. Give a person a WhatsApp number on People, "
+                "and a role that may talk to Hiro."
             )
         log.info(
             "WhatsApp channel configured",
@@ -137,7 +131,6 @@ class WhatsAppChannel(ChannelPlugin):
             allowed=len(self._allowed_senders),
             read_receipts=self._send_read_receipts,
             audio_out=self._audio_out,
-            owner_set=bool(self._owner_number),
             library_log_level=str(self._config.get("whatsmeow_log_level") or "WARNING"),
         )
 
@@ -347,6 +340,11 @@ class WhatsAppChannel(ChannelPlugin):
         await self.emit_event("channel.status", {"state": state, **detail})
 
     async def _handle_inbound(self, inbound: dict[str, Any]) -> None:
+        # Hiro answers one-to-one messages only: a message in a group is ignored (Michel's decision, Permissions
+        # phase 3; groups get a design of their own)
+        if inbound.get("is_group"):
+            log.info("WhatsApp inbound ignored — a group message", chat=inbound.get("chat_jid"))
+            return
         # Allow-list is closed by default: only explicitly permitted numbers reach
         # the agent (unknown/LID-only senders with no phone match are dropped).
         pn = _normalize_number(inbound.get("sender_pn", ""))
@@ -397,13 +395,10 @@ class WhatsAppChannel(ChannelPlugin):
         # every text turn.
         if self._audio_out and inbound.get("audio_b64"):
             metadata["request_voice_reply"] = True
-        # Phase 7b: the sender's number (digits), so the core can file the turn's AI usage under the
-        # family member it belongs to (people.whatsapp).
+        # The sender's number (digits): the core finds the person by it (people.whatsapp), whose conversation and
+        # memory the turn uses (Permissions phase 3). The sender id is WhatsApp's own, often a LID, not the number.
         if sender_number := _normalize_number(inbound.get("sender_pn", "")):
             metadata["sender_number"] = sender_number
-        # Owner's own number → route to the General/Hiro thread, not a per-sender one.
-        if self._owner_number and _normalize_number(inbound.get("sender_pn", "")) == self._owner_number:
-            metadata["route_to_default"] = True
         um = UnifiedMessage(
             routing=MessageRouting(
                 channel="whatsapp",

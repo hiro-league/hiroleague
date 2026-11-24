@@ -16,6 +16,8 @@ own all post-validation work.
 
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from hiro_channel_sdk.constants import (
@@ -29,6 +31,7 @@ from hiro_channel_sdk.models import UnifiedMessage
 from hiro_commons import tasks
 from hiro_commons.log import Logger, log_scope
 
+from .chat_writer import NotAllowed, conversation_for, stamp, writer_of
 from .comm_log import LOG_IN, comm_extras, comm_kind, comm_peer_label
 from .envelope_factory import EnvelopeFactory
 
@@ -47,41 +50,14 @@ RunMessage = Callable[..., Awaitable[None]]
 EmitOutbound = Callable[[UnifiedMessage], Awaitable[None]]
 
 
-def _check_permissions(msg: UnifiedMessage) -> None:
-    """Placeholder for inbound user/channel permission checks."""
-
-
-def _ensure_conversation(ctx: "ServerContext", msg: UnifiedMessage) -> None:
-    """Populate ``routing.metadata.chat_channel_id`` for channels that don't supply it.
-
-    Device clients include ``chat_channel_id`` (they synced the conversation
-    earlier). Channels like WhatsApp arrive with only a sender JID, so map
-    ``(channel, sender_id)`` to a conversation here — mutating the shared ``msg``
-    object *before* both persistence and agent dispatch read the key.
-    """
-    from ..domain.conversation_channel import (
-        CHAT_CHANNEL_ID_METADATA_KEY,
-        resolve_default_channel,
-        resolve_or_create_channel_for_sender,
-    )
-
+def _admit(workspace_path: Path, msg: UnifiedMessage, person_id: str | None) -> None:
+    """Who wrote a chat ``message``, whether they may talk, and its conversation (Permissions phase 3): raises
+    :class:`NotAllowed` before anything is kept or acknowledged. Requests and events pass: a device's requests are
+    checked per method (request_methods.py)."""
     if msg.message_type != MESSAGE_TYPE_MESSAGE:
         return
-    meta = msg.routing.metadata
-    if meta.get(CHAT_CHANNEL_ID_METADATA_KEY):
-        return
-    sender = msg.routing.sender_id
-    if not sender:
-        return
-    # A channel may hint that a known peer (e.g. the WhatsApp owner) belongs in the
-    # main General thread rather than its own per-sender channel.
-    if meta.get("route_to_default"):
-        conv = resolve_default_channel(ctx.workspace_path)
-    else:
-        conv = resolve_or_create_channel_for_sender(
-            ctx.workspace_path, channel=msg.routing.channel, sender_id=sender,
-        )
-    meta[CHAT_CHANNEL_ID_METADATA_KEY] = conv.id
+    writer = writer_of(workspace_path, msg, person_id=person_id)
+    stamp(msg, writer, conversation_for(workspace_path, msg, writer))
 
 
 class InboundPipeline:
@@ -109,12 +85,14 @@ class InboundPipeline:
         data: dict[str, Any],
         *,
         await_message_flow: bool = False,
+        person_id: str | None = None,
     ) -> None:
-        """Validate the raw dict, run permission check, and dispatch by type.
+        """Validate the raw dict, check who wrote it, and dispatch by type.
 
         ``await_message_flow=True`` blocks ``message`` payloads until the
         inbound-persistence subscriber finishes. Other message types ignore
-        the flag.
+        the flag. ``person_id`` is the writer an in-process sender hands in (the
+        admin's signed-in person; "" for the owner, the command line's).
         """
         try:
             msg = UnifiedMessage.model_validate(data)
@@ -123,21 +101,21 @@ class InboundPipeline:
             return
 
         try:
-            _ensure_conversation(self._ctx, msg)
-        except Exception as exc:
-            # Without a resolved conversation the message can't be threaded/persisted.
-            log.warning(
-                f"⚠️ {LOG_IN} Could not resolve conversation — dropping",
-                **comm_extras(msg, channel=msg.routing.channel, error=str(exc)),
+            # Off the loop: it reads the family list and the conversations, and may make a person's first one
+            await asyncio.to_thread(_admit, self._ctx.workspace_path, msg, person_id)
+        except NotAllowed as exc:
+            # A stranger, or someone who may not talk: nothing is kept, acknowledged or answered
+            log.info(
+                f"{LOG_IN} Message dropped — {exc.reason} · {self._routing_tag(msg)}",
+                **comm_extras(msg, channel=msg.routing.channel),
             )
             return
-
-        try:
-            _check_permissions(msg)
-        except PermissionError as exc:
-            log.warning(
-                f"⚠️ {LOG_IN} Blocked by permission — {self._routing_tag(msg)}",
+        except Exception as exc:
+            # Without a writer and a conversation the message can't be threaded or kept
+            log.error(
+                f"❌ {LOG_IN} Could not tell who wrote the message — dropping",
                 **comm_extras(msg, channel=msg.routing.channel, error=str(exc)),
+                exc_info=True,
             )
             return
 

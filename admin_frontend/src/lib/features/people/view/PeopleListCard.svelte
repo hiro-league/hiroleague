@@ -1,7 +1,6 @@
 <script lang="ts">
   import { KeyRound, MessageCircle, MonitorSmartphone, Pencil, Trash2, RefreshCw } from '@lucide/svelte';
-  import MockupBadge from '$kit/ui/mockup-badge.svelte';
-  import type { OwnedDevice } from '../../devices/shared/device-people-mock';
+  import type { DeviceRow } from '$lib/api/devices';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import ResourceView from '$kit/ui/resource-view.svelte';
@@ -10,8 +9,8 @@
   import { TABLE_GRID_ROW } from '$kit/ui/table-grid';
   import { shownNumber, type PeopleController } from '../state/people-controller.svelte';
 
-  // mockup: Permissions phase 3, a person's devices beside their WhatsApp address (`devicesOf`)
-  let { ctrl, devicesOf }: { ctrl: PeopleController; devicesOf: (personId: string) => OwnedDevice[] } = $props();
+  // Permissions phase 3: a person's devices beside their WhatsApp address (`devicesOf`)
+  let { ctrl, devicesOf }: { ctrl: PeopleController; devicesOf: (personId: string) => DeviceRow[] } = $props();
 
   const GRID = '1.1fr 1fr 170px 1.4fr 150px 210px';
   // ResourceView's shape: nothing to show yet reads as loading / failed; rows already held stay up while it reloads.
@@ -43,7 +42,7 @@
           <span>Name</span>
           <span>Hiro calls them</span>
           <span>Roles</span>
-          <span class="flex items-center gap-1.5">Talks to Hiro on <MockupBadge class="normal-case" /></span>
+          <span>Talks to Hiro on</span>
           <span>Admin sign-in</span>
           <span class="text-right">Actions</span>
         {/snippet}
@@ -58,7 +57,7 @@
                   <Badge variant={roleId === 'owner' ? 'default' : 'secondary'}>{ctrl.roleName(roleId)}</Badge>
                 {/each}
               </span>
-              <!-- mockup: where a person talks to Hiro: their address on each chat channel, and their devices -->
+              <!-- Where a person talks to Hiro: their address on each chat channel, and their devices -->
               <span class="flex min-w-0 flex-wrap content-start items-center gap-1">
                 {#if person.whatsapp}
                   <Badge variant="outline" class="gap-1 font-mono" title="WhatsApp">

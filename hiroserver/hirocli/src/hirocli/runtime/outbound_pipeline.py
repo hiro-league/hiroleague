@@ -19,8 +19,11 @@ from typing import TYPE_CHECKING
 from hiro_channel_sdk import message_story
 from hiro_channel_sdk.log_scope_fields import unified_message_log_scope
 from hiro_channel_sdk.models import UnifiedMessage
+from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
 from hiro_commons.log import Logger, log_scope
 from hiro_commons.logging_foundation import story
+
+from ..domain.conversation_channel import CHAT_CHANNEL_ID_METADATA_KEY
 
 from .comm_log import LOG_OUT, comm_extras, comm_kind, comm_peer_label
 
@@ -31,12 +34,20 @@ if TYPE_CHECKING:
 log = Logger.get("OUTBOUND")
 
 
-def _check_permissions(msg: UnifiedMessage) -> None:
-    """Placeholder for outbound user/channel permission checks.
+async def _device_targets(ctx: ServerContext, msg: UnifiedMessage) -> list[str] | None:
+    """The devices a frame for the devices channel goes to (Permissions phase 3), or None to send it as it is.
 
-    Will enforce access control rules once the permission system is designed.
-    Raise PermissionError to drop the message.
+    A frame that names its device goes there. One that names none would reach every device through the gateway, so it
+    goes to the connected devices of its conversation's person instead, and to no device when it names no
+    conversation.
     """
+    if msg.routing.channel != MANDATORY_CHANNEL_NAME or msg.routing.recipient_id:
+        return None
+    conversation = (msg.routing.metadata or {}).get(CHAT_CHANNEL_ID_METADATA_KEY)
+    if not conversation:
+        log.warning(f"⚠️ {LOG_OUT} Not sent — a frame for every device names no conversation", **comm_extras(msg))
+        return []
+    return await asyncio.to_thread(ctx.device_targeting.for_conversation, conversation)
 
 
 class OutboundPipeline:
@@ -109,12 +120,11 @@ class OutboundPipeline:
                     traffic_subclass=_out_traffic_subclass,
                 ):
                     try:
-                        _check_permissions(msg)
-                    except PermissionError as exc:
-                        log.warning(
-                            f"⚠️ {LOG_OUT} Blocked by permission — {self._routing_tag(msg)}",
-                            **comm_extras(msg, channel=msg.routing.channel, error=str(exc)),
-                        )
+                        targets = await _device_targets(self._ctx, msg)
+                    except Exception as exc:
+                        # One frame whose devices can't be read never stops the queue; it goes to no device
+                        log.error(f"❌ {LOG_OUT} Not sent — its devices couldn't be read", **comm_extras(msg, error=str(exc)),
+                                  exc_info=True)
                         continue
 
                     # See ``enqueue`` — same rationale: avoid duplicate INFO per hop.
@@ -126,8 +136,15 @@ class OutboundPipeline:
                             items=len(msg.content),
                         ),
                     )
-                    await self._sink.send_to_channel(
-                        msg.routing.channel, msg.model_dump(mode="json")
-                    )
+                    if targets is None:
+                        await self._sink.send_to_channel(msg.routing.channel, msg.model_dump(mode="json"))
+                        continue
+                    # One frame per device of the conversation's person
+                    for device_id in targets:
+                        if device_id == msg.routing.sender_id:
+                            continue  # a device's own message, mirrored: it has it already
+                        frame = msg.model_dump(mode="json")
+                        frame["routing"]["recipient_id"] = device_id
+                        await self._sink.send_to_channel(msg.routing.channel, frame)
             finally:
                 self.queue.task_done()

@@ -50,6 +50,15 @@ class InfraEventHandlers:
         self._extensions = manager
         # A device paired or removed (the admin, the CLI): the gateway hears the new list at once.
         get_domain_event_bus().subscribe(DomainEventType.DEVICES_CHANGED, self._on_devices_changed)
+        # A person or a role changed: a chat channel hears again who may talk (Permissions phase 3)
+        get_domain_event_bus().subscribe(DomainEventType.PEOPLE_CHANGED, self._on_people_changed)
+
+    async def _on_people_changed(self, event: DomainEvent) -> None:
+        if event.workspace_path != self._ctx.workspace_path or self._extensions is None:
+            return
+        for name in self._extensions.get_connected_channels():
+            if name != MANDATORY_CHANNEL_NAME:
+                await self._extensions.push_config(name)
 
     async def _on_devices_changed(self, event: DomainEvent) -> None:
         if event.workspace_path == self._ctx.workspace_path:
@@ -182,6 +191,8 @@ class InfraEventHandlers:
                 expires_at=expires_at,
                 metadata={"source": "gateway_pairing"},
                 device_name=device_name,
+                # Permissions phase 3: the device is the person's the code was made for
+                person_id=session.person_id,
             ),
         )
         clear_pairing_session(self._ctx.workspace_path)

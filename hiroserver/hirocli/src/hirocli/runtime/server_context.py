@@ -20,6 +20,7 @@ from hiro_commons.log import Logger
 
 from hirocli.domain.config import Config, resolve_log_dir
 from hirocli.domain.pairing import get_device_name
+from hirocli.runtime.device_targeting import DeviceTargeting
 from hirocli.runtime.preference_reactor import PreferenceReactor
 from hirocli.runtime.preferences_runtime import WorkspacePreferencesRuntime, register_live_preferences
 
@@ -75,6 +76,8 @@ class ServerContext:
     loop: asyncio.AbstractEventLoop = field(init=False)
     log_dir: Path = field(init=False)
     device_names: DeviceNameResolver = field(init=False)
+    # Permissions phase 3: the connected devices, and which get a frame about a conversation (its person's)
+    device_targeting: DeviceTargeting = field(init=False)
     preferences: WorkspacePreferencesRuntime = field(init=False)
     preference_reactor: PreferenceReactor = field(init=False)
     memory_service: "MemoryService | None" = field(default=None, init=False)
@@ -101,6 +104,7 @@ class ServerContext:
         self.loop = asyncio.get_running_loop()
         self.log_dir = resolve_log_dir(self.workspace_path, self.config)
         self.device_names = DeviceNameResolver(self.workspace_path)
+        self.device_targeting = DeviceTargeting(self.workspace_path)
         self.preferences = WorkspacePreferencesRuntime(self.workspace_path)
         # Phase 7a: tools that write preferences in this process go through this runtime.
         register_live_preferences(self.preferences)

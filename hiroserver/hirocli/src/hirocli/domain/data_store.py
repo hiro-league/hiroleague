@@ -35,7 +35,8 @@ _DDL = [
     CREATE TABLE IF NOT EXISTS users (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
         name       TEXT NOT NULL UNIQUE,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        person_id  TEXT NOT NULL DEFAULT ''
     )
     """,
     """
@@ -105,6 +106,9 @@ _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
     # users
     ("users", "name",       "TEXT NOT NULL DEFAULT ''"),
     ("users", "created_at", "TEXT NOT NULL DEFAULT ''"),
+    # Permissions phase 3: the person in the family list this chat user is ("" = nobody yet). Each person who talks
+    # to Hiro has one chat user; their conversations and memory group are keyed by its id.
+    ("users", "person_id",  "TEXT NOT NULL DEFAULT ''"),
     # channels
     ("channels", "name",            "TEXT NOT NULL DEFAULT ''"),
     ("channels", "type",            "TEXT NOT NULL DEFAULT 'direct'"),
@@ -142,6 +146,8 @@ _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
     ("memory_ingest_cursors", "last_ingested_at", "TEXT NOT NULL DEFAULT ''"),
     ("memory_ingest_cursors", "updated_at",       "TEXT NOT NULL DEFAULT ''"),
 ]
+
+_USERS_PERSON_INDEX = "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_person ON users(person_id) WHERE person_id != ''"
 
 # ---------------------------------------------------------------------------
 # Path helpers
@@ -221,6 +227,8 @@ def ensure_data_db(workspace_path: Path) -> None:
             if col_name not in table_existing[table]:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_def}")
                 table_existing[table].add(col_name)
+        # One chat user per person (Permissions phase 3); made after the column, which an old data.db lacks
+        conn.execute(_USERS_PERSON_INDEX)
 
         conn.commit()
 
@@ -277,3 +285,44 @@ def get_default_user_id(workspace_path: Path) -> int:
         return int(row[0])
 
 
+def chat_user_id(workspace_path: Path, person_id: str, *, owner: bool) -> int:
+    """The chat user Hiro keeps for a person (Permissions phase 3): their conversations and memory group are keyed by
+    its id, so each person has their own.
+
+    The first owner to talk takes the seeded user, which holds every conversation and memory made before phase 3:
+    they stay where they are, and are the owner's. Anyone else gets a chat user of their own the first time. ``""``
+    (no family list yet: whoever talks is the owner) is the seeded user.
+    """
+    if not person_id:
+        return get_default_user_id(workspace_path)
+    ensure_data_db(workspace_path)
+    with sqlite3.connect(str(data_db_path(workspace_path))) as conn:
+        row = conn.execute("SELECT id FROM users WHERE person_id = ?", (person_id,)).fetchone()
+        if row is not None:
+            return int(row[0])
+        if owner:
+            # Only while the seeded user is nobody's: a second owner gets a chat user of their own
+            claimed = conn.execute(
+                "UPDATE users SET person_id = ? WHERE name = ? AND person_id = ''", (person_id, _DEFAULT_USER_NAME)
+            ).rowcount
+            if claimed:
+                conn.commit()
+                log.info("Conversations: the owner's chat user is now their person's", person_id=person_id)
+                return get_default_user_id(workspace_path)
+        conn.execute(
+            "INSERT OR IGNORE INTO users (name, created_at, person_id) VALUES (?, ?, ?)",
+            (f"person:{person_id}", utc_iso(utc_now()), person_id),
+        )
+        conn.commit()
+        row = conn.execute("SELECT id FROM users WHERE person_id = ?", (person_id,)).fetchone()
+        if row is None:
+            raise RuntimeError(f"The chat user for person {person_id} is missing after it was made")
+        return int(row[0])
+
+
+def person_of_chat_user(workspace_path: Path, user_id: int) -> str:
+    """The person a chat user is, "" when it is nobody's yet (the seeded user before its owner talks)."""
+    ensure_data_db(workspace_path)
+    with sqlite3.connect(str(data_db_path(workspace_path))) as conn:
+        row = conn.execute("SELECT person_id FROM users WHERE id = ?", (user_id,)).fetchone()
+        return str(row[0]) if row else ""

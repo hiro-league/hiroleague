@@ -1,6 +1,6 @@
 """Device management tools.
 
-Three operations: generate pairing code, list approved devices, revoke a device.
+Four operations: generate a pairing code (for a person), list approved devices, say whose a device is, revoke one.
 Both the CLI (commands/device.py) and the AI agent call these directly.
 """
 
@@ -17,7 +17,10 @@ from ..domain.pairing import (
     load_approved_devices,
     revoke_approved_device,
     save_pairing_session,
+    set_device_person,
 )
+from ..domain.people import get_person, list_people
+from ..domain.talkers import owner_person
 from ..domain.workspace import resolve_workspace
 from .base import Tool, ToolParam
 
@@ -48,6 +51,23 @@ class DeviceAddResult:
 
 
 @dataclass
+class DeviceAssignResult:
+    device_id: str
+    person_id: str
+    person_name: str
+
+
+def _person_or_owner(workspace_path: Path, person_id: str | None) -> str:
+    """Whose a device paired now will be: the person named, else the owner (Permissions phase 3)."""
+    if person_id:
+        if get_person(workspace_path, person_id) is None:
+            raise ValueError(f"Nobody in the family list has the id {person_id}.")
+        return person_id
+    owner = owner_person(list_people(workspace_path))
+    return owner.person_id if owner else ""
+
+
+@dataclass
 class DeviceListResult:
     devices: list[dict[str, Any]] = field(default_factory=list)
 
@@ -71,6 +91,7 @@ class DeviceAddTool(Tool):
         "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
         "ttl_seconds": ToolParam(int, "Pairing code lifetime in seconds", required=False),
         "code_length": ToolParam(int, "Pairing code length in digits", required=False),
+        "person_id": ToolParam(str, "Whose the device will be (default: the owner)", required=False),
     }
 
     def execute(
@@ -78,12 +99,14 @@ class DeviceAddTool(Tool):
         workspace: str | None = None,
         ttl_seconds: int | None = None,
         code_length: int | None = None,
+        person_id: str | None = None,
     ) -> DeviceAddResult:
         workspace_path = _resolve_path(workspace)
         config = load_config(workspace_path)
         session = create_pairing_session(
             code_length=code_length or config.pairing_code_length,
             ttl_seconds=ttl_seconds or config.pairing_code_ttl_seconds,
+            person_id=_person_or_owner(workspace_path, person_id),
         )
         save_pairing_session(workspace_path, session)
         return DeviceAddResult(
@@ -103,6 +126,7 @@ class DeviceListTool(Tool):
     def execute(self, workspace: str | None = None) -> DeviceListResult:
         workspace_path = _resolve_path(workspace)
         devices = load_approved_devices(workspace_path)
+        names = {p.person_id: p.name for p in list_people(workspace_path)}
         return DeviceListResult(
             devices=[
                 {
@@ -114,10 +138,33 @@ class DeviceListTool(Tool):
                         if d.expires_at
                         else None
                     ),
+                    # Permissions phase 3: whose it is, by name too (the Devices page needs no right to People)
+                    "person_id": d.person_id,
+                    "person_name": names.get(d.person_id, ""),
                 }
                 for d in devices
             ]
         )
+
+
+class DeviceAssignTool(Tool):
+    surfaces = frozenset({"cli", "http"})
+    name = "device_assign"
+    description = "Say whose a paired device is: it then shows and writes only that person's conversations"
+    params = {
+        "device_id": ToolParam(str, "Device ID"),
+        "person_id": ToolParam(str, "The person it belongs to"),
+        "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
+    }
+
+    def execute(self, device_id: str, person_id: str, workspace: str | None = None) -> DeviceAssignResult:
+        workspace_path = _resolve_path(workspace)
+        person = get_person(workspace_path, person_id)
+        if person is None:
+            raise ValueError(f"Nobody in the family list has the id {person_id}.")
+        if not set_device_person(workspace_path, device_id, person.person_id):
+            raise ValueError(f"No paired device {device_id}.")
+        return DeviceAssignResult(device_id=device_id, person_id=person.person_id, person_name=person.name)
 
 
 class DeviceRevokeTool(Tool):

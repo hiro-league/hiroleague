@@ -8,7 +8,7 @@
 
   type Props = {
     ctrl: DevicesController;
-    /** mockup: Permissions phase 3, whose the device approved with this code will be */
+    /** Permissions phase 3: whose the device approved with this code will be */
     forName?: string;
   };
 

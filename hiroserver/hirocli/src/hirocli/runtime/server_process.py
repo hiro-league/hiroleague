@@ -119,6 +119,7 @@ def _wire_runtime(
         ctx.workspace_path,
         comm_manager.enqueue_outbound,
         version_store=resource_versions,
+        targeting=ctx.device_targeting,
     )
     resource_change_broadcaster.start()
 

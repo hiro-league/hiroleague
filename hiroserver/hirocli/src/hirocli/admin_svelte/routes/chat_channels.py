@@ -7,7 +7,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
@@ -98,13 +98,16 @@ async def send_chat_channel_message(
     channel_id: int,
     body: ChatChannelMessageSendRequest,
     workspace_id: SelectedWorkspaceIdDep,
+    request: Request,
 ) -> Any:
-    """Proxy to workspace Hiro ``POST /invoke`` → ``message_send`` (live server)."""
+    """Proxy to workspace Hiro ``POST /invoke`` → ``message_send`` (live server), as the signed-in person: the turn is
+    theirs, in a conversation of their own (Permissions phase 3)."""
     result = await run_in_threadpool(
         partial(
             ChatChannelsService().send_chat_message,
             workspace_id,
             channel_id,
+            person_id=request.state.admin_person.person_id,
             text=body.text,
             audio_base64=body.audio_base64,
             audio_mime_type=body.audio_mime_type,

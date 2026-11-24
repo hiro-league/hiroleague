@@ -43,7 +43,7 @@ from .agent_graph import (
     ChatGraphConfig,
 )
 from hiro_memory.ledger import RunAccumulator, current_run
-from ..domain.people import find_by_number
+from .chat_writer import PERSON_ID_METADATA_KEY, PERSON_NAME_METADATA_KEY, PERSON_OWNER_METADATA_KEY
 from ..services.ai_usage.from_ledger import usage_person, usage_profile
 from hiro_memory.tracing import langsmith_run_id
 from . import stories
@@ -367,9 +367,10 @@ class AgentManager:
                 # (the ledger's chat-<message id>) carries the same story id.
                 with message_story.hop("agent.run", msg.routing.metadata, _mid or msg.routing.id, area="AGENT",
                                        run_id=f"chat-{msg.routing.id}"):
-                    # The logging plan's phase 6a: the turn is a named story (a conversation), whoever sent it
-                    peer = comm_peer_label(msg, self._ctx)
-                    story.named(stories.CHAT_TURN.name, title=f'{peer}: "{_pv}"' if _pv else f"{peer} · {comm_kind(msg)}")
+                    # The logging plan's phase 6a: the turn is a named story (a conversation), titled with its person
+                    # (Permissions phase 3: the inbound check wrote the writer on the message)
+                    who = str(msg.routing.metadata.get(PERSON_NAME_METADATA_KEY) or "") or comm_peer_label(msg, self._ctx)
+                    story.named(stories.CHAT_TURN.name, title=f'{who}: "{_pv}"' if _pv else f"{who} · {comm_kind(msg)}")
                     await self._handle_inner(msg, persisted_event=persisted_event)
             except Exception as exc:
                 log.error(
@@ -415,6 +416,11 @@ class AgentManager:
         tools_enabled = bool(prefs.chat.tools_enabled) and routing_tools_enabled(
             msg.routing.metadata
         )
+        # Permissions phase 3, until phase 4 holds each tool to the person's rights: Hiro's tools act with the owner's
+        # reach, so only the owner's turns get them. Everyone else talks with no tools, and sees nobody else's things.
+        if tools_enabled and not msg.routing.metadata.get(PERSON_OWNER_METADATA_KEY):
+            tools_enabled = False
+            log.fineinfo(f"{LOG_IN} tools off — {peer} isn't the owner (until tools follow each person's rights)")
 
         ch = self._load_character_for_channel(character_id)
         system_prompt = effective_character_system_prompt(ch)
@@ -529,8 +535,8 @@ class AgentManager:
             else None
         )
         run_token = current_run.set(accumulator) if accumulator is not None else None
-        # Phase 7b: AI usage files this turn's calls under the family member who wrote (WhatsApp number).
-        person_token = usage_person.set(await _sender_person(self._ctx.workspace_path, routing_metadata))
+        # Phase 7b: AI usage files this turn's calls under the person who wrote it (the inbound check's writer).
+        person_token = usage_person.set(str(routing_metadata.get(PERSON_ID_METADATA_KEY) or ""))
         # Phase 7b step 5: the turn's chat calls are filed under the AI profile its model came from.
         profile_token = usage_profile.set((llm_entry.profile_id, llm_entry.profile_name))
         t0 = time.perf_counter()
@@ -1210,19 +1216,3 @@ async def _close_memory_service(service: "MemoryService | None") -> None:
     if inspect.isawaitable(result):
         await result
 
-
-async def _sender_person(workspace_path: Any, routing_metadata: dict[str, Any]) -> str:
-    """The person id of a WhatsApp sender in the family list (``sender_number``), else "" (Phase 7b: AI usage).
-
-    For counting, and for the person the core asks an app on behalf of (extension_state); whose conversation and
-    memory a turn uses is Phase 10's matching.
-    """
-    number = str(routing_metadata.get("sender_number") or "")
-    if not number:
-        return ""
-    try:
-        person = await asyncio.to_thread(find_by_number, workspace_path, number)
-    except Exception as exc:  # the count goes without a person; the turn goes on
-        log.warning("⚠️ AI usage — sender's person unreadable", error=str(exc))
-        return ""
-    return person.person_id if person else ""

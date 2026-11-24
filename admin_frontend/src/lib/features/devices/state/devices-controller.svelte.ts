@@ -54,9 +54,10 @@ export function createDevicesController(notify: Notify) {
     revokeTarget = null;
   }
 
-  async function generatePairingCode() {
+  /** A pairing code for a person: the device approved with it is theirs (Permissions phase 3). */
+  async function generatePairingCode(personId: string) {
     await work.run(async () => {
-      pairing = await generateDevicePairingCode();
+      pairing = await generateDevicePairingCode(personId);
       await load();
     });
     if (work.error) notify('error', work.error);

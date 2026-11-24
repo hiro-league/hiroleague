@@ -25,11 +25,11 @@ from hiro_commons.rules import Rule, for_features, rule_for
 from starlette.concurrency import run_in_threadpool
 
 from hirocli.domain.access import AdminAccess, admin_access
-from hirocli.domain.core_features import CORE_FEATURES, NOT_IN_ADMIN
+from hirocli.domain.core_features import CORE_BY_ID, CORE_FEATURES, NOT_IN_ADMIN
 
 log = Logger.get("ADMIN.RULES")
 
-BY_ID = {f.id: f for f in CORE_FEATURES}
+BY_ID = CORE_BY_ID
 # Every feature that opens a page: what the shell's own reads (the top bar, the live status) need
 ADMIN = tuple(f.id for f in CORE_FEATURES if f.id not in NOT_IN_ADMIN)
 GET = ("GET",)
@@ -61,8 +61,8 @@ ADMIN_RULES: tuple[Rule, ...] = (
     R("/api/characters/{character_id}", "assistant.characters", "logs.runs", methods=GET),
     R("/api/characters", "assistant.characters", "conversations", "memories", "logs.runs", methods=GET),
     R("/api/characters", "assistant.characters"),
-    # Conversations. Writing to Hiro stays the owner's until a turn is its writer's (Permissions phase 3)
-    Rule("/api/chat-channels/{channel_id}/messages/send", "owner"),
+    # Conversations. Writing to Hiro is talking to it: the turn is the signed-in person's, in their own conversation
+    R("/api/chat-channels/{channel_id}/messages/send", "assistant", action="talk"),
     R("/api/chat-channels/{channel_id}/messages", "conversations", methods=GET),
     R("/api/chat-channels", "conversations", "memories", "logs.runs", methods=GET),
     R("/api/chat-channels", "conversations"),

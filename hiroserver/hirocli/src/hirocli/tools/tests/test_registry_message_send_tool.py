@@ -43,8 +43,9 @@ class FakeCommManager:
         data: dict[str, Any],
         *,
         await_message_flow: bool = False,
+        person_id: str | None = None,
     ) -> None:
-        self.calls.append({"data": data, "await_message_flow": await_message_flow})
+        self.calls.append({"data": data, "await_message_flow": await_message_flow, "person_id": person_id})
 
 
 class EchoTool(Tool):

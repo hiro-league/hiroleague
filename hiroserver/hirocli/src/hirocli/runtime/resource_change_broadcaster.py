@@ -72,9 +72,12 @@ class ResourceChangeBroadcaster:
         self._emit_outbound = emit_outbound
         self._version_store = version_store
         self._registry = registry or ResourceRegistry()
-        self._targeting = targeting or DeviceTargeting()
+        # The server hands in the one on its context, which the outbound pipeline shares
+        self._targeting = targeting or DeviceTargeting(workspace_path)
         self._bus = bus or get_domain_event_bus()
-        self._connected_device_ids: set[str] = set()
+        # Permissions phase 3: the chat users whose conversations changed since a resource's last hint (or None: a
+        # change about no one conversation), so the hint reaches only their devices
+        self._changed_users: dict[str, set[int] | None] = {}
         self._extensions: ExtensionManager | None = None
         self._debounce_tasks: dict[str, asyncio.Task[None]] = {}
 
@@ -91,13 +94,13 @@ class ResourceChangeBroadcaster:
             self._bus.unsubscribe(event_type, self._on_domain_event)
 
     async def handle_device_connected(self, device_id: str) -> None:
-        self._connected_device_ids.add(device_id)
+        self._targeting.connected(device_id)
 
     async def handle_device_disconnected(self, device_id: str) -> None:
-        self._connected_device_ids.discard(device_id)
+        self._targeting.disconnected(device_id)
 
     async def clear_connected_devices(self) -> None:
-        self._connected_device_ids.clear()
+        self._targeting.clear()
 
     def set_extension_manager(self, extensions: ExtensionManager) -> None:
         """The apps' readers: built after the broadcaster (server_process)."""
@@ -116,16 +119,21 @@ class ResourceChangeBroadcaster:
         if signal is None:
             return
         log.info("Domain signal received", event_type=event.type, signal=signal)
-        self._schedule_for_signal(signal)
+        self._schedule_for_signal(signal, event.payload or {})
 
-    def _schedule_for_signal(self, signal: str) -> None:
+    def _schedule_for_signal(self, signal: str, payload: dict[str, Any] | None = None) -> None:
         resources = list(self._registry.resources_for_signal(signal))
         if not resources:
             log.debug("Signal ignored (no resources)", signal=signal)
             return
+        user_id = (payload or {}).get("user_id")
         # Per-resource emission already logs ``⬆️ Resource hints sent``; no need
         # to also log "marked dirty" between signal-received and flush.
         for resource in resources:
+            if isinstance(user_id, int) and self._changed_users.get(resource, set()) is not None:
+                self._changed_users.setdefault(resource, set()).add(user_id)  # type: ignore[union-attr]
+            else:
+                self._changed_users[resource] = None  # a change about everyone's: every device
             self._schedule_emit(resource, signal)
 
     def _schedule_emit(self, resource: str, reason: str) -> None:
@@ -171,7 +179,14 @@ class ResourceChangeBroadcaster:
         if self._registry.read_by(resource) == READ_BY_APPS:
             await self._flush_to_apps(resource, reason)
             return
-        recipients = self._targeting.device_ids_for_connected(self._connected_device_ids)
+        users = self._changed_users.pop(resource, None)
+        if users is None:
+            recipients = self._targeting.all_connected()
+        else:
+            # Off the loop: whose each conversation is reads the databases
+            recipients = await asyncio.to_thread(
+                lambda: sorted({d for uid in users for d in self._targeting.for_chat_user(uid)})
+            )
         if not recipients:
             log.debug(
                 f"Hint skipped (no devices) — resource:{resource}",

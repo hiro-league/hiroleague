@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from hirocli.tools.device import DeviceAddTool, DeviceListTool, DeviceRevokeTool
+from hirocli.tools.device import DeviceAddTool, DeviceAssignTool, DeviceListTool, DeviceRevokeTool
 
 from hirocli.admin.shared.result import Result
 from hiro_commons.log import Logger
@@ -36,11 +36,23 @@ class DeviceService:
             return Result.failure(str(exc))
         return Result.success(list(result.devices))
 
-    def generate_pairing_code(self, workspace_id: str | None) -> Result[DevicePairingData]:
+    def assign_device(self, device_id: str, person_id: str, workspace_id: str | None) -> Result[str]:
+        """Say whose a paired device is (Permissions phase 3)."""
         if not workspace_id:
             return Result.failure("No workspace selected.")
         try:
-            raw = DeviceAddTool().execute(workspace=workspace_id)
+            done = DeviceAssignTool().execute(device_id=device_id, person_id=person_id, workspace=workspace_id)
+        except ValueError as exc:
+            # The tool's words for a person: no such device or person
+            return Result.failure(str(exc))
+        log.info(f"Devices: {done.device_id} is now {done.person_name}'s", device_id=done.device_id, person_id=done.person_id)
+        return Result.success(f"It is now {done.person_name}'s device.")
+
+    def generate_pairing_code(self, workspace_id: str | None, person_id: str | None = None) -> Result[DevicePairingData]:
+        if not workspace_id:
+            return Result.failure("No workspace selected.")
+        try:
+            raw = DeviceAddTool().execute(workspace=workspace_id, person_id=person_id)
         except Exception as exc:
             log.warning("⚠️ Device pairing code failed — HiroAdmin · devices", workspace_id=workspace_id, error=str(exc), exc_info=True)
             return Result.failure(str(exc))

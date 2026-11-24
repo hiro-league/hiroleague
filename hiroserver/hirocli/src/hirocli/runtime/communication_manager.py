@@ -88,15 +88,17 @@ class CommunicationManager:
         data: dict[str, Any],
         *,
         await_message_flow: bool = False,
+        person_id: str | None = None,
     ) -> None:
         """The extension manager's chat handler (relayed chat lands here).
 
         ``await_message_flow=True`` blocks until the inbound persistence
         subscriber has run for ``message`` payloads. Used by synthetic
         injectors (Admin UI / CLI ``message_send``) so a follow-up HTTP
-        refresh sees the persisted row.
+        refresh sees the persisted row. ``person_id`` is the writer such an
+        injector hands in (Permissions phase 3): never read from the message.
         """
-        await self._inbound.receive(data, await_message_flow=await_message_flow)
+        await self._inbound.receive(data, await_message_flow=await_message_flow, person_id=person_id)
 
     async def enqueue_outbound(self, msg: UnifiedMessage) -> None:
         """Place a message on the outbound queue."""

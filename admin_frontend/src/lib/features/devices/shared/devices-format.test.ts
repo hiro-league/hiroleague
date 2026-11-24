@@ -18,7 +18,9 @@ describe('displayDeviceName', () => {
         device_id: 'abc123',
         device_name: 'Phone',
         paired_at: '',
-        expires_at: null
+        expires_at: null,
+        person_id: '',
+        person_name: ''
       })
     ).toBe('Phone');
   });
@@ -29,7 +31,9 @@ describe('displayDeviceName', () => {
         device_id: '0123456789abcdef',
         device_name: null,
         paired_at: '',
-        expires_at: null
+        expires_at: null,
+        person_id: '',
+        person_name: ''
       })
     ).toBe('0123456789ab...');
   });
@@ -40,7 +44,9 @@ describe('displayDeviceName', () => {
         device_id: 'short-id',
         device_name: null,
         paired_at: '',
-        expires_at: null
+        expires_at: null,
+        person_id: '',
+        person_name: ''
       })
     ).toBe('short-id');
   });

@@ -32,8 +32,11 @@ def register(device_app: typer.Typer, console: Console) -> None:
             None, "--code-length",
             help="Pairing code length in digits (default from config).",
         ),
+        person: Optional[str] = typer.Option(
+            None, "--person", help="Whose the device will be: a person's id (default: the owner).",
+        ),
     ) -> None:
-        """Generate a short-lived pairing code for onboarding a mobile device."""
+        """Generate a short-lived pairing code for onboarding a device: it will be the person's."""
         from ..tools.device import DeviceAddTool
 
         log.info("hiro device add", ttl_seconds=ttl_seconds, code_length=code_length)
@@ -43,8 +46,9 @@ def register(device_app: typer.Typer, console: Console) -> None:
                 workspace=workspace,
                 ttl_seconds=ttl_seconds,
                 code_length=code_length,
+                person_id=person,
             )
-        except WorkspaceError as exc:
+        except (WorkspaceError, ValueError) as exc:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1) from exc
 
@@ -79,6 +83,7 @@ def register(device_app: typer.Typer, console: Console) -> None:
         table = Table(title="Approved devices", show_header=True)
         table.add_column("Name", style="bold")
         table.add_column("Device ID")
+        table.add_column("Person")
         table.add_column("Paired At")
         table.add_column("Expires At")
 
@@ -86,10 +91,30 @@ def register(device_app: typer.Typer, console: Console) -> None:
             table.add_row(
                 device.get("device_name") or "—",
                 device["device_id"],
+                device.get("person_id") or "—",
                 device["paired_at"],
                 device["expires_at"] or "—",
             )
         console.print(table)
+
+    @device_app.command("assign")
+    def device_assign(
+        device_id: str = typer.Argument(..., help="Approved device_id"),
+        person: str = typer.Argument(..., help="The person's id it belongs to"),
+        workspace: Optional[str] = typer.Option(
+            None, "--workspace", "-W", help="Workspace name (default: registry default)."
+        ),
+    ) -> None:
+        """Say whose a paired device is: it then shows and writes only that person's conversations."""
+        from ..tools.device import DeviceAssignTool
+
+        log.info("hiro device assign", device_id=device_id, person_id=person)
+        try:
+            result = DeviceAssignTool().execute(device_id=device_id, person_id=person, workspace=workspace)
+        except (WorkspaceError, ValueError) as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+        console.print(f"[green]{result.device_id}[/green] is now [bold]{result.person_name}[/bold]'s device.")
 
     @device_app.command("revoke")
     def device_revoke(

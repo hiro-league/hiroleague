@@ -62,6 +62,9 @@ CORE_FEATURES: list[ExtensionFeature] = [
     ExtensionFeature(id="settings", name="Settings", rights=[_see("How Hiro behaves"), _change("Change it")]),
 ]
 
+# Each core feature by its id: what the SDK's one check reads.
+CORE_BY_ID: dict[str, ExtensionFeature] = {f.id: f for f in CORE_FEATURES}
+
 # Talking to Hiro is a chat channel's or a device's: it opens no page of the admin.
 NOT_IN_ADMIN = frozenset({"assistant"})
 

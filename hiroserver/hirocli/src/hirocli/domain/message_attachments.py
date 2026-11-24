@@ -162,8 +162,10 @@ def get_attachment_by_message_external_id(
     *,
     message_external_id: str,
     slot_index: int,
+    user_id: int | None = None,
 ) -> dict[str, Any] | None:
-    """Return one attachment by public message id and slot."""
+    """Return one attachment by public message id and slot; with ``user_id``, only from that chat user's
+    conversations (a device asks for its person's, Permissions phase 3)."""
     ensure_data_db(workspace_path)
     with sqlite3.connect(str(data_db_path(workspace_path))) as conn:
         conn.row_factory = sqlite3.Row
@@ -172,14 +174,15 @@ def get_attachment_by_message_external_id(
             SELECT a.*
             FROM message_attachments a
             JOIN messages m ON m.id = a.message_pk
-            WHERE m.external_id = ? AND a.slot_index = ?
+            JOIN channels c ON c.id = m.channel_id
+            WHERE m.external_id = ? AND a.slot_index = ? AND (? IS NULL OR c.user_id = ?)
             """,
-            (message_external_id, slot_index),
+            (message_external_id, slot_index, user_id, user_id),
         ).fetchone()
     return _row_to_dict(row) if row is not None else None
 
 
-def find_by_blob_id(workspace_path: Path, blob_id: str) -> dict[str, Any] | None:
+def find_by_blob_id(workspace_path: Path, blob_id: str, user_id: int | None = None) -> dict[str, Any] | None:
     """Return the tracked attachment for a blob id.
 
     Each attachment row owns its own bytes (no cross-row blob sharing — see
@@ -189,7 +192,8 @@ def find_by_blob_id(workspace_path: Path, blob_id: str) -> dict[str, Any] | None
     still see the older one deterministically.
 
     Joins ``messages`` so callers (logging in particular) can refer to the
-    public ``message_external_id`` without a second round-trip.
+    public ``message_external_id`` without a second round-trip. With ``user_id``, only from that chat user's
+    conversations (Permissions phase 3): the same bytes in two people's conversations are two rows.
     """
     ensure_data_db(workspace_path)
     with sqlite3.connect(str(data_db_path(workspace_path))) as conn:
@@ -199,11 +203,12 @@ def find_by_blob_id(workspace_path: Path, blob_id: str) -> dict[str, Any] | None
             SELECT a.*, m.external_id AS message_external_id
             FROM message_attachments a
             JOIN messages m ON m.id = a.message_pk
-            WHERE a.blob_id = ?
+            JOIN channels c ON c.id = m.channel_id
+            WHERE a.blob_id = ? AND (? IS NULL OR c.user_id = ?)
             ORDER BY a.id ASC
             LIMIT 1
             """,
-            (blob_id,),
+            (blob_id, user_id, user_id),
         ).fetchone()
     return _row_to_dict(row) if row is not None else None
 

@@ -36,6 +36,8 @@ class PairingSession(BaseModel):
     code: str
     created_at: datetime
     ttl_seconds: int
+    # Permissions phase 3: the person the device approved with this code belongs to ("" = the owner)
+    person_id: str = ""
 
     @property
     def expires_at(self) -> datetime:
@@ -62,6 +64,8 @@ class ApprovedDevice(BaseModel):
     expires_at: datetime | None = None
     metadata: dict[str, str] = Field(default_factory=dict)
     device_name: str | None = None
+    # Permissions phase 3: the person it belongs to; it shows and writes only that person's conversations
+    person_id: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -83,13 +87,18 @@ def generate_pairing_code(length: int = DEFAULT_PAIRING_CODE_LENGTH) -> str:
     return "".join(str(secrets.randbelow(10)) for _ in range(length))
 
 
-def create_pairing_session(code_length: int = DEFAULT_PAIRING_CODE_LENGTH, ttl_seconds: int = DEFAULT_PAIRING_CODE_TTL_SECONDS) -> PairingSession:
+def create_pairing_session(
+    code_length: int = DEFAULT_PAIRING_CODE_LENGTH,
+    ttl_seconds: int = DEFAULT_PAIRING_CODE_TTL_SECONDS,
+    person_id: str = "",
+) -> PairingSession:
     if ttl_seconds <= 0:
         raise ValueError("pairing code ttl_seconds must be > 0")
     return PairingSession(
         code=generate_pairing_code(code_length),
         created_at=datetime.now(UTC),
         ttl_seconds=ttl_seconds,
+        person_id=person_id,
     )
 
 
@@ -150,6 +159,7 @@ def load_approved_devices(workspace_path: Path) -> list[ApprovedDevice]:
                         ),
                         metadata=json.loads(row["metadata"] or "{}"),
                         device_name=row["device_name"] or None,
+                        person_id=row["person_id"] or "",
                     )
                 )
             except (json.JSONDecodeError, ValueError, TypeError) as exc:
@@ -169,8 +179,8 @@ def save_approved_devices(workspace_path: Path, devices: list[ApprovedDevice]) -
         for device in devices:
             conn.execute(
                 """
-                INSERT INTO devices (device_id, device_public_key, paired_at, expires_at, metadata, device_name)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO devices (device_id, device_public_key, paired_at, expires_at, metadata, device_name, person_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     device.device_id,
@@ -179,6 +189,7 @@ def save_approved_devices(workspace_path: Path, devices: list[ApprovedDevice]) -
                     utc_iso(device.expires_at) if device.expires_at else None,
                     json.dumps(device.metadata),
                     device.device_name,
+                    device.person_id,
                 ),
             )
         conn.commit()
@@ -191,14 +202,15 @@ def upsert_approved_device(workspace_path: Path, device: ApprovedDevice) -> None
     with sqlite3.connect(str(db_path(workspace_path))) as conn:
         conn.execute(
             """
-            INSERT INTO devices (device_id, device_public_key, paired_at, expires_at, metadata, device_name)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO devices (device_id, device_public_key, paired_at, expires_at, metadata, device_name, person_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(device_id) DO UPDATE SET
                 device_public_key = excluded.device_public_key,
                 paired_at         = excluded.paired_at,
                 expires_at        = excluded.expires_at,
                 metadata          = excluded.metadata,
-                device_name       = excluded.device_name
+                device_name       = excluded.device_name,
+                person_id         = excluded.person_id
             """,
             (
                 device.device_id,
@@ -207,6 +219,7 @@ def upsert_approved_device(workspace_path: Path, device: ApprovedDevice) -> None
                 utc_iso(device.expires_at) if device.expires_at else None,
                 json.dumps(device.metadata),
                 device.device_name,
+                device.person_id,
             ),
         )
         conn.commit()
@@ -251,3 +264,32 @@ def get_device_name(workspace_path: Path, device_id: str) -> str | None:
             "SELECT device_name FROM devices WHERE device_id = ?", (device_id,)
         ).fetchone()
         return row["device_name"] if row and row["device_name"] else None
+
+
+def device_person_id(workspace_path: Path, device_id: str) -> str:
+    """The person a paired device belongs to (Permissions phase 3), "" for a device that isn't paired."""
+    ensure_db(workspace_path)
+    with sqlite3.connect(str(db_path(workspace_path))) as conn:
+        row = conn.execute("SELECT person_id FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+        return str(row[0] or "") if row else ""
+
+
+def device_ids_of(workspace_path: Path, person_id: str) -> set[str]:
+    """The devices that belong to a person."""
+    ensure_db(workspace_path)
+    with sqlite3.connect(str(db_path(workspace_path))) as conn:
+        rows = conn.execute("SELECT device_id FROM devices WHERE person_id = ?", (person_id,)).fetchall()
+        return {str(r[0]) for r in rows}
+
+
+def set_device_person(workspace_path: Path, device_id: str, person_id: str) -> bool:
+    """Say whose a paired device is (the admin's Devices page). Returns False when no such device is paired."""
+    ensure_db(workspace_path)
+    with sqlite3.connect(str(db_path(workspace_path))) as conn:
+        changed = conn.execute(
+            "UPDATE devices SET person_id = ? WHERE device_id = ?", (person_id, device_id)
+        ).rowcount
+        conn.commit()
+    if changed:
+        _devices_changed(workspace_path)
+    return changed > 0

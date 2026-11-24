@@ -106,11 +106,16 @@ def test_logs_see_reaches_the_logs_and_nothing_else() -> None:
 
 
 def test_their_own_things_open_no_admin_route() -> None:
+    send = ("POST", "/api/chat-channels/{channel_id}/messages/send")
     kid = _access("conversations.see:own", "memories.see:own", "assistant.talk")
-    assert not any(_allows(kid, m, p) for m, p in EVERY_ROUTE if not p.startswith("/api/auth/") and p != "/api/apps")
+    outside = ("/api/apps",)
+    assert not any(_allows(kid, m, p) for m, p in EVERY_ROUTE
+                   if not p.startswith("/api/auth/") and p not in outside and (m, p) != send)
     everyone = _access("conversations.see")
     assert _allows(everyone, "GET", "/api/chat-channels/{channel_id}/messages")
-    assert not _allows(everyone, "POST", "/api/chat-channels/{channel_id}/messages/send")  # the owner's until phase 3
+    # Writing to Hiro is talking to it (Permissions phase 3): the route sends into the writer's own conversation only
+    assert not _allows(everyone, *send)
+    assert _allows(kid, *send)
 
 
 def test_a_change_needs_the_change_and_the_owner_has_everything() -> None:

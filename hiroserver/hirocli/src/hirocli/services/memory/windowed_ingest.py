@@ -206,7 +206,7 @@ async def sweep_idle_conversations(
     sweep."""
     from hirocli.domain.character import get_character_name
     from hirocli.domain.conversation_channel import _get_channel_by_id
-    from hirocli.domain.memory import resolve_memory_user_id
+    from hirocli.domain.memory import resolve_memory_user_id, speaker_name
     from hirocli.domain.memory_ingest_cursor import list_idle_pending_channels
 
     cutoff = (now or dt.datetime.now(dt.UTC)) - dt.timedelta(hours=max(1, int(idle_flush_hours)))
@@ -226,7 +226,8 @@ async def sweep_idle_conversations(
                 ),
                 run_id=str(channel_id),
                 character_id=channel.character_id,
-                user_name=user_name,
+                # Each conversation's own person (Permissions phase 3): the owner keeps the preference
+                user_name=speaker_name(workspace_path, channel.user_id, user_name),
                 character_name=get_character_name(workspace_path, channel.character_id),
                 window_turns=window_turns,
                 session_gap_minutes=session_gap_minutes,

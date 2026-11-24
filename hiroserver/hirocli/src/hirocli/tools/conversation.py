@@ -25,7 +25,6 @@ from ..domain.conversation_channel import (
     _get_default_channel,
 )
 from ..domain.server_info import build_channel_list_entries
-from ..domain.data_store import get_default_user_id
 from ..domain.workspace import resolve_workspace
 from .base import Tool, ToolParam
 
@@ -112,13 +111,14 @@ SYNTHETIC_ADMIN_ORIGIN = "admin"
 
 
 class MessageSendTool(Tool):
-    """Enqueue a workspace-owner user message via ``InboundPipeline.receive`` (live server only)."""
+    """Enqueue a person's message via ``InboundPipeline.receive`` (live server only): the owner's, or the admin's
+    signed-in person's (Permissions phase 3), into a conversation of their own."""
 
     runtime = True
     agent_default = False
     name = "message_send"
     description = (
-        "Send a text or audio message into a conversation channel as the workspace owner user. "
+        "Send a text or audio message into one of the owner's own conversation channels. "
         "Requires the Hiro workspace server to be running (in-process ToolRegistry runtime)."
     )
     params = {
@@ -132,7 +132,11 @@ class MessageSendTool(Tool):
         "use_knowledge": ToolParam(bool, "Augment the reply with workspace knowledge (default true)", required=False),
         "disable_tools": ToolParam(bool, "Disable agent tools for this turn (default false)", required=False),
         "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
+        "person_id": ToolParam(str, "The person writing: the admin's signed-in person (default: the owner)", required=False),
     }
+    # Permissions phase 3: whoever calls it names the writer, so Hiro never gets it (the command line and the control
+    # server act as the owner already)
+    surfaces = frozenset({"cli", "http"})
 
     def attach_runtime(self, ctx: Any) -> None:
         # Reason: runtime-scoped tools need the server's CommunicationManager; set on register.
@@ -158,7 +162,12 @@ class MessageSendTool(Tool):
         request_voice_reply: bool = False,
         use_knowledge: bool = True,
         disable_tools: bool = False,
+        person_id: str = "",
     ) -> MessageSendResult:
+        """``person_id`` is the writer, handed in by the admin (its signed-in person); "" is the owner (the command
+        line, the control server). Hiro never has this tool, so nobody speaks as someone else through it."""
+        from ..runtime.chat_writer import NotAllowed, conversation_for, writer_of  # lazy: tools stay below runtime
+
         rt = getattr(self, "_runtime", None)
         if rt is None:
             raise RuntimeError(
@@ -182,13 +191,9 @@ class MessageSendTool(Tool):
                     f"started on {resolved_workspace_path}, caller asked for {caller_path}.",
                 )
 
-        owner_id = get_default_user_id(resolved_workspace_path)
         channel_row = _get_channel_by_id(resolved_workspace_path, channel_id)
         if channel_row is None:
             raise ValueError(f"Conversation channel id {channel_id} not found.")
-        if channel_row.user_id != owner_id:
-            raise ValueError("Channel does not belong to the workspace owner user.")
-        del owner_id  # only used for the ownership check; sender_id is the synthetic sentinel.
 
         text_ok = bool(text and str(text).strip())
         path_ok = bool(audio_path and str(audio_path).strip())
@@ -275,10 +280,18 @@ class MessageSendTool(Tool):
             content=items,
         )
 
+        # Permissions phase 3: a turn is its writer's, in a conversation of their own. Said here in words; the core's
+        # inbound check refuses it again.
+        try:
+            writer = await asyncio.to_thread(writer_of, resolved_workspace_path, envelope, person_id=person_id)
+            await asyncio.to_thread(conversation_for, resolved_workspace_path, envelope, writer)
+        except NotAllowed as exc:
+            raise ValueError(f"Not sent: {exc.reason}.") from exc
+
         payload = envelope.model_dump(mode="json")
         # await_message_flow=True so persistence + agent enqueue finish before we
         # return — the Admin UI's immediate /messages refresh then sees the row.
-        await rt.comm_manager.receive(payload, await_message_flow=True)
+        await rt.comm_manager.receive(payload, await_message_flow=True, person_id=person_id)
         return MessageSendResult(message_id=msg_id, channel_id=channel_id)
 
 

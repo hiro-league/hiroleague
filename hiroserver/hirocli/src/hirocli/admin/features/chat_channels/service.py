@@ -352,8 +352,10 @@ class ChatChannelsService:
         request_voice_reply: bool = False,
         use_knowledge: bool = True,
         disable_tools: bool = False,
+        person_id: str = "",
     ) -> Result[dict[str, Any]]:
-        """Deliver a synthetic user message through the workspace server's ``InboundPipeline``."""
+        """Deliver a synthetic user message through the workspace server's ``InboundPipeline``, written by
+        ``person_id`` (the admin's signed-in person; "" = the owner)."""
         if not workspace_id:
             return Result.failure("No workspace selected.")
 
@@ -371,6 +373,7 @@ class ChatChannelsService:
             "use_knowledge": use_knowledge,
             "disable_tools": disable_tools,
             "workspace": workspace_id,
+            "person_id": person_id,
         }
         if text_ok:
             params["text"] = str(text).strip()

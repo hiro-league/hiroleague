@@ -5,12 +5,12 @@
   import { toast } from '$kit/ui/toast.svelte';
   import { createDevicesController } from './state/devices-controller.svelte';
   import DevicesList from './view/DevicesList.svelte';
-  import { DeviceOwnersMock } from './state/device-owners-mock.svelte';
+  import { DeviceOwners } from './state/device-owners.svelte';
 
   // The family's paired phones. The channels they chat through are on the Extensions page.
   const ctrl = createDevicesController(toast.show);
-  // mockup: Permissions phase 3, whose each device is
-  const owners = new DeviceOwnersMock(() => ctrl.rows);
+  // Permissions phase 3: whose each device is, and whose the next one will be
+  const owners = new DeviceOwners(() => ctrl.load());
 
   onMount(() => {
     void ctrl.load();

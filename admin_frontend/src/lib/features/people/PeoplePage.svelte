@@ -25,16 +25,15 @@
   import AppFilter from './view/AppFilter.svelte';
   import { Resource } from '$kit/state/resource.svelte';
   import { listDevices } from '$lib/api/devices';
-  import { DeviceOwnersMock } from '../devices/state/device-owners-mock.svelte';
+  import { devicesOf } from '../devices/shared/device-people';
 
   // Phase 9a: an app's Edit link opens People → Roles at one role (?tab=roles&role=kid).
   const asked = page.url.searchParams;
   const ctrl = createPeopleController(toast.show);
   // A role added, renamed or removed changes the People tab's role names too.
   const roles = createRolesController(toast.show, () => ctrl.load(), asked.get('role'));
-  // mockup: Permissions phase 3, each person's devices
+  // Permissions phase 3: each person's devices, beside their WhatsApp address
   const devices = new Resource(listDevices);
-  const owners = new DeviceOwnersMock(() => devices.data ?? []);
 
   type Tab = 'people' | 'roles' | 'compare';
   const TABS: Tab[] = ['people', 'roles', 'compare'];
@@ -86,7 +85,7 @@
   {:else if tab === 'compare'}
     <CompareView ctrl={roles} onopen={openRole} />
   {:else}
-    <PeopleListCard {ctrl} devicesOf={owners.devicesOf} />
+    <PeopleListCard {ctrl} devicesOf={(personId) => devicesOf(devices.data ?? [], personId)} />
   {/if}
 </section>
 

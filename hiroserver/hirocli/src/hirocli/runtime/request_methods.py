@@ -45,25 +45,49 @@ from .uses_for_extensions import USES_REQUEST_HANDLERS
 from .envelope_factory import EnvelopeFactory
 from .notify import NOTIFY_REQUEST_HANDLERS
 from .people_for_extensions import PEOPLE_REQUEST_HANDLERS
-from .request_handler import ALL_CALLERS, DEVICES_ONLY, RequestContext, RequestHandler
+from .request_handler import (
+    ALL_CALLERS,
+    ANY_DEVICE,
+    DEVICES_ONLY,
+    OWNER_ONLY,
+    DeviceRight,
+    RequestContext,
+    RequestHandler,
+    RequestRefused,
+)
 from .stream_sender import send_file_as_stream
 from .whatsapp_for_extensions import WHATSAPP_REQUEST_HANDLERS
 
 log = Logger.get("REQUEST")
 
 
+def _own_conversation(ctx: RequestContext, channel_id: int) -> None:
+    """A device asks only about its person's conversations (Permissions phase 3): another's answers as not found."""
+    from ..domain.conversation_channel import _get_channel_by_id
+
+    own = ctx.own_user()
+    if own is None:
+        return
+    channel = _get_channel_by_id(ctx.workspace_path, channel_id)
+    if channel is None or channel.user_id != own:
+        raise RequestRefused("not_found", f"No conversation {channel_id}.")
+
+
 async def handle_channels_list(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
     del params
     tool = ConversationChannelListTool()
     result = tool.execute(workspace_path=ctx.workspace_path)
-    payload: dict[str, Any] = {"channels": result.channels}
+    own = ctx.own_user()
+    # A device lists its person's conversations only, whatever their reach (Permissions phase 3)
+    channels = [c for c in result.channels if own is None or c.get("user_id") == own]
+    payload: dict[str, Any] = {"channels": channels}
     versions = ctx.resource_versions
     if versions is not None:
         # Tier 2: monotonic counter shared with resource.changed (see ResourceVersionStore).
         payload["resource_sync_version"] = versions.get("channels")
     log.fineinfo(
         "Resource served — request:channels.list",
-        count=len(result.channels),
+        count=len(channels),
         version=payload.get("resource_sync_version"),
     )
     return payload
@@ -73,6 +97,7 @@ async def handle_channels_clear_messages(params: dict[str, Any], ctx: RequestCon
     channel_id = params.get("channel_id")
     if channel_id is None:
         raise ValueError("channel_id is required")
+    _own_conversation(ctx, int(channel_id))
     started = perf_counter()
     tool = ConversationChannelClearMessagesTool()
     result = tool.execute(channel_id=int(channel_id), workspace_path=ctx.workspace_path)
@@ -89,6 +114,7 @@ async def handle_messages_history(params: dict[str, Any], ctx: RequestContext) -
     channel_id = params.get("channel_id")
     if channel_id is None:
         raise ValueError("channel_id is required")
+    _own_conversation(ctx, int(channel_id))
     started = perf_counter()
     tool = MessageHistoryTool()
     result = tool.execute(
@@ -177,11 +203,15 @@ async def handle_files_head(params: dict[str, Any], ctx: RequestContext) -> dict
         "sender_id",
         None,
     )
-    meta = tool.execute(
-        ref=ref.strip(),
-        workspace_path=ctx.workspace_path,
-        requesting_device_id=requesting_device_id,
-    )
+    try:
+        meta = tool.execute(
+            ref=ref.strip(),
+            workspace_path=ctx.workspace_path,
+            requesting_device_id=requesting_device_id,
+        )
+    except FileNotFoundError as exc:
+        # Another person's file answers as not found, as a missing one (Permissions phase 3)
+        raise RequestRefused("not_found", "No such file.") from exc
     # ``kind`` mirrors files.get — same vocabulary so log filters can group both.
     head_kind = ref.strip().split(":", 1)[0].lower() if ":" in ref else "unknown"
     log.info(
@@ -257,11 +287,15 @@ async def handle_files_get(params: dict[str, Any], ctx: RequestContext) -> None:
         "sender_id",
         None,
     )
-    path, media_type, kind, detail = resolve_blob_id_with_kind(
-        ctx.workspace_path,
-        blob_id,
-        requesting_device_id=requesting_device_id,
-    )
+    try:
+        path, media_type, kind, detail = resolve_blob_id_with_kind(
+            ctx.workspace_path,
+            blob_id,
+            requesting_device_id=requesting_device_id,
+        )
+    except FileNotFoundError as exc:
+        # Another person's file answers as not found, as a missing one (Permissions phase 3)
+        raise RequestRefused("not_found", "No such file.") from exc
     size = path.stat().st_size
     chunk_count = chunk_count_for_size(size, DEFAULT_CHUNK_SIZE)
     label, label_extras = _human_label_for_file(kind, media_type, detail)
@@ -317,6 +351,22 @@ async def handle_core_info(params: dict[str, Any], ctx: RequestContext) -> dict[
     }
 
 
+# What a device's person needs for each method (Permissions phase 3); a method left out answers the owner's devices
+# only. Conversations and their files are the person's own: a grant for their own things is enough.
+_SEE_CONVERSATIONS: DeviceRight = ("conversations", "see")
+_TALK: DeviceRight = ("assistant", "talk")
+DEVICE_RIGHTS: Final[dict[str, DeviceRight]] = {
+    "channels.list": _SEE_CONVERSATIONS,
+    "messages.history": _SEE_CONVERSATIONS,
+    "files.head": _SEE_CONVERSATIONS,
+    "files.get": _SEE_CONVERSATIONS,
+    "channels.clear_messages": ("conversations", "change"),
+    "characters.list": _TALK,
+    "policy.get": _TALK,
+    METHOD_CORE_INFO: ANY_DEVICE,
+    "logs.report": ANY_DEVICE,  # the device app's own problems
+}
+
 # (method, handler, who may call it). The app's methods stay devices only: a
 # signed-in extension doesn't get chat history or files by being connected.
 _REGISTERED_HANDLERS: Final[tuple[tuple[str, Any, frozenset[str]], ...]] = (
@@ -355,6 +405,6 @@ REGISTERED_REQUEST_METHOD_NAMES: frozenset[str] = frozenset(
 def register_request_methods(handler: RequestHandler) -> None:
     """Register all data-plane request methods."""
     for name, fn, callers in _REGISTERED_HANDLERS:
-        handler.register(name, fn, callers=callers)
+        handler.register(name, fn, callers=callers, device_right=DEVICE_RIGHTS.get(name, OWNER_ONLY))
     log.info("✅ Registered all request methods")
 

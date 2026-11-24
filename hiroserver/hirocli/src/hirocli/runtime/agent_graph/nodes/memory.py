@@ -12,6 +12,7 @@ fan-out off ``trim_history``; ``memory_out`` runs after ``call_model``/tools.
 
 from __future__ import annotations
 
+import asyncio
 import time
 import uuid
 from typing import Any
@@ -19,7 +20,7 @@ from typing import Any
 from hiro_commons.log import Logger
 from langgraph.types import RetryPolicy, StreamWriter
 
-from ....domain.memory import resolve_memory_user_id
+from ....domain.memory import resolve_memory_user_id, speaker_name
 from ..events import (
     GRAPH_ERROR,
     GRAPH_MEMORY_RETRIEVED,
@@ -157,7 +158,13 @@ class MemoryNodes(NodeGroup):
         # assistant is marked as the AI in the prompt to avoid same-name collisions.
         from ....domain.character import get_character_name
 
-        user_name = (getattr(memory_prefs, "user_name", "") or "").strip()
+        # The turn's own person (Permissions phase 3): the owner keeps the preference, anyone else their own name
+        user_name = await asyncio.to_thread(
+            speaker_name,
+            self.services.workspace_path,
+            memory_user_id,
+            (getattr(memory_prefs, "user_name", "") or "").strip(),
+        )
         agent_name = get_character_name(self.services.workspace_path, state.get("character_id", ""))
         # History = the trimmed prior turns (bounded by chat.max_messages in trim_history). The
         # current user turn isn't in ``messages`` yet (it's ``user_text``, appended later by
@@ -399,6 +406,12 @@ class MemoryNodes(NodeGroup):
         # ``graphiti_ingest`` run the Graph Runs page can't render. ``self._ledger_sink``
         # (passed inside the controller) turns those rows on. Token cost prices on those sub-rows, so
         # this node's own row carries no usage.
+        speaker = await asyncio.to_thread(
+            speaker_name,
+            self.services.workspace_path,
+            memory_user_id,
+            (getattr(memory_prefs, "user_name", "") or "").strip(),
+        )
         with substep_scope():
             try:
                 result = await ingest_pending_windows(
@@ -408,8 +421,9 @@ class MemoryNodes(NodeGroup):
                     user_id=memory_user_id,
                     run_id=memory_run_id,
                     character_id=character_id,
-                    # Speaker labels: the user_name pref (A1 anchor) + the character's display name.
-                    user_name=(getattr(memory_prefs, "user_name", "") or "").strip(),
+                    # Speaker labels: the turn's person (the owner: the user_name pref, the A1 anchor) + the
+                    # character's display name.
+                    user_name=speaker,
                     character_name=get_character_name(self.services.workspace_path, character_id),
                     window_turns=int(getattr(ext, "window_turns", 4)),
                     session_gap_minutes=int(getattr(ext, "session_gap_minutes", 120)),

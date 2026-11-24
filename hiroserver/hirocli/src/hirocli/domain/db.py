@@ -70,7 +70,8 @@ _DDL = [
         paired_at          TEXT NOT NULL,
         expires_at         TEXT,
         metadata           TEXT NOT NULL DEFAULT '{}',
-        device_name        TEXT
+        device_name        TEXT,
+        person_id          TEXT NOT NULL DEFAULT ''
     )
     """,
     """
@@ -221,6 +222,9 @@ _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
     ("devices", "expires_at",        "TEXT"),
     ("devices", "metadata",          "TEXT NOT NULL DEFAULT '{}'"),
     ("devices", "device_name",       "TEXT"),
+    # Permissions phase 3: the person the device belongs to (a device several people use belongs to a person made
+    # for it). "" only before phase 3's first start, which makes those devices the owner's.
+    ("devices", "person_id",         "TEXT NOT NULL DEFAULT ''"),
     # channel_plugins
     ("channel_plugins", "enabled",       "INTEGER NOT NULL DEFAULT 1"),
     ("channel_plugins", "command",       "TEXT NOT NULL DEFAULT '[]'"),
@@ -436,6 +440,23 @@ def _give_core_to_admin_roles(conn: sqlite3.Connection) -> list[str]:
     return given
 
 
+def _give_devices_to_owner(conn: sqlite3.Connection) -> int:
+    """Permissions phase 3: every paired device that belongs to nobody becomes the owner's (the first person who holds
+    Owner), as every conversation made before phase 3 is. A device paired since always names its person, so this
+    finds devices only on phase 3's first start. With no owner in the family list yet, they wait for one. Returns how
+    many devices were given."""
+    owner = conn.execute(
+        """
+        SELECT p.person_id FROM people p JOIN person_roles pr ON pr.person_id = p.person_id
+        WHERE pr.role_id = 'owner' ORDER BY p.created_at, p.person_id LIMIT 1
+        """
+    ).fetchone()
+    if owner is None:
+        return 0
+    cur = conn.execute("UPDATE devices SET person_id = ? WHERE person_id = ''", (owner[0],))
+    return max(cur.rowcount, 0)
+
+
 # ---------------------------------------------------------------------------
 # Path helper
 # ---------------------------------------------------------------------------
@@ -478,8 +499,11 @@ def ensure_db(workspace_path: Path) -> None:
         _add_missing_columns(conn)
         filled = _fill_person_roles(conn)
         given = _give_core_to_admin_roles(conn)
+        devices = _give_devices_to_owner(conn)
     finally:
         conn.close()
+    if devices:
+        _log.info("Devices: %d paired device(s) now belong to the owner (Permissions phase 3)", devices)
     if given:
         _log.info("Roles: %s opened the admin, and now hold every core permission (Permissions phase 2)", ", ".join(given))
     if filled:

@@ -69,6 +69,7 @@ _LAZY_EXPORTS: dict[str, str] = {
     "ChannelSetupTool": ".channel",
     # device
     "DeviceAddTool": ".device",
+    "DeviceAssignTool": ".device",
     "DeviceListTool": ".device",
     "DeviceRevokeTool": ".device",
     # extension
@@ -267,7 +268,7 @@ def all_tools() -> list[Tool]:
         MessageHistoryTool,
         MessageSendTool,
     )
-    from .device import DeviceAddTool, DeviceListTool, DeviceRevokeTool
+    from .device import DeviceAddTool, DeviceAssignTool, DeviceListTool, DeviceRevokeTool
     from .extension import (
         ExtensionAddressTool,
         ExtensionAddTool,
@@ -368,6 +369,7 @@ def all_tools() -> list[Tool]:
         CharacterDeleteTool(),
         CharacterUploadPhotoTool(),
         DeviceAddTool(),
+        DeviceAssignTool(),
         DeviceListTool(),
         DeviceRevokeTool(),
         ExtensionAddTool(),
@@ -527,6 +529,7 @@ if TYPE_CHECKING:  # pragma: no cover
     )
     from .device import (  # noqa: F401
         DeviceAddTool,
+        DeviceAssignTool,
         DeviceListTool,
         DeviceRevokeTool,
     )

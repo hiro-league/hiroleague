@@ -91,6 +91,7 @@ def resolve_ref(
             workspace_path,
             message_external_id=message_external_id,
             slot_index=slot_index,
+            user_id=_asker_user(workspace_path, requesting_device_id, kind, rid),
         )
         if row is None:
             log.warning(
@@ -146,6 +147,20 @@ def _authorize_requesting_device(
     raise PermissionError(f"device is not authorized for ref: {ref_kind}:{ref_id}")
 
 
+def _asker_user(workspace_path: Path, requesting_device_id: str | None, ref_kind: str, ref_id: str) -> int | None:
+    """The chat user a requesting device fetches for (Permissions phase 3): only its person's conversations'
+    attachments; None for the server itself. Another person's attachment then answers as not found."""
+    if requesting_device_id is None or requesting_device_id == "server":
+        return None
+    from .talkers import device_owner  # lazy: talkers reads the family list
+
+    _person, user_id = device_owner(workspace_path, requesting_device_id)
+    if user_id is None:
+        log.warning(f"⚠️ Reference unresolved — {ref_kind}:{ref_id}", reason="device_of_nobody")
+        raise PermissionError(f"device belongs to nobody: {ref_kind}:{ref_id}")
+    return user_id
+
+
 def resolve_blob_id(
     workspace_path: Path,
     blob_id: str,
@@ -187,7 +202,9 @@ def resolve_blob_id_with_kind(
     if len(want) != 64:
         raise ValueError("blob_id has invalid sha256 length")
 
-    attachment = find_by_blob_id(workspace_path, blob_id)
+    attachment = find_by_blob_id(
+        workspace_path, blob_id, _asker_user(workspace_path, requesting_device_id, "blob", blob_id)
+    )
     if attachment is not None:
         path = media_file_path(workspace_path, str(attachment["media_path"]))
         if not path.exists():

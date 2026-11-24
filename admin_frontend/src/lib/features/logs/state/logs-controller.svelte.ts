@@ -70,7 +70,9 @@ export function createLogsPageController(opts: { prefs: LogsPreferences }) {
           device_id: id,
           device_name: null,
           paired_at: '',
-          expires_at: null
+          expires_at: null,
+          person_id: '',
+          person_name: ''
         });
       }
     }

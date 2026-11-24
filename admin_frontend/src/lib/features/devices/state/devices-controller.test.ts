@@ -15,6 +15,8 @@ const deviceRow = (over: Partial<DeviceRow> = {}): DeviceRow => ({
   device_name: 'Phone',
   paired_at: '2026-06-19T10:00:00Z',
   expires_at: '2027-06-19T10:00:00Z',
+  person_id: 'p-owner',
+  person_name: 'Misho',
   ...over
 });
 
@@ -85,8 +87,9 @@ describe('generatePairingCode', () => {
     vi.mocked(api.generateDevicePairingCode).mockResolvedValue(pairing as never);
     vi.mocked(api.listDevices).mockResolvedValue([deviceRow()] as never);
 
-    await ctrl.generatePairingCode();
+    await ctrl.generatePairingCode('p-owner');
 
+    expect(api.generateDevicePairingCode).toHaveBeenCalledWith('p-owner');
     expect(ctrl.pairing).toEqual(pairing);
     expect(api.listDevices).toHaveBeenCalledTimes(1);
     expect(ctrl.busy).toBe(false);
@@ -95,7 +98,7 @@ describe('generatePairingCode', () => {
   it('notifies on failure', async () => {
     const { ctrl, notify } = make();
     vi.mocked(api.generateDevicePairingCode).mockRejectedValue(new Error('pair fail'));
-    await ctrl.generatePairingCode();
+    await ctrl.generatePairingCode('p-owner');
     expect(notify).toHaveBeenCalledWith('error', 'pair fail');
     expect(ctrl.pairing).toBeNull();
   });
@@ -144,7 +147,7 @@ describe('copyPairingPayload', () => {
   it('copies qr_payload and notifies on success', async () => {
     const { ctrl, notify } = make();
     vi.mocked(api.generateDevicePairingCode).mockResolvedValue(pairingData({ qr_payload: 'payload-xyz' }) as never);
-    await ctrl.generatePairingCode();
+    await ctrl.generatePairingCode('p-owner');
     await ctrl.copyPairingPayload();
 
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('payload-xyz');
@@ -162,7 +165,7 @@ describe('copyPairingPayload', () => {
   it('notifies on clipboard failure', async () => {
     const { ctrl, notify } = make();
     vi.mocked(api.generateDevicePairingCode).mockResolvedValue(pairingData() as never);
-    await ctrl.generatePairingCode();
+    await ctrl.generatePairingCode('p-owner');
     vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('denied'));
     await ctrl.copyPairingPayload();
     expect(notify).toHaveBeenCalledWith('error', 'Copy failed.');
@@ -173,7 +176,7 @@ describe('closePairing', () => {
   it('clears pairing and copy feedback when not busy', async () => {
     const { ctrl } = make();
     vi.mocked(api.generateDevicePairingCode).mockResolvedValue(pairingData() as never);
-    await ctrl.generatePairingCode();
+    await ctrl.generatePairingCode('p-owner');
     await ctrl.copyPairingPayload();
     expect(ctrl.copied).toBe(true);
     ctrl.closePairing();
