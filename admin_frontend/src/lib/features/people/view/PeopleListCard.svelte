@@ -10,7 +10,7 @@
 
   let { ctrl }: { ctrl: PeopleController } = $props();
 
-  const GRID = '1.2fr 1fr 110px 170px 150px 210px';
+  const GRID = '1.2fr 1fr 170px 170px 150px 210px';
   // ResourceView's shape: nothing to show yet reads as loading / failed; rows already held stay up while it reloads.
   const view = $derived({
     data: ctrl.people.length || !(ctrl.loading || ctrl.error) ? ctrl.people : null,
@@ -39,7 +39,7 @@
         {#snippet headRow()}
           <span>Name</span>
           <span>Hiro calls them</span>
-          <span>Role</span>
+          <span>Roles</span>
           <span>WhatsApp</span>
           <span>Admin sign-in</span>
           <span class="text-right">Actions</span>
@@ -49,7 +49,11 @@
             <div class={TABLE_GRID_ROW} style:grid-template-columns={GRID}>
               <span class="truncate font-sans text-sm font-semibold">{person.name}</span>
               <span class="truncate font-sans text-sm">{person.calls_them || person.name}</span>
-              <span><Badge variant={person.role_id === 'owner' ? 'default' : 'secondary'}>{ctrl.roleName(person.role_id)}</Badge></span>
+              <span class="flex flex-wrap gap-1">
+                {#each ctrl.rolesOf(person) as roleId (roleId)}
+                  <Badge variant={roleId === 'owner' ? 'default' : 'secondary'}>{ctrl.roleName(roleId)}</Badge>
+                {/each}
+              </span>
               <span class="truncate font-mono text-xs" class:text-muted-foreground={!person.whatsapp}>
                 {shownNumber(person.whatsapp) || 'none'}
               </span>

@@ -66,7 +66,7 @@ def register(people_app: typer.Typer, console: Console) -> None:
             table = Table(title="People", show_header=True)
             table.add_column("Name", style="bold")
             table.add_column("Hiro calls them")
-            table.add_column("Role")
+            table.add_column("Roles")
             table.add_column("WhatsApp")
             table.add_column("Admin sign-in")
             table.add_column("ID", style="dim")
@@ -74,7 +74,7 @@ def register(people_app: typer.Typer, console: Console) -> None:
                 table.add_row(
                     p["name"],
                     p["calls_them"] or p["name"],
-                    roles.get(p["role_id"], p["role_id"]),
+                    ", ".join(roles.get(r, r) for r in p["role_ids"]),
                     _number(p["whatsapp"]),
                     p["sign_in"] or "no",
                     p["person_id"],
@@ -85,7 +85,7 @@ def register(people_app: typer.Typer, console: Console) -> None:
     @people_app.command("add")
     def people_add(
         name: str = typer.Argument(..., help="Their name."),
-        role: str = typer.Option(..., "--role", "-r", help="Role id: owner, adult, kid, …"),
+        role: list[str] = typer.Option(..., "--role", "-r", help="Role id: owner, adult, kid, … (repeat for several)"),
         calls_them: Optional[str] = typer.Option(None, "--calls-them", help="What Hiro calls them."),
         whatsapp: Optional[str] = typer.Option(None, "--whatsapp", help="WhatsApp number with the country code."),
         workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help=_WORKSPACE_HELP),
@@ -97,7 +97,7 @@ def register(people_app: typer.Typer, console: Console) -> None:
         result = _run(
             console,
             lambda: PersonAddTool().execute(
-                name=name, role_id=role, calls_them=calls_them, whatsapp=whatsapp, workspace=workspace
+                name=name, role_ids=role, calls_them=calls_them, whatsapp=whatsapp, workspace=workspace
             ),
         )
         console.print(f"[green]Added[/green] [bold]{result.person['name']}[/bold] ({result.person['person_id']}).")
@@ -106,7 +106,9 @@ def register(people_app: typer.Typer, console: Console) -> None:
     def people_update(
         person: str = typer.Argument(..., help="The person: id, name or sign-in name."),
         name: Optional[str] = typer.Option(None, "--name", help="New name."),
-        role: Optional[str] = typer.Option(None, "--role", "-r", help="New role id."),
+        role: Optional[list[str]] = typer.Option(
+            None, "--role", "-r", help="Their roles from now on (repeat for several): owner, adult, kid, …"
+        ),
         calls_them: Optional[str] = typer.Option(None, "--calls-them", help="What Hiro calls them ('' = their name)."),
         whatsapp: Optional[str] = typer.Option(None, "--whatsapp", help="WhatsApp number ('' = none)."),
         workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help=_WORKSPACE_HELP),
@@ -118,7 +120,8 @@ def register(people_app: typer.Typer, console: Console) -> None:
         result = _run(
             console,
             lambda: PersonUpdateTool().execute(
-                person=person, name=name, role_id=role, calls_them=calls_them, whatsapp=whatsapp, workspace=workspace
+                person=person, name=name, role_ids=role or None, calls_them=calls_them, whatsapp=whatsapp,
+                workspace=workspace,
             ),
         )
         console.print(f"[green]Saved[/green] [bold]{result.person['name']}[/bold].")

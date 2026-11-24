@@ -1,7 +1,7 @@
 """The family: people and their roles (the plan's Phase 6).
 
 One list, owned by the core. A person has a name, what Hiro calls them, a WhatsApp
-number, one role, and a sign-in only if they use the admin. Extensions (HomeHiro
+number, one or several roles, and a sign-in only if they use the admin. Extensions (HomeHiro
 first) read the list and are told when it changes; what a role may do inside an
 extension stays with that extension. The core checks nothing per role in Phase 6:
 whoever signs in to the admin can do everything there.
@@ -12,6 +12,9 @@ whoever signs in to the admin can do everything there.
   declares and handles HiroLeague's own right (``admin``).
 - Owner, Adult and Kid are there from the start (the same ids HomeHiro uses);
   Owner is built in and can't be renamed or removed.
+- Permissions phase 1: a person holds one or several roles (``person_roles``), and their rights add up.
+  ``people.role_id`` stays, always the first of them in the roles' order (Owner first): what an app reads until it
+  knows several roles (phase 5). One write path keeps both (``_set_roles``).
 - Passwords and sign-in sessions live in ``admin_sign_in.py``; this module only
   stores the hash it is given.
 
@@ -72,7 +75,8 @@ class Person(BaseModel):
     name: str
     calls_them: str = ""
     whatsapp: str = ""  # digits with the country code, "" = none
-    role_id: str
+    role_id: str  # the first of role_ids, in the roles' order
+    role_ids: list[str] = []  # every role they hold, in the roles' order (Permissions phase 1)
     sign_in: str | None = None  # the admin sign-in name, None = doesn't use the admin
     created_at: str = ""
     updated_at: str = ""
@@ -171,17 +175,37 @@ def _rights_from(raw: str | None) -> dict[str, list[str]]:
     return {str(k): [str(x) for x in v] for k, v in data.items() if isinstance(v, list)}
 
 
-def _row_to_person(row: sqlite3.Row) -> Person:
+def _row_to_person(row: sqlite3.Row, role_ids: list[str]) -> Person:
     return Person(
         person_id=row["person_id"],
         name=row["name"],
         calls_them=row["calls_them"] or "",
         whatsapp=row["whatsapp"] or "",
         role_id=row["role_id"],
+        # A person written by an older release before ensure_db filled person_roles holds their one role.
+        role_ids=role_ids or ([row["role_id"]] if row["role_id"] else []),
         sign_in=row["sign_in"],
         created_at=row["created_at"] or "",
         updated_at=row["updated_at"] or "",
     )
+
+
+def _roles_held(conn: sqlite3.Connection, person_ids: list[str] | None = None) -> dict[str, list[str]]:
+    """Each person's roles, in the roles' order: everyone's, or only those named."""
+    sql = (
+        "SELECT pr.person_id, pr.role_id FROM person_roles pr JOIN roles r ON r.role_id = pr.role_id"
+        + (f" WHERE pr.person_id IN ({', '.join('?' * len(person_ids))})" if person_ids is not None else "")
+        + " ORDER BY r.position, r.name"
+    )
+    held: dict[str, list[str]] = {}
+    for row in conn.execute(sql, person_ids or []):
+        held.setdefault(row["person_id"], []).append(row["role_id"])
+    return held
+
+
+def _people_from(conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[Person]:
+    held = _roles_held(conn, [r["person_id"] for r in rows])
+    return [_row_to_person(r, held.get(r["person_id"], [])) for r in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -292,10 +316,10 @@ def set_role_rights(workspace_path: Path, role_id: str, extension: str, keys: li
     return role.model_copy(update={"rights": rights})
 
 
-def role_opens_settings(workspace_path: Path, role_id: str) -> bool:
-    """Whether people with this role can open HiroLeague's settings (Phase 8); an unknown role can't."""
-    role = get_role(workspace_path, role_id)
-    return role is not None and role.admin
+def opens_settings(workspace_path: Path, role_ids: list[str]) -> bool:
+    """Whether a person with these roles can open HiroLeague's settings (Phase 8): any of them can; an unknown role
+    can't."""
+    return any(r.admin for r in list_roles(workspace_path) if r.role_id in role_ids)
 
 
 def remove_role(workspace_path: Path, role_id: str) -> None:
@@ -305,7 +329,13 @@ def remove_role(workspace_path: Path, role_id: str) -> None:
     if role.built_in:
         raise PeopleError(f"{role.name} is built in and can't be removed.")
     with _connect(workspace_path) as conn:
-        users = [r["name"] for r in conn.execute("SELECT name FROM people WHERE role_id = ?", (role_id,))]
+        users = [
+            r["name"]
+            for r in conn.execute(
+                "SELECT p.name FROM people p JOIN person_roles pr ON pr.person_id = p.person_id WHERE pr.role_id = ?",
+                (role_id,),
+            )
+        ]
         if users:
             raise PeopleError(f"{role.name} is still given to {', '.join(users)}; give them another role first.")
         conn.execute("DELETE FROM roles WHERE role_id = ?", (role_id,))
@@ -319,24 +349,38 @@ def remove_role(workspace_path: Path, role_id: str) -> None:
 
 
 def list_people(workspace_path: Path) -> list[Person]:
-    """Everyone, by role (Owner first) then name."""
+    """Everyone, by their first role (Owner first) then name."""
     with _connect(workspace_path) as conn:
         rows = conn.execute(
             "SELECT p.* FROM people p LEFT JOIN roles r ON r.role_id = p.role_id "
             "ORDER BY COALESCE(r.position, 999), lower(p.name)"
         ).fetchall()
-    return [_row_to_person(r) for r in rows]
+        return _people_from(conn, rows)
 
 
 def get_person(workspace_path: Path, person_id: str) -> Person | None:
     with _connect(workspace_path) as conn:
         row = conn.execute("SELECT * FROM people WHERE person_id = ?", (person_id,)).fetchone()
-    return _row_to_person(row) if row else None
+        return _people_from(conn, [row])[0] if row else None
 
 
-def _check_role(conn: sqlite3.Connection, role_id: str) -> None:
-    if conn.execute("SELECT 1 FROM roles WHERE role_id = ?", (role_id,)).fetchone() is None:
-        raise PeopleError(f"There is no role {role_id!r}.")
+def _in_role_order(conn: sqlite3.Connection, role_ids: list[str]) -> list[str]:
+    """The roles asked for, checked and in the roles' order (Owner first), each once; at least one."""
+    wanted = {r.strip() for r in role_ids if r and r.strip()}
+    if not wanted:
+        raise PeopleError("Give them at least one role.")
+    order = [r["role_id"] for r in conn.execute("SELECT role_id FROM roles ORDER BY position, name")]
+    unknown = sorted(wanted - set(order))
+    if unknown:
+        raise PeopleError(f"There is no role {unknown[0]!r}.")
+    return [r for r in order if r in wanted]
+
+
+def _set_roles(conn: sqlite3.Connection, person_id: str, role_ids: list[str]) -> None:
+    """The one write of a person's roles: the rows, and people.role_id as the first of them. Not committed."""
+    conn.execute("DELETE FROM person_roles WHERE person_id = ?", (person_id,))
+    conn.executemany("INSERT INTO person_roles (person_id, role_id) VALUES (?, ?)", [(person_id, r) for r in role_ids])
+    conn.execute("UPDATE people SET role_id = ? WHERE person_id = ?", (role_ids[0], person_id))
 
 
 def _check_number_free(conn: sqlite3.Connection, number: str, person_id: str | None) -> None:
@@ -353,31 +397,35 @@ def add_person(
     workspace_path: Path,
     *,
     name: str,
-    role_id: str,
+    role_id: str = "",
+    role_ids: list[str] | None = None,
     calls_them: str = "",
     whatsapp: str = "",
 ) -> Person:
+    """A new person with the roles given (``role_ids``), or the one ``role_id`` (an app that knows one role)."""
     name = _clean_name(name)
     calls_them = " ".join((calls_them or "").split())
     number = clean_number(whatsapp)
     now = _now()
-    person = Person(
-        person_id=uuid.uuid4().hex,
-        name=name,
-        calls_them=calls_them,
-        whatsapp=number,
-        role_id=role_id,
-        created_at=now,
-        updated_at=now,
-    )
     with _connect(workspace_path) as conn:
-        _check_role(conn, role_id)
+        held = _in_role_order(conn, role_ids if role_ids is not None else [role_id])
         _check_number_free(conn, number, None)
+        person = Person(
+            person_id=uuid.uuid4().hex,
+            name=name,
+            calls_them=calls_them,
+            whatsapp=number,
+            role_id=held[0],
+            role_ids=held,
+            created_at=now,
+            updated_at=now,
+        )
         conn.execute(
             "INSERT INTO people (person_id, name, calls_them, whatsapp, role_id, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (person.person_id, person.name, person.calls_them, person.whatsapp, person.role_id, now, now),
         )
+        _set_roles(conn, person.person_id, held)
         conn.commit()
     _changed(workspace_path, "person_added", person_id=person.person_id)
     return person
@@ -389,10 +437,13 @@ def update_person(
     *,
     name: str | None = None,
     role_id: str | None = None,
+    role_ids: list[str] | None = None,
     calls_them: str | None = None,
     whatsapp: str | None = None,
 ) -> Person:
-    """Change what is given (None = leave as it is)."""
+    """Change what is given (None = leave as it is). ``role_ids`` sets every role they hold. ``role_id`` alone (an app
+    that knows one role, until phase 5) changes nothing when it is already their first role, and otherwise makes it
+    their only role."""
     person = get_person(workspace_path, person_id)
     if person is None:
         raise PeopleError("That person isn't in the family list.")
@@ -403,27 +454,29 @@ def update_person(
         changes["calls_them"] = " ".join(calls_them.split())
     if whatsapp is not None:
         changes["whatsapp"] = clean_number(whatsapp)
-    if role_id is not None:
-        changes["role_id"] = role_id
-    if not changes:
+    wanted = role_ids if role_ids is not None else [role_id] if role_id is not None and role_id != person.role_id else None
+    if not changes and wanted is None:
         return person
     with _connect(workspace_path) as conn:
-        if "role_id" in changes:
-            _check_role(conn, changes["role_id"])
-            if person.role_id == OWNER_ROLE and changes["role_id"] != OWNER_ROLE:
+        held = person.role_ids
+        if wanted is not None:
+            held = _in_role_order(conn, wanted)
+            if OWNER_ROLE in person.role_ids and OWNER_ROLE not in held:
                 _check_not_last_owner(conn, person)
         if "whatsapp" in changes:
             _check_number_free(conn, changes["whatsapp"], person_id)
         changes["updated_at"] = _now()
         cols = ", ".join(f"{k} = ?" for k in changes)
         conn.execute(f"UPDATE people SET {cols} WHERE person_id = ?", (*changes.values(), person_id))
+        if wanted is not None:
+            _set_roles(conn, person_id, held)
         conn.commit()
     _changed(workspace_path, "person_updated", person_id=person_id)
-    return person.model_copy(update=changes)
+    return person.model_copy(update={**changes, "role_id": held[0], "role_ids": held})
 
 
 def _check_not_last_owner(conn: sqlite3.Connection, person: Person) -> None:
-    owners = conn.execute("SELECT COUNT(*) FROM people WHERE role_id = ?", (OWNER_ROLE,)).fetchone()[0]
+    owners = conn.execute("SELECT COUNT(*) FROM person_roles WHERE role_id = ?", (OWNER_ROLE,)).fetchone()[0]
     if owners <= 1:
         raise PeopleError(f"{person.name} is the only Owner; make someone else Owner first.")
 
@@ -441,11 +494,12 @@ def remove_person(workspace_path: Path, person_id: str) -> Person:
     if person is None:
         raise PeopleError("That person isn't in the family list.")
     with _connect(workspace_path) as conn:
-        if person.role_id == OWNER_ROLE:
+        if OWNER_ROLE in person.role_ids:
             _check_not_last_owner(conn, person)
         if person.sign_in is not None:
             _check_not_last_sign_in(conn, person)
         conn.execute("DELETE FROM admin_sessions WHERE person_id = ?", (person_id,))
+        conn.execute("DELETE FROM person_roles WHERE person_id = ?", (person_id,))
         conn.execute("DELETE FROM people WHERE person_id = ?", (person_id,))
         conn.commit()
     _changed(workspace_path, "person_removed", person_id=person_id)
@@ -458,7 +512,7 @@ def find_by_number(workspace_path: Path, number: str) -> Person | None:
         return None
     with _connect(workspace_path) as conn:
         row = conn.execute("SELECT * FROM people WHERE whatsapp = ?", (number,)).fetchone()
-    return _row_to_person(row) if row else None
+        return _people_from(conn, [row])[0] if row else None
 
 
 # ---------------------------------------------------------------------------
@@ -514,7 +568,7 @@ def sign_in_hash(workspace_path: Path, sign_in: str) -> tuple[Person, str] | Non
             "SELECT * FROM people WHERE lower(sign_in) = lower(?) AND password_hash IS NOT NULL",
             ((sign_in or "").strip(),),
         ).fetchone()
-    return (_row_to_person(row), row["password_hash"]) if row else None
+        return (_people_from(conn, [row])[0], row["password_hash"]) if row else None
 
 
 def anyone_signs_in(workspace_path: Path) -> bool:

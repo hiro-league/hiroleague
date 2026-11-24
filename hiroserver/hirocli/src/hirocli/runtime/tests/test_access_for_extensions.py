@@ -99,3 +99,33 @@ def test_import_fills_only_roles_without_rights_there(tmp_path: Path) -> None:
     assert get_role(tmp_path, "kid").rights["home"] == ["myroom.use"]
     again = asyncio.run(handle_roles_import_rights({"roles": {"kid": {"rights": []}}}, ctx))
     assert again == {"imported": []}
+
+
+# Permissions phase 1: a right an app declares personal is granted for their own or for everyone's.
+PERSONAL_INFO = {"name": "study", "features": [
+    {"id": "study", "name": "Study", "rights": [
+        {"id": "see", "name": "See", "personal": True}, {"id": "add", "name": "Add", "personal": True},
+        {"id": "grade", "name": "Grade"}]},
+]}
+
+
+def test_a_personal_right_is_granted_for_their_own_or_everyones(tmp_path: Path) -> None:
+    add_paired_extension(tmp_path, name="study", public_key="k", info=PERSONAL_INFO)
+    assert set_rights(tmp_path, "kid", "study", ["study.add:own"]).rights["study"] == ["study.see:own", "study.add:own"]
+    assert set_rights(tmp_path, "adult", "study", ["study.add:own", "study.see"]).rights["study"] == [
+        "study.see", "study.add:own"]
+    with pytest.raises(PeopleError, match="isn't about people's own things"):
+        set_rights(tmp_path, "kid", "study", ["study.grade:own"])
+    roles = {r["role_id"]: r["rights"] for r in roles_with_rights(tmp_path)}
+    assert roles["kid"]["study"] == ["study.see:own", "study.add:own"]
+    assert roles["owner"]["study"] == ["study.see", "study.add", "study.grade"]  # the owner's reach everyone's
+
+
+def test_existing_grants_keep_their_meaning(tmp_path: Path) -> None:
+    """A plain key granted before a right was declared personal still reaches everyone's: nothing is rewritten."""
+    add_paired_extension(tmp_path, name="home", public_key="k", info=INFO)
+    set_rights(tmp_path, "kid", "home", ["streams.see", "myroom.use"])
+    personal = {**INFO, "features": [{**f, "rights": [{**r, "personal": True} for r in f["rights"]]} for f in FEATURES]}
+    add_paired_extension(tmp_path, name="home", public_key="k", info=personal)
+    roles = {r["role_id"]: r["rights"] for r in roles_with_rights(tmp_path)}
+    assert roles["kid"]["home"] == ["streams.see", "myroom.use"]

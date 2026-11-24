@@ -7,6 +7,10 @@ the family list, family.py) and checks them on every route (guard.py) with the S
 without it. Owner has every right. Users and roles themselves are not a feature: only owners see them, so nobody can
 give themselves more.
 
+Permissions phase 1: the core lets a person hold several roles, but the app still knows one, the first of them
+(`role_id` in the family list); several roles reach the app with phase 5. Until then a key ending ":own" (a right
+granted for the person's own things) grants nothing here: the app hands the check no record's owners.
+
 The pages read a level per feature (`levels`): "use" when a role has any right beyond seeing it, so a page shows its
 buttons; the routes check the exact right and say which one is missing.
 """
@@ -31,6 +35,15 @@ def right(rid: str, name: str, says: str) -> ExtensionRight:
     return ExtensionRight(id=rid, name=name, says=says)
 
 
+def _held(role_id: str | None) -> list[str]:
+    """The roles the one check adds up: the app's one role, or none (waiting, refused)."""
+    return [role_id] if role_id else []
+
+
+def _check(role_id: str | None, rights: list[str], feature: str, right: str) -> bool:
+    return allowed(dict.fromkeys(_held(role_id), rights), feature, right, ext().by_id)
+
+
 def has_see(feature: str) -> bool:
     return any(r.id == SEE for r in ext().by_id[feature].rights)
 
@@ -39,10 +52,9 @@ def can(role_id: str | None, rights: Iterable[str], feature: str, right: str) ->
     """Whether a role may use one right. Asking to see a feature that has no "see" right (Settings): any of its rights
     is enough to read it."""
     rights = list(rights)
-    by_id = ext().by_id
     if right == SEE and not has_see(feature):
-        return any(allowed(role_id, rights, feature, r.id, by_id) for r in by_id[feature].rights)
-    return allowed(role_id, rights, feature, right, by_id)
+        return any(_check(role_id, rights, feature, r.id) for r in ext().by_id[feature].rights)
+    return _check(role_id, rights, feature, right)
 
 
 def rights_of(role_id: str | None, rights: Iterable[str]) -> list[str]:
@@ -54,12 +66,11 @@ def rights_of(role_id: str | None, rights: Iterable[str]) -> list[str]:
 
 def level(role_id: str | None, rights: Iterable[str], feature: str) -> Access:
     """A feature's level for the pages: "use" with any right beyond seeing it, "see" with only that, else "no"."""
-    by_id = ext().by_id
-    f = by_id[feature]
+    f = ext().by_id[feature]
     rights = list(rights)
-    if any(r.id != SEE and allowed(role_id, rights, feature, r.id, by_id) for r in f.rights):
+    if any(r.id != SEE and _check(role_id, rights, feature, r.id) for r in f.rights):
         return "use"
-    return "see" if has_see(feature) and allowed(role_id, rights, feature, SEE, by_id) else "no"
+    return "see" if has_see(feature) and _check(role_id, rights, feature, SEE) else "no"
 
 
 def levels(role_id: str | None, rights: Iterable[str]) -> dict[str, Access]:

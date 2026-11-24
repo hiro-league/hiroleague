@@ -45,7 +45,7 @@ from hirocli.domain.admin_sign_in import (
     session_person,
     start_session,
 )
-from hirocli.domain.people import anyone_signs_in, get_person, get_role
+from hirocli.domain.people import anyone_signs_in, get_person, get_role, opens_settings
 from hirocli.runtime.sign_in_for_extensions import (
     CODES,
     app_entry,
@@ -54,7 +54,7 @@ from hirocli.runtime.sign_in_for_extensions import (
     list_sign_in_offers,
     list_sites,
     local_path,
-    sites_for_role,
+    sites_for_roles,
 )
 
 log = Logger.get("ADMIN.AUTH")
@@ -100,7 +100,8 @@ def _too_many_failures(name: str) -> bool:
 
 
 def _public(person: Any) -> dict[str, Any]:
-    return {"person_id": person.person_id, "name": person.name, "sign_in": person.sign_in, "role_id": person.role_id}
+    return {"person_id": person.person_id, "name": person.name, "sign_in": person.sign_in, "role_id": person.role_id,
+            "role_ids": person.role_ids}
 
 
 def _manager(request: Request) -> Any:
@@ -130,11 +131,6 @@ def _to_sign_in_page(for_extension: str, next_path: str, error: str | None = Non
     """Back to the sign-in page, keeping where the browser was going (and why it didn't get there)."""
     query = {k: v for k, v in (("for", for_extension), ("next", next_path), ("signin_error", error)) if v}
     return RedirectResponse(f"/sign-in?{urlencode(query)}" if query else "/sign-in", status_code=303)
-
-
-def _role_opens_settings(workspace_path: Path, role_id: str) -> bool:
-    role = get_role(workspace_path, role_id)
-    return role is not None and role.admin
 
 
 async def signed_in_person(request: Request) -> Any:
@@ -167,7 +163,7 @@ class RequireSignIn:
                 return
             # Phase 8: signed in for the apps only (Adult and Kid by default): the settings stay shut.
             if not path.startswith(LIMITED_PREFIXES):
-                opens = await run_in_threadpool(_role_opens_settings, self.workspace_path, person.role_id)
+                opens = await run_in_threadpool(opens_settings, self.workspace_path, person.role_ids)
                 if not opens:
                     refused = api_failure(NOT_FOR_YOUR_ROLE, 403)
                     await refused(scope, receive, send)
@@ -181,13 +177,14 @@ async def who_am_i(request: Request) -> Any:
     workspace_path = _workspace_path(request)
     anyone = await run_in_threadpool(anyone_signs_in, workspace_path)
     role = await run_in_threadpool(get_role, workspace_path, person.role_id) if person else None
+    opens = await run_in_threadpool(opens_settings, workspace_path, person.role_ids) if person else False
     # Phase 8: the ways to sign in connected extensions offer (the sign-in page's buttons).
     offers = [{"id": o.id, "label": o.label, "extension": o.extension} for o in list_sign_in_offers(_manager(request))]
     return {
             "signed_in": person is not None,
             "person": _public(person) if person else None,
             "role_name": role.name if role else None,
-            "can_open_settings": bool(role and role.admin),
+            "can_open_settings": opens,  # any of their roles opens it
             "anyone_signs_in": anyone,
             "sign_in_offers": offers,
             # A test environment and what its core reaches (its switchboard), for the banner on every page; None in
@@ -351,14 +348,14 @@ async def sign_in_with(method: str, request: Request, next: str = "/") -> Redire
 
 @auth_router.get("/apps")
 async def apps(request: Request) -> Any:
-    """Phase 8: the extensions' sites this person's role sees (the dashboard's Apps card). The app switcher (UI kit)
+    """Phase 8: the extensions' sites this person's roles see (the dashboard's Apps card). The app switcher (UI kit)
     reads the same list, every app's own /api/apps alike: HiroLeague first, the app it is shown in marked ``here``
     (the Apps card leaves that one out)."""
     person = await signed_in_person(request)
     if person is None:
         return api_failure("Sign in first.", 401)
     sites = await run_in_threadpool(list_sites, _manager(request), _workspace_path(request))
-    shown = sites_for_role(sites, person.role_id)
+    shown = sites_for_roles(sites, person.role_ids)
     core = {"extension": "hiroleague", "title": "HiroLeague", "icon": "hiroleague", "url": _origin(request),
             "online": True, "here": True}
     return {"apps": [core, *({**app_entry(s), "here": False} for s in shown)]}

@@ -1,13 +1,14 @@
 <script lang="ts">
   /**
    * People (Phase 6): one family list in the core, read by extensions such as HomeHiro.
-   * Phase 9a: two tabs — People (the list) and Roles (what each role may do in HiroLeague and each app).
+   * Three tabs, each one job: People (the list), Roles (one role at a time: what it is for, who holds it, its rights)
+   * and Compare (every role side by side, read only). The header holds the tabs, the tab's action and, on Roles and
+   * Compare, which app is shown (or all); it stays at the top while the page scrolls.
    */
-  import { UserPlus } from '@lucide/svelte';
+  import { Plus, UserPlus } from '@lucide/svelte';
   import { page } from '$app/state';
   import PageHeader from '$kit/ui/page-header.svelte';
   import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
-  import Panel from '$kit/ui/panel.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import ConfirmDialog from '$kit/ui/confirm-dialog.svelte';
   import { toast } from '$kit/ui/toast.svelte';
@@ -18,7 +19,9 @@
   import PageTabs from '$kit/ui/page-tabs.svelte';
   import NewRoleDialog from './dialogs/NewRoleDialog.svelte';
   import { createRolesController } from './state/roles-controller.svelte';
-  import RolesTab from './view/RolesTab.svelte';
+  import RolesView from './view/RolesView.svelte';
+  import CompareView from './view/CompareView.svelte';
+  import AppFilter from './view/AppFilter.svelte';
 
   // Phase 9a: an app's Edit link opens People → Roles at one role (?tab=roles&role=kid).
   const asked = page.url.searchParams;
@@ -26,35 +29,50 @@
   // A role added, renamed or removed changes the People tab's role names too.
   const roles = createRolesController(toast.show, () => ctrl.load(), asked.get('role'));
 
-  let tab = $state<'people' | 'roles'>(asked.get('tab') === 'roles' ? 'roles' : 'people');
+  type Tab = 'people' | 'roles' | 'compare';
+  const TABS: Tab[] = ['people', 'roles', 'compare'];
+  const askedTab = asked.get('tab');
+  let tab = $state<Tab>(TABS.find((t) => t === askedTab) ?? 'people');
   const tabDescriptors = [
     { id: 'people' as const, label: 'People' },
-    { id: 'roles' as const, label: 'Roles' }
+    { id: 'roles' as const, label: 'Roles' },
+    { id: 'compare' as const, label: 'Compare' }
   ];
+  // A role opened from Compare starts at the top of its rights, not where Compare was scrolled to.
+  function openRole(roleId: string) {
+    roles.role = roleId;
+    tab = 'roles';
+    window.scrollTo({ top: 0 });
+  }
 </script>
 
 <section class={ADMIN_PAGE_MAX_W}>
-  <PageHeader title="People" description="The family: who they are, what Hiro calls them, how to reach them, their role. HomeHiro reads this list.">
+  <PageHeader title="People">
     {#snippet tabs()}
-    <PageTabs label="People sections" tabs={tabDescriptors} value={tab} onchange={(id) => (tab = id)} />
+      <PageTabs label="People sections" tabs={tabDescriptors} value={tab} onchange={(id) => (tab = id)} />
     {/snippet}
+    {#snippet actions()}
+      {#if tab === 'people'}
+        <Button disabled={ctrl.busy} onclick={() => ctrl.openAdd()}>
+          <UserPlus size={15} /> Add person
+        </Button>
+      {:else if tab === 'roles'}
+        <Button variant="outline" disabled={roles.busy} onclick={() => (roles.newName = '')}>
+          <Plus size={15} /> New role
+        </Button>
+      {/if}
+    {/snippet}
+    {#if tab !== 'people'}
+      <AppFilter sources={roles.sources} value={roles.app} onchange={(next) => (roles.app = next)} />
+    {/if}
   </PageHeader>
-  
+
   {#if tab === 'roles'}
-    <RolesTab ctrl={roles} people={ctrl.people} />
+    <RolesView ctrl={roles} people={ctrl.people} rolesOf={ctrl.rolesOf} />
+  {:else if tab === 'compare'}
+    <CompareView ctrl={roles} onopen={openRole} />
   {:else}
-  <section class="grid gap-4">
-    <Panel class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-      <p class="font-sans text-sm text-muted-foreground">
-        One sign-in for HiroLeague and its apps: a password given here, or Home Assistant's login while Home
-        is connected. Roles says what each role may do here and in each app.
-      </p>
-      <Button disabled={ctrl.busy} onclick={() => ctrl.openAdd()}>
-        <UserPlus size={15} /> Add person
-      </Button>
-    </Panel>
     <PeopleListCard {ctrl} />
-  </section>
   {/if}
 </section>
 

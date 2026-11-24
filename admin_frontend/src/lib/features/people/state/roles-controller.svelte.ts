@@ -13,20 +13,23 @@ import {
 import { Action } from '$kit/state/action.svelte';
 import { Resource } from '$kit/state/resource.svelte';
 import type { Notify } from '$kit/ui/toast.svelte';
+import { reachOf, setReach, withReaches, type Reach } from '../reach';
 
 export type RolesController = ReturnType<typeof createRolesController>;
 
-export const ALL_SOURCES = 'all';
-export const ALL_ROLES = 'all';
 export const OWNER = 'owner';
+export const ALL_APPS = 'all';
 const SEE = 'see';
 
 export const rightKey = (feature: string, right: string) => `${feature}.${right}`;
 
 /**
- * People → Roles (Phase 9a): what each role may do, per source — HiroLeague itself and each extension, which
- * declares its features and their rights when it connects. A role has each right or not; the owner has every
- * right except features not made for the owner. Each change saves at once (the extension is told and follows).
+ * People → Roles and Compare (Phase 9a; Permissions phase 1): what each role may do, per source — HiroLeague itself
+ * and each extension, which declares its features and their rights when it connects. A role has each right or not
+ * (or, for a right about people's things, their own or everyone's); the owner has every right except features not
+ * made for the owner. Each change saves at once (the extension is told and follows).
+ *
+ * `role` is the role shown on Roles; `app` the source both tabs show, or ALL_APPS.
  */
 export function createRolesController(
   notify: Notify,
@@ -39,23 +42,35 @@ export function createRolesController(
   const roles = $derived(access.data?.roles ?? []);
   const work = new Action();
 
-  let tab = $state<string>(ALL_ROLES);
-  let sourceId = $state<string>(ALL_SOURCES);
+  let role = $state<string>(firstRole ?? '');
+  let app = $state<string>(ALL_APPS);
+  const shown = $derived(app === ALL_APPS ? sources : sources.filter((s) => s.id === app));
 
-  // A tab or source that is gone after a read falls back to "all"; the first read opens `firstRole`.
-  let first = true;
+  // A role that is gone after a read (or none yet) falls back to the first one that isn't the owner; an app that is
+  // gone falls back to all.
   $effect(() => {
     const data = access.data;
     if (!data) return;
     untrack(() => {
-      if (first) {
-        first = false;
-        if (firstRole && data.roles.some((r) => r.role_id === firstRole)) tab = firstRole;
-      }
-      if (tab !== ALL_ROLES && !data.roles.some((r) => r.role_id === tab)) tab = ALL_ROLES;
-      if (sourceId !== ALL_SOURCES && !data.sources.some((s) => s.id === sourceId)) sourceId = ALL_SOURCES;
+      if (!data.roles.some((r) => r.role_id === role)) role = (data.roles.find((r) => r.role_id !== OWNER) ?? data.roles[0])?.role_id ?? '';
+      if (app !== ALL_APPS && !data.sources.some((s) => s.id === app)) app = ALL_APPS;
     });
   });
+
+  /** How far a role's grant of one right reaches: a right not about people's things is everyone's or nothing. */
+  function reach(role: RoleAccess, source: AccessSource, feature: AccessFeature, right: string): Reach {
+    return reachOf(granted(role, source), rightKey(feature.id, right));
+  }
+
+  function reaches(role: RoleAccess, source: AccessSource, feature: AccessFeature): Record<string, Reach> {
+    return Object.fromEntries(feature.rights.map((r) => [r.id, reach(role, source, feature, r.id)]));
+  }
+
+  /** Set a personal right's reach and save it at once; See follows (setReach), and the core keeps it as it says. */
+  function setRightReach(role: RoleAccess, source: AccessSource, feature: AccessFeature, right: string, to: Reach) {
+    const next = setReach(feature.rights.map((r) => r.id), reaches(role, source, feature), right, to);
+    void run(() => setRoleRights(role.role_id, source.id, withReaches(granted(role, source), feature.id, next)));
+  }
 
   /** The new-role dialog: null = closed. */
   let newName = $state<string | null>(null);
@@ -103,12 +118,12 @@ export function createRolesController(
     if (newName === null) return;
     const name = newName;
     await work.run(async () => {
-      const role = (await addRole(name)).role;
-      notify('success', `Added the role ${role.name}.`);
+      const added = (await addRole(name)).role;
+      notify('success', `Added the role ${added.name}.`);
       newName = null;
       await access.reload();
       await onRolesChanged();
-      tab = role.role_id;
+      role = added.role_id;
     });
     if (work.error) notify('error', work.error);
   }
@@ -118,7 +133,6 @@ export function createRolesController(
     const role = removeTarget;
     removeTarget = null;
     await run(() => removeRole(role.role_id), `Removed ${role.name}.`);
-    tab = ALL_ROLES;
   }
 
   return {
@@ -129,6 +143,11 @@ export function createRolesController(
     submitNew,
     submitRemove,
     granted,
+    reach,
+    reaches,
+    setRightReach,
+    personal: (_source: AccessSource, feature: AccessFeature, right: string) =>
+      feature.rights.some((r) => r.id === right && r.personal),
     get sources() {
       return sources;
     },
@@ -144,17 +163,23 @@ export function createRolesController(
     get error() {
       return access.error || null;
     },
-    get tab() {
-      return tab;
+    /** The role shown on Roles. */
+    get role() {
+      return role;
     },
-    set tab(value: string) {
-      tab = value;
+    set role(value: string) {
+      role = value;
     },
-    get sourceId() {
-      return sourceId;
+    /** The app picked in the filter, or ALL_APPS. */
+    get app() {
+      return app;
     },
-    set sourceId(value: string) {
-      sourceId = value;
+    set app(value: string) {
+      app = value;
+    },
+    /** The sources the filter lets through, in their order. */
+    get shown() {
+      return shown;
     },
     get newName() {
       return newName;

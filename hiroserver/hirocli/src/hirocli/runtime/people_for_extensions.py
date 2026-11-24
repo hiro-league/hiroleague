@@ -48,7 +48,10 @@ log = Logger.get("PEOPLE")
 def for_extension(person: Person | dict[str, Any]) -> dict[str, Any]:
     """A person as extensions see them: no admin sign-in details."""
     data = person.model_dump() if isinstance(person, Person) else dict(person)
-    return {k: data.get(k, "") for k in ("person_id", "name", "calls_them", "whatsapp", "role_id")}
+    return {
+        **{k: data.get(k, "") for k in ("person_id", "name", "calls_them", "whatsapp", "role_id")},
+        "role_ids": list(data.get("role_ids") or []),  # every role they hold; role_id is the first (phase 1)
+    }
 
 
 def _workspace(ctx: RequestContext) -> Path:
@@ -80,7 +83,18 @@ def _str(params: dict[str, Any], key: str) -> str | None:
     return None if value is None else str(value)
 
 
+def _role_ids(params: dict[str, Any]) -> list[str] | None:
+    """Every role a person is to hold (``role_ids``), None when left out; a value that isn't a list is refused."""
+    value = params.get("role_ids")
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise RequestRefused("invalid_params", "role_ids must be a list of role ids")
+    return [str(r) for r in value]
+
+
 async def handle_people_add(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
+    role_ids = _role_ids(params)
     person = await _change(
         ctx,
         "person added",
@@ -88,6 +102,7 @@ async def handle_people_add(params: dict[str, Any], ctx: RequestContext) -> dict
             _workspace(ctx),
             name=_str(params, "name") or "",
             role_id=_str(params, "role_id") or "",
+            role_ids=role_ids,
             calls_them=_str(params, "calls_them") or "",
             whatsapp=_str(params, "whatsapp") or "",
         ),
@@ -99,6 +114,7 @@ async def handle_people_update(params: dict[str, Any], ctx: RequestContext) -> d
     person_id = _str(params, "person_id")
     if not person_id:
         raise RequestRefused("invalid_params", "person_id is missing")
+    role_ids = _role_ids(params)
     person = await _change(
         ctx,
         "person updated",
@@ -107,6 +123,7 @@ async def handle_people_update(params: dict[str, Any], ctx: RequestContext) -> d
             person_id,
             name=_str(params, "name"),
             role_id=_str(params, "role_id"),
+            role_ids=role_ids,
             calls_them=_str(params, "calls_them"),
             whatsapp=_str(params, "whatsapp"),
         ),

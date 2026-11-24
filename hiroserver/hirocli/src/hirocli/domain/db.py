@@ -172,6 +172,15 @@ _DDL = [
         PRIMARY KEY (provider_id, name)
     )
     """,
+    # Permissions phase 1: the roles each person holds; their rights add up. people.role_id stays, the first of
+    # these in the roles' order (domain/people.py). Kept until the role is taken away or the person is removed.
+    """
+    CREATE TABLE IF NOT EXISTS person_roles (
+        person_id  TEXT NOT NULL,
+        role_id    TEXT NOT NULL,
+        PRIMARY KEY (person_id, role_id)
+    )
+    """,
     # Admin sign-in sessions: only a hash of each cookie's token is kept.
     """
     CREATE TABLE IF NOT EXISTS admin_sessions (
@@ -377,6 +386,22 @@ def _copy_into_extension_records(conn: sqlite3.Connection) -> tuple[int, int] | 
     return apps, channels
 
 
+def _fill_person_roles(conn: sqlite3.Connection) -> int:
+    """Each person who holds no role in person_roles yet gets one row: the role in their people.role_id.
+
+    Only adds rows (people and roles are read, never written), so it is safe to run on every start: a person added by
+    an older release, which knew only people.role_id, is filled on the next. Returns how many people were filled.
+    """
+    cur = conn.execute(
+        """
+        INSERT OR IGNORE INTO person_roles (person_id, role_id)
+        SELECT p.person_id, p.role_id FROM people p
+        WHERE p.role_id != '' AND NOT EXISTS (SELECT 1 FROM person_roles pr WHERE pr.person_id = p.person_id)
+        """
+    )
+    return max(cur.rowcount, 0)
+
+
 # ---------------------------------------------------------------------------
 # Path helper
 # ---------------------------------------------------------------------------
@@ -417,8 +442,11 @@ def ensure_db(workspace_path: Path) -> None:
         _add_missing_columns(conn)
         copied = _copy_into_extension_records(conn)
         _add_missing_columns(conn)
+        filled = _fill_person_roles(conn)
     finally:
         conn.close()
+    if filled:
+        _log.info("People: %d person(s) now hold their role in person_roles (Permissions phase 1)", filled)
     if copied is not None:
         _log.info(
             "Extensions: the one list was made — %d app(s) and %d channel plugin(s) copied, counts match",

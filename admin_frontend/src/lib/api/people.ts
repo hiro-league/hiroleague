@@ -8,7 +8,10 @@ export type Person = {
   calls_them: string;
   /** Digits with the country code; "" = none. */
   whatsapp: string;
+  /** The first of role_ids, in the roles' order: what an app that knows one role reads. */
   role_id: string;
+  /** Every role they hold, in the roles' order (Owner first); their rights add up. */
+  role_ids: string[];
   /** The admin sign-in name; null = they don't use the admin. */
   sign_in: string | null;
   has_sign_in: boolean;
@@ -30,7 +33,7 @@ export type PeopleData = { people: Person[]; roles: Role[] };
 
 export type PersonFields = {
   name: string;
-  role_id: string;
+  role_ids: string[];
   calls_them: string;
   whatsapp: string;
 };
@@ -66,7 +69,8 @@ export async function removeSignIn(personId: string) {
 // Phase 9a: what each role may do, per source (HiroLeague and each extension).
 // ---------------------------------------------------------------------------
 
-export type AccessRight = { id: string; name: string; says: string };
+/** `personal`: about people's things, granted for their own ("<feature>.<right>:own") or everyone's (the plain key). */
+export type AccessRight = { id: string; name: string; says: string; personal: boolean };
 export type AccessFeature = { id: string; name: string; rights: AccessRight[]; not_for_owner: boolean };
 export type AccessSource = {
   /** "hiroleague", or the extension's name (its rights are kept under it). */
@@ -77,7 +81,7 @@ export type AccessSource = {
   connected: boolean;
   features: AccessFeature[];
 };
-/** A role with its rights in every source: {source id: ["<feature>.<right>", ...]}. */
+/** A role with its rights in every source: {source id: ["<feature>.<right>", "<feature>.<right>:own", ...]}. */
 export type RoleAccess = Role & { rights: Record<string, string[]> };
 export type AccessData = { sources: AccessSource[]; roles: RoleAccess[] };
 

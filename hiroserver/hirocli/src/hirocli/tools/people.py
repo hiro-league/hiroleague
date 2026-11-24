@@ -97,7 +97,7 @@ class AccessResult:
 class PeopleListTool(Tool):
     name = "people_list"
     description = (
-        "List the family: each person's name, what Hiro calls them, their role (Owner, Adult, Kid…) "
+        "List the family: each person's name, what Hiro calls them, their roles (Owner, Adult, Kid…) "
         "and WhatsApp number; plus the roles"
     )
     params = {"workspace": _WORKSPACE}
@@ -121,7 +121,7 @@ class PersonAddTool(Tool):
     description = "Add a person to the family list"
     params = {
         "name": ToolParam(str, "Their name"),
-        "role_id": ToolParam(str, "Their role id (owner, adult, kid, …)"),
+        "role_ids": ToolParam(list[str], "Their role ids, one or several (owner, adult, kid, …); their rights add up"),
         "calls_them": ToolParam(str, "What Hiro calls them (default: their name)", required=False),
         "whatsapp": ToolParam(str, "WhatsApp number with the country code", required=False),
         "workspace": _WORKSPACE,
@@ -130,13 +130,13 @@ class PersonAddTool(Tool):
     def execute(
         self,
         name: str,
-        role_id: str,
+        role_ids: list[str],
         calls_them: str | None = None,
         whatsapp: str | None = None,
         workspace: str | None = None,
     ) -> PersonResult:
         person = add_person(
-            _resolve_path(workspace), name=name, role_id=role_id, calls_them=calls_them or "", whatsapp=whatsapp or ""
+            _resolve_path(workspace), name=name, role_ids=role_ids, calls_them=calls_them or "", whatsapp=whatsapp or ""
         )
         return PersonResult(person=person.public())
 
@@ -144,11 +144,11 @@ class PersonAddTool(Tool):
 class PersonUpdateTool(Tool):
     surfaces = frozenset({"cli", "http"})
     name = "person_update"
-    description = "Change a person's name, what Hiro calls them, role or WhatsApp number"
+    description = "Change a person's name, what Hiro calls them, roles or WhatsApp number"
     params = {
         "person": ToolParam(str, "The person: id, name or sign-in name"),
         "name": ToolParam(str, "New name", required=False),
-        "role_id": ToolParam(str, "New role id", required=False),
+        "role_ids": ToolParam(list[str], "Their roles from now on, one or several", required=False),
         "calls_them": ToolParam(str, "What Hiro calls them ('' = their name)", required=False),
         "whatsapp": ToolParam(str, "WhatsApp number with the country code ('' = none)", required=False),
         "workspace": _WORKSPACE,
@@ -158,7 +158,7 @@ class PersonUpdateTool(Tool):
         self,
         person: str,
         name: str | None = None,
-        role_id: str | None = None,
+        role_ids: list[str] | None = None,
         calls_them: str | None = None,
         whatsapp: str | None = None,
         workspace: str | None = None,
@@ -168,7 +168,7 @@ class PersonUpdateTool(Tool):
             workspace_path,
             find_person(workspace_path, person),
             name=name,
-            role_id=role_id,
+            role_ids=role_ids,
             calls_them=calls_them,
             whatsapp=whatsapp,
         )
@@ -241,10 +241,10 @@ class OwnerSignInTool(Tool):
         try:
             person_id = find_person(workspace_path, name)
         except PeopleError:
-            person_id = add_person(workspace_path, name=name, role_id=OWNER_ROLE).person_id
+            person_id = add_person(workspace_path, name=name, role_ids=[OWNER_ROLE]).person_id
         person = get_person(workspace_path, person_id)
-        if person is not None and person.role_id != OWNER_ROLE:
-            update_person(workspace_path, person_id, role_id=OWNER_ROLE)
+        if person is not None and OWNER_ROLE not in person.role_ids:
+            update_person(workspace_path, person_id, role_ids=[*person.role_ids, OWNER_ROLE])
         updated = give_sign_in(workspace_path, person_id, sign_in=sign_in, password=password)
         return PersonResult(person=updated.public())
 

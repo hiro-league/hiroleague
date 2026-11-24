@@ -124,7 +124,7 @@ def quick_person(workspace_path: Path) -> Person | None:
         return None
     if asked.mode == switchboard.AS:
         return get_person(workspace_path, asked.person)
-    return next((p for p in list_people(workspace_path) if p.role_id == OWNER_ROLE), None)
+    return next((p for p in list_people(workspace_path) if OWNER_ROLE in p.role_ids), None)
 
 
 def session_person(workspace_path: Path, token: str | None) -> Person | None:

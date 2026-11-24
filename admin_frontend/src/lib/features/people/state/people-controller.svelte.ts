@@ -12,6 +12,7 @@ import {
 import { Action } from '$kit/state/action.svelte';
 import { Resource } from '$kit/state/resource.svelte';
 import type { Notify } from '$kit/ui/toast.svelte';
+import { inRoleOrder } from '../reach';
 
 export type PeopleController = ReturnType<typeof createPeopleController>;
 
@@ -20,7 +21,10 @@ export function shownNumber(digits: string): string {
   return digits ? `+${digits}` : '';
 }
 
-const EMPTY: PersonFields = { name: '', role_id: 'adult', calls_them: '', whatsapp: '' };
+/** The add/edit form: a person's fields, with every role they hold (Permissions, phase 1). */
+export type PersonForm = PersonFields;
+
+const EMPTY: PersonForm = { name: '', role_ids: ['adult'], calls_them: '', whatsapp: '' };
 
 /**
  * People page state (Phase 6): the family list, adding and editing a person, their
@@ -41,7 +45,7 @@ export function createPeopleController(notify: Notify) {
   );
 
   /** The add/edit dialog: null = closed; editing = null for a new person. */
-  let form = $state<PersonFields | null>(null);
+  let form = $state<PersonForm | null>(null);
   let editing = $state<Person | null>(null);
 
   /** The sign-in dialog. */
@@ -57,6 +61,21 @@ export function createPeopleController(notify: Notify) {
     return roles.find((r) => r.role_id === roleId)?.name ?? roleId;
   }
 
+  const order = $derived(roles.map((r) => r.role_id));
+
+  /** A person's roles, in the roles' order (Owner first), as the core keeps them. */
+  function rolesOf(person: Person): string[] {
+    return person.role_ids;
+  }
+
+  /** Tick or untick one role in the form; a person keeps at least one. */
+  function toggleRole(roleId: string, on: boolean) {
+    if (!form) return;
+    const next = on ? [...form.role_ids, roleId] : form.role_ids.filter((id) => id !== roleId);
+    if (next.length === 0) return;
+    form.role_ids = inRoleOrder(next, order);
+  }
+
   function openAdd() {
     editing = null;
     form = { ...EMPTY };
@@ -67,7 +86,7 @@ export function createPeopleController(notify: Notify) {
     editing = person;
     form = {
       name: person.name,
-      role_id: person.role_id,
+      role_ids: [...person.role_ids],
       calls_them: person.calls_them,
       whatsapp: shownNumber(person.whatsapp)
     };
@@ -215,6 +234,8 @@ export function createPeopleController(notify: Notify) {
     },
     load: list.reload,
     roleName,
+    rolesOf,
+    toggleRole,
     openAdd,
     openEdit,
     closeForm,

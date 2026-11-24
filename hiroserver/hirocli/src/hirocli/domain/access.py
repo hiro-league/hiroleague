@@ -8,7 +8,8 @@ theirs in Phase 10.
 
 Rights are checked against what the extension declared when they are set, and again when they are
 read (a right the extension no longer declares drops out). The owner has every right except the
-features not made for the owner, and can't be changed.
+features not made for the owner, and can't be changed. Permissions phase 1: a right the source declares
+``personal`` may be granted for the person's own things (its key ending ``:own``) or everyone's (the plain key).
 
 Synchronous (CLI and admin worker threads), like domain/people.py.
 """
@@ -18,7 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from hiro_channel_sdk.access import ExtensionFeature, ExtensionRight, normalize, owner_rights
+from hiro_channel_sdk.access import OWN, ExtensionFeature, ExtensionRight, declared_keys, normalize, owner_rights
 from pydantic import BaseModel, ValidationError
 
 from hiro_commons.log import Logger
@@ -94,10 +95,15 @@ def rights_in(role: Role, source: str, features: list[ExtensionFeature]) -> list
 
 
 def set_rights(workspace_path: Path, role_id: str, source: str, keys: list[str]) -> Role:
-    """Give a role exactly these rights in one source (unknown keys refused, ``see`` added where needed)."""
+    """Give a role exactly these rights in one source (unknown keys refused, an ``:own`` key only for a personal right;
+    ``see`` added where needed, reaching as far)."""
     features = source_features(workspace_path, source)
-    known = {f"{f.id}.{r.id}" for f in features for r in f.rights}
+    known = set(declared_keys(features))
     unknown = sorted(set(keys) - known)
+    not_personal = [k for k in unknown if k.endswith(OWN) and k.removesuffix(OWN) in known]
+    if not_personal:
+        raise PeopleError(f"{not_personal[0].removesuffix(OWN)} isn't about people's own things: it is given to "
+                          "everyone's or not at all.")
     if unknown:
         raise PeopleError(f"{source} has no right called {', '.join(unknown)}.")
     if source == CORE_SOURCE:

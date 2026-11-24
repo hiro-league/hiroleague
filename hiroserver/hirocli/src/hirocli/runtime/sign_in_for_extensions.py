@@ -36,7 +36,7 @@ from hiro_channel_sdk.constants import (
 from hiro_commons.log import Logger
 
 from ..domain.extensions import list_paired_extensions
-from ..domain.people import get_person, get_role
+from ..domain.people import get_person, get_role, opens_settings
 from .request_handler import EXTENSIONS_ONLY, RequestContext, RequestRefused
 from .whatsapp_for_extensions import sender_label
 
@@ -132,8 +132,9 @@ def list_sites(manager: ExtensionManager | None, workspace_path: Path) -> list[S
     return sites
 
 
-def sites_for_role(sites: list[Site], role_id: str) -> list[Site]:
-    return [s for s in sites if not s.roles or role_id in s.roles]
+def sites_for_roles(sites: list[Site], role_ids: list[str]) -> list[Site]:
+    """The sites a person sees: a site that names roles shows to anyone holding any of them."""
+    return [s for s in sites if not s.roles or any(r in s.roles for r in role_ids)]
 
 
 def find_site(manager: ExtensionManager | None, workspace_path: Path, extension: str) -> Site | None:
@@ -268,7 +269,8 @@ async def handle_auth_code(params: dict[str, Any], ctx: RequestContext) -> dict[
     return {
         "person_id": person.person_id,
         "name": person.name,
-        "role_id": person.role_id,
+        "role_id": person.role_id,  # the first of role_ids: what an app reads until it knows several (phase 5)
+        "role_ids": person.role_ids,
         "role_name": role.name if role else person.role_id,
     }
 
@@ -292,10 +294,9 @@ async def handle_sites_list(params: dict[str, Any], ctx: RequestContext) -> dict
     if person is None:
         return {"apps": [], "opens_settings": False}
     sites = await asyncio.to_thread(list_sites, ctx.server_ctx.extension_manager, workspace_path)
-    role = await asyncio.to_thread(get_role, workspace_path, person.role_id)
     return {
-        "apps": [app_entry(s) for s in sites_for_role(sites, person.role_id)],
-        "opens_settings": bool(role and role.admin),
+        "apps": [app_entry(s) for s in sites_for_roles(sites, person.role_ids)],
+        "opens_settings": await asyncio.to_thread(opens_settings, workspace_path, person.role_ids),
     }
 
 

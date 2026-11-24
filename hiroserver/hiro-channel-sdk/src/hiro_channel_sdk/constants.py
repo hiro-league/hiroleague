@@ -117,17 +117,21 @@ NOTIFY_MAX_RECIPIENTS: int = 10
 
 # Phase 6: the family lives in the core.
 #   people.list      extension → core, {} → {"people": [{person_id, name, calls_them, whatsapp,
-#                    role_id}], "roles": [{role_id, name, built_in, says, rights}]}. whatsapp = digits with the
-#                    country code ("" = none); calls_them "" = their name.
-#   people.add       extension → core, {name, role_id, calls_them?, whatsapp?} → {"person": {...}}
-#   people.update    extension → core, {person_id, name?, role_id?, calls_them?, whatsapp?}
-#                    → {"person": {...}}; a field left out stays as it is.
+#                    role_id, role_ids}], "roles": [{role_id, name, built_in, says, rights}]}. whatsapp = digits with
+#                    the country code ("" = none); calls_them "" = their name. Permissions phase 1: role_ids is every
+#                    role the person holds, their rights adding up; role_id is the first of them in the roles' order
+#                    (Owner first), what an app that knows one role reads.
+#   people.add       extension → core, {name, role_id | role_ids, calls_them?, whatsapp?} → {"person": {...}}
+#   people.update    extension → core, {person_id, name?, role_id? | role_ids?, calls_them?, whatsapp?}
+#                    → {"person": {...}}; a field left out stays as it is. role_ids sets every role they hold;
+#                    role_id alone changes nothing when it is already their first role, else becomes their only one.
 #   roles.add        extension → core, {name} → {"role": {...}}
 #   roles.rename     extension → core, {role_id, name} → {"role": {...}}
 #   roles.remove     extension → core, {role_id} → {} (refused while someone has it)
 #   Phase 9a: each role in people.list also carries ``says`` (one line on what it is for) and ``rights``: the
 #                    right keys ("<feature>.<right>") the core grants it in the calling extension, from the features
-#                    the extension declared (ExtensionInfo.features; hiro_channel_sdk.access checks them).
+#                    the extension declared (ExtensionInfo.features; hiro_channel_sdk.access checks them). A key ending
+#                    ":own" (a right the extension declared personal) reaches only the person's own things.
 #   roles.import_rights extension → core, {roles: {role_id: {rights: [...], says?: str}}} → {"imported": [role_id]}:
 #                    once, an extension's own grants from before Phase 9a; only fills roles the core has no rights
 #                    for in this extension yet (and an empty ``says``), never overwrites what the admin set.
@@ -227,7 +231,8 @@ VOICE_ERROR_FAILED: str = "failed"          # the provider failed (the message s
 # Phase 8: one sign-in (docs/phase8-one-sign-in-design.md in hiroleague). An extension's site sends a signed-out
 # browser to the core's sign-in page (<admin>/sign-in?for=<extension name>&next=<path>); the core sends it back to
 # the site the extension declared (offers.shows, kind "site") at <site>/api/auth/hiro?code=<one-time>&next=<path>.
-#   auth.code        extension → core, {code} → {person_id, name, role_id, role_name}. One use, 60 s, only by the
+#   auth.code        extension → core, {code} → {person_id, name, role_id, role_ids, role_name}: role_ids every
+#                    role they hold, role_id the first (role_name its name). One use, 60 s, only by the
 #                    extension the code was made for. Error: invalid_code.
 #   sign_in.start    core → extension, {method, client_id, redirect_uri, state} → {url}: where to send the browser
 #                    to sign in (e.g. Home Assistant's login page). `method` is the id the extension offered.

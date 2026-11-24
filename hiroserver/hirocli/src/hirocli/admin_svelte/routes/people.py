@@ -44,14 +44,14 @@ people_router = APIRouter()
 
 class PersonBody(BaseModel):
     name: str
-    role_id: str
+    role_ids: list[str]  # every role they hold (Permissions phase 1)
     calls_them: str = ""
     whatsapp: str = ""
 
 
 class PersonPatch(BaseModel):
     name: str | None = None
-    role_id: str | None = None
+    role_ids: list[str] | None = None
     calls_them: str | None = None
     whatsapp: str | None = None
 
@@ -99,7 +99,8 @@ async def add_person(body: PersonBody, workspace_id: SelectedWorkspaceIdDep) -> 
     return await _call(
         "add the person",
         lambda: PersonAddTool().execute(
-            name=body.name, role_id=body.role_id, calls_them=body.calls_them, whatsapp=body.whatsapp, workspace=workspace_id
+            name=body.name, role_ids=body.role_ids, calls_them=body.calls_them, whatsapp=body.whatsapp,
+            workspace=workspace_id,
         ),
     )
 
@@ -111,7 +112,7 @@ async def update_person(person_id: str, body: PersonPatch, workspace_id: Selecte
         lambda: PersonUpdateTool().execute(
             person=person_id,
             name=body.name,
-            role_id=body.role_id,
+            role_ids=body.role_ids,
             calls_them=body.calls_them,
             whatsapp=body.whatsapp,
             workspace=workspace_id,

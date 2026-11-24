@@ -64,6 +64,15 @@ def test_a_feature_without_see_is_read_with_any_of_its_rights():
     assert allowed(rule, "GET", "adult", ["settings.change"]) and not allowed(rule, "GET", "adult", [])
 
 
+def test_a_grant_for_their_own_reaches_nothing_in_an_app_yet():
+    """Permissions phase 1: the app knows one role and hands the check no record's owners, so a key ending ":own"
+    grants nothing here, whether its right is personal or not (several roles and "whose" come with phase 5)."""
+    rule = rule_for("GET", "/api/service-status")
+    assert rule is not None
+    assert not allowed(rule, "GET", "adult", ["status.see:own"])
+    assert allowed(rule, "GET", "adult", ["status.see", "status.see:own"])
+
+
 def test_users_and_roles_are_the_owners():
     for method, path in [("GET", "/api/users"), ("PUT", "/api/users/{user_id}"), ("GET", "/api/roles")]:
         rule = rule_for(method, path)

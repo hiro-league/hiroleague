@@ -3,7 +3,7 @@
   import * as Dialog from '$kit/components/ui/dialog/index.js';
   import Field from '$kit/ui/field.svelte';
   import { Input } from '$kit/components/ui/input/index.js';
-  import PickSelect from '$kit/ui/pick-select.svelte';
+  import CheckboxField from '$kit/ui/checkbox-field.svelte';
   import type { PeopleController } from '../state/people-controller.svelte';
 
   let { ctrl }: { ctrl: PeopleController } = $props();
@@ -33,16 +33,21 @@
         <Field label="What Hiro calls them" for="{uid}-calls" hint="Leave empty to use their name.">
           <Input id="{uid}-calls" bind:value={ctrl.form.calls_them} placeholder={ctrl.form.name} />
         </Field>
-        <Field label="Role" for="{uid}-role" hint="What each role may do in Home is set in HomeHiro.">
-          <PickSelect
-            id="{uid}-role"
-            class="h-8 w-full text-sm"
-            label="Role"
-            value={ctrl.form.role_id}
-            options={ctrl.roles.map((role) => ({ value: role.role_id, label: role.name }))}
-            onchange={(v) => ctrl.form && (ctrl.form.role_id = v)}
-          />
-        </Field>
+        <!-- Permissions phase 1: several roles a person, their rights adding up -->
+        <fieldset class="grid gap-1.5">
+          <legend class="mb-1.5 font-sans text-sm font-medium">Roles</legend>
+          {#each ctrl.roles as role (role.role_id)}
+            {@const held = ctrl.form.role_ids.includes(role.role_id)}
+            <CheckboxField
+              label={role.name}
+              checked={held}
+              disabled={held && ctrl.form.role_ids.length === 1}
+              help={role.says || undefined}
+              onchange={() => ctrl.toggleRole(role.role_id, !held)}
+            />
+          {/each}
+          <p class="font-sans text-xs text-muted-foreground">Their rights add up. What each role may do is on Roles.</p>
+        </fieldset>
         <Field label="WhatsApp number" for="{uid}-whatsapp" hint="With the country code, e.g. +20 100 123 4567. Empty = none.">
           <Input id="{uid}-whatsapp" bind:value={ctrl.form.whatsapp} inputmode="tel" autocomplete="off" />
         </Field>

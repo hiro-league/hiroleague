@@ -39,9 +39,27 @@ def test_the_list_has_people_and_roles_without_sign_in_details(tmp_path: Path) -
     give_sign_in(tmp_path, michel.person_id, sign_in="michel", password="correct horse")
     answer = asyncio.run(handle_people_list({}, _ctx(tmp_path)))
     assert answer["people"] == [
-        {"person_id": michel.person_id, "name": "Michel", "calls_them": "", "whatsapp": "201000000001", "role_id": "owner"}
+        {"person_id": michel.person_id, "name": "Michel", "calls_them": "", "whatsapp": "201000000001", "role_id": "owner",
+         "role_ids": ["owner"]}
     ]
     assert [r["role_id"] for r in answer["roles"]] == ["owner", "adult", "kid"]
+
+
+def test_the_list_carries_every_role_and_the_first(tmp_path: Path) -> None:
+    """Permissions phase 1: role_ids is every role held; role_id stays the first, what an app knowing one reads."""
+    add_person(tmp_path, name="Mark", role_ids=["kid", "adult"])
+    person = asyncio.run(handle_people_list({}, _ctx(tmp_path)))["people"][0]
+    assert person["role_ids"] == ["adult", "kid"] and person["role_id"] == "adult"
+
+
+def test_an_extension_sets_several_roles_or_one(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    added = asyncio.run(handle_people_add({"name": "Mark", "role_ids": ["kid", "adult"]}, ctx))["person"]
+    assert added["role_ids"] == ["adult", "kid"]
+    kept = asyncio.run(handle_people_update({"person_id": added["person_id"], "role_id": "adult"}, ctx))["person"]
+    assert kept["role_ids"] == ["adult", "kid"]  # already their first role: nothing changes
+    with pytest.raises(RequestRefused, match="list"):
+        asyncio.run(handle_people_update({"person_id": added["person_id"], "role_ids": "kid"}, ctx))
 
 
 def test_an_extension_adds_and_changes_people_and_roles(tmp_path: Path) -> None:
