@@ -12,17 +12,20 @@ the background and nothing else waits on it.
 While connected, the app's log lines (INFO and up) go to the core's log store too (the SDK's `log_sender`, started
 with the link): the core's log tools then answer across every app. The app's own file stays the first copy.
 
-Settings → HiroLeague sets the core's address (stored in the database, key `hiroleague_url`), the app's own address
-(key `<app>_url`, e.g. `nethiro_url`) and pairs. The app's address is a LAN name the core sets up (`sites.claim`,
-hiroleague docs/site-names-design.md): the app claims `<label>.hiro.local` or `<label>.local` with the port it listens on,
-the core publishes the name and points its web proxy there, and the app then declares `http://<name>` as its site. Until
-a name is set, the app claims `<Extension.name>.hiro.local` by itself once connected.
+Settings → HiroLeague sets the core's address (key `hiroleague_url`), the app's own address (key `<app>_url`, e.g.
+`nethiro_url`) and pairs. The keys live in the app's database (`settings`), or in a store the app hands the link
+(`LinkSettings`, `link.use_settings`): CodeHiro, which keeps its own SQLite store, not the kit's database. The app's
+address is a LAN name the core sets up (`sites.claim`, hiroleague docs/site-names-design.md): the app claims
+`<label>.hiro.local` or `<label>.local` with the port it listens on, the core publishes the name and points its web
+proxy there, and the app then declares `http://<name>` as its site. Until a name is set, the app claims
+`<Extension.name>.hiro.local` by itself once connected.
 
 Backend kit, step 3: NetHiro's and TrainHiro's own copies, the same but for the values now in `Extension`.
 """
 
+import asyncio
 import time
-from typing import Any
+from typing import Any, Protocol
 
 from hiro_channel_sdk import ExtensionClient, ExtensionCredentials, ExtensionInfo, ExtensionOffers, ExtensionRequestError
 from hiro_channel_sdk.constants import (CORE_REPO, EVENT_TYPE_RESOURCE_CHANGED, METHOD_CORE_INFO, METHOD_SITES_CLAIM,
@@ -36,7 +39,6 @@ from sqlmodel import Session
 
 from . import calls, identity, settings
 from .auth.identity import DEV
-from .db import run_db
 from .errors import AppError, Invalid, OutsideError, Unavailable, failed, translate
 from .events import bus
 from .extension import ext
@@ -79,7 +81,8 @@ def info_for(site_url: str) -> ExtensionInfo:
         knows=list(e.knows),
         can_do=list(e.can_do),
         tells=list(e.tells),
-        shows=[{"kind": OFFER_KIND_SITE, "title": e.site_title, "icon": e.site_icon, "url": site_url, "roles": []}],
+        shows=[{"kind": OFFER_KIND_SITE, "title": e.site_title, "icon": e.site_icon, "url": site_url,
+                "roles": list(e.site_roles)}],
     )
     return ExtensionInfo(name=e.name, version=e.version, description=e.description, offers=offers, uses=list(e.uses), voice_uses=list(e.voice_uses),
                          embed_uses=list(e.embed_uses), rerank_uses=list(e.rerank_uses),
@@ -87,13 +90,32 @@ def info_for(site_url: str) -> ExtensionInfo:
                          features=list(e.features))  # its features and rights, granted per role in HiroLeague
 
 
-def _read(session: Session, key: str) -> str:
-    return settings.get(session, key) or ""
+class LinkSettings(Protocol):
+    """Where the link keeps what Settings → HiroLeague sets: the core's address (URL_KEY), the admin's (ADMIN_URL_KEY)
+    and the app's own (SITE_URL_KEY). Plain functions, run in a worker thread since they may wait on a database;
+    `put(key, "")` takes the key away (back to its default)."""
+
+    def get(self, key: str) -> str: ...
+
+    def put(self, key: str, value: str) -> None: ...
 
 
-def _write(session: Session, key: str, value: str) -> None:
-    settings.put(session, key, value or None)
-    session.commit()
+class AppDatabase:
+    """The link's settings in the app's own database (`settings`, the kit's `db`): every app on the kit's database.
+    `db` is imported on first use, so an app that hands the link a store of its own never opens the kit's database."""
+
+    def get(self, key: str) -> str:
+        from .db import engine  # first use: see the class's notes
+
+        with Session(engine) as session:
+            return settings.get(session, key) or ""
+
+    def put(self, key: str, value: str) -> None:
+        from .db import engine
+
+        with Session(engine) as session:
+            settings.put(session, key, value or None)
+            session.commit()
 
 
 def check_admin_url(url: str) -> str:
@@ -158,6 +180,7 @@ class HiroLeagueLink(Worker):
 
     def __init__(self) -> None:
         super().__init__()
+        self.settings: LinkSettings = AppDatabase()  # where its settings live (use_settings for another store)
         self.admin_url_set = ""  # Settings → HiroLeague's admin address ("" = derived); read when the link starts
         self.site_url_set = ""  # the app's address ("" = none claimed yet: the default); read when the link starts
         # (the real info is set at connect time, from the app's Extension: _connect)
@@ -182,12 +205,25 @@ class HiroLeagueLink(Worker):
             self.spawn(LogSender(self.client, *files).run(), "send logs")
 
     async def _connect(self) -> None:
-        self.admin_url_set = await run_db(_read, ADMIN_URL_KEY)
-        self.site_url_set = await run_db(_read, SITE_URL_KEY)
-        self.client.update_info(info_for(self.site_url()))  # declared with the address set
-        url = await run_db(_read, URL_KEY)
-        self.client.set_url(url)
+        self._took(await self._read(URL_KEY), await self._read(ADMIN_URL_KEY), await self._read(SITE_URL_KEY))
         await self.client.run()
+
+    def use_settings(self, store: LinkSettings) -> None:
+        """Keep the link's settings in `store`, not the app's database (CodeHiro: its own SQLite store), and read them
+        from it now, so Settings → HiroLeague shows them before the link starts. Called before `start()`."""
+        self.settings = store
+        self._took(store.get(URL_KEY), store.get(ADMIN_URL_KEY), store.get(SITE_URL_KEY))
+
+    def _took(self, url: str, admin_url: str, site_url: str) -> None:
+        self.admin_url_set, self.site_url_set = admin_url, site_url
+        self.client.update_info(info_for(self.site_url()))  # declared with the address set
+        self.client.set_url(url)
+
+    async def _read(self, key: str) -> str:
+        return await asyncio.to_thread(self.settings.get, key)
+
+    async def _write(self, key: str, value: str) -> None:
+        await asyncio.to_thread(self.settings.put, key, value)
 
     async def _claim_default(self) -> None:
         """The app's first connection claims <name>.hiro.local, so its Apps card and sign-in work without a visit to
@@ -245,7 +281,7 @@ class HiroLeagueLink(Worker):
             published, proxied = bool(answer["published"]), bool(answer["proxied"])
             note = str(answer.get("note") or "")
         url = f"http://{name}"
-        await run_db(_write, SITE_URL_KEY, url)
+        await self._write(SITE_URL_KEY, url)
         self.site_url_set = url
         self.client.update_info(info_for(self.site_url()))
         if self.client.url:
@@ -262,13 +298,13 @@ class HiroLeagueLink(Worker):
 
     async def set_admin_url(self, url: str) -> dict[str, Any]:
         url = check_admin_url(url)
-        await run_db(_write, ADMIN_URL_KEY, url)
+        await self._write(ADMIN_URL_KEY, url)
         self.admin_url_set = url
         return self.status()
 
     async def set_url(self, url: str) -> dict[str, Any]:
         url = check_url(url)
-        await run_db(_write, URL_KEY, url)
+        await self._write(URL_KEY, url)
         self.client.set_url(url)
         return self.status()
 

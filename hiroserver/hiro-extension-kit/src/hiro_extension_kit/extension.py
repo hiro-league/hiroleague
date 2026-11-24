@@ -68,6 +68,9 @@ class Extension:
     # Its address until a name is claimed, e.g. HomeHiro's hand-written http://homehiro.local. "": none, and the app
     # claims <name>.hiro.local by itself on its first connection.
     site_default: str = ""
+    # The roles its Apps card and app-switcher tile are shown to (offers.shows' `roles`); () = every role. CodeHiro:
+    # the owner only, since it refuses everyone else at sign-in.
+    site_roles: Sequence[str] = ()
     other_way: OtherWay | None = None  # another way in beside HiroLeague's sign-in (HomeHiro: HA's add-on)
     users_scope: UsersScope | None = None  # what the app keeps per user beside their role (HomeHiro: My room)
     # Each time the family copy is written (family.py), before the users' roles are worked out again: the app tidies its

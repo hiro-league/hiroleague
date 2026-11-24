@@ -13,23 +13,22 @@ and rights are its `Extension.features` (access.py); every route's check is guar
 
 import dataclasses
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
-from urllib.parse import quote, urlencode, urlsplit
+from typing import Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import RedirectResponse
-from hiro_channel_sdk import ExtensionRequestError
-from hiro_channel_sdk.constants import AUTH_ERROR_INVALID_CODE, METHOD_AUTH_CODE
 from pydantic import BaseModel, Field
 from sqlmodel import Session, col, select
 
 from .. import family, identity, switchboard
 from ..db import get_session, run_db
-from ..errors import Invalid, AppError, NotAllowed, NotFound, NotSignedIn, OutsideError, Unavailable, failed
+from ..errors import Invalid, AppError, NotAllowed, NotFound, NotSignedIn, failed
 from ..extension import ext
 from ..hiroleague import link
 from .models import AppUser, CorePerson, Role
 from . import sessions
+from .one_sign_in import after_core_sign_out, local_path, redeem, sign_in_url, sign_out_url
 from .access import OWNER, levels, rights_of
 from .identity import Caller, caller_of, device_of
 
@@ -37,7 +36,6 @@ log = identity.logger("auth")
 router = APIRouter(prefix="/api")
 
 SEEN_EVERY = timedelta(minutes=5)  # how often "last here" is written for someone who keeps using the app
-REDEEM_TIMEOUT = 10.0  # seconds: asking the core whose sign-in code it is
 
 
 def _now() -> datetime:
@@ -188,11 +186,6 @@ async def me(request: Request) -> MeOut:
 # ---- Signing in through HiroLeague (Phase 8: one sign-in)
 
 
-def local_path(path: str) -> str:
-    """Only a path on the app itself, never another site ("//evil.example", "https://...")."""
-    return path if path.startswith("/") and not path.startswith(("//", "/\\")) else "/"
-
-
 def _failed_sign_in(message: str) -> RedirectResponse:
     return RedirectResponse("/?signin_error=" + quote(message), 303)
 
@@ -201,35 +194,13 @@ def _failed_sign_in(message: str) -> RedirectResponse:
 async def sign_in(next: str = "/") -> RedirectResponse:
     """A signed-out browser goes to HiroLeague's sign-in page, which sends it back to /api/auth/hiro with a one-time
     code."""
-    admin = link.admin_url()
-    if not admin:
+    url = sign_in_url(link, next)
+    if url is None:
         other = ext().other_way
         ask = f"{other.elsewhere}ask the owner" if other and other.elsewhere else "Ask the owner"
         return _failed_sign_in(f"{_title()} doesn't know HiroLeague's address yet, so it can't send you there to sign in. "
                                f"{ask} to set it (Settings → HiroLeague).")
-    return RedirectResponse(f"{admin}/sign-in?{urlencode({'for': ext().name, 'next': local_path(next)})}", 303)
-
-
-async def _redeem(code: str) -> dict[str, Any]:
-    """Whose one-time code this is, asked of the core (`auth.code`): {person_id, name, role_id, role_name}."""
-    if not code:
-        raise Invalid("The sign-in came back without its code. Sign in again.")
-    client = link.client
-    if not client.connected:
-        raise Unavailable(f"{_title()} isn't connected to HiroLeague right now, so it can't finish signing you in. "
-                          "Try again in a minute.")
-    try:
-        answer = await client.request(METHOD_AUTH_CODE, {"code": code}, timeout=REDEEM_TIMEOUT)
-    except ExtensionRequestError as exc:
-        if exc.code == AUTH_ERROR_INVALID_CODE:
-            raise Invalid("This sign-in has expired or was used already. Sign in again.") from exc
-        if exc.code in ("not_connected", "timeout"):
-            raise Unavailable(f"HiroLeague didn't answer, so {_title()} can't finish signing you in. Try again in a "
-                              "minute.") from exc
-        raise OutsideError(f"HiroLeague couldn't say who signed in ({exc.code}): {exc.message}") from exc
-    if not isinstance(answer.get("person_id"), str) or not answer["person_id"]:
-        raise OutsideError("HiroLeague's answer about who signed in can't be read")
-    return answer
+    return RedirectResponse(url, 303)
 
 
 def _start_session(session: Session, c: Caller) -> str:
@@ -243,7 +214,7 @@ async def signed_in_at_hiroleague(request: Request, code: str = "", next: str = 
     """HiroLeague sent the browser back with a one-time code: ask the core whose it is, start the app's own session
     (90 days), go where they were going. A failure goes back to the app's first page, which says why."""
     try:
-        who = await _redeem(code)
+        who = await redeem(link, code)
     except AppError as exc:
         failed(log, "Signing in through HiroLeague", exc)
         return _failed_sign_in(str(exc))
@@ -267,19 +238,12 @@ async def _end_this_session(request: Request) -> None:
     await run_db(lambda s: sessions.end(s, token))
 
 
-def _origin(url: str) -> str | None:
-    parts = urlsplit(url or "")
-    return f"{parts.scheme}://{parts.netloc}" if parts.scheme in ("http", "https") and parts.netloc else None
-
-
 @router.post("/auth/logout")
 async def sign_out(request: Request) -> Response:
     """Sign out, of HiroLeague too. The app's session ends here; the page then goes to HiroLeague's sign-out, which ends
     that one and shows its sign-in page, back to the app after the next sign-in."""
     await _end_this_session(request)
-    admin = link.admin_url()
-    then = f"{admin}/api/auth/sign-out?{urlencode({'for': ext().name})}" if admin else None
-    r = Response(SignedOut(then=then).model_dump_json(), media_type="application/json")
+    r = Response(SignedOut(then=sign_out_url(link)).model_dump_json(), media_type="application/json")
     r.delete_cookie(sessions.COOKIE, path="/")
     return r
 
@@ -289,9 +253,7 @@ async def signed_out_by_hiroleague(request: Request, next: str = "/") -> Redirec
     """HiroLeague's Sign out passes the browser through here (signing out of both): the app's session in this browser
     ends, then on to `next`, only ever back to HiroLeague's own address (anything else: the app's first page)."""
     await _end_this_session(request)
-    admin = _origin(link.admin_url() or "")
-    target = next if admin and _origin(next) == admin else "/"
-    r = RedirectResponse(target, 303)
+    r = RedirectResponse(after_core_sign_out(link, next), 303)
     r.delete_cookie(sessions.COOKIE, path="/")
     return r
 
