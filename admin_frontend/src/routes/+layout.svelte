@@ -19,7 +19,6 @@
   import AdminRuntime from '$lib/shell/AdminRuntime.svelte';
   import AdminTopBar from '$lib/shell/AdminTopBar.svelte';
   import { menuPreview } from '$lib/shell/menu-preview.svelte';
-  import MockupBadge from '$kit/ui/mockup-badge.svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import { ADMIN_SHELL_CONTENT_PADDING, ADMIN_SHELL_HEADER_PADDING } from '$lib/styling/admin-tokens';
   import { cn } from '$kit/utils';
@@ -48,12 +47,11 @@
   {@render children?.()}
 {/if}
 
-<!-- mockup: Permissions phase 2, People → Roles' "View as": the admin as that role sees it, on every page and on the
+<!-- Permissions phase 2, People → Roles' "View as": the admin as that role's people see it, on every page and on the
      apps-only view a role with no page gets -->
 {#snippet previewBar()}
   {#if menuPreview.current}
     <div class={cn('flex items-center gap-3 border-b border-primary/20 bg-primary/5 py-1.5 font-sans text-sm', ADMIN_SHELL_HEADER_PADDING)}>
-      <MockupBadge />
       <span>Viewing as <span class="font-medium">{menuPreview.current.roleName}</span></span>
       <Button size="sm" variant="outline" class="ml-auto" onclick={() => menuPreview.stop()}>Stop</Button>
     </div>

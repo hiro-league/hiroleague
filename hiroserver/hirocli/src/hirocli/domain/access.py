@@ -2,9 +2,9 @@
 
 A source is HiroLeague itself or one paired extension. Each declares features with rights
 (hiro_channel_sdk.access); the core keeps, per role, the rights it grants in each extension
-(domain/people.py ``Role.rights``) and the extension enforces them. HiroLeague's own source has one
-right for now, opening its settings, which is Phase 8's ``Role.admin`` switch; Hiro's tools get
-theirs in Phase 10.
+(domain/people.py ``Role.rights``) and the extension enforces them. HiroLeague's own source declares the
+core's features (Permissions phase 2, domain/core_features.py), kept under ``hiroleague`` like an app's grants; the
+admin checks them on every route.
 
 Rights are checked against what the extension declared when they are set, and again when they are
 read (a right the extension no longer declares drops out). The owner has every right except the
@@ -19,25 +19,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from hiro_channel_sdk.access import OWN, ExtensionFeature, ExtensionRight, declared_keys, normalize, owner_rights
+from hiro_channel_sdk.access import OWN, ExtensionFeature, declared_keys, normalize, owner_rights
 from pydantic import BaseModel, ValidationError
 
 from hiro_commons.log import Logger
 
 from .extensions import PairedExtension, list_paired_extensions
-from .people import OWNER_ROLE, PeopleError, Role, get_role, list_roles, set_role_admin, set_role_rights, set_role_says
+from .core_features import CORE_AREAS, CORE_FEATURES, CORE_SOURCE, admin_levels, opens_admin
+from .people import OWNER_ROLE, PeopleError, Role, get_role, list_roles, set_role_rights, set_role_says
 
 log = Logger.get("ACCESS")
 
-CORE_SOURCE = "hiroleague"
-CORE_FEATURES: list[ExtensionFeature] = [
-    ExtensionFeature(
-        id="admin",
-        name="HiroLeague's settings",
-        rights=[ExtensionRight(id="open", name="Open", says="Open HiroLeague's settings (this admin); without it, the Apps card only")],
-    )
-]
-ADMIN_OPEN = "admin.open"
 
 
 class Source(BaseModel):
@@ -46,6 +38,8 @@ class Source(BaseModel):
     kind: str  # "core" | "extension"
     extension_id: str = ""
     features: list[ExtensionFeature]
+    # The areas that group several features ({area id: name}): the core's; an app declares none yet
+    areas: dict[str, str] = {}
 
 
 def _declared(ext: PairedExtension) -> list[ExtensionFeature]:
@@ -61,7 +55,7 @@ def _declared(ext: PairedExtension) -> list[ExtensionFeature]:
 
 def list_sources(workspace_path: Path) -> list[Source]:
     """HiroLeague first, then every paired extension that declared features, in pairing order."""
-    sources = [Source(id=CORE_SOURCE, name="HiroLeague", kind="core", features=CORE_FEATURES)]
+    sources = [Source(id=CORE_SOURCE, name="HiroLeague", kind="core", features=CORE_FEATURES, areas=CORE_AREAS)]
     for ext in list_paired_extensions(workspace_path):
         features = _declared(ext)
         if features and ext.name:
@@ -89,8 +83,6 @@ def rights_in(role: Role, source: str, features: list[ExtensionFeature]) -> list
     """A role's rights in one source, kept to what the source declares now."""
     if role.role_id == OWNER_ROLE:
         return [k for k in normalize(features, owner_rights(features))]
-    if source == CORE_SOURCE:
-        return [ADMIN_OPEN] if role.admin else []
     return normalize(features, role.rights.get(source, []))
 
 
@@ -106,8 +98,6 @@ def set_rights(workspace_path: Path, role_id: str, source: str, keys: list[str])
                           "everyone's or not at all.")
     if unknown:
         raise PeopleError(f"{source} has no right called {', '.join(unknown)}.")
-    if source == CORE_SOURCE:
-        return set_role_admin(workspace_path, role_id, ADMIN_OPEN in keys)
     return set_role_rights(workspace_path, role_id, source, normalize(features, keys))
 
 
@@ -169,3 +159,28 @@ def roles_with_rights(workspace_path: Path) -> list[dict[str, Any]]:
         {**r.model_dump(exclude={"rights"}), "rights": {s.id: rights_in(r, s.id, s.features) for s in sources}}
         for r in list_roles(workspace_path)
     ]
+
+
+class AdminAccess(BaseModel):
+    """What a person may do in HiroLeague itself: their keys in the core over all their roles, and each core
+    feature's level for the admin's pages (only a grant for everyone's opens one)."""
+
+    owner: bool
+    keys: list[str]
+    levels: dict[str, str]
+
+    @property
+    def opens_admin(self) -> bool:
+        return opens_admin(self.levels)
+
+
+def admin_access(workspace_path: Path, role_ids: list[str]) -> AdminAccess:
+    """A person's access to the admin from the roles they hold: the owner has every feature; anyone else the keys their
+    roles add up to. An unknown role adds nothing."""
+    owner = OWNER_ROLE in role_ids
+    keys: set[str] = set()
+    for role in list_roles(workspace_path):
+        if role.role_id in role_ids:
+            keys.update(rights_in(role, CORE_SOURCE, CORE_FEATURES))
+    ordered = [k for k in declared_keys(CORE_FEATURES) if k in keys]
+    return AdminAccess(owner=owner, keys=ordered, levels=admin_levels(ordered, owner))

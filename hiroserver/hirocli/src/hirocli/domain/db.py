@@ -30,6 +30,7 @@ columns always set by application code at insert time.
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 from contextlib import asynccontextmanager
@@ -38,6 +39,8 @@ from pathlib import Path
 import aiosqlite
 
 from hiro_commons.constants.storage import DB_DIR, WORKSPACE_DB_FILENAME
+
+from .core_features import CORE_SOURCE, every_core_key
 
 _log = logging.getLogger(__name__)
 
@@ -412,6 +415,27 @@ def _fill_person_roles(conn: sqlite3.Connection) -> int:
     return max(cur.rowcount, 0)
 
 
+def _give_core_to_admin_roles(conn: sqlite3.Connection) -> list[str]:
+    """Permissions phase 2, once per role: a role whose Phase 8 admin switch is on, and that holds nothing in the
+    core yet, gets every core permission, so nobody who opened the admin loses a page. A role with any core grants
+    (even none, set on the Roles page) is never touched again, and Owner needs none. Returns the role ids given them.
+    """
+    given: list[str] = []
+    rows = conn.execute("SELECT role_id, rights FROM roles WHERE admin = 1 AND role_id != 'owner'").fetchall()
+    for role_id, raw in rows:
+        try:
+            rights = json.loads(raw or "{}")
+        except json.JSONDecodeError:
+            _log.warning("Roles: %s's rights can't be read; its core permissions are left as they are", role_id)
+            continue
+        if not isinstance(rights, dict) or CORE_SOURCE in rights:
+            continue
+        rights[CORE_SOURCE] = every_core_key()
+        conn.execute("UPDATE roles SET rights = ? WHERE role_id = ?", (json.dumps(rights), role_id))
+        given.append(str(role_id))
+    return given
+
+
 # ---------------------------------------------------------------------------
 # Path helper
 # ---------------------------------------------------------------------------
@@ -453,8 +477,11 @@ def ensure_db(workspace_path: Path) -> None:
         copied = _copy_into_extension_records(conn)
         _add_missing_columns(conn)
         filled = _fill_person_roles(conn)
+        given = _give_core_to_admin_roles(conn)
     finally:
         conn.close()
+    if given:
+        _log.info("Roles: %s opened the admin, and now hold every core permission (Permissions phase 2)", ", ".join(given))
     if filled:
         _log.info("People: %d person(s) now hold their role in person_roles (Permissions phase 1)", filled)
     if copied is not None:

@@ -1,6 +1,7 @@
 import { untrack } from 'svelte';
 import {
   addRole,
+  getRoleAdminView,
   listAccess,
   removeRole,
   renameRole,
@@ -13,9 +14,9 @@ import {
 import { Action } from '$kit/state/action.svelte';
 import { Resource } from '$kit/state/resource.svelte';
 import type { Notify } from '$kit/ui/toast.svelte';
+import { menuPreview } from '$lib/shell/menu-preview.svelte';
 import { featureOfKey, reachOf, setReach, withReaches, type Reach } from '../reach';
-import { CORE_SOURCE, coreSourceMock } from '../core-features-mock';
-import { coreGrantsMock as coreGrants } from '../core-grants-mock.svelte';
+
 
 export type RolesController = ReturnType<typeof createRolesController>;
 
@@ -40,9 +41,7 @@ export function createRolesController(
   firstRole: string | null = null
 ) {
   const access = new Resource(listAccess);
-  // mockup: the core's own features (Permissions phase 2) stand in for what the core declares today, in one place so
-  // Roles and Compare show the same; their grants live here and are never sent (saveRights)
-  const sources = $derived((access.data?.sources ?? []).map((s) => (s.id === CORE_SOURCE ? coreSourceMock() : s)));
+  const sources = $derived(access.data?.sources ?? []);
   const roles = $derived(access.data?.roles ?? []);
   const work = new Action();
 
@@ -91,22 +90,20 @@ export function createRolesController(
   }
 
   function granted(role: RoleAccess, source: AccessSource): Set<string> {
-    // mockup: the core's grants are this page's own until the core declares its features
-    if (source.id === CORE_SOURCE) {
-      if (role.role_id === OWNER) return new Set(source.features.flatMap((f) => f.rights.map((r) => rightKey(f.id, r.id))));
-      return new Set(coreGrants[role.role_id] ?? []);
-    }
     return new Set(role.rights[source.id] ?? []);
   }
 
   /** Save a role's keys in one source at once; the app follows. */
   function saveRights(role: RoleAccess, source: AccessSource, keys: string[]) {
-    // mockup: the core's stay here (the core keeps only declared keys, and would drop these)
-    if (source.id === CORE_SOURCE) {
-      coreGrants[role.role_id] = keys;
-      return;
-    }
     void run(() => setRoleRights(role.role_id, source.id, keys));
+  }
+
+  /** "View as": the admin's menu and tabs as this role's people see them, from the levels the core works out. */
+  async function viewAs(role: RoleAccess) {
+    await work.run(async () => {
+      menuPreview.start(role.name, (await getRoleAdminView(role.role_id)).levels);
+    });
+    if (work.error) notify('error', work.error);
   }
 
   /** Tick or untick one right; ticking adds See, unticking See takes the feature's other rights away. */
@@ -163,8 +160,7 @@ export function createRolesController(
     submitNew,
     submitRemove,
     granted,
-    /** mockup: a role's keys in the core, for "View as". */
-    coreKeys: (role: RoleAccess) => [...granted(role, sources.find((s) => s.id === CORE_SOURCE) ?? coreSourceMock())],
+    viewAs,
     reach,
     reaches,
     setRightReach,

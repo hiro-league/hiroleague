@@ -6,7 +6,6 @@
    * Compare, which app is shown (or all); it stays at the top while the page scrolls.
    */
   import { Eye, Plus, UserPlus } from '@lucide/svelte';
-  import { menuPreview } from '$lib/shell/menu-preview.svelte';
   import { OWNER } from './state/roles-controller.svelte';
   import { page } from '$app/state';
   import PageHeader from '$kit/ui/page-header.svelte';
@@ -40,7 +39,7 @@
     { id: 'roles' as const, label: 'Roles' },
     { id: 'compare' as const, label: 'Compare' }
   ];
-  // mockup: "View as" the role shown on Roles: the admin's menu and tabs as its people would see them
+  // "View as" the role shown on Roles: the admin's menu and tabs as its people see them (Permissions phase 2)
   const shownRole = $derived(roles.roles.find((r) => r.role_id === roles.role));
   // A role opened from Compare starts at the top of its rights, not where Compare was scrolled to.
   function openRole(roleId: string) {
@@ -62,8 +61,7 @@
         </Button>
       {:else if tab === 'roles'}
         {#if shownRole && shownRole.role_id !== OWNER}
-          <!-- mockup: Permissions phase 2 -->
-          <Button variant="outline" onclick={() => menuPreview.start(shownRole.name, roles.coreKeys(shownRole))}>
+          <Button variant="outline" disabled={roles.busy} onclick={() => void roles.viewAs(shownRole)}>
             <Eye size={15} /> View as {shownRole.name}
           </Button>
         {/if}

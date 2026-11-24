@@ -3,13 +3,13 @@
 One list, owned by the core. A person has a name, what Hiro calls them, a WhatsApp
 number, one or several roles, and a sign-in only if they use the admin. Extensions (HomeHiro
 first) read the list and are told when it changes; what a role may do inside an
-extension stays with that extension. The core checks nothing per role in Phase 6:
-whoever signs in to the admin can do everything there.
+extension stays with that extension, and what it may do in HiroLeague itself is the core's features
+(Permissions phase 2, domain/core_features.py), checked on every admin route.
 
 - ``roles`` and ``people`` are durable rows in workspace.db.
 - Phase 9a: a role also has a line on what it is for (``says``) and, per extension, the rights it is given
-  there (``rights``: {extension name: [right keys]}); domain/access.py checks them against what each extension
-  declares and handles HiroLeague's own right (``admin``).
+  there (``rights``: {extension name: [right keys]}, HiroLeague's own under ``hiroleague``); domain/access.py
+  checks them against what each source declares.
 - Owner, Adult and Kid are there from the start (the same ids HomeHiro uses);
   Owner is built in and can't be renamed or removed.
 - Permissions phase 1: a person holds one or several roles (``person_roles``), and their rights add up.
@@ -62,8 +62,8 @@ class Role(BaseModel):
     role_id: str
     name: str
     built_in: bool = False
-    # Phase 8: whether people with this role can open HiroLeague's settings (the admin). Owner always can;
-    # the others sign in only for the apps (the dashboard's Apps card) until a role is switched on.
+    # Phase 8's switch: the role opened every page of the admin. Permissions phase 2 reads it once, giving such a role
+    # every core permission (db.py); it is still written beside those grants, for a release that reads only it.
     admin: bool = False
     # Phase 9a: one line on what it is for, and the rights it has in each extension ({extension name: [keys]}).
     says: str = ""
@@ -314,12 +314,6 @@ def set_role_rights(workspace_path: Path, role_id: str, extension: str, keys: li
         conn.commit()
     _changed(workspace_path, "role_rights", role_id=role_id, extension=extension)
     return role.model_copy(update={"rights": rights})
-
-
-def opens_settings(workspace_path: Path, role_ids: list[str]) -> bool:
-    """Whether a person with these roles can open HiroLeague's settings (Phase 8): any of them can; an unknown role
-    can't."""
-    return any(r.admin for r in list_roles(workspace_path) if r.role_id in role_ids)
 
 
 def remove_role(workspace_path: Path, role_id: str) -> None:

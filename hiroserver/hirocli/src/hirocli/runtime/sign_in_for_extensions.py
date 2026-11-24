@@ -36,7 +36,8 @@ from hiro_channel_sdk.constants import (
 from hiro_commons.log import Logger
 
 from ..domain.extensions import list_paired_extensions
-from ..domain.people import get_person, get_role, opens_settings
+from ..domain.access import admin_access
+from ..domain.people import get_person, get_role
 from .request_handler import EXTENSIONS_ONLY, RequestContext, RequestRefused
 from .whatsapp_for_extensions import sender_label
 
@@ -296,7 +297,8 @@ async def handle_sites_list(params: dict[str, Any], ctx: RequestContext) -> dict
     sites = await asyncio.to_thread(list_sites, ctx.server_ctx.extension_manager, workspace_path)
     return {
         "apps": [app_entry(s) for s in sites_for_roles(sites, person.role_ids)],
-        "opens_settings": await asyncio.to_thread(opens_settings, workspace_path, person.role_ids),
+        # Permissions phase 2: any page of the admin their roles open (the field keeps its name: apps read it)
+        "opens_settings": (await asyncio.to_thread(admin_access, workspace_path, person.role_ids)).opens_admin,
     }
 
 

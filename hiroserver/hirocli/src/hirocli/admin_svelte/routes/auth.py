@@ -4,9 +4,9 @@ Every other ``/api`` route needs a signed-in session (``RequireSignIn`` below, a
 as middleware in admin/run.py). Sign-ins belong to the workspace this server runs
 (the hosting workspace), whichever workspace the admin is looking at.
 
-Phase 8: a role either opens HiroLeague's settings (Owner always; others when switched on)
-or not; someone whose role doesn't may call only the sign-in routes and ``/api/apps`` (the
-dashboard's Apps card). An extension's site sends a signed-out browser here
+Permissions phase 2: a person opens the admin's pages their roles' core permissions reach
+(domain/core_features.py); someone whose roles reach none may call only the sign-in routes and ``/api/apps``
+(the dashboard's Apps card). An extension's site sends a signed-out browser here
 (``/sign-in?for=<extension>&next=<path>``); once signed in, ``/api/auth/for/<extension>``
 sends it back with a one-time code (runtime/sign_in_for_extensions.py). A connected extension
 may offer a way to sign in (Home Assistant's login): ``/api/auth/with/<id>`` starts it there,
@@ -45,7 +45,8 @@ from hirocli.domain.admin_sign_in import (
     session_person,
     start_session,
 )
-from hirocli.domain.people import anyone_signs_in, get_person, get_role, opens_settings
+from hirocli.domain.access import AdminAccess, admin_access
+from hirocli.domain.people import anyone_signs_in, get_person, get_role
 from hirocli.runtime.sign_in_for_extensions import (
     CODES,
     app_entry,
@@ -64,7 +65,7 @@ auth_router = APIRouter()
 AUTH_PREFIX = "/api/auth/"
 # Phase 8: what someone whose role doesn't open HiroLeague's settings may still call.
 LIMITED_PREFIXES = (AUTH_PREFIX, "/api/apps")
-NOT_FOR_YOUR_ROLE = "Your role doesn't open HiroLeague's settings."
+NOT_FOR_YOUR_ROLE = "Your roles don't open this part of HiroLeague."
 
 # Wrong passwords: at most this many per sign-in name in the window, then wait.
 _MAX_FAILURES = 10
@@ -140,6 +141,12 @@ async def signed_in_person(request: Request) -> Any:
     return await run_in_threadpool(session_person, _workspace_path(request), token)
 
 
+def route_allows(access: AdminAccess, method: str, path: str) -> bool:
+    """Whether this access opens one admin route. Fails closed: until each route has its rule (phase 5's
+    ``hiro_commons.rules``, then the admin's own list), only the owner passes."""
+    return access.owner
+
+
 class RequireSignIn:
     """ASGI middleware: every /api route but /api/auth/* needs a signed-in session.
 
@@ -161,10 +168,10 @@ class RequireSignIn:
                 denied = api_failure("Sign in to the admin first.", 401)
                 await denied(scope, receive, send)
                 return
-            # Phase 8: signed in for the apps only (Adult and Kid by default): the settings stay shut.
+            # Signed in for the apps only (Adult and Kid by default), or for some pages: the rest stays shut.
             if not path.startswith(LIMITED_PREFIXES):
-                opens = await run_in_threadpool(opens_settings, self.workspace_path, person.role_ids)
-                if not opens:
+                access = await run_in_threadpool(admin_access, self.workspace_path, person.role_ids)
+                if not route_allows(access, scope.get("method", "GET"), path):
                     refused = api_failure(NOT_FOR_YOUR_ROLE, 403)
                     await refused(scope, receive, send)
                     return
@@ -177,14 +184,19 @@ async def who_am_i(request: Request) -> Any:
     workspace_path = _workspace_path(request)
     anyone = await run_in_threadpool(anyone_signs_in, workspace_path)
     role = await run_in_threadpool(get_role, workspace_path, person.role_id) if person else None
-    opens = await run_in_threadpool(opens_settings, workspace_path, person.role_ids) if person else False
+    access = await run_in_threadpool(admin_access, workspace_path, person.role_ids) if person else None
     # Phase 8: the ways to sign in connected extensions offer (the sign-in page's buttons).
     offers = [{"id": o.id, "label": o.label, "extension": o.extension} for o in list_sign_in_offers(_manager(request))]
     return {
             "signed_in": person is not None,
             "person": _public(person) if person else None,
             "role_name": role.name if role else None,
-            "can_open_settings": opens,  # any of their roles opens it
+            # Permissions phase 2: their keys in the core over all their roles, each core feature's level for the
+            # pages (the menu and the tabs read them), and whether any page opens at all
+            "owner": bool(access and access.owner),
+            "core_keys": access.keys if access else [],
+            "levels": access.levels if access else {},
+            "can_open_settings": bool(access and (access.owner or access.opens_admin)),
             "anyone_signs_in": anyone,
             "sign_in_offers": offers,
             # A test environment and what its core reaches (its switchboard), for the banner on every page; None in

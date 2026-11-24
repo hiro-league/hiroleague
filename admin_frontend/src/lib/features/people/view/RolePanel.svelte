@@ -16,8 +16,7 @@
   import type { AccessFeature, AccessSource, RoleAccess } from '$lib/api/people';
   import { OWNER, rightKey, type RolesController } from '../state/roles-controller.svelte';
   import type { Reach } from '../reach';
-  import MockupBadge from '$kit/ui/mockup-badge.svelte';
-  import { CORE_AREAS, CORE_SOURCE, groupByArea } from '../core-features-mock';
+  import { groupByArea } from '../areas';
 
   let { ctrl, role, holders }: { ctrl: RolesController; role: RoleAccess; holders: string[] } = $props();
 
@@ -94,18 +93,14 @@
     <section class="grid gap-1.5" aria-label={`${s.name}: rights`}>
       <SectionLabel level={4}>
         {s.name}
-        {#snippet actions()}
-          <!-- mockup: the core's own features (Permissions phase 2) -->
-          {#if s.id === CORE_SOURCE}<MockupBadge />{/if}
-          <span class="font-sans text-xs text-muted-foreground">{sourceLine(s)}</span>
-        {/snippet}
+        {#snippet actions()}<span class="font-sans text-xs text-muted-foreground">{sourceLine(s)}</span>{/snippet}
       </SectionLabel>
       {#if s.features.length === 0}
         <p class="font-sans text-sm text-muted-foreground">Nothing to give here yet.</p>
       {:else}
         {@const g = ctrl.granted(role, s)}
         <div class="grid divide-y rounded-lg border">
-          {#each groupByArea(s.features, s.id === CORE_SOURCE ? CORE_AREAS : {}) as group (group.area ?? group.features[0].id)}
+          {#each groupByArea(s.features, s.areas ?? {}) as group (group.area ?? group.features[0].id)}
           {#if group.area !== null}
             <!-- an area over its features (a permission is area.feature.action) -->
             <div class="bg-muted/40 px-3 py-1.5 font-sans text-xs font-semibold text-muted-foreground">{group.name}</div>

@@ -10,8 +10,7 @@
   import type { AccessFeature, AccessSource, RoleAccess } from '$lib/api/people';
   import type { RolesController } from '../state/roles-controller.svelte';
   import { featureSummary } from '../reach';
-  import MockupBadge from '$kit/ui/mockup-badge.svelte';
-  import { CORE_AREAS, CORE_SOURCE, groupByArea } from '../core-features-mock';
+  import { groupByArea } from '../areas';
 
   let { ctrl, onopen }: { ctrl: RolesController; onopen: (roleId: string) => void } = $props();
 
@@ -39,14 +38,10 @@
       {#each ctrl.shown as s (s.id)}
         <Table.Row class="bg-muted/40 hover:bg-muted/40">
           <Table.Cell colspan={ctrl.roles.length + 1} class="px-3 py-1.5 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
-            <span class="flex items-center gap-2">
-              {s.name}
-              <!-- mockup: the core's own features (Permissions phase 2) -->
-              {#if s.id === CORE_SOURCE}<MockupBadge class="normal-case" />{/if}
-            </span>
+            {s.name}
           </Table.Cell>
         </Table.Row>
-        {#each groupByArea(s.features, s.id === CORE_SOURCE ? CORE_AREAS : {}) as group (group.area ?? group.features[0].id)}
+        {#each groupByArea(s.features, s.areas ?? {}) as group (group.area ?? group.features[0].id)}
         {#if group.area !== null}
           <Table.Row class="hover:bg-transparent">
             <Table.Cell colspan={ctrl.roles.length + 1} class="px-3 pt-2 pb-1 text-xs font-semibold text-muted-foreground">{group.name}</Table.Cell>
