@@ -389,9 +389,19 @@ def _copy_into_extension_records(conn: sqlite3.Connection) -> tuple[int, int] | 
 def _fill_person_roles(conn: sqlite3.Connection) -> int:
     """Each person who holds no role in person_roles yet gets one row: the role in their people.role_id.
 
-    Only adds rows (people and roles are read, never written), so it is safe to run on every start: a person added by
-    an older release, which knew only people.role_id, is filled on the next. Returns how many people were filled.
+    people and roles are read, never written, so it is safe to run on every start: a person added by an older
+    release, which knew only people.role_id, is filled on the next. This release always keeps people.role_id one of a
+    person's rows; when it isn't, an older release run by hand on this database changed their role, so their rows are
+    dropped and they hold that one role, as the older release meant. Returns how many people were filled.
     """
+    conn.execute(
+        """
+        DELETE FROM person_roles WHERE person_id IN (
+            SELECT p.person_id FROM people p WHERE p.role_id != ''
+            AND NOT EXISTS (SELECT 1 FROM person_roles pr WHERE pr.person_id = p.person_id AND pr.role_id = p.role_id)
+        )
+        """
+    )
     cur = conn.execute(
         """
         INSERT OR IGNORE INTO person_roles (person_id, role_id)

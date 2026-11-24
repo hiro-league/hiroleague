@@ -112,3 +112,18 @@ def test_people_from_before_hold_their_one_role(tmp_path: Path) -> None:
     with sqlite3.connect(db) as conn:
         assert sorted(conn.execute("SELECT person_id, role_id FROM people")) == [("p1", "owner"), ("p2", "kid")]
         assert sorted(conn.execute("SELECT person_id, role_id FROM person_roles")) == [("p1", "owner"), ("p2", "kid")]
+
+
+def test_a_role_changed_by_an_older_release_is_the_one_they_hold(tmp_path: Path) -> None:
+    """Back to an older release by hand, on this database: it changes only people.role_id. On the next start of this
+    release that person holds that one role, and everyone else keeps theirs."""
+    from hirocli.domain.db import _fill_person_roles
+
+    mark = add_person(tmp_path, name="Mark", role_ids=["adult", "kid"])
+    mona = add_person(tmp_path, name="Mona", role_ids=["adult", "kid"])
+    db = tmp_path / "db" / "workspace.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE people SET role_id = 'owner' WHERE person_id = ?", (mark.person_id,))  # the older release
+        assert _fill_person_roles(conn) == 1
+    assert get_person(tmp_path, mark.person_id).role_ids == ["owner"]
+    assert get_person(tmp_path, mona.person_id).role_ids == ["adult", "kid"]
