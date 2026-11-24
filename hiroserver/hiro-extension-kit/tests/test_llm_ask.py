@@ -7,6 +7,7 @@ app declares stays in the app's tests."""
 
 import asyncio
 import base64
+import dataclasses
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -15,11 +16,13 @@ from fastapi.testclient import TestClient
 from hiro_channel_sdk import ExtensionRequestError
 from sqlmodel import Session, select
 
-from hiro_extension_kit import errors
+from hiro_extension_kit import errors, extension
 from hiro_extension_kit.db import engine
 from hiro_extension_kit.errors import Busy, Unavailable
+from hiro_extension_kit.extension import ext
 from hiro_extension_kit.llm import LLMError, ai_api, core_ai, profiles, recorder
 from hiro_extension_kit.llm.models import LlmRequest
+from hiro_extension_kit.testing import DictSettings, FakeLink
 
 _app = FastAPI()
 _app.include_router(ai_api.router)
@@ -61,6 +64,43 @@ def test_a_copys_own_profile_and_sound_and_an_apps_line_go_along(fake_ai):
     assert "pictures" not in params
     assert "label" not in params  # asked without a label ("Other"): none for AI usage either
     assert fake_ai.timeouts == [40 + profiles.SLACK]
+
+
+def test_a_folder_to_read_goes_along(fake_ai):
+    """Unified communication, phase 6: a use declared with folder=True asks a plan tool to read a folder (CodeHiro's
+    review of a checkout)."""
+    run(profiles.ask(None, "sites", "Review it", [], SCHEMA, folder="/srv/reports/checkouts/homehiro"))
+    assert fake_ai.asked[-1][1]["folder"] == "/srv/reports/checkouts/homehiro"
+    run(profiles.ask(None, "sites", "Sort them", [], SCHEMA))
+    assert "folder" not in fake_ai.asked[-1][1]
+
+
+def test_an_app_without_the_log_keeps_no_row_but_labels_its_asks(fake_ai, monkeypatch):
+    """Extension(llm_log=False), CodeHiro: nothing is kept in Logs → LLM requests, and the core's AI usage still
+    files the ask under its label."""
+    monkeypatch.setattr(extension, "_extension", dataclasses.replace(ext(), llm_log=False))
+
+    async def review():
+        async with recorder.recording("Reviews", "homehiro: Security"):
+            return await profiles.ask(None, "sites", "Review it", [], SCHEMA)
+
+    assert run(review()).text == '{"answer": "yes"}'
+    assert fake_ai.asked[-1][1]["label"] == "homehiro: Security"
+    with Session(engine) as s:
+        assert s.exec(select(LlmRequest)).all() == []
+
+
+def test_the_list_is_kept_in_the_store_the_app_hands_its_link(fake_ai, monkeypatch):
+    """An app with its own store (CodeHiro's reports.db, the link's `use_settings`): the last list is kept there, and
+    read back from there after a restart while the core is down."""
+    store = DictSettings()
+    monkeypatch.setattr(core_ai, "link", FakeLink(fake_ai, store))
+    run(core_ai.read())
+    assert list(store.kept) == [core_ai.CACHE_KEY]
+    core_ai._known = core_ai.Known()  # as after a restart
+    fake_ai.connected = False
+    d = run(core_ai.read())
+    assert not d.reachable and [p.id for p in d.profiles] == ["camera", "camera-codex", "hh-wake1"]
 
 
 def test_a_profile_from_before_the_import_is_asked_by_its_new_id(fake_ai):

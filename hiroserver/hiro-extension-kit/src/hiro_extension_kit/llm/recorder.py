@@ -11,6 +11,10 @@ A question asked outside any `recording` is kept too, as "Other". A request with
 isn't kept. Rows are kept KEEP_DAYS, their pictures PICTURE_DAYS (DATA_DIR/llm-requests/<id>/<n>.jpg). What the
 requests add up to is counted by the HiroLeague core since Phase 7b (its Logs → AI usage). Recording never stops a
 question: a failure to save is logged.
+
+An app with `Extension(llm_log=False)` keeps no log: a `recording` still labels its asks for the core's AI usage
+(`usage_label`), and nothing is saved. The database and the picture library are imported only when a request is
+saved, so such an app never opens the kit's database (CodeHiro keeps its own store).
 """
 
 import io
@@ -23,14 +27,13 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from hiro_commons.logging_foundation import story
-from PIL import Image
 from sqlmodel import Session, col, delete, select
 
 from .. import identity
 from .. import files
-from ..db import run_db
 from ..errors import failed
 from ..events import bus
+from ..extension import ext
 from .models import LlmRequest
 
 log = identity.logger("llm")
@@ -179,8 +182,10 @@ async def done(t: Try) -> None:
 
 
 async def keep(req: Request) -> None:
-    if not req.tries:
+    if not req.tries or not ext().llm_log:
         return
+    from ..db import run_db  # only when a request is kept (the module's notes)
+
     try:
         await run_db(_save, req)
     except Exception as exc:  # the question counts more than its log
@@ -204,6 +209,8 @@ def _parts(req: Request, prompt: str) -> list[dict]:
 
 
 def _size(jpeg: bytes) -> tuple[int, int]:
+    from PIL import Image  # only when a request is kept (the module's notes)
+
     try:
         with Image.open(io.BytesIO(jpeg)) as im:
             return im.size

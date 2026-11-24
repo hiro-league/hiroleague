@@ -4,9 +4,10 @@ Settings → AI from HiroLeague shows them.
 
 The list is read through the link (hiroleague.link) when the core says `resource.changed` for `ai.profiles`, when the
 link connects and in its slow round (follow.py; the `core-ai` worker follows it), and when a page asks for it and the
-last read is older than FRESH. It is kept in memory and in the database
-(setting CACHE_KEY, with when it was read), so while the core is down, or after a restart without it, the pickers
-still list the last profiles it sent, with when that was. A read that fails keeps the last list and says why.
+last read is older than FRESH. It is kept in memory and in the link's settings store (`link.settings`, CACHE_KEY,
+with when it was read: the app's database, or the store an app with its own hands the link, CodeHiro's reports.db),
+so while the core is down, or after a restart without it, the pickers still list the last profiles it sent, with when
+that was. A read that fails keeps the last list and says why.
 
 The core's answer is read loosely (`parse`, pure): a field it leaves out is left empty here, never a failure, so the
 two sides can grow apart a little without breaking the pickers.
@@ -22,12 +23,9 @@ from typing import Any, Literal
 from hiro_channel_sdk import ExtensionRequestError
 from hiro_channel_sdk.constants import METHOD_AI_PROFILES, METHOD_AI_USES_SET, RESOURCE_AI_PROFILES
 from pydantic import BaseModel
-from sqlmodel import Session
 
 from .. import identity
-from .. import settings
 from .. import calls
-from ..db import engine, run_db
 from ..errors import Invalid, Unavailable, failed
 from hiro_channel_sdk.workers import Worker
 from ..hiroleague import link
@@ -35,7 +33,7 @@ from ..extension import ext
 
 log = identity.logger("llm")
 
-CACHE_KEY = "core_ai_profiles"  # the last list read, as JSON {"answer", "fetched_at"} (settings table)
+CACHE_KEY = "core_ai_profiles"  # the last list read, as JSON {"answer", "fetched_at"} (the link's settings)
 FRESH = timedelta(seconds=30)  # a page's read asks the core again when the last read is older
 TIMEOUT = 10.0  # seconds the core may take to answer
 IMPORTED = "hh-"  # the core's import (`hiro ai import-homehiro`) kept HomeHiro's old profile ids as hh-<id>
@@ -198,18 +196,19 @@ class Known:
     answer: dict[str, Any] = field(default_factory=dict)  # the core's last answer, as it came
     fetched_at: datetime | None = None
     error: str | None = None
-    loaded: bool = False  # read back from the database once
+    loaded: bool = False  # read back from the link's settings once
 
 
 _known = Known()
 _lock: asyncio.Lock | None = None
 
 
-def _load(session: Session) -> None:
+def _load() -> None:
+    """The kept list, read back once (in a thread: the store is a database)."""
     if _known.loaded:
         return
     _known.loaded = True
-    raw = settings.get(session, CACHE_KEY)
+    raw = link.settings.get(CACHE_KEY)
     if not raw:
         return
     try:
@@ -221,9 +220,8 @@ def _load(session: Session) -> None:
         _known.answer, _known.fetched_at = {}, None
 
 
-def _keep(session: Session, answer: dict[str, Any], at: datetime) -> None:
-    settings.put(session, CACHE_KEY, json.dumps({"answer": answer, "fetched_at": at.isoformat()}))
-    session.commit()
+def _keep(answer: dict[str, Any], at: datetime) -> None:
+    link.settings.put(CACHE_KEY, json.dumps({"answer": answer, "fetched_at": at.isoformat()}))
 
 
 async def refresh() -> None:
@@ -231,7 +229,7 @@ async def refresh() -> None:
     global _lock
     _lock = _lock or asyncio.Lock()
     async with _lock:
-        await run_db(_load)
+        await asyncio.to_thread(_load)
         client = link.client
         if not client.connected:
             _known.error = _no_core()
@@ -247,14 +245,14 @@ async def refresh() -> None:
         at = datetime.now(UTC)
         _known.answer, _known.fetched_at, _known.error = answer if isinstance(answer, dict) else {}, at, None
         try:
-            await run_db(_keep, _known.answer, at)
+            await asyncio.to_thread(_keep, _known.answer, at)
         except Exception as exc:  # the list read counts more than its copy (backend guide, section 5.7)
             failed(log, "AI from HiroLeague: keeping the list of profiles", exc)
 
 
 async def read() -> CoreAi:
     """What the pickers and Settings show: read again when older than FRESH, else the last list."""
-    await run_db(_load)
+    await asyncio.to_thread(_load)
     if not link.client.connected:
         _known.error = _no_core()  # the last list, as it was
     elif not _known.fetched_at or datetime.now(UTC) - _known.fetched_at > FRESH or _known.error:
@@ -281,9 +279,7 @@ async def set_use(use: str, profile_id: str | None) -> None:
 
 def _profile_ids() -> set[str] | None:
     """The ids the core listed last; None when it never sent a list (nothing to check against)."""
-    if not _known.loaded:
-        with Session(engine) as session:
-            _load(session)
+    _load()
     if _known.fetched_at is None:
         return None
     return {p.id for p in parse(_known.answer)[0]}
@@ -298,8 +294,8 @@ def resolve(profile_id: str) -> str:
 
 
 async def resolved(profile_id: str) -> str:
-    """`resolve`, from the event loop: the kept list is read from the database in a thread first."""
-    await run_db(_load)
+    """`resolve`, from the event loop: the kept list is read from the link's settings in a thread first."""
+    await asyncio.to_thread(_load)
     return resolve(profile_id)
 
 

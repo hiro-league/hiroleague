@@ -4,8 +4,9 @@ with its AI profiles (the model, thinking, budget, fallbacks; its admin's Catalo
 A task names a profile of its own (one of the core's: core_ai.py lists them), or none, and the
 core takes the profile its Uses page gives the task's use (`<extension>:<use>`, declared in the app's Extension.uses). `ask()`:
 - sends the words, the pictures (base64 JPEGs, with their labels from the LLM requests log), the sound (base64, with
-  its type), the answer's schema and, for an app's question, `wait` false (the core answers `busy` at a plan tool that
-  is already busy, and the app sends it again, instead of queueing behind the app's own);
+  its type), the answer's schema, the folder a plan tool reads (a use declared with `folder=True`) and, for an app's
+  question, `wait` false (the core answers `busy` at a plan tool that is already busy, and the app sends it again,
+  instead of queueing behind the app's own);
 - maps the core's answer to `Asked` and adds what the core tried to the LLM requests log (recorder.py), so Logs →
   LLM requests and LLM usage keep working from the answers;
 - maps the core's refusals to the errors callers handle: `LimitReached` (429) when every profile in the chain is over
@@ -143,24 +144,26 @@ def _refused(exc: ExtensionRequestError, use: str, timeout: float) -> AppError:
 
 async def ask(profile_id: str | None, use: str, prompt: str, pictures: list[bytes], schema: dict,
               detail: Detail = "medium", local_only: bool = False, timeout: float | None = None, line: str = "",
-              sound: bytes | None = None) -> Asked:
+              sound: bytes | None = None, folder: str | None = None) -> Asked:
     """One question, asked of the HiroLeague core (see the module's notes), about `pictures` (JPEGs, in order; none:
     words only). `profile_id`: one of the core's profiles; None: the core's profile for `use`. `local_only`: the
     picture may only go to a model on the home's own machines (a camera's privacy, vision/): the core passes over
     every profile that isn't local. `timeout`: seconds the model may take (a question with many pages to read); none:
-    the core's own limit. `line`: "" for the app's own questions (they wait their turn at a busy plan tool), else the
-    id of the app that asks (answered `Busy` instead: apps_api.py). `sound`: a WAV heard with the words (the Wake
-    word's check)."""
+    the core's own limit. `line`: "" for the app's own questions (they wait their turn at a busy plan tool), else a
+    line of its own, answered `Busy` instead of waiting: the id of the app that asks (apps_api.py), or CodeHiro's
+    reviews. `sound`: a WAV heard with the words (the Wake
+    word's check). `folder`: the folder a plan tool reads to answer, as the core's machine names it (CodeHiro's review
+    of a checkout); the core asks only within the folders its admin allows the app (ai.folders)."""
     if not link.client.connected:  # checked first: nothing was asked, nothing to log
         raise Unavailable(f"Not asked: {core_ai._no_core()}")
     if recorder.active():
-        return await _ask(profile_id, use, prompt, pictures, schema, detail, local_only, timeout, line, sound)
+        return await _ask(profile_id, use, prompt, pictures, schema, detail, local_only, timeout, line, sound, folder)
     async with recorder.recording("Other", "Asked without a label"):  # kept in Logs → LLM requests all the same
-        return await _ask(profile_id, use, prompt, pictures, schema, detail, local_only, timeout, line, sound)
+        return await _ask(profile_id, use, prompt, pictures, schema, detail, local_only, timeout, line, sound, folder)
 
 
 async def _ask(profile_id: str | None, use: str, prompt: str, pictures: list[bytes], schema: dict, detail: Detail,
-               local_only: bool, timeout: float | None, line: str, sound: bytes | None) -> Asked:
+               local_only: bool, timeout: float | None, line: str, sound: bytes | None, folder: str | None) -> Asked:
     labels = recorder.labels()
     params: dict[str, Any] = {
         "use": use, "prompt": prompt, "schema": schema, "detail": detail, "local_only": local_only, "wait": not line,
@@ -170,6 +173,7 @@ async def _ask(profile_id: str | None, use: str, prompt: str, pictures: list[byt
            if pictures else {}),
         **({"sound": {"b64": base64.b64encode(sound).decode(), "mime": "audio/wav"}} if sound else {}),
         **({"timeout": timeout} if timeout else {}),
+        **({"folder": folder} if folder else {}),
         # Phase 7b: the core's AI usage files the ask under this label (the camera, or the task).
         **({"label": label} if (label := recorder.usage_label()) else {}),
     }

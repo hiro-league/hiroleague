@@ -62,6 +62,10 @@ class Extension:
     # What it says changed (offers.tells): {"resource", "name", "says"}, each sent with hiroleague.tell_changed()
     tells: Sequence[dict[str, Any]] = ()
     uses: Sequence[ExtensionUse] = ()  # what it asks the core's AI for
+    # Every ask kept in its LLM requests log (llm/recorder.py: a table in the app's database, Logs → LLM requests).
+    # False: not kept (CodeHiro, which has no such page and keeps its own store); the core counts each ask all the
+    # same, under its label (its Logs → AI usage).
+    llm_log: bool = True
     voice_uses: Sequence[ExtensionVoiceUse] = ()  # what it asks the core to say aloud
     embed_uses: Sequence[ExtensionSearchUse] = ()  # what it asks the core to turn into vectors (llm.search.embed)
     rerank_uses: Sequence[ExtensionSearchUse] = ()  # what it asks the core to put in order (llm.search.rerank)

@@ -429,10 +429,14 @@ class FakeCore:
 
 
 class FakeLink:
-    """The app's `hiroleague.link` as its feature modules use it: its client, and what Settings → HiroLeague reads."""
+    """The app's `hiroleague.link` as its feature modules use it: its client, its settings store (the app's database
+    unless a test hands one), and what Settings → HiroLeague reads."""
 
-    def __init__(self, client: Any) -> None:
+    def __init__(self, client: Any, settings: Any = None) -> None:
+        from .hiroleague import AppDatabase
+
         self.client = client
+        self.settings = settings if settings is not None else AppDatabase()
         self.followed: dict[str, Any] = {}  # resource -> the read that keeps its copy (follow.py); a test calls it
 
     def follow(self, resource: str, refresh: Any) -> Any:
@@ -442,6 +446,23 @@ class FakeLink:
     def status(self) -> dict[str, Any]:
         return {"url": "ws://127.0.0.1:18082", "status": "connected" if self.client.connected else "disconnected",
                 "error": None, "core": self.client.status_detail.get("core") if self.client.connected else None}
+
+
+class DictSettings:
+    """A settings store of an app's own, as the link is handed one (hiroleague.py `use_settings`, CodeHiro's
+    reports.db): plain get and put, "" taking a key away. `kept` is what it holds."""
+
+    def __init__(self, **kept: str) -> None:
+        self.kept = dict(kept)
+
+    def get(self, key: str) -> str:
+        return self.kept.get(key, "")
+
+    def put(self, key: str, value: str) -> None:
+        if value:
+            self.kept[key] = value
+        else:
+            self.kept.pop(key, None)
 
 
 def join_family(core: FakeCore, name: str, role_id: str = "adult", *, whatsapp: str = "") -> dict[str, Any]:

@@ -14,23 +14,7 @@ from hiro_extension_kit import extension, hiroleague
 from hiro_extension_kit.auth import one_sign_in
 from hiro_extension_kit.errors import Invalid, OutsideError, Unavailable
 from hiro_extension_kit.extension import ext
-from hiro_extension_kit.testing import FakeCore
-
-
-class DictStore:
-    """An app's own store, as CodeHiro's reports.db: plain get and put, "" taking a key away."""
-
-    def __init__(self, **kept: str) -> None:
-        self.kept = dict(kept)
-
-    def get(self, key: str) -> str:
-        return self.kept.get(key, "")
-
-    def put(self, key: str, value: str) -> None:
-        if value:
-            self.kept[key] = value
-        else:
-            self.kept.pop(key, None)
+from hiro_extension_kit.testing import DictSettings, FakeCore
 
 
 @pytest.fixture
@@ -46,7 +30,7 @@ def link(monkeypatch):
 
 
 def test_a_store_of_its_own_is_read_at_once(link) -> None:
-    store = DictStore(**{hiroleague.URL_KEY: "ws://127.0.0.1:18082", hiroleague.ADMIN_URL_KEY: "http://hiro.local",
+    store = DictSettings(**{hiroleague.URL_KEY: "ws://127.0.0.1:18082", hiroleague.ADMIN_URL_KEY: "http://hiro.local",
                          hiroleague.SITE_URL_KEY: "http://testapp.hiro.local"})
     link.use_settings(store)
     status = link.status()
@@ -56,7 +40,7 @@ def test_a_store_of_its_own_is_read_at_once(link) -> None:
 
 
 def test_settings_changed_are_kept_in_that_store(link) -> None:
-    store = DictStore()
+    store = DictSettings()
     link.use_settings(store)
     asyncio.run(link.set_url("ws://127.0.0.1:18082"))
     asyncio.run(link.set_admin_url("http://hiro.local/"))
@@ -90,10 +74,10 @@ def test_the_site_shows_to_the_roles_named(monkeypatch) -> None:
 
 
 def test_sign_in_and_out_go_to_the_core_known(link) -> None:
-    link.use_settings(DictStore())
+    link.use_settings(DictSettings())
     assert one_sign_in.sign_in_url(link, "/x") is None  # no address known: nowhere to send the browser
     assert one_sign_in.sign_out_url(link) is None
-    link.use_settings(DictStore(**{hiroleague.ADMIN_URL_KEY: "http://hiro.local"}))
+    link.use_settings(DictSettings(**{hiroleague.ADMIN_URL_KEY: "http://hiro.local"}))
     assert one_sign_in.sign_in_url(link, "//evil.example") == "http://hiro.local/sign-in?for=test&next=%2F"
     assert one_sign_in.sign_out_url(link) == "http://hiro.local/api/auth/sign-out?for=test"
     assert one_sign_in.after_core_sign_out(link, "http://hiro.local/sign-in") == "http://hiro.local/sign-in"

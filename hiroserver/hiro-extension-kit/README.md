@@ -66,13 +66,13 @@ disk and nothing in its API.
 | `family` | the copy of the core's family list and roles (`worker`, `sync`, `update_person`, `reachable`), and the one-time copy of rights from the app a feature came from |
 | `auth` | `identity`, `sessions`, `access` (rights per role), `api` (`/api/me`, sign-in, Settings → Users and Roles), `one_sign_in` (the one sign-in as far as it talks to the core: `auth.code`, the sign-in and sign-out addresses; CodeHiro uses it alone), `guard` (every route's check), `rules` (`Rule`, `for_features`), `models` (`CorePerson`, `Role`, `AppUser`, `WebSession`, imported by an app that uses them). All three apps use it; an app's extras come in through `Extension`: another way in (`other_way`, HomeHiro's HA add-on), what it keeps per user beside the role (`users_scope`, HomeHiro's My room), its own rows tidied after each family sync (`family_tidy`) |
 | `site_name` | the LAN name rules (`site_name`, `name_of`) |
-| `llm` | optional, for an app that asks the core's AI: `profiles.ask()`, `core_ai` (the core's profiles and the app's uses, kept), `recorder` and `requests_api` (Logs → LLM requests), `ai_api`, and its table (`llm.models.LlmRequest`, which the app's models.py imports) |
+| `llm` | optional, for an app that asks the core's AI: `profiles.ask()` (with a `folder` for a plan tool to read), `core_ai` (the core's profiles and the app's uses, kept in the link's settings), `recorder` and `requests_api` (Logs → LLM requests; `Extension(llm_log=False)` keeps none), `ai_api`, and its table (`llm.models.LlmRequest`, which the app's models.py imports) |
 | `voices` | optional: the core's voice profiles for the pickers (`read`, `choices`, the `reader` worker), and for an app with a voice use (`Extension.voice_uses`) `speak()` and `set_default()` |
 | `whatsapp` | optional: `send()` (text, picture, voice note; honours `Extension.outputs`), `check()`, `status()`, `notify()` through the core's WhatsApp |
 | `predeploy` | a deploy's safety steps for the app's one database (`snapshot`, `trial`, `restore`, `main`); HomeHiro takes its helpers (`copy_db`, `counts`, `losses`) for its own two-database steps |
 | `api_types` | the frontend's types from the API description (`generate`, `clashes`); each app's `scripts/api_types.py` says where they go |
 | `notices` | `Browsers(notices, hello=...)` and `events_router(browsers)`: `GET /api/events`, the notices open pages reload on |
-| `testing` | for an app's tests only: `guard_network()`, `RunLog`, `CleanDatabases`, `wait_until()`, `FakeCore`, `FakeLink`, `join_family()`, `ai_answer()` and `ai_profiles()` (the core's AI answers), `auth()` and `outputs()` (sign-in or sending on or off for one test) |
+| `testing` | for an app's tests only: `guard_network()`, `RunLog`, `CleanDatabases`, `wait_until()`, `FakeCore`, `FakeLink`, `DictSettings` (a settings store of the app's own), `join_family()`, `ai_answer()` and `ai_profiles()` (the core's AI answers), `auth()` and `outputs()` (sign-in or sending on or off for one test) |
 | `contract` | for an app's tests only: `AppContract`, what every app checks of itself (below) |
 
 ## Rules
