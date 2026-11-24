@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { accessFromKeys } from './core-access';
+import { accessFromKeys, tabsFor } from './core-access';
 
 describe('accessFromKeys', () => {
   it('gives see for a see key and use for any other action', () => {
@@ -23,5 +23,18 @@ describe('accessFromKeys', () => {
 
   it('counts an action of a feature that has no see', () => {
     expect(accessFromKeys(['ai.images.run'])['ai.images']).toBe('use');
+  });
+});
+
+describe('tabsFor', () => {
+  const tabs = [{ id: 'logs' }, { id: 'runs' }, { id: 'usage' }];
+  const featureOf = (id: string) => (id === 'runs' ? 'logs.runs' : id === 'usage' ? 'logs.usage' : 'logs');
+
+  it('keeps the tabs whose feature the person has', () => {
+    expect(tabsFor(tabs, featureOf, accessFromKeys(['logs.see'])).map((t) => t.id)).toEqual(['logs']);
+  });
+
+  it('keeps every tab when none is open (the page itself is refused)', () => {
+    expect(tabsFor(tabs, featureOf, {}).map((t) => t.id)).toEqual(['logs', 'runs', 'usage']);
   });
 });

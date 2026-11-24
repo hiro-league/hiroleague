@@ -111,8 +111,8 @@
             <div class="bg-muted/40 px-3 py-1.5 font-sans text-xs font-semibold text-muted-foreground">{group.name}</div>
           {/if}
           {#each group.features as f (f.id)}
-            <div class={cn('grid gap-2 px-3 py-2.5 lg:grid-cols-[220px_1fr] lg:items-center', group.area !== null && 'lg:pl-6')}>
-              <span class="flex items-center gap-2 font-sans text-sm font-medium">
+            <div class="grid gap-2 px-3 py-2.5 lg:grid-cols-[220px_1fr] lg:items-center">
+              <span class={cn('flex items-center gap-2 font-sans text-sm font-medium', group.area !== null && 'pl-3')}>
                 {f.name}
                 {#if personalFeature(s, f)}
                   <span class="text-muted-foreground" title="About people's things: granted for their own or for everyone's">

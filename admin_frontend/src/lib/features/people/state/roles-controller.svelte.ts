@@ -14,7 +14,8 @@ import { Action } from '$kit/state/action.svelte';
 import { Resource } from '$kit/state/resource.svelte';
 import type { Notify } from '$kit/ui/toast.svelte';
 import { featureOfKey, reachOf, setReach, withReaches, type Reach } from '../reach';
-import { CORE_GRANTS_MOCK, CORE_SOURCE, coreSourceMock } from '../core-features-mock';
+import { CORE_SOURCE, coreSourceMock } from '../core-features-mock';
+import { coreGrantsMock as coreGrants } from '../core-grants-mock.svelte';
 
 export type RolesController = ReturnType<typeof createRolesController>;
 
@@ -42,7 +43,6 @@ export function createRolesController(
   // mockup: the core's own features (Permissions phase 2) stand in for what the core declares today, in one place so
   // Roles and Compare show the same; their grants live here and are never sent (saveRights)
   const sources = $derived((access.data?.sources ?? []).map((s) => (s.id === CORE_SOURCE ? coreSourceMock() : s)));
-  const coreGrants = $state<Record<string, string[]>>({ ...CORE_GRANTS_MOCK });
   const roles = $derived(access.data?.roles ?? []);
   const work = new Action();
 
