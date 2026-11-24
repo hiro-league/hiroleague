@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { KeyRound, Pencil, Trash2, RefreshCw } from '@lucide/svelte';
+  import { KeyRound, MessageCircle, MonitorSmartphone, Pencil, Trash2, RefreshCw } from '@lucide/svelte';
+  import MockupBadge from '$kit/ui/mockup-badge.svelte';
+  import type { OwnedDevice } from '../../devices/shared/device-people-mock';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import ResourceView from '$kit/ui/resource-view.svelte';
@@ -8,9 +10,10 @@
   import { TABLE_GRID_ROW } from '$kit/ui/table-grid';
   import { shownNumber, type PeopleController } from '../state/people-controller.svelte';
 
-  let { ctrl }: { ctrl: PeopleController } = $props();
+  // mockup: Permissions phase 3, a person's devices beside their WhatsApp address (`devicesOf`)
+  let { ctrl, devicesOf }: { ctrl: PeopleController; devicesOf: (personId: string) => OwnedDevice[] } = $props();
 
-  const GRID = '1.2fr 1fr 170px 170px 150px 210px';
+  const GRID = '1.1fr 1fr 170px 1.4fr 150px 210px';
   // ResourceView's shape: nothing to show yet reads as loading / failed; rows already held stay up while it reloads.
   const view = $derived({
     data: ctrl.people.length || !(ctrl.loading || ctrl.error) ? ctrl.people : null,
@@ -40,12 +43,13 @@
           <span>Name</span>
           <span>Hiro calls them</span>
           <span>Roles</span>
-          <span>WhatsApp</span>
+          <span class="flex items-center gap-1.5">Talks to Hiro on <MockupBadge class="normal-case" /></span>
           <span>Admin sign-in</span>
           <span class="text-right">Actions</span>
         {/snippet}
         {#snippet body()}
           {#each ctrl.people as person (person.person_id)}
+            {@const devices = devicesOf(person.person_id)}
             <div class={TABLE_GRID_ROW} style:grid-template-columns={GRID}>
               <span class="truncate font-sans text-sm font-semibold">{person.name}</span>
               <span class="truncate font-sans text-sm">{person.calls_them || person.name}</span>
@@ -54,8 +58,21 @@
                   <Badge variant={roleId === 'owner' ? 'default' : 'secondary'}>{ctrl.roleName(roleId)}</Badge>
                 {/each}
               </span>
-              <span class="truncate font-mono text-xs" class:text-muted-foreground={!person.whatsapp}>
-                {shownNumber(person.whatsapp) || 'none'}
+              <!-- mockup: where a person talks to Hiro: their address on each chat channel, and their devices -->
+              <span class="flex min-w-0 flex-wrap content-start items-center gap-1">
+                {#if person.whatsapp}
+                  <Badge variant="outline" class="gap-1 font-mono" title="WhatsApp">
+                    <MessageCircle size={12} />{shownNumber(person.whatsapp)}
+                  </Badge>
+                {/if}
+                {#each devices as device (device.device_id)}
+                  <Badge variant="secondary" class="gap-1" title="A paired device">
+                    <MonitorSmartphone size={12} />{device.device_name ?? device.device_id}
+                  </Badge>
+                {/each}
+                {#if !person.whatsapp && devices.length === 0}
+                  <span class="text-xs text-muted-foreground">none</span>
+                {/if}
               </span>
               <span class="truncate font-sans text-sm" class:text-muted-foreground={!person.has_sign_in}>
                 {person.sign_in ?? 'no'}

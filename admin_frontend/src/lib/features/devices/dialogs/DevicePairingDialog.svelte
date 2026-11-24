@@ -8,9 +8,11 @@
 
   type Props = {
     ctrl: DevicesController;
+    /** mockup: Permissions phase 3, whose the device approved with this code will be */
+    forName?: string;
   };
 
-  let { ctrl }: Props = $props();
+  let { ctrl, forName = '' }: Props = $props();
 
   const qrSvg = $derived(ctrl.pairing ? sanitizePairingQrSvg(ctrl.pairing.qr_svg) : '');
 </script>
@@ -23,7 +25,7 @@
 >
   <Dialog.Content class="sm:max-w-md">
     <Dialog.Header>
-      <Dialog.Title>Pairing code</Dialog.Title>
+      <Dialog.Title>{forName ? `Pairing code for ${forName}` : 'Pairing code'}</Dialog.Title>
     </Dialog.Header>
     {#if ctrl.pairing}
       <div class="grid justify-items-center gap-3 text-center">

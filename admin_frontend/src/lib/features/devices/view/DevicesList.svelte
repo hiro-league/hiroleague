@@ -7,15 +7,19 @@
   import { TABLE_GRID_ROW } from '$kit/ui/table-grid';
   import DevicePairingDialog from '../dialogs/DevicePairingDialog.svelte';
   import DeviceRevokeDialog from '../dialogs/DeviceRevokeDialog.svelte';
+  import MockupBadge from '$kit/ui/mockup-badge.svelte';
+  import PickSelect from '$kit/ui/pick-select.svelte';
+  import type { DeviceOwnersMock } from '../state/device-owners-mock.svelte';
   import { formatDeviceTimestamp } from '../shared/devices-format';
   import type { DevicesController } from '../state/devices-controller.svelte';
 
-  let { ctrl }: { ctrl: DevicesController } = $props();
+  // mockup: Permissions phase 3, whose each device is (`owners`)
+  let { ctrl, owners }: { ctrl: DevicesController; owners: DeviceOwnersMock } = $props();
 
-  const DEVICE_GRID = '180px 1.5fr 190px 190px 110px';
+  const DEVICE_GRID = '180px 200px 1.2fr 190px 190px 110px';
   // ResourceView's shape: nothing to show yet reads as loading / failed; rows already held stay up while it reloads.
   const view = $derived({
-    data: ctrl.rows.length || !(ctrl.loading || ctrl.error) ? ctrl.rows : null,
+    data: ctrl.rows.length || !(ctrl.loading || ctrl.error) ? owners.devices : null,
     error: ctrl.error ?? '',
     loading: ctrl.loading,
     reload: () => ctrl.load()
@@ -31,14 +35,26 @@
           Generate a short-lived code and enter it on your mobile device to authorize it.
         </p>
       </div>
-      <Button disabled={ctrl.busy} onclick={() => void ctrl.generatePairingCode()}>
-        <Link2 size={15} /> Generate pairing code
-      </Button>
+      <!-- mockup: a pairing code is made for a person -->
+      <div class="flex items-center gap-2">
+        <MockupBadge />
+        <PickSelect
+          value={owners.pairFor}
+          options={owners.options}
+          onchange={(v) => (owners.pairFor = v)}
+          label="Whose device it will be"
+          class="h-9 w-44 text-sm"
+        />
+        <Button disabled={ctrl.busy} onclick={() => void ctrl.generatePairingCode()}>
+          <Link2 size={15} /> Generate pairing code
+        </Button>
+      </div>
     </div>
   </Panel>
 
-  <Panel title="Approved devices" description={`${ctrl.rows.length} paired`} class="grid gap-4">
+  <Panel title="Approved devices" description={`${owners.devices.length} paired`} class="grid gap-4">
     {#snippet actions()}
+      <MockupBadge />
       <Button variant="outline" disabled={ctrl.loading} onclick={() => void ctrl.load()}>
         <RefreshCw size={15} /> Refresh
       </Button>
@@ -55,16 +71,26 @@
         <TableShell layout="grid" minWidth={920} gridColumns={DEVICE_GRID} stickyHead>
           {#snippet headRow()}
             <span>Name</span>
+            <span>Person</span>
             <span>Device ID</span>
             <span>Paired</span>
             <span>Expires</span>
             <span>Actions</span>
           {/snippet}
           {#snippet body()}
-            {#each ctrl.rows as row (row.device_id)}
+            {#each owners.devices as row (row.device_id)}
               <div class={TABLE_GRID_ROW} style:grid-template-columns={DEVICE_GRID}>
                 <span class="truncate font-sans text-sm font-semibold" title={row.device_name ?? ''}>
                   {row.device_name || '-'}
+                </span>
+                <!-- mockup: whose the device is, changed in the page only -->
+                <span class="min-w-0 pr-3">
+                  <PickSelect
+                    value={row.person_id}
+                    options={owners.options}
+                    onchange={(v) => owners.pick(row.device_id, v)}
+                    label="Whose device {row.device_name ?? row.device_id} is"
+                  />
                 </span>
                 <span class="truncate font-mono text-xs text-muted-foreground" title={row.device_id}>
                   {row.device_id}
@@ -79,7 +105,7 @@
                   <Button
                     size="sm"
                     variant="destructive"
-                    disabled={ctrl.busy}
+                    disabled={ctrl.busy || row.mock}
                     onclick={() => ctrl.openRevoke(row)}
                     title="Revoke device"
                   >
@@ -95,5 +121,5 @@
   </Panel>
 </section>
 
-<DevicePairingDialog {ctrl} />
+<DevicePairingDialog {ctrl} forName={owners.nameOf(owners.pairFor)} />
 <DeviceRevokeDialog {ctrl} />
