@@ -11,9 +11,9 @@ Contract (params, answers, error codes) in ``hiro_channel_sdk.constants``. The c
 the WhatsApp plugin with ``channel.call`` and waits for its answer: a reply (channel.send)
 is handed over and forgotten, which can't say "sent" or why not.
 
-A message to the owner's number is also written to the owner's conversation and to Hiro's
-own thread, so the owner sees it in the app and Hiro knows it was said when the owner
-replies. Messages to anyone else are only sent (other people don't talk to Hiro yet).
+A message to the owner's number (the owner's WhatsApp on People) is also written to the
+owner's conversation and to Hiro's own thread, so the owner sees it in the app and Hiro knows
+it was said when the owner replies. Messages to anyone else are only sent.
 
 Not exposed as a Tool (CLI / agent / HTTP) on purpose: no new features in Phase 4. A Tool
 can wrap the same plugin call later.
@@ -96,10 +96,13 @@ def _validated_send(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def owner_number(server_ctx: ServerContext) -> str:
-    from ..domain.channel_config import load_channel_config
+    """The owner's WhatsApp number, from People (Permissions phase 3: an address belongs to a person; the channel's
+    own owner number is read no more)."""
+    from ..domain.people import list_people
+    from ..domain.talkers import owner_person
 
-    cfg = load_channel_config(server_ctx.workspace_path, WHATSAPP_CHANNEL)
-    return digits(str((cfg.config if cfg else {}).get("owner_number") or ""))
+    owner = owner_person(list_people(server_ctx.workspace_path))
+    return digits(owner.whatsapp) if owner else ""
 
 
 def _record_text(params: dict[str, Any]) -> str:
@@ -126,8 +129,8 @@ async def record_for_owner(server_ctx: ServerContext, params: dict[str, Any], se
     if not body:
         return
     try:
-        # The owner's WhatsApp lands in the default (General) conversation (the
-        # plugin's route_to_default), so that's where this goes too.
+        # The owner's WhatsApp lands in their General conversation (the seeded user's), so that's where
+        # this goes too.
         conv = resolve_default_channel(server_ctx.workspace_path)
         await save_message(
             server_ctx.workspace_path,

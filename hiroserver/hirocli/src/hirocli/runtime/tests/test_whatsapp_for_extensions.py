@@ -74,8 +74,13 @@ def _ctx(workspace: Path, channels: FakeChannels | None, agent: FakeAgent | None
 
 
 @pytest.fixture
-def workspace(tmp_path: Path) -> Path:
-    save_channel_config(tmp_path, ChannelConfig(name="whatsapp", config={"owner_number": f"+{OWNER}"}))
+def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    from hirocli.domain import people
+
+    monkeypatch.setattr(people, "get_domain_event_bus", lambda: SimpleNamespace(publish=lambda _e: None))
+    save_channel_config(tmp_path, ChannelConfig(name="whatsapp", config={}))
+    # The owner's number is theirs on People (Permissions phase 3)
+    people.add_person(tmp_path, name="Misho", role_ids=["owner"], whatsapp=f"+{OWNER}")
     return tmp_path
 
 

@@ -19,7 +19,7 @@ from hiro_channel_sdk import ExtensionRequestError
 from hirocli.domain.channel_config import ChannelConfig, save_channel_config
 from hirocli.domain.conversation_channel import resolve_default_channel
 from hirocli.domain.message_store import list_messages
-from hirocli.domain.people import add_person
+from hirocli.domain.people import add_person, find_by_number
 from hirocli.runtime.extension_manager import ChannelCallError
 from hirocli.runtime.notify import handle_notify
 from hirocli.runtime.request_handler import RequestRefused
@@ -71,7 +71,9 @@ def _ctx(workspace: Path, channels: FakeChannels | None, agent: FakeAgent | None
 
 @pytest.fixture
 def workspace(tmp_path: Path) -> Path:
-    save_channel_config(tmp_path, ChannelConfig(name="whatsapp", config={"owner_number": f"+{OWNER}"}))
+    save_channel_config(tmp_path, ChannelConfig(name="whatsapp", config={}))
+    # The owner's number is theirs on People (Permissions phase 3)
+    add_person(tmp_path, name="Michel", role_ids=["owner"], whatsapp=f"+{OWNER}")
     return tmp_path
 
 
@@ -83,7 +85,8 @@ def _bodies(workspace: Path) -> list[str]:
 def _params(workspace: Path, style: str = "exact", *people: tuple[str, str]) -> dict[str, Any]:
     """Phase 6: recipients are people in the family list (added here), not names and numbers."""
     to = [
-        {"person": add_person(workspace, name=n, role_id="adult", whatsapp=num).person_id}
+        # The owner is in the list already, with their number (the fixture)
+        {"person": (find_by_number(workspace, num) or add_person(workspace, name=n, role_id="adult", whatsapp=num)).person_id}
         for n, num in (people or (("Sara", SARA),))
     ]
     return {"to": to, "medium": "whatsapp", "text": "Joe just got home", "style": style}
