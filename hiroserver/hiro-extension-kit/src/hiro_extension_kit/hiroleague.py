@@ -25,6 +25,7 @@ Backend kit, step 3: NetHiro's and TrainHiro's own copies, the same but for the 
 
 import asyncio
 import time
+from collections.abc import Callable
 from typing import Any, Protocol
 
 from hiro_channel_sdk import ExtensionClient, ExtensionCredentials, ExtensionInfo, ExtensionOffers, ExtensionRequestError
@@ -42,6 +43,7 @@ from .auth.identity import DEV
 from .errors import AppError, Invalid, OutsideError, Unavailable, failed, translate
 from .events import bus
 from .extension import ext
+from .follow import Follower, Refresh
 from .site_name import BadLabel, name_of, site_name
 
 log = identity.logger("hiroleague")
@@ -186,12 +188,20 @@ class HiroLeagueLink(Worker):
         # (the real info is set at connect time, from the app's Extension: _connect)
         self.client = ExtensionClient("", ExtensionInfo(name=identity.app().name, version="0"),
                                       ExtensionCredentials(identity.app().data_dir / "hiroleague"), on_status=self._status)
+        # The app's copies of what the core keeps (family, AI and voice profiles), kept fresh in one place (follow.py)
+        self.follower = Follower(lambda: self.client.connected, log)
+        self.client.on_event(EVENT_TYPE_RESOURCE_CHANGED, self.follower.changed)
+
+    def follow(self, resource: str, refresh: Refresh) -> Callable[[], None]:
+        """Keep a copy of `resource` fresh with `refresh()` (follow.py). Returns the function that stops it."""
+        return self.follower.follow(resource, refresh)
 
     def _status(self, status: str, _detail: dict[str, Any]) -> None:
         # The SDK awaits this before it reads the connection's frames: never ask the core from here. The bus runs its
         # subscribers on the loop, so they start their requests on their own (family.py).
         if status == STATUS_CONNECTED:
             bus.publish(CONNECTED)
+            self.follower.connected()
             # no name yet and no default address: claim <name>.hiro.local (not awaited here, see above)
             if not self.site_url_set and not ext().site_default:
                 self.spawn(self._claim_default(), "claim the default name")
@@ -199,6 +209,7 @@ class HiroLeagueLink(Worker):
     def on_start(self) -> None:
         # Stopping the worker cancels this task, which closes the connection.
         self.spawn(self._connect(), "connect")
+        self.spawn(self.follower.run(), "follow the core's changes")
         # The app's log lines go to the core's log store while the link is up (the SDK's log_sender: it reads the
         # app's own file, so lines logged while the core is away go when it is back)
         if (files := logging_foundation.where()) is not None:

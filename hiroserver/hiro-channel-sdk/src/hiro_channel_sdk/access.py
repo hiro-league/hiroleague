@@ -2,8 +2,8 @@
 
 An extension declares its features when it connects (``ExtensionInfo.features``): each feature lists its rights,
 the things a person can do in it ("see", "build", "delete", ...). The core keeps, per role, the rights it grants in
-each extension and hands an extension its own part with ``people.list`` (each role's ``rights``); ``people.changed``
-says when to read again. The extension enforces them with :func:`allowed`, so every extension checks rights the
+each extension and hands an extension its own part with ``people.list`` (each role's ``rights``); ``resource.changed``
+for ``people`` says when to read again. The extension enforces them with :func:`allowed`, so every extension checks rights the
 same way and none keeps its own copy of the rules.
 
 Rights are keys ``"<feature>.<right>"``. A feature that has a ``see`` right is not there at all without it, so

@@ -1,9 +1,12 @@
-"""Emits ``resource.changed`` hints on workspace-domain mutations — Tier 1 substrate.
+"""Emits ``resource.changed`` hints on workspace-domain mutations — the one sender, for the phones and the apps.
 
 Subscribes to the :mod:`hirocli.domain.events` bus and translates typed domain
-events into debounced fan-out of ``resource.changed`` envelopes to connected
-devices. The bus owns the asyncio loop and the thread-safety story; this class
-only deals with the runtime loop.
+events into debounced fan-out of ``resource.changed`` to whoever reads each
+resource (resource_registry.py): the connected devices, or the connected apps
+(unified communication, phase 4: their copies of the family and the AI and voice
+profiles). One shape for both: {resource, reason, resource_sync_version}. The
+bus owns the asyncio loop and the thread-safety story; this class only deals
+with the runtime loop.
 """
 
 from __future__ import annotations
@@ -11,8 +14,9 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from hiro_channel_sdk.constants import EVENT_TYPE_RESOURCE_CHANGED
 from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
 from hiro_commons.log import Logger
 
@@ -24,8 +28,11 @@ from ..domain.events import (
 )
 from .device_targeting import DeviceTargeting
 from .envelope_factory import EnvelopeFactory
-from .resource_registry import ResourceRegistry
+from .resource_registry import READ_BY_APPS, ResourceRegistry
 from .resource_versioning import ResourceVersionStore
+
+if TYPE_CHECKING:
+    from .extension_manager import ExtensionManager
 
 EmitOutbound = Callable[..., Awaitable[None]]
 
@@ -41,6 +48,8 @@ _EVENT_TO_SIGNAL: dict[str, str] = {
     DomainEventType.CHARACTER_CHANGED: "character_changed",
     DomainEventType.CHARACTER_PHOTO_CHANGED: "character_photo_changed",
     DomainEventType.CHANNEL_CHANGED: "channel_changed",
+    DomainEventType.PEOPLE_CHANGED: "people_changed",
+    DomainEventType.PROVIDERS_CHANGED: "providers_changed",
 }
 
 
@@ -66,6 +75,7 @@ class ResourceChangeBroadcaster:
         self._targeting = targeting or DeviceTargeting()
         self._bus = bus or get_domain_event_bus()
         self._connected_device_ids: set[str] = set()
+        self._extensions: ExtensionManager | None = None
         self._debounce_tasks: dict[str, asyncio.Task[None]] = {}
 
     def start(self) -> None:
@@ -89,8 +99,18 @@ class ResourceChangeBroadcaster:
     async def clear_connected_devices(self) -> None:
         self._connected_device_ids.clear()
 
+    def set_extension_manager(self, extensions: ExtensionManager) -> None:
+        """The apps' readers: built after the broadcaster (server_process)."""
+        self._extensions = extensions
+
+    def _same_workspace(self, path: Path) -> bool:
+        try:
+            return path.resolve() == self._workspace_path.resolve()
+        except OSError:
+            return False
+
     async def _on_domain_event(self, event: DomainEvent) -> None:
-        if event.workspace_path != self._workspace_path:
+        if not self._same_workspace(event.workspace_path):
             return
         signal = _EVENT_TO_SIGNAL.get(event.type)
         if signal is None:
@@ -148,6 +168,9 @@ class ResourceChangeBroadcaster:
                 self._debounce_tasks.pop(resource, None)
 
     async def _flush(self, resource: str, reason: str) -> None:
+        if self._registry.read_by(resource) == READ_BY_APPS:
+            await self._flush_to_apps(resource, reason)
+            return
         recipients = self._targeting.device_ids_for_connected(self._connected_device_ids)
         if not recipients:
             log.debug(
@@ -181,3 +204,19 @@ class ResourceChangeBroadcaster:
             sync_version=sync_version,
             device_count=len(recipients),
         )
+
+    async def _flush_to_apps(self, resource: str, reason: str) -> None:
+        """The same note, to every connected app (each keeps its copy: the backend kit's link follows it)."""
+        extensions = self._extensions
+        live = extensions.snapshot() if extensions is not None else {}
+        if not live:
+            log.debug(f"Hint skipped (no apps) — resource:{resource}", reason=reason)
+            return
+        data = {"resource": resource, "reason": reason, "resource_sync_version": self._version_store.bump(resource)}
+        told = [
+            str(app.get("name") or extension_id)
+            for extension_id, app in live.items()
+            if await extensions.send_event(extension_id, EVENT_TYPE_RESOURCE_CHANGED, data)  # type: ignore[union-attr]
+        ]
+        log.info(f"⬆️ Resource hints sent — {', '.join(told) or 'no app'} · {resource}", reason=reason,
+                 sync_version=data["resource_sync_version"])

@@ -19,7 +19,6 @@ from hirocli.runtime.people_for_extensions import (
     handle_people_update,
     handle_roles_add,
     handle_roles_remove,
-    watch_people_changes,
 )
 from hirocli.runtime.request_handler import RequestRefused
 
@@ -66,30 +65,40 @@ def test_a_refused_change_says_why(tmp_path: Path) -> None:
 
 class FakeExtensions:
     def __init__(self) -> None:
-        self.sent: list[tuple[str, str]] = []
+        self.sent: list[tuple[str, str, dict[str, Any]]] = []
 
     def snapshot(self) -> dict[str, dict[str, Any]]:
         return {"ext-1": {"name": "home"}}
 
     async def send_event(self, extension_id: str, event_type: str, data: dict[str, Any] | None = None) -> bool:
-        self.sent.append((extension_id, event_type))
+        self.sent.append((extension_id, event_type, dict(data or {})))
         return True
 
 
-def test_every_connected_extension_is_told_of_a_change_in_its_workspace(tmp_path: Path) -> None:
+def test_every_connected_app_is_told_of_a_change_in_its_workspace(tmp_path: Path) -> None:
+    """Unified communication, phase 4: the one sender's resource.changed for people, to the apps."""
+    from hirocli.runtime.resource_change_broadcaster import ResourceChangeBroadcaster
+    from hirocli.runtime.resource_versioning import ResourceVersionStore
+
     extensions = FakeExtensions()
     bus = get_domain_event_bus()
 
+    async def to_phones(_msg: object) -> None:
+        raise AssertionError("the family is the apps' copy, never the phones'")
+
     async def run() -> None:
         bus.attach_loop(asyncio.get_running_loop())
-        stop = watch_people_changes(extensions, tmp_path)
+        sender = ResourceChangeBroadcaster(tmp_path, to_phones, version_store=ResourceVersionStore())
+        sender.set_extension_manager(extensions)  # type: ignore[arg-type]
+        sender.start()
         try:
-            add_person(tmp_path, name="Mona", role_id="adult")  # publishes people.changed
+            add_person(tmp_path, name="Mona", role_id="adult")  # publishes the family's change
             bus.publish(DomainEvent(DomainEventType.PEOPLE_CHANGED, tmp_path / "other", {}))  # another workspace
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.3)
         finally:
-            stop()
+            sender.close()
             bus.detach_loop()
 
     asyncio.run(run())
-    assert extensions.sent == [("ext-1", "people.changed")]
+    assert extensions.sent == [
+        ("ext-1", "resource.changed", {"resource": "people", "reason": "people_changed", "resource_sync_version": 1})]

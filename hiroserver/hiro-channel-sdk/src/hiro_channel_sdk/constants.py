@@ -133,8 +133,7 @@ NOTIFY_MAX_RECIPIENTS: int = 10
 #                    for in this extension yet (and an empty ``says``), never overwrites what the admin set.
 #                    Or {copy_from: "<another extension's name>"} (Phase 9b): an app taking features over from another
 #                    gets, for each role with none here yet, its rights there in the features this app declares.
-#   people.changed   core → every connected extension, an event with {}: read people.list again.
-#                    Events aren't queued: an extension also reads the list when it connects.
+#   When the list changes the core sends resource.changed {resource: RESOURCE_PEOPLE} (below): read people.list again.
 #   A refused change answers error code "invalid_params" with the reason for people.
 METHOD_PEOPLE_LIST: str = "people.list"
 METHOD_PEOPLE_ADD: str = "people.add"
@@ -143,7 +142,6 @@ METHOD_ROLES_ADD: str = "roles.add"
 METHOD_ROLES_RENAME: str = "roles.rename"
 METHOD_ROLES_REMOVE: str = "roles.remove"
 METHOD_ROLES_IMPORT_RIGHTS: str = "roles.import_rights"
-EVENT_PEOPLE_CHANGED: str = "people.changed"
 
 # core.info answers {name, version, workspace, admin_port, repo}: admin_port (Phase 7b) is the core's admin web port, so
 # an extension can link to the admin (its own setting may say the address people reach it at, e.g. behind a proxy).
@@ -323,6 +321,14 @@ EVENT_TYPE_MESSAGE_TRANSCRIBED: str = "message.transcribed"    # transcript is r
 EVENT_TYPE_MESSAGE_VOICED: str = "message.voiced"              # spoken audio of a text reply (text → audio modality mirror)
 EVENT_TYPE_MESSAGE_CONTENT_ADDED: str = "message.content_added"  # new supplementary content attached to a message (photos, docs, etc.)
 EVENT_TYPE_RESOURCE_CHANGED: str = "resource.changed"          # hint: named cache invalidated — pull via *.list / *.get (Tier 1+ sync substrate)
+# The one "read it again" note (unified communication, phase 4): one sender in the core and one list of resources for the
+# phones and the apps (hirocli runtime/resource_registry.py), each resource read by one kind of reader. Its data is
+# {resource, reason, resource_sync_version}: what to read again, the core change that caused it, and a version that
+# grows with each note. A hint, never the data; events aren't queued, so a reader also reads again when it connects.
+# The resources apps keep a copy of (the kit follows them: hiroleague.link.follow):
+RESOURCE_PEOPLE: str = "people"  # the family list and its roles: people.list
+RESOURCE_AI_PROFILES: str = "ai.profiles"  # the AI profiles and the uses' picks: ai.profiles
+RESOURCE_VOICE_PROFILES: str = "voice.profiles"  # the voice profiles and the uses' picks: voice.profiles
 # The same name from an extension (unified communication, phase 3): extension → core, an event sent as itself with
 # {resource, ids?}: "my <resource> changed, read it again" (a hint, never the data). The resource must be one its
 # description names in offers.tells, or the core drops it with a warning; the core puts it on its bus with the

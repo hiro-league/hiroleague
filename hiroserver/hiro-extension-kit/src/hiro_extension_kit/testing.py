@@ -429,6 +429,11 @@ class FakeLink:
 
     def __init__(self, client: Any) -> None:
         self.client = client
+        self.followed: dict[str, Any] = {}  # resource -> the read that keeps its copy (follow.py); a test calls it
+
+    def follow(self, resource: str, refresh: Any) -> Any:
+        self.followed[resource] = refresh
+        return lambda: self.followed.pop(resource, None)
 
     def status(self) -> dict[str, Any]:
         return {"url": "ws://127.0.0.1:18082", "status": "connected" if self.client.connected else "disconnected",

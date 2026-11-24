@@ -8,11 +8,10 @@ its own.
 A user is a core person: `AppUser.id` is the core's person id, and their role (`AppUser.role_id`) is a cache of that
 person's role in the copy, else they wait (`recompute_roles`).
 
-The copy is read from the core (`people.list`, through `hiroleague.link`) when the link connects, when the core says
-`people.changed`, and every 10 minutes (events aren't queued, and changes made with the core's CLI send none): the
-`FamilySync` worker. With the core down, the app keeps its last copy, so nobody is locked out. A change made here (a
-user's role) is asked of the core first (`people.update`); the core's refusals ("the only Owner") come back as
-`Invalid`, in its words. Open pages hear the notice "family".
+The copy is read from the core (`people.list`, through `hiroleague.link`) when the core says `resource.changed` for
+`people`, when the link connects, and in the link's slow round (follow.py): the `FamilySync` worker follows it. With
+the core down, the app keeps its last copy, so nobody is locked out. A change made here (a user's role) is asked of
+the core first (`people.update`); the core's refusals ("the only Owner") come back as `Invalid`, in its words. Open pages hear the notice "family".
 
 An app that took a feature over from another (`Extension.rights_from`: NetHiro and TrainHiro, from HomeHiro) asks the
 core once, on its first connection, to copy each role's rights there into the app's features
@@ -22,13 +21,13 @@ Backend kit, step 3: each app had its own copy of this module, the same but for 
 """
 
 import asyncio
-from contextlib import suppress
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
 from hiro_channel_sdk import ExtensionRequestError
-from hiro_channel_sdk.constants import EVENT_PEOPLE_CHANGED, METHOD_PEOPLE_LIST, METHOD_PEOPLE_UPDATE, METHOD_ROLES_IMPORT_RIGHTS
+from hiro_channel_sdk.constants import METHOD_PEOPLE_LIST, METHOD_PEOPLE_UPDATE, METHOD_ROLES_IMPORT_RIGHTS, RESOURCE_PEOPLE
 from hiro_channel_sdk.workers import Worker
 from sqlmodel import Session, select
 
@@ -37,7 +36,7 @@ from .db import run_db
 from .errors import AppError, Invalid, OutsideError, Unavailable, failed, translate
 from .events import bus
 from .extension import ext
-from .hiroleague import CONNECTED, link
+from .hiroleague import link
 from .auth.models import AppUser, CorePerson, Role
 
 log = identity.logger("family")
@@ -282,49 +281,22 @@ async def sync() -> list[str]:
 
 
 class FamilySync(Worker):
-    """Keeps the copy of the core's family list: when the link connects, when the core says it changed, and every 10
-    minutes."""
+    """Keeps the copy of the core's family list: the link reads it again when the core says it changed, when it
+    connects, and in its slow round (follow.py). With the core away, the last copy stays."""
 
     name = "family"
 
     def __init__(self) -> None:
         super().__init__()
-        self._due: asyncio.Event | None = None
-        self._unsubscribe = None
+        self._unfollow: Callable[[], None] | None = None
 
     def on_start(self) -> None:
-        self._due = asyncio.Event()
-        self._unsubscribe = bus.subscribe(CONNECTED, self._now)
-        link.client.on_event(EVENT_PEOPLE_CHANGED, self._changed)
-        self.spawn(self._loop(), "sync")
+        self._unfollow = link.follow(RESOURCE_PEOPLE, sync)
 
     def on_stop(self) -> None:
-        if self._unsubscribe:
-            self._unsubscribe()
-            self._unsubscribe = None
-
-    def _now(self, _kind: str, _data: Any) -> None:
-        if self._due is not None:
-            self._due.set()
-
-    async def _changed(self, _event: str, _data: dict[str, Any]) -> None:
-        log.debug("Family: HiroLeague says the family list changed")
-        self._now("", None)
-
-    async def _loop(self) -> None:
-        assert self._due is not None
-        while True:
-            with suppress(TimeoutError):
-                await asyncio.wait_for(self._due.wait(), EVERY)
-            self._due.clear()
-            if not self.running:
-                return
-            if not link.client.connected:
-                continue  # keeps the last copy; the next connect asks again
-            try:
-                await sync()
-            except Exception as exc:  # one bad round never ends the loop; logged, the next round tries again
-                failed(log, "Family: reading HiroLeague's family list", exc)
+        if self._unfollow:
+            self._unfollow()
+            self._unfollow = None
 
 
 worker = FamilySync()

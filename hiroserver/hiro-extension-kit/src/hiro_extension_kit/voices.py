@@ -6,8 +6,9 @@ talker.py). The app declares its voice use (`Extension.voice_uses`, HomeHiro's `
 app's page, picks the profile it speaks with by default; a pick of its own (an alert, a Speak node) wins. An app with no
 voice use (NetHiro) only lists the profiles: it speaks by asking HomeHiro.
 
-The core's profiles are read through the link (`voice.profiles`) when it connects, every 10 minutes while connected
-(the `core-voices` worker) and when a page asks and the last read is older than FRESH; the last list is kept in
+The core's profiles are read through the link (`voice.profiles`) when the core says `resource.changed` for
+`voice.profiles`, when the link connects and in its slow round (follow.py; the `core-voices` worker follows it), and
+when a page asks and the last read is older than FRESH; the last list is kept in
 memory and in the database (setting CACHE_KEY), so the pickers still list it while the core is down. Profiles are
 edited only in the core's admin.
 
@@ -21,13 +22,13 @@ import asyncio
 import base64
 import binascii
 import json
-from contextlib import suppress
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from hiro_channel_sdk import ExtensionRequestError
-from hiro_channel_sdk.constants import METHOD_VOICE_PROFILES, METHOD_VOICE_SPEAK, METHOD_VOICE_USES_SET
+from hiro_channel_sdk.constants import METHOD_VOICE_PROFILES, METHOD_VOICE_SPEAK, METHOD_VOICE_USES_SET, RESOURCE_VOICE_PROFILES
 from pydantic import BaseModel
 from sqlmodel import Session
 
@@ -35,16 +36,14 @@ from . import identity, settings
 from . import calls
 from .db import engine, run_db
 from .errors import Invalid, OutsideError, Unavailable, failed
-from .events import bus
 from hiro_channel_sdk.workers import Worker
 from .extension import ext
-from .hiroleague import CONNECTED, link
+from .hiroleague import link
 
 log = identity.logger("voices")
 
 CACHE_KEY = "core_voice_profiles"  # the last list read, as JSON {"answer", "fetched_at"} (settings table)
 FRESH = timedelta(seconds=30)
-EVERY = 600.0
 TIMEOUT = 10.0  # reading the list
 SPEAK_TIMEOUT = 120.0  # a clip the core has to make (a long text on Gemini takes a while)
 IMPORTED = "hh-"  # the core's import kept HomeHiro's TTS profile ids as hh-<id>
@@ -280,43 +279,22 @@ async def set_default(profile_id: str | None) -> None:
 
 
 class CoreVoicesReader(Worker):
-    """Reads the core's voice profiles when the link connects and every EVERY seconds while connected."""
+    """Keeps the core's voice profiles: the link reads them again when the core says they changed, when it connects,
+    and in its slow round (follow.py). A read that fails keeps the last list."""
 
     name = "core-voices"
 
     def __init__(self) -> None:
         super().__init__()
-        self._due: asyncio.Event | None = None
-        self._unsubscribe = None
+        self._unfollow: Callable[[], None] | None = None
 
     def on_start(self) -> None:
-        self._due = asyncio.Event()
-        self._unsubscribe = bus.subscribe(CONNECTED, self._now)
-        self.spawn(self._loop(), "read")
+        self._unfollow = link.follow(RESOURCE_VOICE_PROFILES, refresh)
 
     def on_stop(self) -> None:
-        if self._unsubscribe:
-            self._unsubscribe()
-            self._unsubscribe = None
-
-    def _now(self, _kind: str, _data: Any) -> None:
-        if self._due is not None:
-            self._due.set()
-
-    async def _loop(self) -> None:
-        assert self._due is not None
-        while True:
-            with suppress(TimeoutError):
-                await asyncio.wait_for(self._due.wait(), EVERY)
-            self._due.clear()
-            if not self.running:
-                return
-            if not link.client.connected:
-                continue
-            try:
-                await refresh()
-            except Exception as exc:  # one bad round never ends the loop
-                failed(log, "Voices from HiroLeague: reading the core's profiles", exc)
+        if self._unfollow:
+            self._unfollow()
+            self._unfollow = None
 
 
 reader = CoreVoicesReader()

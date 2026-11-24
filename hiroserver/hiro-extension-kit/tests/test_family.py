@@ -5,7 +5,6 @@ numbers. The core is faked at its request (`fake_core`), so nothing leaves the P
 Shared-code plan, step 1: NetHiro's and TrainHiro's tests each had this file; it is tested once, here."""
 
 import asyncio
-import logging
 from datetime import UTC, datetime
 
 import pytest
@@ -101,60 +100,23 @@ def test_the_cores_failures_in_words(fake_core, answer, kind, says):
         run(family.sync())
 
 
-def test_a_failed_round_is_logged_and_the_worker_goes_on(fake_core, monkeypatch, caplog):
-    monkeypatch.setattr(family, "EVERY", 0.01)
-    fake_core.answers["people.list"] = ExtensionRequestError("internal_error", "boom")
+def test_the_worker_keeps_the_family_copy_through_the_links_one_follower(fake_core):
+    """Unified communication, phase 4: the link reads the copy again on the core's note, a connect and its slow round
+    (follow.py, tested in test_follow.py); the worker only says what it copies and how."""
     worker = family.FamilySync()
+    link = family.link
 
     async def scenario():
         worker.start()
-        await asyncio.sleep(0.1)
-        del fake_core.answers["people.list"]
+        assert link.followed["people"] is family.sync
         fake_core.person("Mona")
-        await asyncio.sleep(0.1)
+        await link.followed["people"]()
         await worker.stop()
 
-    with caplog.at_level(logging.WARNING, "testapp.family"):
-        run(scenario())
-    assert any("Family: reading HiroLeague's family list" in r.getMessage() and "boom" in r.getMessage() for r in caplog.records)
+    run(scenario())
+    assert "people" not in link.followed  # stopped: no longer followed
     with Session(engine) as s:
-        assert [p.name for p in s.exec(select(CorePerson))] == ["Mona"]  # a later round worked
-
-
-def test_the_cores_people_changed_and_a_connect_start_a_sync(fake_core, monkeypatch):
-    from hiro_extension_kit.events import bus
-    from hiro_extension_kit.hiroleague import CONNECTED
-
-    monkeypatch.setattr(family, "EVERY", 60)
-    handlers = fake_core.handlers
-    worker = family.FamilySync()
-
-    def reads() -> int:
-        return [m for m, _ in fake_core.asked].count("people.list")
-
-    async def until(count: int) -> int:
-        # Wait for that many reads (at most 5 s), not a fixed sleep: a round reads the database and asks the (fake) core,
-        # and on 2026-11-12 NetHiro's nightly check (tests 12 at a time on a busy server) missed a 50 ms window twice
-        for _ in range(500):
-            if reads() >= count:
-                break
-            await asyncio.sleep(0.01)
-        return reads()
-
-    async def scenario():
-        worker.start()
-        await asyncio.sleep(0.05)  # no round on start: only the timer (60 s here), the event or a connect starts one
-        first = reads()
-        await handlers["people.changed"]("people.changed", {})
-        after_event = await until(first + 1)
-        bus.publish(CONNECTED)
-        after_connect = await until(after_event + 1)
-        await asyncio.sleep(0.05)  # nothing more comes
-        await worker.stop()
-        return first, after_event, after_connect, reads()
-
-    first, after_event, after_connect, last = run(scenario())
-    assert after_event == first + 1 and after_connect == after_event + 1 and last == after_connect
+        assert [p.name for p in s.exec(select(CorePerson))] == ["Mona"]
 
 
 def test_users_roles_follow_their_core_persons(fake_core):
