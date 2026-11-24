@@ -33,6 +33,7 @@ from ..domain.workspace import (
     set_default_workspace,
 )
 from .base import Tool, ToolParam
+from .rights import ToolRight
 from hiro_commons.log import Logger
 
 log = Logger.get("TOOLS.WORKSPACE")
@@ -132,6 +133,7 @@ def _load_workspace_state_safe(workspace_path: Path) -> Any | None:
 
 class WorkspaceListTool(Tool):
     name = "workspace_list"
+    right = ToolRight("server", "see")
     description = "List all configured workspaces with their ports and status"
     params: dict = {}
 
@@ -291,6 +293,7 @@ class WorkspaceUpdateTool(Tool):
 
 class WorkspaceShowTool(Tool):
     name = "workspace_show"
+    right = ToolRight("server", "see")
     description = "Show details of a workspace: path, ports, configuration, and runtime state"
     params = {
         "workspace": ToolParam(str, "Workspace name or id (omit to show the default)", required=False),

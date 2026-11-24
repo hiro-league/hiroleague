@@ -9,7 +9,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .rights import ToolRight
 
 
 @dataclass
@@ -47,6 +50,10 @@ class Tool(ABC):
                       are shown to the model as out of date, so it reads again
                       instead of answering from an old read kept in the history.
 
+      - right:        the core permission a person needs for Hiro to run it for them (``tools/rights.py``,
+                      Permissions phase 4): a ``ToolRight``, or ``OWNER_ONLY``. Every agent-surfaced tool names
+                      one; the CLI and the control server act as the owner and never read it.
+
     Workspace-scoped tools use ``runtime = False`` (default). Tools that expose
     ``execute_async()`` are invoked via ``ToolRegistry.invoke_async`` from the
     server HTTP handler so the asyncio event loop is not deadlocked.
@@ -65,6 +72,8 @@ class Tool(ABC):
     agent_always: bool = False
     # Live result: earlier turns' results are shown to the model as out of date.
     agent_live: bool = False
+    # The core permission Hiro's turn must hold to run it (None: the owner's only; the contract test refuses it)
+    right: "ToolRight | None" = None
 
     def attach_runtime(self, ctx: Any) -> None:
         """Inject registry runtime context — no-op unless a subclass overrides."""

@@ -128,6 +128,7 @@ async def test_tools_node_produces_tool_message(tmp_path: Path) -> None:
         ],
         "inbound_id": "in-1",
         "chat_channel_id": 1,
+        "tools_offered": ["echo_tool"],  # the turn's person may use it (Permissions phase 4)
     }
     result = await llm.tools_node(state, lambda _e: None)
     assert result["messages"][0].content == "echo: ping"

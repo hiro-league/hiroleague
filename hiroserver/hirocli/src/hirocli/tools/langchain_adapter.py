@@ -2,6 +2,10 @@
 
 Kept as a separate module so importing tools/base.py and tools/device.py
 never pulls in LangChain as a hard import-time dependency.
+
+This is Hiro's path, and only Hiro's (Permissions phase 4): every call is held to the rights of the person the turn
+acts for (``rights.hold``), and a tool's ``workspace`` parameter is never offered to the model, so Hiro works in the
+workspace it runs in.
 """
 
 from __future__ import annotations
@@ -9,6 +13,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from .base import Tool
+from .rights import WORKSPACE_PARAM, hold
 
 
 def to_langchain(tool: Tool) -> Any:
@@ -18,6 +23,8 @@ def to_langchain(tool: Tool) -> Any:
 
     fields: dict[str, Any] = {}
     for param_name, param in tool.params.items():
+        if param_name == WORKSPACE_PARAM:
+            continue
         if param.required:
             fields[param_name] = (param.type_, Field(description=param.description))
         else:
@@ -33,7 +40,7 @@ def to_langchain(tool: Tool) -> Any:
 
     if callable(exec_async):
         async def _arun(**kwargs: Any) -> Any:
-            return await exec_async(**kwargs)
+            return await exec_async(**hold(_tool, kwargs))
 
         return StructuredTool.from_function(
             coroutine=_arun,
@@ -43,7 +50,7 @@ def to_langchain(tool: Tool) -> Any:
         )
 
     def _run(**kwargs: Any) -> Any:
-        return _tool.execute(**kwargs)
+        return _tool.execute(**hold(_tool, kwargs))
 
     return StructuredTool.from_function(
         func=_run,

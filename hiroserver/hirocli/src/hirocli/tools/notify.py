@@ -13,6 +13,7 @@ from typing import Any
 from hiro_channel_sdk.constants import NOTIFY_MEDIUM_WHATSAPP, NOTIFY_STYLE_EXACT
 
 from .base import Tool, ToolParam
+from .rights import OWNER_ONLY
 
 
 @dataclass
@@ -27,6 +28,7 @@ class NotifyTool(Tool):
     surfaces = frozenset({"agent", "http"})
     agent_default = False
     name = "notify"
+    right = OWNER_ONLY
     description = (
         "Tell people something on WhatsApp: the text as it is (style exact) or written by "
         "Hiro's character in its own words (style character). Requires the running server."

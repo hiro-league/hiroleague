@@ -44,6 +44,7 @@ from hiro_commons.timestamps import human_datetime
 from hiro_commons.logging_foundation.line import Line, parse
 
 from .base import Tool, ToolParam
+from .rights import ToolRight
 
 log = Logger.get("LOG_TOOLS")
 
@@ -728,6 +729,7 @@ class LogTailResult:
 
 class LogSearchTool(Tool):
     name = "log_search"
+    right = ToolRight("logs", "see")
     description = (
         "Search the logs of the core (server, channels, gateway, CLI) and of every app for entries matching "
         "the given filters. Rows are returned sorted by timestamp."
@@ -853,6 +855,7 @@ class LogSearchTool(Tool):
 
 class LogTailTool(Tool):
     name = "log_tail"
+    right = ToolRight("logs", "see")
     description = (
         "Return the most recent log entries. To tail live, pass the "
         "file_offsets JSON from a previous result back as after_offsets — "
@@ -1073,6 +1076,7 @@ class LogProblemsResult:
 
 class LogProblemsTool(Tool):
     name = "log_problems"
+    right = ToolRight("logs", "see")
     description = (
         "What went wrong in a span of time, across the core (server, channels, gateway, CLI) and every app: the "
         "warnings and errors of every part, grouped by part and area (with counts, the latest messages, first and last "
@@ -1168,6 +1172,7 @@ class LogStoryResult:
 
 class LogStoryTool(Tool):
     name = "log_story"
+    right = ToolRight("logs", "see")
     description = (
         "Everything one story did, across the core and every app, in order: every line logged under its id (a page "
         "request, a camera check, a chat message from the phone to the reply), its timed steps with how long each "
@@ -1231,6 +1236,7 @@ class LogStoriesResult:
 
 class LogStoriesTool(Tool):
     name = "log_stories"
+    right = ToolRight("logs", "see")
     description = (
         "The stories of a span of time, newest first: everything one starting event caused, as its feature named it. "
         "Each has a kind (conversation, event, round, action, job), a name (\"Health checks\"), a title for this one "

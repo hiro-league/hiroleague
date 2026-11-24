@@ -7,6 +7,7 @@ from typing import Any
 
 from ..domain.model_catalog import MODEL_KINDS, Hosting, ModelKind, get_model_catalog
 from .base import Tool, ToolParam
+from .rights import ToolRight
 
 
 def _dump_provider_row(p: Any) -> dict[str, Any]:
@@ -40,6 +41,7 @@ class LlmCatalogGetModelResult:
 
 class LlmCatalogListProvidersTool(Tool):
     name = "llm_catalog_list_providers"
+    right = ToolRight("ai.providers", "see")
     description = (
         "List AI providers known to Hiro (OpenAI, Google, Anthropic, local runtimes). "
         "Each entry includes hosting type (cloud vs local), required credential env var "
@@ -73,6 +75,7 @@ class LlmCatalogListProvidersTool(Tool):
 
 class LlmCatalogListModelsTool(Tool):
     name = "llm_catalog_list_models"
+    right = ToolRight("ai.providers", "see")
     description = (
         "List models in the Hiro catalog with optional filters: provider_id, model_kind "
         f"({', '.join(MODEL_KINDS)} — includes rows whose primary or extra_kinds "
@@ -153,6 +156,7 @@ class LlmCatalogListModelsTool(Tool):
 
 class LlmCatalogGetModelTool(Tool):
     name = "llm_catalog_get_model"
+    right = ToolRight("ai.providers", "see")
     description = (
         "Return full catalog metadata for one model by canonical id (e.g. "
         "'openai:gpt-6.1-sol'), including pricing block and parent provider summary."

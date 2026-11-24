@@ -25,23 +25,24 @@ class BindingModel:
         return BindingModel(tuple(t.name for t in tools))
 
 
-def _nodes(always: frozenset[str]) -> LLMNodes:
+def _nodes() -> LLMNodes:
     tools = [SimpleNamespace(name="extension_state"), SimpleNamespace(name="channel_disable")]
-    config = ChatGraphConfig(model=BindingModel(), tools=tools, model_id="fake:m", system_prompt=None,
-                             always_tool_names=always)
+    config = ChatGraphConfig(model=BindingModel(), tools=tools, model_id="fake:m", system_prompt=None)
     services = SimpleNamespace(preferences=None, workspace_path=None)
     return LLMNodes(services=services, config=config)  # type: ignore[arg-type]
 
 
 def test_tools_off_leaves_only_the_always_on_ones() -> None:
-    nodes = _nodes(frozenset({"extension_state"}))
-    assert nodes._bound.tools == ("extension_state", "channel_disable")
-    assert nodes._bound_always.tools == ("extension_state",)
+    """The agent manager offers the always-on tools alone when tools are off (Permissions phase 4 keeps them to the
+    person's rights too: tools/tests/test_tool_rights.py); the model is bound to what is offered."""
+    nodes = _nodes()
+    assert nodes.bound_for(["extension_state", "channel_disable"]).tools == ("extension_state", "channel_disable")
+    assert nodes.bound_for(["extension_state"]).tools == ("extension_state",)
 
 
 def test_tools_off_with_none_always_on_is_the_plain_model() -> None:
-    nodes = _nodes(frozenset())
-    assert nodes._bound_always is nodes._model
+    nodes = _nodes()
+    assert nodes.bound_for([]) is nodes._model
 
 
 def test_reading_extensions_is_hiros_always_on_tool() -> None:

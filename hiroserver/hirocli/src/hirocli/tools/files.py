@@ -9,6 +9,7 @@ from ..domain.blob_store import DEFAULT_CHUNK_SIZE, chunk_count_for_size
 from ..domain.files_resolver import resolve_ref
 from ..domain.workspace import resolve_workspace
 from .base import Tool, ToolParam
+from .rights import THEIRS, Acting, ToolRight
 
 
 def _workspace_path(workspace: str | None) -> Path:
@@ -27,6 +28,7 @@ class FilesHeadResult:
 
 class FilesHeadTool(Tool):
     name = "files_head"
+    right = ToolRight("conversations", "see", THEIRS)
     description = "Resolve a file ref to blob metadata (size, sha256 id, chunk layout)"
     params = {
         "ref": ToolParam(
@@ -43,12 +45,16 @@ class FilesHeadTool(Tool):
         *,
         workspace_path: Path | None = None,
         requesting_device_id: str | None = None,
+        acting: Acting | None = None,
     ) -> FilesHeadResult:
         wp = workspace_path or _workspace_path(workspace)
+        # Hiro fetches a person's own conversations' files only, unless their right reaches everyone's
+        own_only = acting is not None and self.right is not None and acting.reach(self.right) == "own"
         path, media_type, blob_id = resolve_ref(
             wp,
             ref,
             requesting_device_id=requesting_device_id,
+            asker_user_id=acting.user_id if own_only and acting is not None else None,
         )
         size = path.stat().st_size
         chunk_size = DEFAULT_CHUNK_SIZE

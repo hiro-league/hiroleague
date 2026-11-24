@@ -10,6 +10,7 @@ from ..domain.workspace import resolve_workspace
 from ..services.knowledge import KnowledgeService, create_knowledge_service
 from ..services.knowledge.live_registry import maybe_recover_abandoned_work
 from .base import Tool, ToolParam
+from .rights import ToolRight
 
 
 def _resolve_path(workspace: str | None) -> Path:
@@ -65,6 +66,7 @@ class KnowledgeScanFolderTool(Tool):
     # Knowledge tools off the chat agent surface (see MemoryListTool rationale).
     agent_default = False
     name = "knowledge_scan_folder"
+    right = ToolRight("knowledge", "see")
     description = "Scan a folder for knowledge-ingestible files"
     params = {
         "folder": ToolParam(str, "Folder path to scan"),
@@ -90,6 +92,7 @@ class KnowledgeIngestTool(Tool):
     runtime = True
     agent_default = False  # knowledge tool off the chat agent surface
     name = "knowledge_ingest"
+    right = ToolRight("knowledge", "change")
     description = "Ingest selected markdown files into the workspace-local knowledge index"
     params = {
         # list[str] so LangChain/Gemini tool schemas include items.type (bare list breaks Gemini).
@@ -165,6 +168,7 @@ class KnowledgeJobStatusTool(Tool):
     runtime = True
     agent_default = False  # knowledge tool off the chat agent surface
     name = "knowledge_job_status"
+    right = ToolRight("knowledge", "see")
     description = "Return persisted status for a knowledge ingestion job"
     params = {
         "job_id": ToolParam(str, "Knowledge ingestion job id"),
@@ -189,6 +193,7 @@ class KnowledgeSearchTool(Tool):
     runtime = True
     agent_default = False  # knowledge tool off the chat agent surface
     name = "knowledge_search"
+    right = ToolRight("knowledge", "see")
     description = "Vector-search ingested knowledge chunks"
     params = {
         "query": ToolParam(str, "Search query"),
@@ -245,6 +250,7 @@ class KnowledgeAnswerTool(Tool):
     runtime = True
     agent_default = False  # knowledge tool off the chat agent surface
     name = "knowledge_answer"
+    right = ToolRight("knowledge", "see")
     description = "Answer a question against ingested knowledge with cited sources"
     params = {
         "query": ToolParam(str, "Question to answer"),
@@ -359,6 +365,7 @@ class KnowledgeListDocumentsTool(Tool):
     runtime = True
     agent_default = False  # knowledge tool off the chat agent surface
     name = "knowledge_list_documents"
+    right = ToolRight("knowledge", "see")
     description = "List ingested knowledge documents"
     params = {
         "status": ToolParam(str, "Document status", required=False),
@@ -416,6 +423,7 @@ class KnowledgeDeleteDocumentTool(Tool):
     runtime = True
     agent_default = False
     name = "knowledge_delete_document"
+    right = ToolRight("knowledge", "change")
     description = "Delete a document from the knowledge index without touching the source file"
     params = {
         "document_id": ToolParam(str, "Knowledge document id"),
@@ -440,6 +448,7 @@ class KnowledgeReingestDocumentTool(Tool):
     runtime = True
     agent_default = False
     name = "knowledge_reingest_document"
+    right = ToolRight("knowledge", "change")
     description = "Re-read and re-index an existing knowledge document"
     params = {
         "document_id": ToolParam(str, "Knowledge document id"),
@@ -464,6 +473,7 @@ class KnowledgeUpdateDocumentMetadataTool(Tool):
     runtime = True
     agent_default = False  # knowledge tool off the chat agent surface
     name = "knowledge_update_document_metadata"
+    right = ToolRight("knowledge", "change")
     description = "Update knowledge document owner, category, and tags"
     params = {
         "document_id": ToolParam(str, "Knowledge document id"),
@@ -509,6 +519,7 @@ class KnowledgeGetDocumentTool(Tool):
     runtime = True
     agent_default = False  # knowledge tool off the chat agent surface
     name = "knowledge_get_document"
+    right = ToolRight("knowledge", "see")
     description = "Get one knowledge document and its vector-store chunks"
     params = {
         "document_id": ToolParam(str, "Knowledge document id"),
@@ -555,6 +566,7 @@ class _KnowledgeWorkspaceRuntimeTool(Tool):
 
 class KnowledgeListTagsTool(_KnowledgeWorkspaceRuntimeTool):
     name = "knowledge_list_tags"
+    right = ToolRight("knowledge", "see")
     description = "List knowledge tags"
 
     async def execute_async(self, workspace: str | None = None, **kwargs: Any) -> Any:
@@ -567,6 +579,7 @@ class KnowledgeListTagsTool(_KnowledgeWorkspaceRuntimeTool):
 
 class KnowledgeListCategoriesTool(_KnowledgeWorkspaceRuntimeTool):
     name = "knowledge_list_categories"
+    right = ToolRight("knowledge", "see")
     description = "List knowledge categories"
 
     async def execute_async(self, workspace: str | None = None, **kwargs: Any) -> Any:
@@ -581,6 +594,7 @@ class KnowledgeCreateCategoryTool(Tool):
     runtime = True
     agent_default = False  # knowledge tool off the chat agent surface
     name = "knowledge_create_category"
+    right = ToolRight("knowledge", "change")
     description = "Create a knowledge category or subcategory"
     params = {
         "name": ToolParam(str, "Category name"),
@@ -616,6 +630,7 @@ class KnowledgeCreateTagTool(Tool):
     runtime = True
     agent_default = False  # knowledge tool off the chat agent surface
     name = "knowledge_create_tag"
+    right = ToolRight("knowledge", "change")
     description = "Create a knowledge tag"
     params = {
         "name": ToolParam(str, "Tag name"),

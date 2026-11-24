@@ -7,6 +7,7 @@ from typing import Any
 from ..domain.server_info import build_policy_snapshot
 from ..domain.workspace import resolve_workspace
 from .base import Tool, ToolParam
+from .rights import ToolRight
 
 
 def _resolve_path(workspace: str | None) -> Path:
@@ -21,6 +22,7 @@ class PolicyGetResult:
 
 class PolicyGetTool(Tool):
     name = "policy_get"
+    right = ToolRight("assistant", "talk")
     description = "Get workspace media policy snapshot (saved preferences only; channels use conversation_channel_list)"
     params = {
         "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),

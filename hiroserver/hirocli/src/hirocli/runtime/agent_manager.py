@@ -45,6 +45,8 @@ from .agent_graph import (
 from hiro_memory.ledger import RunAccumulator, current_run
 from .chat_writer import PERSON_ID_METADATA_KEY, PERSON_NAME_METADATA_KEY, PERSON_OWNER_METADATA_KEY
 from ..services.ai_usage.from_ledger import usage_person, usage_profile
+from ..tools import rights
+from ..tools.rights import Acting, ToolRight, acting_for, may_use
 from hiro_memory.tracing import langsmith_run_id
 from . import stories
 from .comm_log import (
@@ -58,6 +60,8 @@ from .comm_log import (
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from langgraph.graph.state import CompiledStateGraph
 
     from ..domain.memory import MemoryService
@@ -123,11 +127,31 @@ def _audio_extension_for_media_type(media_type: str) -> str:
     return audio_extension_for_media_type(media_type)
 
 
-def turn_may_use_tools(routing_metadata: dict[str, Any]) -> bool:
-    """Permissions phase 3, until phase 4 holds each tool to the person's rights: Hiro's tools act with the owner's
-    reach, so only the owner's turns get them. Everyone else talks with no tools (the always-on ones too, but for an ask
-    to an app, which answers for the turn's person), and sees nobody else's things."""
-    return bool(routing_metadata.get(PERSON_OWNER_METADATA_KEY))
+# Hiro's per-turn knowledge recall shows the knowledge base: it needs Knowledge: see (Permissions phase 4)
+KNOWLEDGE_SEE = ToolRight("knowledge", "see")
+
+
+def acting_for_turn(workspace_path: Path, routing_metadata: dict[str, Any], user_id: int) -> Acting:
+    """The person a turn acts for (Permissions phase 4): the writer the inbound check stamped on it, with their roles.
+    Hiro's tools, its asks and its knowledge recall are held to their rights."""
+    return acting_for(
+        workspace_path,
+        person_id=str(routing_metadata.get(PERSON_ID_METADATA_KEY) or ""),
+        name=str(routing_metadata.get(PERSON_NAME_METADATA_KEY) or ""),
+        user_id=user_id,
+        owner=bool(routing_metadata.get(PERSON_OWNER_METADATA_KEY)),
+    )
+
+
+def tools_offered(registry: "ToolRegistry | None", acting: Acting, tools_enabled: bool) -> list[str]:
+    """The tools a turn offers the model: Hiro's (the always-on ones alone when tools are off for the turn), kept to
+    those its person may use."""
+    if registry is None:
+        return []
+    return [
+        t.name for t in registry.agent_tools()
+        if (tools_enabled or type(t).agent_always) and may_use(acting, t)
+    ]
 
 
 class AgentManager:
@@ -415,17 +439,17 @@ class AgentManager:
             is not None
         )
         request_voice_reply = routing_requests_voice_reply(msg.routing.metadata)
+        # The person this turn acts for: its tools and its knowledge recall are held to their rights
+        acting = await asyncio.to_thread(acting_for_turn, self._ctx.workspace_path, msg.routing.metadata, data_user_id)
         # Per-message knowledge toggle (default on); the fan-out edge skips retrieval when off.
-        knowledge_enabled = routing_uses_knowledge(msg.routing.metadata)
-        # Tools kill-switch: global preference AND the per-chat opt-out. Either off => no tools bound
-        # this turn. call_model invokes the un-bound model when disabled, so should_continue routes
-        # straight to memory_out (no tools node hop).
+        knowledge_enabled = routing_uses_knowledge(msg.routing.metadata) and acting.reach(KNOWLEDGE_SEE) != "no"
+        # Tools kill-switch: global preference AND the per-chat opt-out. Either off => only the always-on tools.
         tools_enabled = bool(prefs.chat.tools_enabled) and routing_tools_enabled(
             msg.routing.metadata
         )
-        if tools_enabled and not turn_may_use_tools(msg.routing.metadata):
-            tools_enabled = False
-            log.fineinfo(f"{LOG_IN} tools off — {peer} isn't the owner (until tools follow each person's rights)")
+        offered = tools_offered(self._tool_registry, acting, tools_enabled)
+        if not acting.owner:
+            log.fineinfo(f"{LOG_IN} tools for {acting.name} — {len(offered)} offered", tools=offered)
 
         ch = self._load_character_for_channel(character_id)
         system_prompt = effective_character_system_prompt(ch)
@@ -481,6 +505,7 @@ class AgentManager:
             "voice_input_allowed": voice_input_allowed,
             "knowledge_enabled": knowledge_enabled,
             "tools_enabled": tools_enabled,
+            "tools_offered": offered,
             "routing_metadata": dict(msg.routing.metadata or {}),
             "inbound_envelope": msg.model_dump(mode="json"),
             "transcripts": [],
@@ -542,6 +567,8 @@ class AgentManager:
         run_token = current_run.set(accumulator) if accumulator is not None else None
         # Phase 7b: AI usage files this turn's calls under the person who wrote it (the inbound check's writer).
         person_token = usage_person.set(str(routing_metadata.get(PERSON_ID_METADATA_KEY) or ""))
+        # Permissions phase 4: every tool Hiro runs in this turn is held to that person's rights
+        acting_token = rights.begin(acting)
         # Phase 7b step 5: the turn's chat calls are filed under the AI profile its model came from.
         profile_token = usage_profile.set((llm_entry.profile_id, llm_entry.profile_name))
         t0 = time.perf_counter()
@@ -616,6 +643,7 @@ class AgentManager:
             if run_token is not None:
                 current_run.reset(run_token)
             usage_person.reset(person_token)
+            rights.end(acting_token)
             usage_profile.reset(profile_token)
             self._comm.graph_subscriber.end_run(msg.routing.id)
             elapsed_ms = int((time.perf_counter() - t0) * 1000)
@@ -697,8 +725,6 @@ class AgentManager:
             ChatGraphConfig(
                 model=model,
                 tools=self._lc_agent_tools,
-                # Always-on tools stay offered when tools are off for a turn (Tool.agent_always).
-                always_tool_names=reg.agent_always_tool_names() if reg is not None else frozenset(),
                 # Live tools' older results reach the model as out of date (Tool.agent_live).
                 live_tool_names=reg.agent_live_tool_names() if reg is not None else frozenset(),
                 model_id=llm_entry.model_id,

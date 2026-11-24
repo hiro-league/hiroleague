@@ -6,8 +6,9 @@ Split out of the old monolithic ``ConversationNodes`` (review §1.5).
 - ``tools`` — dispatch any tool calls the model emitted
 - ``should_continue`` (router) — loop back to ``call_model`` while the model keeps calling tools
 
-Holds the model + tool wiring from ``ChatGraphConfig``: ``_model``, ``_bound`` (model with
-tools attached), ``_tools_by_name`` (dispatch table). No retry policy at the graph layer —
+Holds the model + tool wiring from ``ChatGraphConfig``: ``_model``, the model bound to each set of tools a
+turn is offered (``state["tools_offered"]``: the ones its person may use, Permissions phase 4), ``_tools_by_name``
+(dispatch table). No retry policy at the graph layer —
 the chat model client owns its own back-off, and a graph-level retry would double-charge
 tokens.
 """
@@ -37,6 +38,7 @@ from ..graph_kit import (
 )
 from hiro_memory.replies import llm_usage_payload, normalize_reply_content
 from hiro_memory.ledger import graph_logged, observe, record_child
+from ....tools.rights import ToolRefused
 from ..node_group import NodeGroup
 from ..state import GraphState
 from ._helpers import _error_slug
@@ -103,13 +105,22 @@ class LLMNodes(NodeGroup):
         self._thinking = config.thinking
         self._tools = config.tools
         self._model = config.model
-        self._bound = config.model.bind_tools(config.tools) if config.tools else config.model
         self._tools_by_name = {getattr(t, "name", ""): t for t in config.tools}
-        # Always-on tools (Tool.agent_always): the model used when tools are off for the turn.
-        always = [t for t in config.tools if getattr(t, "name", "") in config.always_tool_names]
-        self._bound_always = config.model.bind_tools(always) if always else config.model
+        # The model bound to each set of tools a turn is offered (few: one per set of rights, tools on or off)
+        self._bound_by_offer: dict[frozenset[str], Any] = {}
         # Live tools (Tool.agent_live): their results from earlier turns reach the model as out of date.
         self._live_tool_names = config.live_tool_names
+
+    def bound_for(self, offered: Any) -> Any:
+        """The model with the tools this turn is offered: those its person may use (the agent manager decides, the
+        always-on ones alone when tools are off for the turn). None offered: the plain model."""
+        names = frozenset(offered or ())
+        bound = self._bound_by_offer.get(names)
+        if bound is None:
+            chosen = [t for t in self._tools if getattr(t, "name", "") in names]
+            bound = self._model.bind_tools(chosen) if chosen else self._model
+            self._bound_by_offer[names] = bound
+        return bound
 
     def is_active(self, label: str) -> bool:
         """``tools`` is registered only when the build config supplied a non-empty tool list."""
@@ -165,11 +176,9 @@ class LLMNodes(NodeGroup):
         # wrapper otherwise stamps only the exception class name, e.g. "googlegenerativeai").
         effective_model = self._model_id or str(state.get("model_id") or "")
         provider = effective_model.split(":", 1)[0] if ":" in effective_model else ""
-        # Per-turn tools kill-switch: when tools are disabled for this turn (preference or
-        # per-chat opt-out), only the always-on tools are offered (``_bound_always`` is the
-        # un-bound model when there are none), so no other tool calls are emitted.
-        # ``bound`` already == model when no tools were compiled in.
-        active = self._bound if state.get("tools_enabled", True) else self._bound_always
+        # Only the tools this turn is offered: the ones its person may use (the always-on ones alone when tools are
+        # off for the turn), so the model never asks for what it would be refused.
+        active = self.bound_for(state.get("tools_offered"))
         try:
             response = await active.ainvoke(inputs)
         except Exception as exc:
@@ -218,6 +227,7 @@ class LLMNodes(NodeGroup):
             return {}
 
         out: list[ToolMessage] = []
+        offered = frozenset(state.get("tools_offered") or ())
         for idx, call in enumerate(last.tool_calls):
             call_id = tool_call_id(call)
             tool_name = tool_call_name(call)
@@ -229,8 +239,22 @@ class LLMNodes(NodeGroup):
             try:
                 if tool is None:
                     raise KeyError(f"unknown tool: {tool_name}")
+                if tool_name not in offered:
+                    # A tool this turn wasn't offered is never run, whatever the model asks
+                    raise ToolRefused(f"{tool_name} isn't one of the tools for this conversation.", "not_offered")
                 result = await tool.ainvoke(args)
                 content = _tool_result_content(result)
+            except ToolRefused as exc:
+                # Expected: the turn's person may not do this (Permissions phase 4). The model passes the words on.
+                log.info(
+                    f"🚫 Tool refused — {tool_name}",
+                    tool=tool_name,
+                    reason=exc.reason,
+                    words=exc.words,
+                )
+                status = "refused"
+                error = exc.words
+                content = f"Not allowed: {exc.words}"
             except Exception as exc:
                 log.warning("A tool call failed — the model gets the error instead of a result", tool=tool_name, exc_info=True)
                 status = "failed"
@@ -238,7 +262,17 @@ class LLMNodes(NodeGroup):
                 content = f"Error: {error}"
 
             elapsed_ms = int((time.perf_counter() - started) * 1000)
-            if status == "completed":
+            if status == "refused":
+                record_child(
+                    node=f"tools/{_error_slug(tool_name) or 'unknown'}",
+                    status="error",
+                    elapsed_ms=elapsed_ms,
+                    branch_index=idx,
+                    input=_tool_input_preview(tool_name, args),
+                    output=f"refused: {error}",
+                    fail={"code": "not_allowed", "decision": "refused"},
+                )
+            elif status == "completed":
                 record_child(
                     node=f"tools/{_error_slug(tool_name) or 'unknown'}",
                     status="ok",

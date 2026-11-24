@@ -24,8 +24,12 @@ def resolve_ref(
     ref: str,
     *,
     requesting_device_id: str | None = None,
+    asker_user_id: int | None = None,
 ) -> tuple[Path, str, str]:
     """Return ``(path, media_type, blob_id)`` for a logical reference.
+
+    ``asker_user_id`` keeps a message's attachment to one chat user's conversations, as a requesting device's person
+    does: Hiro fetching for a person whose right reaches their own things only (Permissions phase 4).
 
     Reference shape: ``<kind>:<id>`` (see docs/file-communication-implementation.md §4).
     """
@@ -91,7 +95,11 @@ def resolve_ref(
             workspace_path,
             message_external_id=message_external_id,
             slot_index=slot_index,
-            user_id=_asker_user(workspace_path, requesting_device_id, kind, rid),
+            user_id=(
+                asker_user_id
+                if asker_user_id is not None
+                else _asker_user(workspace_path, requesting_device_id, kind, rid)
+            ),
         )
         if row is None:
             log.warning(

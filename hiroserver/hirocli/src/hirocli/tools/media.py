@@ -12,6 +12,7 @@ from typing import Any
 
 from ..domain.workspace import WorkspaceError, resolve_workspace
 from .base import Tool, ToolParam
+from .rights import ToolRight
 
 
 def _media_workspace_path(workspace: str | None) -> Path:
@@ -43,6 +44,7 @@ class TranscribeTool(Tool):
     """
 
     name = "transcribe_audio"
+    right = ToolRight("assistant", "talk")
     description = (
         "Transcribe an audio file to text. "
         "Provide the audio as a URL, a data URI, or a base64-encoded string. "
@@ -95,6 +97,7 @@ class DescribeImageTool(Tool):
     """
 
     name = "describe_image"
+    right = ToolRight("assistant", "talk")
     description = (
         "Describe the visual contents of an image. "
         "Provide the image as a URL, a data URI, or a base64-encoded string. "

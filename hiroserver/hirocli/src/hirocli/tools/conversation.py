@@ -27,11 +27,23 @@ from ..domain.conversation_channel import (
 from ..domain.server_info import build_channel_list_entries
 from ..domain.workspace import resolve_workspace
 from .base import Tool, ToolParam
+from .rights import BY_RECORD, THEIRS, Acting, ToolRight
 
 
 def _resolve_path(workspace: str | None) -> Path:
     entry, _ = resolve_workspace(workspace)
     return Path(entry.path)
+
+
+def _channel_users(workspace_path: Path, channel_id: int | None) -> list[int]:
+    """Whose a conversation is (Permissions phase 4): the chat user it belongs to; none for one that doesn't exist."""
+    channel = _get_channel_by_id(workspace_path, int(channel_id)) if channel_id is not None else None
+    return [channel.user_id] if channel is not None else []
+
+
+def _own_only(acting: Acting | None, tool: Tool) -> bool:
+    """Whether Hiro's turn reaches only its person's own conversations: a grant for their own things."""
+    return acting is not None and tool.right is not None and acting.reach(tool.right) == "own"
 
 
 def _resolve_channel(
@@ -297,6 +309,7 @@ class MessageSendTool(Tool):
 
 class ConversationChannelListTool(Tool):
     name = "conversation_channel_list"
+    right = ToolRight("conversations", "see", THEIRS)
     description = "List all conversation channels (active conversations) and their metadata"
     params = {
         "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
@@ -307,9 +320,14 @@ class ConversationChannelListTool(Tool):
         workspace: str | None = None,
         *,
         workspace_path: Path | None = None,
+        acting: Acting | None = None,
     ) -> ConversationChannelListResult:
         resolved_workspace_path = workspace_path or _resolve_path(workspace)
         channels = build_channel_list_entries(resolved_workspace_path)
+        if _own_only(acting, self):
+            # Hiro lists a person's own conversations only, unless their right reaches everyone's
+            assert acting is not None
+            channels = [ch for ch in channels if ch.user_id == acting.user_id]
         return ConversationChannelListResult(
             channels=[ch.model_dump(mode="json") for ch in channels],
         )
@@ -317,6 +335,7 @@ class ConversationChannelListTool(Tool):
 
 class ConversationChannelGetTool(Tool):
     name = "conversation_channel_get"
+    right = ToolRight("conversations", "see", THEIRS)
     description = "Get a conversation channel by id or by user-scoped name; falls back to that user's General channel if not found"
     params = {
         "channel_id": ToolParam(int, "Channel integer id", required=False),
@@ -333,21 +352,29 @@ class ConversationChannelGetTool(Tool):
         *,
         workspace_path: Path | None = None,
         user_id: int | None = None,
+        acting: Acting | None = None,
     ) -> ConversationChannelGetResult:
         resolved_workspace_path = workspace_path or _resolve_path(workspace)
+        own_only = _own_only(acting, self)
+        if acting is not None and (own_only or user_id is None):
+            # Hiro looks among its person's conversations: theirs is the General it falls back to
+            user_id = acting.user_id
         channel = _resolve_channel(
             resolved_workspace_path,
             channel_id=channel_id,
             channel_name=channel_name,
             user_id=user_id,
         )
+        if own_only and channel is not None and acting is not None and channel.get("user_id") != acting.user_id:
+            channel = None  # another person's conversation answers as a missing one
         return ConversationChannelGetResult(channel=channel)
 
 
 class ConversationChannelCreateTool(Tool):
     name = "conversation_channel_create"
+    right = ToolRight("conversations", "change", THEIRS)
     description = (
-        "Create a direct conversation channel for the workspace owner user and selected character slug"
+        "Create a direct conversation channel for the person you talk to, with the selected character slug"
     )
     params = {
         "channel_name": ToolParam(str, "Channel name"),
@@ -364,22 +391,26 @@ class ConversationChannelCreateTool(Tool):
         workspace: str | None = None,
         *,
         workspace_path: Path | None = None,
+        acting: Acting | None = None,
     ) -> ConversationChannelCreateResult:
         resolved_workspace_path = workspace_path or _resolve_path(workspace)
         channel = create_channel(
             resolved_workspace_path,
             name=channel_name,
             character_id=character_id,
-            description=channel_description.strip(),
+            # Hiro's turn makes it for its person; the command line and the admin, for the owner
+            user_id=acting.user_id if acting is not None else None,
+            description=(channel_description or "").strip(),
         )
         return ConversationChannelCreateResult(channel=channel.model_dump())
 
 
 class ConversationChannelUpdateTool(Tool):
     name = "conversation_channel_update"
+    right = ToolRight("conversations", "change", BY_RECORD)
     description = (
         "Update an existing conversation channel name, optional description text, "
-        "or character slug — type stays direct and owner stays the workspace default user"
+        "or character slug — type stays direct and it stays its person's"
     )
     params = {
         "channel_id": ToolParam(int, "Channel integer id"),
@@ -388,6 +419,9 @@ class ConversationChannelUpdateTool(Tool):
         "channel_description": ToolParam(str, "Channel description/subtitle text", required=False),
         "character_id": ToolParam(str, "Character id (slug)", required=False),
     }
+
+    def record_users(self, workspace_path: Path, channel_id: int | None = None, **_: Any) -> list[int]:
+        return _channel_users(workspace_path, channel_id)
 
     def execute(
         self,
@@ -417,11 +451,15 @@ class ConversationChannelUpdateTool(Tool):
 class ConversationChannelDeleteTool(Tool):
     agent_default = False
     name = "conversation_channel_delete"
+    right = ToolRight("conversations", "change", BY_RECORD)
     description = "Delete a conversation channel and all messages in it"
     params = {
         "channel_id": ToolParam(int, "Channel integer id"),
         "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
     }
+
+    def record_users(self, workspace_path: Path, channel_id: int | None = None, **_: Any) -> list[int]:
+        return _channel_users(workspace_path, channel_id)
 
     def execute(
         self,
@@ -438,6 +476,7 @@ class ConversationChannelDeleteTool(Tool):
 class ConversationChannelClearMessagesTool(Tool):
     agent_default = False
     name = "conversation_channel_clear_messages"
+    right = ToolRight("conversations", "change", BY_RECORD)
     description = (
         "Delete all messages and attachments in a conversation channel (channel row unchanged). "
         "Increments last_deleted on the channel for device sync."
@@ -446,6 +485,9 @@ class ConversationChannelClearMessagesTool(Tool):
         "channel_id": ToolParam(int, "Channel integer id"),
         "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
     }
+
+    def record_users(self, workspace_path: Path, channel_id: int | None = None, **_: Any) -> list[int]:
+        return _channel_users(workspace_path, channel_id)
 
     def execute(
         self,
@@ -464,6 +506,7 @@ class ConversationChannelClearMessagesTool(Tool):
 
 class MessageHistoryTool(Tool):
     name = "message_history"
+    right = ToolRight("conversations", "see", BY_RECORD)
     description = (
         "Retrieve normalized message history for a conversation channel. "
         "Use all_messages=true for no row limit; otherwise limit defaults to 50. "
@@ -486,6 +529,9 @@ class MessageHistoryTool(Tool):
         ),
         "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
     }
+
+    def record_users(self, workspace_path: Path, channel_id: int | None = None, **_: Any) -> list[int]:
+        return _channel_users(workspace_path, channel_id)
 
     def execute(
         self,

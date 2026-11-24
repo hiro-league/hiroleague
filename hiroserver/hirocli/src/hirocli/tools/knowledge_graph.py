@@ -36,6 +36,7 @@ from hiro_memory.knowledge.graph_build import (
     remove_document_episodes,
 )
 from .base import Tool, ToolParam
+from .rights import ToolRight
 
 log = Logger.get("SVC.KNOWLEDGE.GRAPH.TOOL")
 
@@ -194,6 +195,7 @@ class KnowledgeGraphIngestTool(Tool):
 
     runtime = True
     name = "knowledge_graph_ingest"
+    right = ToolRight("knowledge", "change")
     description = (
         "Build the Graphiti temporal knowledge graph from a knowledge document's "
         "chunks (one episode per chunk). Idempotent; pairs with the Qdrant evidence pipeline."
@@ -265,6 +267,7 @@ class KnowledgeGraphIngestBatchTool(Tool):
 
     runtime = True
     name = "knowledge_graph_ingest_batch"
+    right = ToolRight("knowledge", "change")
     description = (
         "Graph-ingest N already-ingested documents in one call (Graphiti). "
         "Per-doc failure isolation; idempotent re-run."
@@ -347,6 +350,7 @@ class KnowledgeGraphExportTool(Tool):
 
     runtime = True
     name = "knowledge_graph_export"
+    right = ToolRight("knowledge", "see")
     description = (
         "Export the whole knowledge graph (nodes + edges) as JSON for "
         "visualization. Read-only; empty graph until the Phase 4 snapshot lands."

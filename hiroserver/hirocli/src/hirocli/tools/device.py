@@ -23,6 +23,7 @@ from ..domain.people import get_person, list_people
 from ..domain.talkers import owner_person
 from ..domain.workspace import resolve_workspace
 from .base import Tool, ToolParam
+from .rights import ToolRight
 
 
 def _resolve_path(workspace: str | None) -> Path:
@@ -118,6 +119,7 @@ class DeviceAddTool(Tool):
 
 class DeviceListTool(Tool):
     name = "device_list"
+    right = ToolRight("devices", "see")
     description = "List all approved paired mobile devices"
     params = {
         "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),

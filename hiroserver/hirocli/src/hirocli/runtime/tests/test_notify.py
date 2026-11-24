@@ -247,18 +247,25 @@ def test_extension_state_asks_for_the_person_chatting_when_the_core_knows_them()
 
 
 def test_the_person_chatting_reaches_the_tool_the_way_hiros_agent_runs_it() -> None:
-    """Through the LangChain adapter Hiro's graph calls, as a chat turn does: the turn's person is still known there."""
+    """Through the LangChain adapter Hiro's graph calls, as a chat turn does: the turn's person is still known there,
+    and a Kid who may talk may ask the home, which answers by the Kid's rights (Permissions phase 4)."""
+    from pathlib import Path
+
     from hiro_channel_sdk.constants import FOR_PERSON
 
     from hirocli.services.ai_usage.from_ledger import usage_person
     from hirocli.tools.langchain_adapter import to_langchain
+    from hirocli.tools.rights import Acting, acting_as
 
     extensions = FakeExtensions({"ext-1": HOME})
+    kid = Acting(person_id="cp-kid", name="Mark", user_id=2, owner=False, workspace_path=Path("."),
+                 roles={"kid": ["assistant.talk"]})
 
     async def turn() -> None:
         token = usage_person.set("cp-kid")
         try:
-            await to_langchain(_tool(extensions)).ainvoke({})
+            with acting_as(kid):
+                await to_langchain(_tool(extensions)).ainvoke({})
         finally:
             usage_person.reset(token)
 

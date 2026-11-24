@@ -136,6 +136,8 @@ class GraphState(TypedDict, total=False):
     request_voice_reply: bool
     voice_input_allowed: bool
     tools_enabled: bool
+    # The tools this turn offers the model: those its person may use (Permissions phase 4)
+    tools_offered: list[str]
 
     # --- Fan-out scratch (reducer-merged) ---
     audio_items: list[AudioItem]

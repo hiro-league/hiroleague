@@ -34,6 +34,7 @@ from ..domain.people import (
 )
 from ..domain.workspace import resolve_workspace
 from .base import Tool, ToolParam
+from .rights import OWNER_ONLY
 
 _WORKSPACE = ToolParam(str, "Workspace name (default: registry default)", required=False)
 
@@ -97,6 +98,7 @@ class AccessResult:
 
 class PeopleListTool(Tool):
     name = "people_list"
+    right = OWNER_ONLY
     description = (
         "List the family: each person's name, what Hiro calls them, their roles (Owner, Adult, Kid…) "
         "and WhatsApp number; plus the roles"
