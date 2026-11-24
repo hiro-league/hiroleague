@@ -13,7 +13,6 @@ packaged default avatar from the app — not a per-character file under the work
 from __future__ import annotations
 
 import json
-import logging
 import re
 import shutil
 import sqlite3
@@ -23,12 +22,15 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from hiro_commons.constants.storage import CHARACTERS_DIR, DEFAULT_CHARACTER_ID
+from hiro_commons.log import Logger
 from hiro_commons.timestamps import utc_iso, utc_now
 
 from .db import db_path, ensure_db
 from .events import DomainEvent, DomainEventType, get_domain_event_bus
 
-logger = logging.getLogger(__name__)
+# The core's structlog logger, not a standard one: this module's lines carry keyword fields (character_id=...), which a
+# standard Logger refuses with a TypeError once INFO is on for it, as it is on the server (the core's level).
+logger = Logger.get("CHARACTER")
 
 
 def _notify_character_photo_changed(workspace_path: Path, character_id: str) -> None:
@@ -584,7 +586,7 @@ def _profile_models(workspace_path: Path) -> tuple[dict[str, str], dict[str, str
     try:
         prefs = load_preferences(workspace_path)
     except Exception as exc:  # a broken preferences file must not break the app's character list
-        logger.warning("Character list without models — preferences unreadable", extra={"error": str(exc)})
+        logger.warning("Character list without models — preferences unreadable", error=str(exc))
         return {}, {}
     return (
         {pid: p.model for pid, p in prefs.ai.profiles.items()},

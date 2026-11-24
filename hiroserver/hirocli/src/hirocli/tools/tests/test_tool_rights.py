@@ -121,12 +121,9 @@ class _Bus:
 
 
 @pytest.fixture
-def family(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> SimpleNamespace:
+def family(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """The owner (Misho, the seeded chat user) and a Kid (Mark) with the locked map's grants, each with a
     conversation of their own."""
-    # Seeding the default character logs through a plain stdlib logger with a keyword field, which raises once an
-    # earlier test (a CLI run) has left INFO on for it: not this phase's to fix, so keep it quiet here
-    caplog.set_level(logging.WARNING, logger="hirocli.domain.character")
     monkeypatch.setattr(people, "get_domain_event_bus", _Bus)
     misho = add_person(tmp_path, name="Misho", role_ids=["owner"])
     mark = add_person(tmp_path, name="Mark", role_ids=["kid"])
