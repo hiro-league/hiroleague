@@ -312,3 +312,89 @@ def test_a_kids_ask_to_the_home_is_for_the_kid(family: SimpleNamespace) -> None:
     finally:
         usage_person.reset(token)
     assert may_use(family.mark, next(t for t in AGENT_TOOLS if t.name == "extension_state"))
+
+
+# -- a whole turn through the compiled chat graph -----------------------------------------------------------------------
+
+
+async def _turn_listing(family: SimpleNamespace, acting: Acting | None) -> dict[str, Any]:
+    """One turn of the real compiled graph, its model scripted to list conversations, run as the agent manager runs
+    it: the person set around the run, never inside it. Returns the tool's event payload."""
+    from hiro_memory.testing import ai_text, ai_tool_call
+
+    from hirocli.runtime.agent_graph.events import GRAPH_TOOL_COMPLETED
+    from hirocli.runtime.tests.graph_fakes import FakeMemory, make_inbound_envelope, run_graph
+    from hirocli.runtime.tests.test_chat_graph_characterization import _build_chat, _state
+    from hirocli.tools.rights import begin, end
+
+    compiled, _sink, _ = _build_chat(
+        family.path,
+        responses=[ai_tool_call("conversation_channel_list", {}), ai_text("done")],
+        tools=(to_langchain(ConversationChannelListTool()),),
+        memory=FakeMemory(),
+    )
+    state = _state(family.path, make_inbound_envelope(text="which chats do I have?"),
+                   tools_offered=["conversation_channel_list"],
+                   data_user_id=acting.user_id if acting else family.mark.user_id)
+    token = begin(acting) if acting is not None else None
+    try:
+        result = await run_graph(compiled, state)
+    finally:
+        if token is not None:
+            end(token)
+    payload = result.event_payload(GRAPH_TOOL_COMPLETED)
+    assert payload is not None
+    return payload
+
+
+@pytest.mark.asyncio
+async def test_through_the_compiled_graph_a_kids_hiro_lists_only_the_kids_conversations(
+    family: SimpleNamespace,
+) -> None:
+    payload = await _turn_listing(family, family.mark)
+    assert payload["status"] == "completed"
+    assert "Homework" in payload["result"] and "Plans" not in payload["result"]
+
+
+@pytest.mark.asyncio
+async def test_through_the_compiled_graph_a_turn_with_no_person_runs_no_tool(family: SimpleNamespace) -> None:
+    payload = await _turn_listing(family, None)
+    assert payload["status"] == "refused" and "whom this turn is for" in payload["error"]
+
+
+def test_a_kid_gets_no_file_from_another_persons_conversation(family: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    """files_head, offered to a Kid, keeps to their own conversations: the owner's attachment answers as missing."""
+    from hirocli.domain import files_resolver
+    from hirocli.tools.files import FilesHeadTool
+
+    seen: list[int | None] = []
+
+    def lookup(_path: Path, *, message_external_id: str, slot_index: int, user_id: int | None) -> None:
+        seen.append(user_id)  # the chat user the attachment must belong to; none of this test's rows match
+        return None
+
+    monkeypatch.setattr(files_resolver, "get_attachment_by_message_external_id", lookup)
+    tool = FilesHeadTool()
+    with acting_as(family.mark), pytest.raises(FileNotFoundError):
+        tool.execute(**hold(tool, {"ref": "message_attachment:owners-msg:0"}))
+    with acting_as(family.misho), pytest.raises(FileNotFoundError):
+        tool.execute(**hold(tool, {"ref": "message_attachment:owners-msg:0"}))
+    assert seen == [family.mark.user_id, None]  # the Kid's own only; the owner reaches everyone's, as before
+
+
+def test_a_tool_that_takes_only_a_workspace_name_gets_hiros_own(
+    family: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hirocli.domain import workspace as workspace_mod
+    from hirocli.tools import rights
+
+    registry = SimpleNamespace(workspaces={"ws-hiro": SimpleNamespace(path=str(family.path)),
+                                           "ws-other": SimpleNamespace(path=str(family.path / "other"))})
+    monkeypatch.setattr(workspace_mod, "load_registry", lambda: registry)
+    assert rights.workspace_id_of(family.path) == "ws-hiro"
+    named_only = next(t for t in AGENT_TOOLS if t.name == "log_tail")
+    assert "workspace_path" not in inspect.signature(entry(named_only)).parameters
+    owner = Acting(person_id=family.misho.person_id, name="Misho", user_id=family.misho.user_id, owner=True,
+                   workspace_path=family.path, workspace_id=rights.workspace_id_of(family.path))
+    with acting_as(owner):
+        assert hold(named_only, {"workspace": "ws-other"})["workspace"] == "ws-hiro"

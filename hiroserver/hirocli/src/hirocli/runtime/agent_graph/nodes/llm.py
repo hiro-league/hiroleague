@@ -263,14 +263,15 @@ class LLMNodes(NodeGroup):
 
             elapsed_ms = int((time.perf_counter() - started) * 1000)
             if status == "refused":
+                # A refusal is an outcome, not a failure: the step ran and said no
                 record_child(
                     node=f"tools/{_error_slug(tool_name) or 'unknown'}",
-                    status="error",
+                    status="ok",
                     elapsed_ms=elapsed_ms,
                     branch_index=idx,
                     input=_tool_input_preview(tool_name, args),
                     output=f"refused: {error}",
-                    fail={"code": "not_allowed", "decision": "refused"},
+                    decision=("refused", "not_allowed"),
                 )
             elif status == "completed":
                 record_child(
