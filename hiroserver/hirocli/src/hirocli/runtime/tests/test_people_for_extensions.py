@@ -74,11 +74,12 @@ def test_an_extension_adds_and_changes_people_and_roles(tmp_path: Path) -> None:
 
 
 def test_a_refused_change_says_why(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)  # one app, paired once (one name is one app)
     with pytest.raises(RequestRefused) as refused:
-        asyncio.run(handle_people_add({"name": "Grandma", "role_id": "guest"}, _ctx(tmp_path)))
+        asyncio.run(handle_people_add({"name": "Grandma", "role_id": "guest"}, ctx))
     assert refused.value.code == "invalid_params" and "no role" in refused.value.message
     with pytest.raises(RequestRefused):
-        asyncio.run(handle_roles_remove({"role_id": "owner"}, _ctx(tmp_path)))
+        asyncio.run(handle_roles_remove({"role_id": "owner"}, ctx))
 
 
 class FakeExtensions:

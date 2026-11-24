@@ -316,6 +316,24 @@ def set_role_rights(workspace_path: Path, role_id: str, extension: str, keys: li
     return role.model_copy(update={"rights": rights})
 
 
+def drop_source_rights(workspace_path: Path, extension: str) -> dict[str, list[str]]:
+    """An app was removed: every role's grants in it go ({role id: the keys it held}, roles that held none left out).
+    Its name is its key, so an app paired later under the same name starts with none."""
+    dropped: dict[str, list[str]] = {}
+    with _connect(workspace_path) as conn:
+        for row in conn.execute("SELECT * FROM roles").fetchall():
+            role = _row_to_role(row)
+            if extension not in role.rights:
+                continue
+            dropped[role.role_id] = list(role.rights[extension])
+            rights = {k: v for k, v in role.rights.items() if k != extension}
+            conn.execute("UPDATE roles SET rights = ? WHERE role_id = ?", (json.dumps(rights), role.role_id))
+        conn.commit()
+    if dropped:
+        _changed(workspace_path, "role_rights", extension=extension)
+    return dropped
+
+
 def remove_role(workspace_path: Path, role_id: str) -> None:
     role = get_role(workspace_path, role_id)
     if role is None:

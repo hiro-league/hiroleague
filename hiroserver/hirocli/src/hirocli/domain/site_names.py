@@ -2,8 +2,10 @@
 
 An extension claims one name for its site (``reports.hiro.local`` or ``abc.local``) with the port it listens on; the
 core keeps the claim here (workspace.db ``site_names``), publishes the name on the LAN and points Caddy at the port
-(runtime/site_names.py). What lives here is the pure part: the name rules, the names Caddy's hand-written file
-already serves (never touched, never given out), the Caddy file the core writes, and the claims table.
+(runtime/site_names.py). The core claims its own names the same way, from its config rather than the table:
+``hiro.local`` for its admin and the gateway's name. What lives here is the pure part: the name rules, the names
+Caddy's hand-written file already serves (never touched, never given out), what the core serves, the Caddy file it
+writes, and the claims table.
 """
 
 from __future__ import annotations
@@ -21,6 +23,8 @@ _LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
 _NAME = re.compile(rf"^{_LABEL}(?:\.hiro)?\.local$")
 # Never given to an app, whatever Caddy's file says: the core's own address.
 RESERVED = frozenset({DOMAIN})
+# The id the core's own names are written under (they are never rows of the claims table).
+CORE_ID = "hiroleague"
 # A site address line in a Caddyfile: "http://a.local, b.local {" (the addresses before the brace).
 _SITE_LINE = re.compile(r"^\s*([^#{}\s][^#{}]*?)\s*\{\s*(?:#.*)?$")
 
@@ -59,6 +63,27 @@ def check_port(port: object) -> int:
     return port
 
 
+def gateway_name(gateway_url: str) -> str | None:
+    """The LAN name devices are given for the gateway (``ws://gate.hiro.local`` → ``gate.hiro.local``), or None when
+    the address isn't a name the core can serve (``localhost``, an IP address, a name outside ``.local``)."""
+    host = re.sub(r"^[a-z]+://", "", (gateway_url or "").strip().lower()).split("/")[0].split(":")[0]
+    try:
+        name = check_name(host)
+    except SiteNameError:
+        return None
+    return None if name == DOMAIN else name
+
+
+def core_names(*, admin_port: int, gateway_url: str, gateway_port: int, gateway_builtin: bool) -> list[SiteName]:
+    """The core's own names, claimed as an app claims its own: ``hiro.local`` for its admin, and the gateway's name
+    when the core runs the gateway itself (a gateway run elsewhere is served there)."""
+    names = [SiteName(DOMAIN, CORE_ID, admin_port)]
+    gate = gateway_name(gateway_url)
+    if gate and gateway_builtin:
+        names.append(SiteName(gate, CORE_ID, gateway_port))
+    return names
+
+
 def caddy_names(caddyfile: Path | None) -> set[str]:
     """The names a hand-written Caddyfile already serves (its site addresses, scheme and port dropped)."""
     if caddyfile is None or not caddyfile.is_file():
@@ -75,11 +100,34 @@ def caddy_names(caddyfile: Path | None) -> set[str]:
     return names
 
 
+@dataclass(frozen=True)
+class Served:
+    """What the core serves: every app's claim and its own names, less those it must leave alone."""
+
+    names: list[SiteName]
+    # The core's names the hand-written Caddyfile still serves: Caddy refuses a name in both files, and then serves
+    # none, so the core takes such a name only once its hand-written block is gone.
+    deferred: frozenset[str]
+    # The core's names an app's claim already holds (kept from before the core claimed them): the app keeps it.
+    clashes: frozenset[str]
+
+
+def served(claims: list[SiteName], core: list[SiteName], hand_written: set[str]) -> Served:
+    """The names to publish and proxy: the apps' claims, then the core's own names that neither the hand-written
+    Caddyfile nor an app's claim holds. Never one name twice, so Caddy always loads the file."""
+    claimed = {c.name for c in claims}
+    deferred = frozenset(c.name for c in core if c.name in hand_written)
+    clashes = frozenset(c.name for c in core if c.name in claimed and c.name not in hand_written)
+    own = [c for c in core if c.name not in deferred and c.name not in clashes]
+    return Served([*claims, *own], deferred, clashes)
+
+
 def render_caddy(claims: list[SiteName]) -> str:
     """The Caddy file the core owns: one block per claimed name, proxied to the app on this machine."""
     lines = [
         "# Written by HiroLeague (site names, docs/site-names-design.md): each app's LAN name, claimed from its address",
-        "# setting. Don't edit: the core writes this file again on each change. Hand-written names go in the Caddyfile.",
+        "# setting, and the core's own (its admin, its gateway). Don't edit: the core writes this file again on each",
+        "# change. Hand-written names go in the Caddyfile.",
     ]
     for c in sorted(claims, key=lambda c: c.name):
         lines += [
@@ -115,7 +163,7 @@ def claim(workspace_path: Path, extension_id: str, name: str, port: int, hand_wr
     """Give ``name`` to the extension (dropping its old one); the claim, and the old name it replaced (or None).
 
     Raises SiteNameError: ``invalid`` (the name or port), ``taken`` (another app's, Caddy's hand-written file's, or
-    the core's own)."""
+    the core's own: ``hand_written`` holds the core's names too)."""
     name, port = check_name(name), check_port(port)
     if name in RESERVED or name in hand_written:
         raise SiteNameError("taken", f"{name} is already in use on this server. Pick another name.")

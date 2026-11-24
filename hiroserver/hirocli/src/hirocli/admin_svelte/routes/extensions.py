@@ -177,7 +177,13 @@ async def remove_extension(
             # Close it now; it is refused when it tries again.
             await manager.disconnect(extension_id)
     if not channel:
-        return {"message": f"{ext.name} removed: it pairs again with a new code."}
+        gone = [f"its name {result.data.site_name}"] if result.data.site_name else []
+        if result.data.rights_dropped:
+            gone.append(f"its rights in {len(result.data.rights_dropped)} role(s)")
+        if result.data.picks_dropped:
+            gone.append(f"{len(result.data.picks_dropped)} AI or voice pick(s)")
+        with_it = f", with {', '.join(gone)}" if gone else ""
+        return {"message": f"{ext.name} removed{with_it}: it pairs again with a new code. Its own data stays."}
     if result.data.uninstalled:
         return {"message": f"{ext.name} removed, and its program uninstalled."}
     return {"message": f"{ext.name} removed; its program stayed installed (the server's log says why)."}

@@ -51,6 +51,7 @@ from .constants import (
     EXTENSION_CHANNEL,
     EXTENSION_DENIED_BAD_CODE,
     EXTENSION_DENIED_BAD_FRAME,
+    EXTENSION_DENIED_NAME_TAKEN,
     EXTENSION_FRAME_AUTH,
     EXTENSION_FRAME_CHALLENGE,
     EXTENSION_FRAME_DENIED,
@@ -628,6 +629,14 @@ class ExtensionClient:
             # Not the core (wrong address?) — retry with the usual delays, keep any code.
             await self._set_status(STATUS_DISCONNECTED, {"error": denied.message})
             return
+        elif denied.reason == EXTENSION_DENIED_NAME_TAKEN:
+            # Another app holds the name this one declares: the core's words say which and what to do. Pairing drops
+            # its code (a new one once the other app is removed); a paired app keeps its key and tries again later.
+            if self._pairing_code is None:
+                await self._set_status(STATUS_DISCONNECTED, {"error": denied.message})
+                return
+            self._pairing_code = None
+            message = denied.message
         else:
             # not_paired / bad_signature: the core doesn't know this key (e.g. removed in its admin).
             self._pairing_code = None

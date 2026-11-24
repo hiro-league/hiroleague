@@ -140,7 +140,7 @@ export function createExtensionsController(notify: Notify) {
       title: `Remove ${row.label}?`,
       description:
         row.kind === 'app'
-          ? `The core forgets ${row.label} and its key; it pairs again with a new code. The app itself and its data stay.`
+          ? `The core forgets ${row.label}: its key, its LAN name, its rights in every role and its AI and voice picks. It pairs again with a new code, and starts with no rights or picks. The app itself and its data stay.`
           : `The core stops ${row.label}, deletes its settings and uninstalls its program. You can install it again later.`,
       action: 'Remove',
       danger: true

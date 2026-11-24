@@ -128,10 +128,10 @@ def test_a_personal_right_is_granted_for_their_own_or_everyones(tmp_path: Path) 
 
 def test_existing_grants_keep_their_meaning(tmp_path: Path) -> None:
     """A plain key granted before a right was declared personal still reaches everyone's: nothing is rewritten."""
-    add_paired_extension(tmp_path, name="home", public_key="k", info=INFO)
+    home = add_paired_extension(tmp_path, name="home", public_key="k", info=INFO)
     set_rights(tmp_path, "kid", "home", ["streams.see", "myroom.use"])
     personal = {**INFO, "features": [{**f, "rights": [{**r, "personal": True} for r in f["rights"]]} for f in FEATURES]}
-    add_paired_extension(tmp_path, name="home", public_key="k", info=personal)
+    touch_paired_extension(tmp_path, home.extension_id, info=personal)  # its next sign-in declares them personal
     roles = {r["role_id"]: r["rights"] for r in roles_with_rights(tmp_path)}
     assert roles["kid"]["home"] == ["streams.see", "myroom.use"]
 

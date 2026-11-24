@@ -9,6 +9,7 @@ ExtensionManager, read by the admin route directly.
 
 from __future__ import annotations
 
+import json
 import shlex
 import socket
 from dataclasses import dataclass, field
@@ -24,14 +25,17 @@ from ..domain.channel_catalog import catalog_channel
 from ..domain.channel_config import list_channel_configs
 from ..domain.channel_descriptor import load_channel_descriptor
 from ..domain.features import feature_active
+from ..domain.events import DomainEvent, DomainEventType, get_domain_event_bus
 from ..domain.extensions import (
     KIND_CHANNEL,
+    RESERVED_NAMES,
     PairedExtension,
     list_paired_extensions,
     remove_paired_extension,
     start_extension_pairing,
 )
-from ..domain.site_names import list_claims
+from ..domain.people import drop_source_rights
+from ..domain.site_names import list_claims, release
 from ..domain.workspace import resolve_workspace
 from .base import Tool, ToolParam
 from .channel import ChannelRemoveTool, ChannelUninstallTool, mandatory_channel
@@ -88,6 +92,10 @@ class ExtensionRemoveResult:
     name: str = ""
     # A channel's program is uninstalled with it; False when that part failed (its row is gone all the same).
     uninstalled: bool = False
+    # An app takes with it what the core kept under its name; its own data stays where the app keeps it.
+    site_name: str = ""  # the LAN name it gave back
+    rights_dropped: dict[str, list[str]] = field(default_factory=dict)  # role id → the keys it held
+    picks_dropped: list[str] = field(default_factory=list)  # "<section>: <key>", as preferences.json had them
 
 
 @dataclass
@@ -251,8 +259,7 @@ class ExtensionRemoveTool(Tool):
         if ext is None:
             return ExtensionRemoveResult(removed=False, extension_id=extension_id)
         if ext.kind != KIND_CHANNEL:
-            removed = remove_paired_extension(workspace_path, extension_id)
-            return ExtensionRemoveResult(removed=removed, extension_id=extension_id, kind=ext.kind, name=ext.name)
+            return _remove_app(workspace_path, ext)
         # A channel: the core installed its program, so removing it uninstalls it too (raises for the mandatory one).
         removed = ChannelRemoveTool().execute(ext.name, workspace).removed
         uninstalled = False
@@ -265,6 +272,71 @@ class ExtensionRemoveTool(Tool):
         return ExtensionRemoveResult(
             removed=removed, extension_id=extension_id, kind=ext.kind, name=ext.name, uninstalled=uninstalled
         )
+
+
+# Where an app's picks live in preferences.json: maps keyed "<app>:<use>" (AI, voice, embedding, reranker uses), and
+# the folders its AI asks may name, keyed by the app's name alone.
+_PICKS_BY_USE = ("ai.uses", "voice.uses", "embedding.uses", "rerank.uses")
+_PICKS_BY_NAME = ("ai.folders",)
+
+
+def picks_without(prefs: Any, name: str) -> tuple[dict[str, Any], list[str]]:
+    """The preference edits that drop an app's picks, and what they drop ("<section>: <key>"). Matches the name
+    exactly, so removing ``home`` leaves ``homehiro``'s alone."""
+    edits: dict[str, Any] = {}
+    dropped: list[str] = []
+    for path in (*_PICKS_BY_USE, *_PICKS_BY_NAME):
+        section, field_name = path.split(".")
+        current: dict[str, Any] = dict(getattr(getattr(prefs, section), field_name))
+        if path in _PICKS_BY_USE:
+            gone = [k for k in current if k.partition(":")[0] == name]
+        else:
+            gone = [k for k in current if k == name]
+        if gone:
+            edits[path] = {k: v for k, v in current.items() if k not in gone}
+            dropped += [f"{path}: {k}" for k in gone]
+    return edits, dropped
+
+
+def _remove_app(workspace_path: Path, ext: PairedExtension) -> ExtensionRemoveResult:
+    """Forget an app and what the core kept under its name: its key, its LAN name, every role's grants in it and its
+    AI and voice picks. Its own data is the app's and stays. In the running server (the admin, or the CLI through
+    /invoke) the name stops being announced and Caddy's file is written again at once; otherwise at the next start."""
+    from ..runtime.preferences_runtime import preferences_runtime_for
+
+    if not remove_paired_extension(workspace_path, ext.extension_id):
+        return ExtensionRemoveResult(removed=False, extension_id=ext.extension_id, kind=ext.kind, name=ext.name)
+    site_name = release(workspace_path, ext.extension_id) or ""
+    rights: dict[str, list[str]] = {}
+    picks: list[str] = []
+    # Grants and picks are kept under the name: only when no other extension holds it (two apps could share one
+    # before names were unique), and never the core's own.
+    shared = ext.name in RESERVED_NAMES or any(e.name == ext.name for e in list_paired_extensions(workspace_path, kind=None))
+    if ext.name and not shared:
+        rights = drop_source_rights(workspace_path, ext.name)
+        runtime = preferences_runtime_for(workspace_path)
+        edits, picks = picks_without(runtime.current, ext.name)
+        if edits:
+            runtime.update_many(edits)
+    get_domain_event_bus().publish(DomainEvent(
+        type=DomainEventType.EXTENSION_REMOVED,
+        workspace_path=workspace_path,
+        payload={"extension_id": ext.extension_id, "name": ext.name, "site_name": site_name},
+    ))
+    # What went, in full, so a removal by mistake can be set again by hand.
+    log.info(
+        f"🗑️ App removed — {ext.name or ext.extension_id}: its name {site_name or '(none)'}, rights in "
+        f"{len(rights)} role(s), {len(picks)} pick(s); its own data stays",
+        extension_id=ext.extension_id,
+        site_name=site_name,
+        rights=json.dumps(rights),
+        picks=", ".join(picks),
+        kept_by_name="another extension holds the same name" if shared else "",
+    )
+    return ExtensionRemoveResult(
+        removed=True, extension_id=ext.extension_id, kind=ext.kind, name=ext.name,
+        site_name=site_name, rights_dropped=rights, picks_dropped=picks,
+    )
 
 
 class ExtensionAddressTool(Tool):

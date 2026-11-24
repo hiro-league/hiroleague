@@ -46,6 +46,44 @@ KIND_CHANNEL = "channel"  # a channel plugin: the core starts it and makes its c
 
 TABLE = "extension_records"
 
+# Names no extension may take: the core's own source, under which its admin grants are kept (core_features.CORE_SOURCE).
+RESERVED_NAMES = frozenset({"hiroleague"})
+
+
+class ExtensionNameTaken(ValueError):
+    """An app's name is its key (rights, AI picks, asks are kept under it), so one name is one app. The message is for
+    people."""
+
+    def __init__(self, name: str, holder: PairedExtension | None) -> None:
+        if holder is None:
+            message = f"“{name}” is HiroLeague's own name; an app can't take it."
+        else:
+            message = (
+                f"Another {'channel' if holder.kind == KIND_CHANNEL else 'app'} is already paired as “{name}”. "
+                "Remove it in the core's admin (Extensions) first, then pair this one."
+            )
+        super().__init__(message)
+        self.name = name
+        self.holder = holder
+
+
+def name_holder(workspace_path: Path, name: str, *, besides: str = "") -> PairedExtension | None:
+    """The extension that holds ``name``, other than ``besides`` (an extension id), or None."""
+    return next(
+        (e for e in list_paired_extensions(workspace_path, kind=None) if e.name == name and e.extension_id != besides),
+        None,
+    )
+
+
+def check_name_free(workspace_path: Path, name: str, *, besides: str = "") -> None:
+    """Raise ExtensionNameTaken when ``name`` is reserved or another extension holds it (design.md §9: a second
+    ``home`` would take HomeHiro's rights, picks and asks)."""
+    if name in RESERVED_NAMES:
+        raise ExtensionNameTaken(name, None)
+    holder = name_holder(workspace_path, name, besides=besides)
+    if holder is not None:
+        raise ExtensionNameTaken(name, holder)
+
 
 class PairedExtension(BaseModel):
     """One extension's row. A channel plugin not yet paired has no key (``public_key`` "") and no ``paired_at``."""
@@ -184,8 +222,10 @@ def get_paired_extension(workspace_path: Path, extension_id: str) -> PairedExten
 
 
 def add_paired_extension(workspace_path: Path, *, name: str, public_key: str, info: dict[str, Any]) -> PairedExtension:
-    """Store a newly paired app under a new id (paired with the admin's code)."""
+    """Store a newly paired app under a new id (paired with the admin's code). Raises ExtensionNameTaken when the
+    name is reserved or another extension holds it."""
     ensure_db(workspace_path)
+    check_name_free(workspace_path, name)
     now = datetime.now(UTC)
     extension = PairedExtension(
         extension_id=uuid.uuid4().hex,

@@ -99,20 +99,49 @@ def register(extension_app: typer.Typer, console: Console) -> None:
         extension_id: str = typer.Argument(..., help="Extension ID to remove (see `hiro extension list`)."),
         workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help=_WORKSPACE_HELP),
     ) -> None:
-        """Remove a paired extension; it is refused until paired again."""
-        from ..tools.extension import ExtensionRemoveTool
+        """Remove a paired extension; it is refused until paired again. An app's LAN name, its rights and its AI picks
+        go with it; its own data stays."""
+        from pathlib import Path
+
+        import httpx
+        from hiro_commons.process import is_running, read_pid
+
+        from ..constants import PID_FILENAME
+        from ..domain.workspace import resolve_workspace
+        from ..domain.workspace_server_client import post_invoke_sync
+        from ..tools.extension import ExtensionRemoveResult, ExtensionRemoveTool
 
         log.info("hiro extension remove", extension_id=extension_id)
         try:
-            result = ExtensionRemoveTool().execute(extension_id=extension_id, workspace=workspace)
-        except WorkspaceError as exc:
+            entry, _ = resolve_workspace(workspace)
+            workspace_path = Path(entry.path)
+            live = is_running(read_pid(workspace_path, PID_FILENAME))
+            if live:
+                # The running core keeps preferences in memory and announces the names: it does the removal, or it
+                # would write the app's picks back and keep its name live.
+                out = post_invoke_sync(workspace_path, "extension_remove",
+                                       {"extension_id": extension_id, "workspace": entry.id})
+                result = ExtensionRemoveResult(**out)
+            else:
+                result = ExtensionRemoveTool().execute(extension_id=extension_id, workspace=workspace)
+        except (WorkspaceError, RuntimeError, OSError, ValueError, httpx.HTTPError) as exc:
+            # The workspace unknown, the server not answering, or the tool's refusal (the mandatory channel).
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1) from exc
-        if result.removed:
-            console.print(f"[green]Removed extension[/green] [bold]{result.extension_id}[/bold].")
-            console.print("[dim]If it is connected now, it is refused from its next connection.[/dim]")
-        else:
+        if not result.removed:
             console.print(f"[yellow]Extension not found:[/yellow] {result.extension_id}")
+            return
+        console.print(f"[green]Removed extension[/green] [bold]{result.name or result.extension_id}[/bold].")
+        if result.site_name:
+            console.print(f"Its name {result.site_name} is free again.")
+        if result.rights_dropped or result.picks_dropped:
+            console.print(f"Its rights in {len(result.rights_dropped)} role(s) and {len(result.picks_dropped)} AI or "
+                          "voice pick(s) went with it.")
+        if live:
+            console.print("[dim]It is refused from its next connection; its own data stays where it is.[/dim]")
+        else:
+            console.print("[dim]Its own data stays where it is. Caddy's file is written again at the core's next "
+                          "start.[/dim]")
 
     @extension_app.command("address")
     def extension_address(

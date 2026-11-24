@@ -3,8 +3,10 @@
 An extension's address setting claims a name (``sites.claim {name, port}``). The core keeps the claim
 (domain/site_names.py), publishes the name on the LAN with one ``avahi-publish -a -R <name> <ip>`` per name (an
 ordinary user may: no sudo), writes every claimed name into the Caddy file it owns and runs the reload command. At
-start it does the same for every kept claim. A machine that isn't set up (no ``site_names_ip`` in the workspace
-config) keeps the claims and publishes nothing; the answer says so.
+start it does the same for every kept claim, and for its own two names (``hiro.local``, the gateway's), except one the
+hand-written Caddyfile still serves. A removed app's name goes at once (``extension.removed`` on the bus). A machine
+that isn't set up (no ``site_names_ip`` in the workspace config) keeps the claims and publishes nothing; the answer
+says so.
 """
 
 from __future__ import annotations
@@ -18,13 +20,17 @@ from typing import TYPE_CHECKING, Any
 from hiro_channel_sdk.constants import METHOD_SITES_CLAIM
 from hiro_commons.log import Logger
 
+from ..domain.events import DomainEvent, DomainEventType, get_domain_event_bus
 from ..domain.site_names import (
     SiteName,
     SiteNameError,
     caddy_names,
     claim,
+    core_names,
+    gateway_name,
     list_claims,
     render_caddy,
+    served,
 )
 from .request_handler import EXTENSIONS_ONLY, RequestContext, RequestRefused
 from .whatsapp_for_extensions import sender_label
@@ -45,6 +51,8 @@ class SiteNames:
         self._ctx = ctx
         self._publishers: dict[str, asyncio.Task[None]] = {}
         self._lock = asyncio.Lock()
+        # The core's names left to the hand-written Caddyfile or an app's claim, as last said (each change logged once).
+        self._left: frozenset[str] = frozenset()
 
     # -- the machine's setup (workspace config) ----------------------------------------------
 
@@ -71,20 +79,37 @@ class SiteNames:
             log.warning("⚠️ Site names — couldn't read the hand-written Caddyfile", error=str(exc))
             return set()
 
+    def _core_names(self) -> list[SiteName]:
+        cfg = self._cfg
+        return core_names(admin_port=cfg.admin_port, gateway_url=cfg.gateway_url, gateway_port=cfg.gateway_port,
+                          gateway_builtin=cfg.gateway_builtin)
+
+    def _taken(self, hand: set[str]) -> set[str]:
+        """What no app may claim: the hand-written names and the core's own (its gateway's name even when the gateway
+        runs elsewhere: devices are given it)."""
+        gate = gateway_name(self._cfg.gateway_url)
+        return hand | {c.name for c in self._core_names()} | ({gate} if gate else set())
+
     # -- lifecycle -----------------------------------------------------------------------------
 
     async def run(self) -> None:
-        """Publish every kept claim and write Caddy's file, then keep the publishers alive until the server stops."""
+        """Publish every kept claim and the core's names and write Caddy's file, then keep the publishers alive until
+        the server stops."""
+        bus = get_domain_event_bus()
+        bus.subscribe(DomainEventType.EXTENSION_REMOVED, self._on_extension_removed)
         claims = await asyncio.to_thread(list_claims, Path(self._ctx.workspace_path))
         if self._ip():
             async with self._lock:
-                await self._apply(claims)
-            log.info(f"✅ Site names ready — {len(claims)} app name(s)", names=", ".join(c.name for c in claims))
+                await self._apply(claims, self.hand_written())
+            own = [c.name for c in self._core_names() if c.name not in self._left]
+            log.info(f"✅ Site names ready — {len(claims)} app name(s), the core's: {', '.join(own) or 'none'}",
+                     names=", ".join(c.name for c in claims))
         elif claims:
             log.info("Site names kept, not published — this machine isn't set up (hiro extension names)")
         try:
             await asyncio.Event().wait()
         finally:
+            bus.unsubscribe(DomainEventType.EXTENSION_REMOVED, self._on_extension_removed)
             for task in self._publishers.values():
                 task.cancel()
             await asyncio.gather(*self._publishers.values(), return_exceptions=True)
@@ -94,14 +119,16 @@ class SiteNames:
         """Give the extension its name, publish it and proxy it; raises SiteNameError."""
         async with self._lock:
             hand = self.hand_written()
-            kept, old = await asyncio.to_thread(claim, Path(self._ctx.workspace_path), extension_id, name, port, hand)
+            kept, old = await asyncio.to_thread(
+                claim, Path(self._ctx.workspace_path), extension_id, name, port, self._taken(hand)
+            )
             published = proxied = False
             note = ""
             if not self._ip():
                 note = "This server isn't set up to publish names (hiro extension names); the name is kept for later."
             else:
                 claims = await asyncio.to_thread(list_claims, Path(self._ctx.workspace_path))
-                proxied, note = await self._apply(claims)
+                proxied, note = await self._apply(claims, hand)
                 published = kept.name in self._publishers
         if old:
             log.info(f"Site name dropped — {old} · replaced by {kept.name}", extension_id=extension_id)
@@ -113,10 +140,26 @@ class SiteNames:
             "note": note,
         }
 
+    async def _on_extension_removed(self, event: DomainEvent) -> None:
+        """An app was removed: its claim is gone from the table, so publish and proxy what is left."""
+        if not _same_place(event.workspace_path, self._ctx.workspace_path) or not event.payload.get("site_name"):
+            return
+        if not self._ip():
+            return  # nothing was published; the claim is gone, and that is all there is
+        async with self._lock:
+            claims = await asyncio.to_thread(list_claims, Path(self._ctx.workspace_path))
+            proxied, note = await self._apply(claims, self.hand_written())
+        log.info(f"Site name gone with its app — {event.payload['site_name']} · {event.payload.get('name') or '?'}",
+                 proxied=proxied, note=note)
+
     # -- applying ------------------------------------------------------------------------------
 
-    async def _apply(self, claims: list[SiteName]) -> tuple[bool, str]:
-        """Publish exactly these names and write them into Caddy's file; (Caddy reloaded, a note when not)."""
+    async def _apply(self, claims: list[SiteName], hand: set[str]) -> tuple[bool, str]:
+        """Publish exactly the apps' claims and the core's names it may take, and write them into Caddy's file;
+        (Caddy reloaded, a note when not)."""
+        plan = served(claims, self._core_names(), hand)
+        self._say_left(plan.deferred, plan.clashes)
+        claims = plan.names
         wanted = {c.name for c in claims}
         for name in list(self._publishers):
             if name not in wanted:
@@ -198,6 +241,25 @@ class SiteNames:
             return False, f"Caddy didn't reload: {detail or proc.returncode}"
         log.info("✅ Site names — Caddy reloaded", command=" ".join(command))
         return True, ""
+
+    def _say_left(self, deferred: frozenset[str], clashes: frozenset[str]) -> None:
+        """Say once which of the core's names it leaves alone, and when it takes one."""
+        left = deferred | clashes
+        for name in sorted(deferred - self._left):
+            log.info(f"Site names — {name} stays with the hand-written Caddyfile; the core takes it once that block "
+                     "is gone")
+        for name in sorted(clashes - self._left):
+            log.warning(f"⚠️ Site names — {name} is the core's, but an app claimed it first; the app keeps it")
+        for name in sorted(self._left - left):
+            log.info(f"✅ Site names — the core serves {name} now")
+        self._left = left
+
+
+def _same_place(a: object, b: object) -> bool:
+    try:
+        return Path(str(a)).resolve() == Path(str(b)).resolve()
+    except OSError:
+        return str(a) == str(b)
 
 
 # ---------------------------------------------------------------------------

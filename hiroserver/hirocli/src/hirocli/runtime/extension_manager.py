@@ -55,6 +55,7 @@ from hiro_channel_sdk.constants import (
     EXTENSION_DENIED_BAD_CODE,
     EXTENSION_DENIED_BAD_FRAME,
     EXTENSION_DENIED_BAD_SIGNATURE,
+    EXTENSION_DENIED_NAME_TAKEN,
     EXTENSION_DENIED_NOT_PAIRED,
     EXTENSION_FRAME_AUTH,
     EXTENSION_FRAME_CHALLENGE,
@@ -105,8 +106,10 @@ from ..domain.talkers import talking_numbers
 from ..domain.extensions import (
     KIND_APP,
     KIND_CHANNEL,
+    ExtensionNameTaken,
     PairedExtension,
     add_paired_extension,
+    check_name_free,
     clear_extension_pairing,
     get_paired_extension,
     load_extension_pairing,
@@ -585,6 +588,13 @@ class ExtensionManager:
                 raise _Denied(EXTENSION_DENIED_NOT_PAIRED, "unknown extension; pair it again")
             if not _signature_ok(found.public_key, nonce, signature):
                 raise _Denied(EXTENSION_DENIED_BAD_SIGNATURE, "signature doesn't match the paired key")
+            if info.name != found.name:
+                # The sign-in renames the app (its declaration's name is stored on every connect): one name is one
+                # app, so a paired app can't take another one's name either (design.md §9).
+                try:
+                    await asyncio.to_thread(check_name_free, workspace, info.name, besides=extension_id)
+                except ExtensionNameTaken as exc:
+                    raise _Denied(EXTENSION_DENIED_NAME_TAKEN, str(exc)) from exc
             await asyncio.to_thread(
                 touch_paired_extension, workspace, extension_id, info=info.model_dump(mode="json", by_alias=True)
             )
@@ -653,9 +663,13 @@ class ExtensionManager:
                 self._wrong_codes = 0
                 log.warning("⚠️ Too many wrong extension pairing codes — the code was dropped")
             raise _Denied(EXTENSION_DENIED_BAD_CODE, "the pairing code is wrong or has expired")
-        extension = await asyncio.to_thread(
-            add_paired_extension, workspace, name=info.name, public_key=public_key, info=dumped
-        )
+        try:
+            extension = await asyncio.to_thread(
+                add_paired_extension, workspace, name=info.name, public_key=public_key, info=dumped
+            )
+        except ExtensionNameTaken as exc:
+            # Checked after the code, so a guess learns nothing; the code stays for the app it was made for.
+            raise _Denied(EXTENSION_DENIED_NAME_TAKEN, str(exc)) from exc
         await asyncio.to_thread(clear_extension_pairing, workspace)  # one code, one extension
         self._wrong_codes = 0
         log.info(f"✅ Extension paired — {info.name}", kind=extension.kind, extension_id=extension.extension_id)

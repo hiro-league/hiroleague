@@ -8,6 +8,7 @@ a devices-only method refused, a wrong code, removal, and signing in again.
 from __future__ import annotations
 
 import asyncio
+import logging
 import socket
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,7 +25,12 @@ from hiro_channel_sdk.extension import (
     ExtensionRequestError,
 )
 from hirocli.domain.config import Config
-from hirocli.domain.extensions import list_paired_extensions, remove_paired_extension, start_extension_pairing
+from hirocli.domain.extensions import (
+    list_paired_extensions,
+    load_extension_pairing,
+    remove_paired_extension,
+    start_extension_pairing,
+)
 from hirocli.runtime.extension_manager import ExtensionManager
 from hirocli.runtime.request_handler import ALL_CALLERS, DEVICES_ONLY, RequestHandler
 from hirocli.runtime.request_methods import handle_core_info
@@ -127,6 +133,96 @@ def test_pair_call_both_ways_remove_and_sign_in_again(tmp_path: Path) -> None:
 
         await client.stop()
         await runner
+        ctx.stop_event.set()
+        await asyncio.wait_for(server, 5)
+
+    asyncio.run(scenario())
+
+
+def test_a_second_app_with_a_taken_name_is_refused_and_the_code_stays(tmp_path: Path, caplog) -> None:
+    """Installing apps, phase 2: one name is one app (a second ``home`` would take HomeHiro's rights, picks and asks).
+    The refusal says why in the app, the core logs it, and the code still pairs the app it was made for."""
+    caplog.set_level(logging.WARNING)
+
+    async def scenario() -> None:
+        workspace = tmp_path / "ws"
+        port = _free_port()
+        manager, ctx = _core(workspace, port)
+        server = asyncio.create_task(manager.run())
+        await _wait_for(lambda: manager.listen_state()["listening"])
+
+        home = _client(port, tmp_path / "home")
+        runner = asyncio.create_task(home.run())
+        home.pair(start_extension_pairing(workspace, code_length=6, ttl_seconds=60).code)
+        await _wait_for(lambda: home.status == STATUS_CONNECTED)
+
+        # A second "home" with a good code: refused, in words; its code dropped, nothing stored.
+        session = start_extension_pairing(workspace, code_length=6, ttl_seconds=60)
+        second = _client(port, tmp_path / "second")
+        second_runner = asyncio.create_task(second.run())
+        second.pair(session.code)
+        await _wait_for(lambda: second.status == STATUS_NOT_PAIRED and "error" in second.status_detail)
+        assert "already paired as “home”" in second.status_detail["error"]
+        assert [e.name for e in list_paired_extensions(workspace)] == ["home"]
+        assert home.status == STATUS_CONNECTED
+
+        # The code wasn't burned: the app it was made for still pairs with it.
+        net = ExtensionClient(f"ws://127.0.0.1:{port}", ExtensionInfo(name="net"), ExtensionCredentials(tmp_path / "net"))
+        net_runner = asyncio.create_task(net.run())
+        net.pair(session.code)
+        await _wait_for(lambda: net.status == STATUS_CONNECTED)
+
+        # The core's own name is no app's.
+        start_extension_pairing(workspace, code_length=6, ttl_seconds=60)
+        core = ExtensionClient(f"ws://127.0.0.1:{port}", ExtensionInfo(name="hiroleague"),
+                               ExtensionCredentials(tmp_path / "core"))
+        core_runner = asyncio.create_task(core.run())
+        core.pair(load_extension_pairing(workspace).code)
+        await _wait_for(lambda: core.status == STATUS_NOT_PAIRED and "error" in core.status_detail)
+        assert "HiroLeague's own name" in core.status_detail["error"]
+
+        for client, task in ((home, runner), (second, second_runner), (net, net_runner), (core, core_runner)):
+            await client.stop()
+            await task
+        ctx.stop_event.set()
+        await asyncio.wait_for(server, 5)
+
+    asyncio.run(scenario())
+    refused = [r for r in caplog.records if "Extension refused" in r.getMessage() and "name_taken" in r.getMessage()]
+    assert len(refused) == 2 and all(r.levelno == logging.WARNING for r in refused)
+
+
+def test_a_paired_app_cant_take_another_apps_name_by_renaming_itself(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        workspace = tmp_path / "ws"
+        port = _free_port()
+        manager, ctx = _core(workspace, port)
+        server = asyncio.create_task(manager.run())
+        await _wait_for(lambda: manager.listen_state()["listening"])
+        clients = []
+        for name in ("home", "net"):
+            client = ExtensionClient(f"ws://127.0.0.1:{port}", ExtensionInfo(name=name),
+                                     ExtensionCredentials(tmp_path / name))
+            clients.append((client, asyncio.create_task(client.run())))
+            client.pair(start_extension_pairing(workspace, code_length=6, ttl_seconds=60).code)
+            await _wait_for(lambda c=client: c.status == STATUS_CONNECTED)
+        net, net_runner = clients[1]
+        await net.stop()
+        await net_runner
+
+        # NetHiro starts again declaring "home": refused, and it keeps its key (it is still NetHiro).
+        renamed = ExtensionClient(f"ws://127.0.0.1:{port}", ExtensionInfo(name="home"),
+                                  ExtensionCredentials(tmp_path / "net"))
+        renamed_runner = asyncio.create_task(renamed.run())
+        await _wait_for(lambda: "already paired as “home”" in str(renamed.status_detail.get("error", "")))
+        assert ExtensionCredentials(tmp_path / "net").extension_id() is not None
+        assert sorted(e.name for e in list_paired_extensions(workspace)) == ["home", "net"]
+
+        await renamed.stop()
+        await renamed_runner
+        home, home_runner = clients[0]
+        await home.stop()
+        await home_runner
         ctx.stop_event.set()
         await asyncio.wait_for(server, 5)
 
