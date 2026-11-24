@@ -8,49 +8,33 @@ app answers with that person's rights. The core never filters an answer: the app
         if who is not None and not who.can("people"):
             return {"note": "...may not see who is home"}
 
-The person's role and rights come from the family copy (family.py), as the route check reads them for a signed-in
-person: someone the app doesn't know, or someone the owner gave no access to the app, has no rights.
+The person comes with their rights as the route check has a signed-in caller's (`auth.access.PersonRights`, one shape
+for both): their roles and each role's rights from the family copy (family.py). Someone the app doesn't know, or
+someone the owner gave No access to the app, has no rights.
 """
 
-from dataclasses import dataclass
 from typing import Any
 
-from hiro_channel_sdk.access import SEE
 from hiro_channel_sdk.constants import FOR_PERSON
 from sqlmodel import Session
 
 from .auth import access
-from .auth.models import AppUser, CorePerson, Role
+from .auth.access import PersonRights
+from .auth.models import AppUser, CorePerson
 from .db import run_db
 
 
-@dataclass(frozen=True)
-class AskedFor:
-    """The person an ask is for, with their role and rights in the app. role_id None = no rights at all."""
-
-    person_id: str
-    role_id: str | None = None
-    rights: tuple[str, ...] = ()
-
-    def can(self, feature: str, right: str = SEE) -> bool:
-        """Whether this person may use one right of one of the app's features (see it, by default)."""
-        return access.can(self.role_id, self.rights, feature, right)
-
-
-def _read(session: Session, person_id: str) -> AskedFor:
+def _read(session: Session, person_id: str) -> PersonRights:
     person = session.get(CorePerson, person_id)
     if person is None:  # not in the app's family copy: someone it doesn't know
-        return AskedFor(person_id)
+        return PersonRights(person_id)
     user = session.get(AppUser, person_id)
     if user is not None and user.denied:  # the owner chose No access to this app for them
-        return AskedFor(person_id)
-    role = session.get(Role, person.role_id)
-    if role is None:  # the copy doesn't have their role yet
-        return AskedFor(person_id)
-    return AskedFor(person_id, role.id, tuple(role.rights))
+        return PersonRights(person_id)
+    return PersonRights(person_id, access.held(session, person.role_ids))
 
 
-async def asked_for(params: dict[str, Any]) -> AskedFor | None:
+async def asked_for(params: dict[str, Any]) -> PersonRights | None:
     """The person the core asks for, with their rights; None when the core asks for itself."""
     person_id = params.get(FOR_PERSON)
     if person_id is None:

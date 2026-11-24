@@ -18,7 +18,9 @@ class CorePerson(SQLModel, table=True):
     name: str
     calls_them: str = ""  # what Hiro calls them ("" = their name)
     whatsapp: str = ""  # digits with the country code ("" = none)
-    role_id: str  # the core's role id (a Role row once synced)
+    role_id: str  # the first of role_ids (Owner when they hold it), as the core lists it
+    # Every role they hold, in the roles' order (Permissions phase 5): their rights add up (auth/access.py)
+    role_ids: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False, server_default="[]"))
     synced_at: datetime
 
 
@@ -38,14 +40,15 @@ class Role(SQLModel, table=True):
 
 
 class AppUser(SQLModel, table=True):
-    """Someone who has opened the app: a person in HiroLeague's family list, with their role. They come in signed in
+    """Someone who has opened the app: a person in HiroLeague's family list, with their roles. They come in signed in
     at HiroLeague (auth/api.py `/api/auth/hiro`; Phase 8's one sign-in)."""
 
     id: str = Field(primary_key=True)  # the core's person id
     name: str  # their name in the family list, as last seen
-    # A cache: their role in HiroLeague's family list (family.py `recompute_roles`); None while the app's copy doesn't
-    # have it yet.
+    # A cache: their roles in HiroLeague's family list that the app's copy has (family.py `recompute_roles`), in the
+    # roles' order; none while it has none of them (they wait). role_id is the first of them, or None.
     role_id: str | None = Field(default=None, foreign_key="role.id", index=True)
+    role_ids: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False, server_default="[]"))
     denied: bool = False  # the owner chose No access
     first_seen: datetime
     last_seen: datetime

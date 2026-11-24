@@ -1,10 +1,10 @@
 <script lang="ts">
-	// Settings → Roles (read-only since Phase 9a): the roles, who has each, and what each may do in the app, as HiroLeague
+	// Settings → Roles (read-only since Phase 9a): one table, each role a column with who holds it (one person may hold
+	// several) and a link to edit it in HiroLeague, each feature a row with what each role may do there, as HiroLeague
 	// grants them. The roles themselves (new, renamed, removed), their lines and their rights change in HiroLeague's
 	// People → Roles, one place for every app; the Edit links open it. Backend: auth/api.py.
 	import { APP } from '$hiro-app/app';
 	import { USERS } from '$hiro-app/users';
-	import { Badge } from '$kit/components/ui/badge/index.js';
 	import { Button } from '$kit/components/ui/button/index.js';
 	import * as Card from '$kit/components/ui/card/index.js';
 	import * as Table from '$kit/components/ui/table/index.js';
@@ -14,7 +14,6 @@
 
 	const ra = new RolesAdmin();
 	const roles = $derived(ra.roles.data?.roles ?? []);
-	const count = (rights: string[]) => ra.features.filter((f) => rights.some((k) => k.startsWith(`${f.id}.`))).length;
 </script>
 
 <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -30,46 +29,31 @@
 </div>
 
 <ResourceView resource={ra.roles} errorTitle="Could not load the roles">
-	<div class="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-		{#each roles as r (r.id)}
-			<Card.Root class="gap-3">
-				<Card.Header class="flex flex-row items-start gap-2">
-					<div class="min-w-0 flex-1">
-						<Card.Title class="flex items-center gap-2">
-							{r.name}
-							{#if r.built_in}<Badge variant="outline" class="gap-1 text-muted-foreground"><Lock class="size-3" /> built in</Badge>{/if}
-							{#if r.core === false}<Badge variant="warning" title="Bring the family list into HiroLeague (Settings → HiroLeague) to make it there"
-									>only in {APP.name}</Badge
-								>{/if}
-						</Card.Title>
-						<Card.Description class="text-xs">{r.says || 'No line yet'}</Card.Description>
-					</div>
-					{#if ra.editUrl(r)}
-						<Button size="sm" variant="ghost" class="text-muted-foreground" href={ra.editUrl(r)} target="_blank" rel="noopener" title="Edit {r.name} in HiroLeague"
-							><ExternalLink class="size-4" /> Edit</Button
-						>
-					{/if}
-				</Card.Header>
-				<Card.Content class="text-xs text-muted-foreground">
-					<div>{count(r.rights)} of {ra.features.length} features</div>
-					<div>{r.users.length ? `${r.users.length === 1 ? '1 user' : `${r.users.length} users`}: ${r.users.join(', ')}` : 'Nobody has it yet'}</div>
-				</Card.Content>
-			</Card.Root>
-		{/each}
-	</div>
-
 	{#if roles.length}
 		<Card.Root>
 			<Card.Header>
-				<Card.Title class="text-base">What each role may do</Card.Title>
+				<Card.Title class="flex items-center gap-2 text-base">What each role may do</Card.Title>
 				<Card.Description>As HiroLeague grants it · Users and roles: owners only</Card.Description>
 			</Card.Header>
 			<Card.Content class="overflow-x-auto">
 				<Table.Root>
 					<Table.Header>
 						<Table.Row class="text-left text-xs text-muted-foreground hover:bg-transparent">
-							<Table.Head class="py-2 pr-3 pl-0 text-muted-foreground">Feature</Table.Head>
-							{#each roles as r (r.id)}<Table.Head class="px-3 py-2 text-muted-foreground">{r.name}</Table.Head>{/each}
+							<Table.Head class="py-2 pr-3 pl-0 align-bottom text-muted-foreground">Feature</Table.Head>
+							{#each roles as r (r.id)}
+								<Table.Head class="h-auto px-3 py-2 align-bottom whitespace-normal">
+									<div class="flex items-center gap-1 font-medium text-foreground">
+										{r.name}
+										{#if r.built_in}<Lock class="size-3 text-muted-foreground" aria-label="built in" />{/if}
+										{#if ra.editUrl(r)}
+											<Button size="icon" variant="ghost" class="size-6 text-muted-foreground" href={ra.editUrl(r)} target="_blank" rel="noopener" title="Edit {r.name} in HiroLeague"
+												><ExternalLink class="size-3.5" /></Button
+											>
+										{/if}
+									</div>
+									<div class="font-normal text-muted-foreground" title={r.says}>{r.users.length ? r.users.join(', ') : 'Nobody yet'}</div>
+								</Table.Head>
+							{/each}
 						</Table.Row>
 					</Table.Header>
 					<Table.Body>

@@ -98,19 +98,28 @@ def signed_in(core: FakeCore, person: dict[str, Any], ua: str = WINDOWS) -> Test
 
 def test_the_pages_level_comes_from_the_rights():
     """"use" with any right beyond See, "see" with See only; a feature without See is "use" with its right."""
-    assert access.level("adult", ["status.see", "status.alerts"], "status") == "use"
-    assert access.level("adult", ["status.see"], "status") == "see"
-    assert access.level("adult", ["settings.change"], "settings") == "use"
-    assert access.level("adult", [], "settings") == "no"
+    assert access.level({"adult": ["status.see", "status.alerts"]}, "status") == "use"
+    assert access.level({"adult": ["status.see"]}, "status") == "see"
+    assert access.level({"adult": ["settings.change"]}, "settings") == "use"
+    assert access.level({"adult": []}, "settings") == "no"
+    assert access.level({"kid": ["notes.see:own", "notes.change:own"]}, "notes") == "use"  # their own counts for a page
 
 
 def test_owner_has_everything_and_no_role_has_nothing():
-    owner = access.levels(access.OWNER, [])
-    assert owner == {"status": "use", "logs": "see", "settings": "use"}
-    assert set(access.levels(None, ["status.see", "status.checks"]).values()) == {"no"}
-    assert access.rights_of(access.OWNER, []) == ["status.see", "status.checks", "status.alerts", "status.network",
-                                                  "status.diagnose", "logs.see", "settings.change"]
-    assert access.rights_of("kid", ["status.see", "bogus.x"]) == ["status.see"]  # unknown rights drop out
+    owner = access.levels({access.OWNER: []})
+    assert owner == {"status": "use", "logs": "see", "settings": "use", "notes": "use"}
+    assert set(access.levels({}).values()) == {"no"}
+    assert access.rights_of({access.OWNER: []}) == ["status.see", "status.checks", "status.alerts", "status.network",
+                                                    "status.diagnose", "logs.see", "settings.change", "notes.see",
+                                                    "notes.change"]
+    assert access.rights_of({"kid": ["status.see", "bogus.x"]}) == ["status.see"]  # unknown rights drop out
+
+
+def test_a_persons_rights_add_up_across_their_roles():
+    roles = {"kid": ["logs.see", "notes.see:own"], "adult": ["status.see", "notes.see"]}
+    assert access.rights_of(roles) == ["status.see", "logs.see", "notes.see"]  # everyone's notes: the wider grant
+    assert access.rights_of({"kid": ["notes.see:own", "status.see:own"]}) == ["notes.see:own"]  # status isn't personal
+    assert access.levels(roles) == {"status": "see", "logs": "see", "settings": "no", "notes": "see"}
 
 
 def test_devices_are_named_from_the_user_agent():
@@ -201,7 +210,7 @@ def test_someone_new_to_the_family_list_is_read_in_first(client, core):
         assert s.get(CorePerson, new["person_id"]) is None
     come_back(client, code_for(core, new))
     me = client.get("/api/me").json()
-    assert (me["state"], me["role_name"]) == ("ok", "Adult")
+    assert (me["state"], me["role_names"]) == ("ok", ["Adult"])
 
 
 def test_an_expired_session_signs_in_nobody(client, core):
@@ -243,24 +252,32 @@ def test_only_an_owner_manages_users_and_roles(client, core):
     assert set(users) == {michel["person_id"], mark["person_id"]}
     assert users[mark["person_id"]]["last_device"] == "Android phone"
     for method, path in [("get", "/api/users"), ("get", "/api/roles"), ("put", f"/api/users/{mark['person_id']}")]:
-        assert adult.request(method, path, json={"role_id": "owner"}).status_code == 403, (method, path)
+        assert adult.request(method, path, json={"role_ids": ["owner"]}).status_code == 403, (method, path)
 
 
-def test_the_owner_gives_a_role_and_it_applies_at_once(client, core):
-    """The role is the family list's, set on the user's core person; No access is the app's own."""
+def test_the_owner_gives_roles_and_they_apply_at_once(client, core):
+    """The roles are the family list's, set on the user's core person; No access is the app's own."""
     michel, mark = join_family(core, "Michel Habib", "owner"), join_family(core, "Mark", "adult")
     owner, them = signed_in(core, michel), signed_in(core, mark)
     mid = mark["person_id"]
-    assert them.get("/api/me").json()["role_name"] == "Adult"
-    assert owner.put(f"/api/users/{mid}", json={"role_id": "kid"}).status_code == 200
-    assert ("people.update", {"person_id": mid, "role_id": "kid"}) in core.asked
-    assert them.get("/api/me").json()["role_name"] == "Kid"
+    assert them.get("/api/me").json()["role_names"] == ["Adult"]
+    assert owner.put(f"/api/users/{mid}", json={"role_ids": ["kid"]}).status_code == 200
+    assert ("people.update", {"person_id": mid, "role_ids": ["kid"]}) in core.asked
+    assert them.get("/api/me").json()["role_names"] == ["Kid"]
+    users = owner.put(f"/api/users/{mid}", json={"role_ids": ["kid", "adult"]}).json()
+    assert next(u for u in users if u["id"] == mid)["role_ids"] == ["adult", "kid"]  # in the roles' order
+    me = them.get("/api/me").json()
+    assert (me["role_ids"], me["role_names"]) == (["adult", "kid"], ["Adult", "Kid"])
+    kid = next(r for r in owner.get("/api/roles").json()["roles"] if r["id"] == "kid")
+    assert kid["users"] == ["Mark"]  # a user shows under every role they hold
 
     asked = len(core.asked)
     owner.put(f"/api/users/{mid}", json={"denied": True})
     assert them.get("/api/me").json()["state"] == "denied"
     assert len(core.asked) == asked  # nothing was asked of HiroLeague
-    assert owner.put(f"/api/users/{mid}", json={}).status_code == 400  # neither a role nor No access
+    owner.put(f"/api/users/{mid}", json={"denied": False})  # back in, with the roles they hold
+    assert them.get("/api/me").json()["role_names"] == ["Adult", "Kid"]
+    assert owner.put(f"/api/users/{mid}", json={"role_ids": []}).status_code == 400  # neither a role nor No access
 
 
 def test_the_only_owner_stays_one(client, core):
@@ -268,13 +285,13 @@ def test_the_only_owner_stays_one(client, core):
     michel, mark = join_family(core, "Michel Habib", "owner"), join_family(core, "Mark", "adult")
     owner = signed_in(core, michel)
     signed_in(core, mark)
-    r = owner.put(f"/api/users/{michel['person_id']}", json={"role_id": "adult"})
+    r = owner.put(f"/api/users/{michel['person_id']}", json={"role_ids": ["adult"]})
     assert r.status_code == 400 and r.json()["detail"] == "Michel Habib is the only Owner; make someone else Owner first."
     r = owner.put(f"/api/users/{michel['person_id']}", json={"denied": True})  # nor No access
     assert r.status_code == 400 and "only owner" in r.json()["detail"]
     # with a second owner, the first may step down (HomeHiro's test_auth checked this too)
-    assert owner.put(f"/api/users/{mark['person_id']}", json={"role_id": "owner"}).status_code == 200
-    assert owner.put(f"/api/users/{michel['person_id']}", json={"role_id": "adult"}).status_code == 200
+    assert owner.put(f"/api/users/{mark['person_id']}", json={"role_ids": ["owner"]}).status_code == 200
+    assert owner.put(f"/api/users/{michel['person_id']}", json={"role_ids": ["adult"]}).status_code == 200
 
 
 def test_someone_gone_from_the_family_list_cant_be_given_a_role(client, core):
@@ -282,7 +299,7 @@ def test_someone_gone_from_the_family_list_cant_be_given_a_role(client, core):
     owner, them = signed_in(core, michel), signed_in(core, mark)
     core.people.remove(mark)
     asyncio.run(family.sync())
-    r = owner.put(f"/api/users/{mark['person_id']}", json={"role_id": "kid"})
+    r = owner.put(f"/api/users/{mark['person_id']}", json={"role_ids": ["kid"]})
     assert r.status_code == 400 and "isn't in HiroLeague's family list any more" in r.json()["detail"]
     assert them.get("/api/me").json()["state"] == "waiting"
 
@@ -293,10 +310,10 @@ def test_roles_are_shown_as_hiroleague_grants_them(client, core):
     signed_in(core, join_family(core, "Mark", "kid"))
     roles = signed_in(core, michel).get("/api/roles").json()
     assert [r["name"] for r in roles["roles"]] == ["Owner", "Adult", "Kid"]
-    assert [f["id"] for f in roles["features"]] == ["status", "logs", "settings"]
+    assert [f["id"] for f in roles["features"]] == ["status", "logs", "settings", "notes"]
     kid = next(r for r in roles["roles"] if r["id"] == "kid")
     assert (kid["users"], kid["says"], kid["rights"]) == (["Mark"], "The kids", ["status.see", "logs.see"])
-    assert kid["access"] == {"status": "see", "logs": "see", "settings": "no"}
+    assert kid["access"] == {"status": "see", "logs": "see", "settings": "no", "notes": "no"}
 
 
 def test_with_sign_in_off_everyone_is_the_owner(client, monkeypatch):

@@ -1,5 +1,7 @@
 """The check every API request passes (auth/guard.py): the rule a route gets, and roles get what they are given, no
-more. Against the kit's test app (conftest.py `TEST_EXTENSION`, shaped like NetHiro's) and a fake core.
+more. A person's roles add up; a grant for their own things reaches a record only through its rule's whose
+(Permissions phase 5: the test app's Notes are about people's things). Against the kit's test app (conftest.py
+`TEST_EXTENSION`, shaped like NetHiro's) and a fake core.
 
 Shared-code plan, step 1: HomeHiro's, NetHiro's and TrainHiro's tests each had the generic half of this. What stays in
 an app is its own rules (which right each of its routes needs); that every route of the app has a rule is the contract's
@@ -13,8 +15,11 @@ from fastapi import APIRouter, Depends, FastAPI
 from fastapi.testclient import TestClient
 
 from hiro_extension_kit import errors, family, testing
-from hiro_extension_kit.auth import api, sessions
-from hiro_extension_kit.auth.guard import KIT_RULES, allowed, guard, rule_for
+from hiro_channel_sdk.access import Reach
+
+from hiro_extension_kit.auth import api, sessions, whose
+from hiro_extension_kit.auth.guard import KIT_RULES, allowed, guard, needs_whose, reach_of, rule_for
+from hiro_extension_kit.auth.whose import listed
 from hiro_extension_kit.db import engine
 from hiro_extension_kit.testing import join_family
 
@@ -45,8 +50,8 @@ def test_a_head_is_a_get_and_a_route_without_a_rule_has_none():
 def test_roles_reach_what_they_are_given(method, path, adult, kid):
     rule = rule_for(method, path)
     assert rule is not None and rule.who == "features"
-    assert allowed(rule, method, "adult", ADULT) is adult
-    assert allowed(rule, method, "kid", KID) is kid
+    assert allowed(rule, method, {"adult": ADULT}) is adult
+    assert allowed(rule, method, {"kid": KID}) is kid
 
 
 def test_a_change_needs_its_own_right():
@@ -54,23 +59,48 @@ def test_a_change_needs_its_own_right():
     other rights aren't."""
     rule = rule_for("PUT", "/api/service-status/alerts/{alert_id}")
     assert rule is not None and rule.who == "features"
-    assert allowed(rule, "PUT", "adult", ["status.see", "status.alerts"])
-    assert not allowed(rule, "PUT", "adult", ["status.see", "status.checks", "status.network", "status.diagnose"])
+    assert allowed(rule, "PUT", {"adult": ["status.see", "status.alerts"]})
+    assert not allowed(rule, "PUT", {"adult": ["status.see", "status.checks", "status.network", "status.diagnose"]})
 
 
 def test_a_feature_without_see_is_read_with_any_of_its_rights():
     rule = rule_for("GET", "/api/settings")
     assert rule is not None
-    assert allowed(rule, "GET", "adult", ["settings.change"]) and not allowed(rule, "GET", "adult", [])
+    assert allowed(rule, "GET", {"adult": ["settings.change"]}) and not allowed(rule, "GET", {"adult": []})
 
 
-def test_a_grant_for_their_own_reaches_nothing_in_an_app_yet():
-    """Permissions phase 1: the app knows one role and hands the check no record's owners, so a key ending ":own"
-    grants nothing here, whether its right is personal or not (several roles and "whose" come with phase 5)."""
+def test_a_persons_roles_add_up():
+    """Two roles, each with part of what a route needs: the person holding both reaches it."""
+    rule = rule_for("GET", "/api/settings")
+    assert rule is not None
+    assert not allowed(rule, "GET", {"kid": []}) and allowed(rule, "GET", {"kid": [], "adult": ["settings.change"]})
+    assert allowed(rule_for("GET", "/api/logs"), "GET", {"kid": ["logs.see"], "adult": []})  # type: ignore[arg-type]
+    assert allowed(rule, "GET", {"owner": []})  # the owner's role reaches everything
+
+
+@pytest.mark.parametrize(("keys", "reach"), [
+    (["notes.see"], "all"),
+    (["notes.see:own"], "own"),
+    (["notes.see:own", "notes.see"], "all"),  # everyone's is the wider grant
+    ([], "no"),
+])
+def test_a_personal_action_reaches_their_own_or_everyones(keys, reach):
+    rule = rule_for("GET", "/api/notes")
+    assert rule is not None and reach_of(rule, "GET", {"adult": keys}) == reach
+
+
+def test_their_own_counts_only_for_a_personal_action():
+    """A key ending ":own" on an action that isn't personal grants nothing: it is granted or not."""
     rule = rule_for("GET", "/api/service-status")
     assert rule is not None
-    assert not allowed(rule, "GET", "adult", ["status.see:own"])
-    assert allowed(rule, "GET", "adult", ["status.see", "status.see:own"])
+    assert reach_of(rule, "GET", {"adult": ["status.see:own"]}) == "no"
+    assert allowed(rule, "GET", {"adult": ["status.see", "status.see:own"]})
+
+
+def test_only_rules_under_a_personal_action_need_whose():
+    assert needs_whose(rule_for("GET", "/api/notes"))  # type: ignore[arg-type]
+    assert not needs_whose(rule_for("GET", "/api/service-status"))  # type: ignore[arg-type]
+    assert not needs_whose(rule_for("GET", "/api/users"))  # type: ignore[arg-type]  # owners only
 
 
 def test_users_and_roles_are_the_owners():
@@ -102,7 +132,27 @@ def _pages() -> APIRouter:
     def apps() -> dict[str, bool]:
         return {"ok": True}
 
+    @r.get("/api/notes/people/{person_id}")
+    def persons_notes(person_id: str) -> dict[str, str]:
+        return {"of": person_id}
+
+    @r.get("/api/notes/{note_id}")
+    def note(note_id: str) -> dict[str, str]:
+        return {"note": note_id}
+
+    @r.put("/api/notes/{note_id}")
+    def change_note(note_id: str) -> dict[str, str]:
+        return {"changed": note_id}
+
+    @r.get("/api/notes")
+    def notes(reach: Reach = Depends(listed)) -> dict[str, str]:
+        return {"reach": reach}
+
     return r
+
+
+NOTES: dict[str, list[str]] = {}  # a note's id -> the people it belongs to (the test app's store)
+whose.register("note", lambda _session, note_id: NOTES.get(note_id, []))
 
 
 @pytest.fixture
@@ -159,7 +209,7 @@ def test_someone_without_a_role_is_told_so(client, fake_core):
 
     with Session(engine) as s:
         for u in s.exec(select(AppUser)):
-            u.role_id = None
+            u.role_id, u.role_ids = None, []
             s.add(u)
         s.commit()
     r = client.get("/api/status", headers=stranger)
@@ -173,3 +223,64 @@ def test_a_changed_role_applies_at_once(client, fake_core):
     next(r for r in fake_core.roles if r["role_id"] == "kid")["rights"] = ["status.see"]
     asyncio.run(family.sync())
     assert client.get("/api/status", headers=kid).status_code == 200
+
+
+def test_a_second_role_adds_what_it_grants(client, fake_core):
+    """Someone who holds Kid and Adult reaches what Adult is given, and loses it when Adult is taken away."""
+    both = join_family(fake_core, "Both", role_ids=["kid", "adult"])
+    headers = as_(both)
+    assert client.get("/api/status", headers=headers).status_code == 403
+    next(r for r in fake_core.roles if r["role_id"] == "adult")["rights"] = ["status.see"]
+    asyncio.run(family.sync())
+    assert client.get("/api/status", headers=headers).status_code == 200
+    fake_core.give(both, ["kid"])
+    asyncio.run(family.sync())
+    assert client.get("/api/status", headers=headers).status_code == 403
+
+
+def _grant_notes(fake_core, keys: list[str]) -> None:
+    next(r for r in fake_core.roles if r["role_id"] == "kid")["rights"] = keys
+    asyncio.run(family.sync())
+
+
+def test_their_own_notes_by_the_person_in_the_address(client, fake_core):
+    mark, sara = join_family(fake_core, "Mark", "kid"), join_family(fake_core, "Sara", "kid")
+    _grant_notes(fake_core, ["notes.see:own"])
+    headers = as_(mark)
+    assert client.get(f"/api/notes/people/{mark['person_id']}", headers=headers).status_code == 200
+    r = client.get(f"/api/notes/people/{sara['person_id']}", headers=headers)
+    assert r.status_code == 403 and "Notes" in r.json()["detail"]
+    _grant_notes(fake_core, ["notes.see"])  # everyone's
+    assert client.get(f"/api/notes/people/{sara['person_id']}", headers=headers).status_code == 200
+
+
+def test_their_own_note_by_the_apps_lookup(client, fake_core):
+    mark, sara = join_family(fake_core, "Mark", "kid"), join_family(fake_core, "Sara", "kid")
+    NOTES.update({"n1": [mark["person_id"]], "n2": [sara["person_id"]]})
+    _grant_notes(fake_core, ["notes.see:own", "notes.change:own"])
+    headers = as_(mark)
+    assert client.get("/api/notes/n1", headers=headers).status_code == 200
+    assert client.put("/api/notes/n1", headers=headers).status_code == 200
+    assert client.get("/api/notes/n2", headers=headers).status_code == 403
+    assert client.put("/api/notes/n2", headers=headers).status_code == 403
+    assert client.get("/api/notes/nowhere", headers=headers).status_code == 403  # nobody's: not theirs either
+    _grant_notes(fake_core, ["notes.see"])  # everyone's, to read; changing is no longer granted at all
+    assert client.get("/api/notes/n2", headers=headers).status_code == 200
+    assert client.put("/api/notes/n1", headers=headers).status_code == 403
+
+
+def test_a_list_is_handed_the_reach_it_filters_by(client, fake_core):
+    mark = join_family(fake_core, "Mark", "kid")
+    owner = as_(join_family(fake_core, "Owner", "owner"))
+    headers = as_(mark)
+    assert client.get("/api/notes", headers=headers).status_code == 403
+    _grant_notes(fake_core, ["notes.see:own"])
+    assert client.get("/api/notes", headers=headers).json() == {"reach": "own"}
+    _grant_notes(fake_core, ["notes.see"])
+    assert client.get("/api/notes", headers=headers).json() == {"reach": "all"}
+    assert client.get("/api/notes", headers=owner).json() == {"reach": "all"}
+
+
+def test_one_lookup_per_name():
+    with pytest.raises(ValueError):
+        whose.register("note", lambda _session, _note_id: [])

@@ -1,6 +1,7 @@
 <script lang="ts">
-	// Settings → Users: everyone who has opened the app (people in HiroLeague's family list), their role, and how they
-	// came in last. Anyone without a role waits at the top. Backend: auth/api.py.
+	// Settings → Users: everyone who has opened the app (people in HiroLeague's family list), their roles, and how they
+	// came in last. Anyone without a role waits at the top. Each row's button gives No access, or lets them back in.
+	// Backend: auth/api.py.
 	import { APP } from '$hiro-app/app';
 	import { USERS } from '$hiro-app/users';
 	import { Badge } from '$kit/components/ui/badge/index.js';
@@ -10,8 +11,7 @@
 	import ResourceView from '$kit/ui/resource-view.svelte';
 	import PersonAvatar from '$kit/ui/avatar.svelte';
 	import { dateTime } from '$kit/format/time';
-	import { Pencil, UserPlus } from '@lucide/svelte';
-	import { hasScope } from './rules';
+	import { Ban, Pencil, UserCheck, UserPlus } from '@lucide/svelte';
 	import type { AppUser } from './types';
 	import UserPanel from './user-panel.svelte';
 	import { UsersAdmin } from './users-admin.svelte';
@@ -26,6 +26,29 @@
 			' · '
 		) || 'nothing picked';
 </script>
+
+{#snippet block(u: AppUser)}
+	{#if u.denied}
+		<Button
+			size="icon"
+			variant="ghost"
+			class="size-9 text-muted-foreground"
+			title="Let {u.name} use {APP.name} again"
+			disabled={ua.blocking.busy(u.id)}
+			onclick={() => ua.block(u)}><UserCheck class="size-5" /></Button
+		>
+	{:else}
+		<Button
+			size="icon"
+			variant="ghost"
+			class="size-9 text-muted-foreground hover:text-destructive"
+			title={u.role_ids.includes('owner') ? 'An owner keeps their access' : `No access to ${APP.name} for ${u.name}`}
+			disabled={u.role_ids.includes('owner') || ua.blocking.busy(u.id)}
+			onclick={() => ua.block(u)}><Ban class="size-5" /></Button
+		>
+	{/if}
+	{#if ua.blocking.error(u.id)}<p class="w-full text-xs text-destructive">{ua.blocking.error(u.id)}</p>{/if}
+{/snippet}
 
 <p class="mb-4 max-w-3xl text-sm text-muted-foreground">{USERS.intro}</p>
 
@@ -47,6 +70,7 @@
 							</div>
 						</div>
 						<Button size="sm" onclick={() => ua.edit(u)}>Pick a role</Button>
+						{@render block(u)}
 					</div>
 				{/each}
 			</Card.Content>
@@ -60,13 +84,18 @@
 					<div class="flex flex-wrap items-center gap-3 px-2 py-3">
 						<PersonAvatar name={u.name} />
 						<div class="min-w-40 flex-1">
-							<div class="flex items-center gap-2 font-medium">
+							<div class="flex flex-wrap items-center gap-2 font-medium">
 								{u.name}
-								<Badge variant={u.role_id === 'owner' ? 'default' : u.denied ? 'outline' : 'secondary'} class={u.denied ? 'text-muted-foreground' : ''}>{ua.roleName(u)}</Badge>
+								{#each ua.roleNames(u) as name, i (name)}
+									<Badge
+										variant={!u.denied && u.role_ids[i] === 'owner' ? 'default' : u.denied ? 'outline' : 'secondary'}
+										class={u.denied ? 'text-muted-foreground' : ''}>{name}</Badge
+									>
+								{/each}
 							</div>
 							{#if scope}
 								<div class="text-xs text-muted-foreground">
-									{#if hasScope(ua.roleOf(u.role_id), scope.feature)}{scope.label}: {scopeText(u)}{:else if u.person}{scope.linkedLabel}: {u.person.name}{/if}
+									{#if ua.usesScope(u.role_ids)}{scope.label}: {scopeText(u)}{:else if u.person}{scope.linkedLabel}: {u.person.name}{/if}
 								</div>
 							{/if}
 						</div>
@@ -75,6 +104,7 @@
 							<div class="text-foreground">{seen(u)}</div>
 						</div>
 						<Button size="icon" variant="ghost" class="size-9 text-muted-foreground" title="Edit {u.name}" onclick={() => ua.edit(u)}><Pencil class="size-5" /></Button>
+						{@render block(u)}
 					</div>
 				{/each}
 			</Card.Content>

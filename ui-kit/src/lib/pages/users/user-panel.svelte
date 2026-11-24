@@ -1,22 +1,20 @@
 <script lang="ts">
-	// Edit one user: their role (the roles under Roles, or No access), and where the app has a scope (HomeHiro's My
-	// room) and the role uses it, which areas and which of their own things it shows. The user is a person in
-	// HiroLeague's family list, and the role is set on them there.
+	// Edit one user: their roles (one or several of those under Roles; their rights add up) or No access, and where the
+	// app has a scope (HomeHiro's My room) and a role uses it, which areas and which of their own things it shows. The
+	// user is a person in HiroLeague's family list, and the roles are set on them there.
 	import { APP } from '$hiro-app/app';
 	import { USERS } from '$hiro-app/users';
 	import EditorSheet from '$kit/ui/editor-sheet.svelte';
+	import CheckboxField from '$kit/ui/checkbox-field.svelte';
 	import { Checkbox } from '$kit/components/ui/checkbox/index.js';
 	import { dateTime } from '$kit/format/time';
-	import { NO_ACCESS, roleSummary } from './rules';
+	import { roleSummary } from './rules';
 	import type { UsersAdmin } from './users-admin.svelte';
 
 	let { ua }: { ua: UsersAdmin } = $props();
 	const scope = USERS.scope;
 	const u = $derived(ua.editing);
-	const choices = $derived([
-		...(ua.roles.data?.roles ?? []).map((r) => ({ id: r.id, name: r.name, says: r.says || roleSummary(r, ua.roles.data?.features ?? []) })),
-		{ id: NO_ACCESS, name: 'No access', says: `They can't use ${APP.name}.` }
-	]);
+	const roles = $derived((ua.roles.data?.roles ?? []).map((r) => ({ id: r.id, name: r.name, says: r.says || roleSummary(r, ua.roles.data?.features ?? []) })));
 </script>
 
 {#snippet personLine()}
@@ -34,19 +32,25 @@
 	onsave={ua.save}
 >
 	<section class="grid gap-2">
-		<h3 class="font-medium">Role</h3>
-		{#each choices as r (r.id)}
-			<button
-				type="button"
-				class={['rounded-md border p-3 text-left', ua.form.value.choice === r.id ? 'border-primary bg-muted' : 'hover:bg-muted/50']}
-				aria-pressed={ua.form.value.choice === r.id}
-				onclick={() => ua.pick(r.id)}
-			>
-				<div class="font-medium">{r.name}</div>
-				<div class="text-xs text-muted-foreground">{r.says}</div>
-			</button>
+		<h3 class="font-medium">Roles</h3>
+		{#each roles as r (r.id)}
+			{@const held = ua.form.value.roleIds.includes(r.id)}
+			{#snippet says()}{r.says}{/snippet}
+			<CheckboxField
+				label={r.name}
+				checked={held}
+				disabled={ua.form.value.denied || (held && ua.form.value.roleIds.length === 1)}
+				details={says}
+				onchange={() => ua.toggleRole(r.id)}
+			/>
 		{/each}
-		<p class="text-xs text-muted-foreground">The role is kept in HiroLeague's family list; what it may do in {APP.name} is under Roles.</p>
+		<p class="text-xs text-muted-foreground">Their rights add up. The roles are kept in HiroLeague's family list; what each may do in {APP.name} is under Roles.</p>
+	</section>
+
+	<section class="grid gap-2">
+		<h3 class="font-medium">Access</h3>
+		{#snippet noAccess()}They can't use {APP.name}. Their roles in HiroLeague stay as they are.{/snippet}
+		<CheckboxField label="No access to {APP.name}" checked={ua.form.value.denied} details={noAccess} onchange={ua.toggleDenied} />
 	</section>
 
 	{#if scope && ua.needsScope}

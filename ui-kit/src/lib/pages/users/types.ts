@@ -22,11 +22,12 @@ export type Roles = { roles: Role[]; features: Feature[]; admin_url?: string };
 /** Something picked for a user: a room, a thing. */
 export type Ref = { id: string; name: string };
 
-/** Someone who opened the app. role_id null + denied false: waiting for a role; role_id null + denied true: No access. */
+/** Someone who opened the app, with the roles they hold (one or several: their rights add up). No roles and not denied:
+ * waiting for a role; denied: No access, the app's own. */
 export type AppUser = {
 	id: string;
 	name: string;
-	role_id: string | null;
+	role_ids: string[];
 	denied: boolean;
 	first_seen: string;
 	last_seen: string;
@@ -38,7 +39,8 @@ export type AppUser = {
 	areas?: string[];
 	things?: string[];
 };
-export type UserChange = { role_id?: string | null; denied?: boolean; areas?: string[]; things?: string[] };
+/** What Save sends: the roles (set in HiroLeague), No access, and with a scope what is picked; a field left out stays. */
+export type UserChange = { role_ids?: string[]; denied?: boolean; areas?: string[]; things?: string[] };
 
 /** An area (room) the owner can give a user, as the app lists them. */
 export type ScopeArea = { id: string; name: string; removed_at?: string | null };

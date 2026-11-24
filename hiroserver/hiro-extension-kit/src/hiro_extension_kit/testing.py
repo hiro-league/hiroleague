@@ -318,12 +318,20 @@ class FakeCore:
 
         self.frames.append(build_request(method, params, sender_id="app", direction="inbound"))
 
-    def person(self, name: str, role_id: str = "adult", whatsapp: str = "", calls_them: str = "") -> dict[str, Any]:
-        """Add someone to the core's list directly (as its admin or CLI would)."""
+    def person(self, name: str, role_id: str = "adult", whatsapp: str = "", calls_them: str = "",
+               role_ids: list[str] | None = None) -> dict[str, Any]:
+        """Add someone to the core's list directly (as its admin or CLI would): one role, or several (`role_ids`)."""
         self._n += 1
-        p = {"person_id": f"cp{self._n}", "name": name, "calls_them": calls_them, "whatsapp": whatsapp, "role_id": role_id}
+        p = {"person_id": f"cp{self._n}", "name": name, "calls_them": calls_them, "whatsapp": whatsapp}
         self.people.append(p)
+        self.give(p, role_ids or [role_id])
         return p
+
+    def give(self, person: dict[str, Any], role_ids: list[str]) -> None:
+        """Set the roles a person holds, as the core keeps them: in the roles' order, role_id the first."""
+        order = [r["role_id"] for r in self.roles]
+        held = sorted(dict.fromkeys(role_ids), key=lambda r: order.index(r) if r in order else len(order))
+        person["role_ids"], person["role_id"] = held, held[0]
 
     def _refuse(self, reason: str):
         from hiro_channel_sdk import ExtensionRequestError
@@ -336,9 +344,10 @@ class FakeCore:
             self._refuse("That person isn't in the family list.")
         return p  # type: ignore[return-value]
 
-    def _check(self, role_id: str | None, number: str | None, person_id: str | None) -> None:
-        if role_id is not None and not any(r["role_id"] == role_id for r in self.roles):
-            self._refuse(f"There is no role {role_id!r}.")
+    def _check(self, role_ids: list[str] | None, number: str | None, person_id: str | None) -> None:
+        for role_id in role_ids or []:
+            if not any(r["role_id"] == role_id for r in self.roles):
+                self._refuse(f"There is no role {role_id!r}.")
         if number and (other := next((p for p in self.people if p["whatsapp"] == number and p["person_id"] != person_id), None)):
             self._refuse(f"{other['name']} already has that WhatsApp number.")
 
@@ -391,18 +400,23 @@ class FakeCore:
         if method == METHOD_PEOPLE_ADD:
             if not str(params.get("name") or "").strip():
                 self._refuse("Name is empty.")
-            self._check(params.get("role_id") or "", params.get("whatsapp"), None)
-            p = self.person(params["name"], params["role_id"], params.get("whatsapp") or "", params.get("calls_them") or "")
+            role_ids = params.get("role_ids") or [params.get("role_id") or ""]
+            self._check(role_ids, params.get("whatsapp"), None)
+            p = self.person(params["name"], whatsapp=params.get("whatsapp") or "", calls_them=params.get("calls_them") or "",
+                            role_ids=role_ids)
             return {"person": dict(p)}
         if method == METHOD_PEOPLE_UPDATE:
             p = self._find(params["person_id"])
-            self._check(params.get("role_id"), params.get("whatsapp"), p["person_id"])
-            if params.get("role_id") is not None and p["role_id"] == "owner" and params["role_id"] != "owner":
-                if sum(x["role_id"] == "owner" for x in self.people) <= 1:
+            role_ids = params.get("role_ids") or ([params["role_id"]] if params.get("role_id") is not None else None)
+            self._check(role_ids, params.get("whatsapp"), p["person_id"])
+            if role_ids is not None and "owner" in p["role_ids"] and "owner" not in role_ids:
+                if sum("owner" in x["role_ids"] for x in self.people) <= 1:
                     self._refuse(f"{p['name']} is the only Owner; make someone else Owner first.")
-            for k in ("name", "role_id", "calls_them", "whatsapp"):
+            for k in ("name", "calls_them", "whatsapp"):
                 if params.get(k) is not None:
                     p[k] = params[k]
+            if role_ids is not None:
+                self.give(p, role_ids)
             return {"person": dict(p)}
         if method == METHOD_ROLES_ADD:
             name = str(params.get("name") or "").strip()
@@ -421,7 +435,7 @@ class FakeCore:
             r = next((r for r in self.roles if r["role_id"] == params.get("role_id")), None)
             if r is None:
                 self._refuse("That role doesn't exist.")
-            if users := [p["name"] for p in self.people if p["role_id"] == params["role_id"]]:
+            if users := [p["name"] for p in self.people if params["role_id"] in p["role_ids"]]:
                 self._refuse(f"{r['name']} is still given to {', '.join(users)}; give them another role first.")  # type: ignore[index]
             self.roles.remove(r)  # type: ignore[arg-type]
             return {}
@@ -465,14 +479,16 @@ class DictSettings:
             self.kept.pop(key, None)
 
 
-def join_family(core: FakeCore, name: str, role_id: str = "adult", *, whatsapp: str = "") -> dict[str, Any]:
-    """A new person in the fake core's family list, with the app's copy synced (family.py). Returns the core person.
-    (Shared-code plan, step 1: NetHiro's and TrainHiro's tests/fakes.py each had this.)"""
+def join_family(core: FakeCore, name: str, role_id: str = "adult", *, whatsapp: str = "",
+                role_ids: list[str] | None = None) -> dict[str, Any]:
+    """A new person in the fake core's family list, with one role or several (`role_ids`), and the app's copy synced
+    (family.py). Returns the core person. (Shared-code plan, step 1: NetHiro's and TrainHiro's tests/fakes.py each had
+    this.)"""
     import asyncio
 
     from . import family
 
-    p = core.person(name, role_id, whatsapp)
+    p = core.person(name, role_id, whatsapp, role_ids=role_ids)
     asyncio.run(family.sync())
     return p
 

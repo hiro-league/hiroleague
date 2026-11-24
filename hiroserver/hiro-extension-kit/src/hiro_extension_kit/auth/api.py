@@ -5,10 +5,10 @@ A user is a person in HiroLeague's family list (`AppUser.id` is the core's perso
 the core's sign-in page (`/api/auth/start`), which sends it back with a one-time code (`/api/auth/hiro`); the app asks
 the core whose code it is (`auth.code`) and keeps its own 90-day session (sessions.py).
 
-A user's role is their core person's role (family.py). Picking a role for a user changes it in the core
-(people.update). The roles themselves (new, renamed, removed), their lines and what each may do in the app are set
-in HiroLeague's People → Roles; Settings → Roles here shows them. No access stays the app's own. The app's features
-and rights are its `Extension.features` (access.py); every route's check is guard.py.
+A user's roles are their core person's roles (family.py): one or several, and their rights add up. Picking them for a
+user changes them in the core (people.update). The roles themselves (new, renamed, removed), their lines and what each
+may do in the app are set in HiroLeague's People → Roles; Settings → Roles here shows them. No access stays the app's
+own. The app's features and actions are its `Extension.features` (access.py); every route's check is guard.py.
 """
 
 import dataclasses
@@ -29,7 +29,7 @@ from ..hiroleague import link
 from .models import AppUser, CorePerson, Role
 from . import sessions
 from .one_sign_in import after_core_sign_out, local_path, redeem, sign_in_url, sign_out_url
-from .access import OWNER, levels, rights_of
+from .access import OWNER, levels, of_user, rights_of
 from .identity import Caller, caller_of, device_of
 
 log = identity.logger("auth")
@@ -86,7 +86,7 @@ async def owner(request: Request) -> Caller:
     if c.way == "dev":
         return c
     user = await run_db(lambda s: s.get(AppUser, c.user_id)) if c.user_id else None
-    if user is None or user.role_id != OWNER:
+    if user is None or user.denied or OWNER not in user.role_ids:
         raise NotAllowed("Only an owner can manage users and roles.")
     return c
 
@@ -122,11 +122,12 @@ class MeOut(BaseModel):
     name: str
     way: Literal["ha", "web", "dev"]
     state: Literal["ok", "waiting", "denied"]  # waiting: no role yet; denied: the owner chose No access
-    role_id: str | None
-    role_name: str | None
+    role_ids: list[str]  # every role they hold, in the roles' order ([] while waiting or denied)
+    role_names: list[str]
     owner: bool
-    access: dict[str, Literal["no", "see", "use"]]  # every feature's level (from the rights: "use" = any beyond See)
-    rights: list[str] = []  # the exact rights ("<feature>.<right>"); the routes check these
+    access: dict[str, Literal["no", "see", "use"]]  # every feature's level, their roles added up ("use" = any beyond See)
+    # The keys their roles add up to ("<feature>.<action>", or ending ":own" for their own things); the routes check these
+    rights: list[str] = []
     reason: str = ""  # why they wait, for people ("" = waiting for a role)
     place: PlaceOut | None = Field(default_factory=_place)  # None in live and env0: everything is real there
 
@@ -159,14 +160,13 @@ def seen(session: Session, c: Caller) -> AppUser:
 
 
 def _me(session: Session, u: AppUser) -> MeOut:
-    role = session.get(Role, u.role_id) if u.role_id else None
-    state = "denied" if u.denied else "waiting" if role is None else "ok"
-    role_id = role.id if role and state == "ok" else None
+    roles = of_user(session, u)
+    names = {r.id: r.name for r in session.exec(select(Role).where(col(Role.id).in_(list(roles))))}
+    state = "denied" if u.denied else "ok" if roles else "waiting"
     return MeOut.model_validate({
-        "id": u.id, "name": u.name, "way": u.last_way or "web", "state": state, "role_id": role_id,
-        "role_name": role.name if role_id and role else None, "owner": role_id == OWNER,
-        "access": levels(role_id, role.rights if role else []),
-        "rights": rights_of(role_id, role.rights if role else []),
+        "id": u.id, "name": u.name, "way": u.last_way or "web", "state": state, "role_ids": list(roles),
+        "role_names": [names[r] for r in roles], "owner": OWNER in roles,
+        "access": levels(roles), "rights": rights_of(roles),
     })
 
 
@@ -175,11 +175,12 @@ async def me(request: Request) -> MeOut:
     """Who is asking, and what their role lets them do: every page asks first."""
     c = await caller(request)
     if c.way == "dev":
-        return MeOut(id=c.user_id, name=c.name, way="dev", state="ok", role_id=OWNER, role_name="Owner", owner=True,
-                     access=levels(OWNER, []), rights=rights_of(OWNER, []))
+        owner = {OWNER: []}
+        return MeOut(id=c.user_id, name=c.name, way="dev", state="ok", role_ids=[OWNER], role_names=["Owner"],
+                     owner=True, access=levels(owner), rights=rights_of(owner))
     if not c.user_id:  # the other way in names someone not linked to a core person: no user row, they wait
-        return MeOut(id="", name=c.name, way=c.way, state="waiting", role_id=None, role_name=None, owner=False,
-                     access=levels(None, []), reason=not_linked(c.name))
+        return MeOut(id="", name=c.name, way=c.way, state="waiting", role_ids=[], role_names=[], owner=False,
+                     access=levels({}), reason=not_linked(c.name))
     return await run_db(lambda s: _me(s, seen(s, c)))
 
 
@@ -269,7 +270,7 @@ class Ref(BaseModel):
 class UserOut(BaseModel):
     id: str  # the core person's id
     name: str
-    role_id: str | None
+    role_ids: list[str]  # the roles they hold that the app's copy has, in the roles' order ([]: they wait)
     denied: bool
     first_seen: datetime
     last_seen: datetime
@@ -284,8 +285,8 @@ class UserOut(BaseModel):
 
 
 class UserIn(BaseModel):
-    role_id: str | None = None  # None with denied: No access
-    denied: bool = False
+    role_ids: list[str] | None = None  # every role they are to hold (set in the core); None: as they are
+    denied: bool | None = None  # No access, the app's own; None: as it is
     areas: list[str] | None = None  # an app with a users scope: what is picked (None: as it was)
     things: list[str] | None = None
 
@@ -301,34 +302,39 @@ def list_users(_c: Caller = Depends(owner), session: Session = Depends(get_sessi
     return users_out(session)
 
 
-def _checked_user(session: Session, user_id: str, body: UserIn) -> tuple[AppUser, Role | None, CorePerson | None]:
-    """The user, the role picked (None: No access) and the core person whose role it sets; raises what's wrong."""
+def _checked_user(session: Session, user_id: str, body: UserIn) -> tuple[AppUser, list[Role], CorePerson | None]:
+    """The user, the roles picked (in the roles' order) and the core person whose roles they set; raises what's wrong.
+    """
     u = session.get(AppUser, user_id)
     if u is None:
         raise NotFound(f"No such user: they appear here once they have opened {_title()}.")
-    role = None
-    if not body.denied:
-        role = session.get(Role, body.role_id) if body.role_id else None
-        if role is None:
-            raise Invalid("Pick a role, or No access.")
-    elif u.role_id == OWNER and not u.denied:  # No access is the app's own: the only owner keeps theirs here
-        owners = session.exec(select(AppUser).where(AppUser.role_id == OWNER, col(AppUser.denied).is_(False))).all()
+    wanted = list(dict.fromkeys(body.role_ids if body.role_ids is not None else u.role_ids))
+    roles = [r for r in session.exec(select(Role).order_by(col(Role.built_in).desc(), col(Role.created_at)))
+             if r.id in wanted]
+    if len(roles) < len(wanted):
+        raise Invalid("A role picked isn't in HiroLeague's family list any more.")
+    denied = u.denied if body.denied is None else body.denied
+    if not denied and not roles:
+        raise Invalid("Pick a role, or No access.")
+    if denied and not u.denied and OWNER in u.role_ids:  # No access is the app's own: the only owner keeps theirs here
+        owners = [o for o in session.exec(select(AppUser).where(col(AppUser.denied).is_(False))) if OWNER in o.role_ids]
         if len(owners) == 1:
             raise Invalid(f"{u.name} is the only owner. Make someone else an owner first.")
     scope = ext().users_scope
     if scope is not None:
         scope.check(session, u, body.areas or [], body.things or [])
     core = session.get(CorePerson, user_id)  # the user is this core person
-    if role is not None and role.id != u.role_id and core is None:
-        raise Invalid(f"{u.name} isn't in HiroLeague's family list any more, so their role can't be set here.")
-    return u, role, core
+    if body.role_ids is not None and [r.id for r in roles] != list(u.role_ids) and core is None:
+        raise Invalid(f"{u.name} isn't in HiroLeague's family list any more, so their roles can't be set here.")
+    return u, roles, core
 
 
 def _write_user(session: Session, user_id: str, body: UserIn) -> list[UserOut]:
     row = session.get(AppUser, user_id)
     if row is None:
         raise NotFound(f"No such user: they appear here once they have opened {_title()}.")
-    row.denied = body.denied
+    if body.denied is not None:
+        row.denied = body.denied
     session.add(row)
     scope = ext().users_scope
     if scope is not None and (body.areas is not None or body.things is not None):
@@ -341,13 +347,17 @@ def _write_user(session: Session, user_id: str, body: UserIn) -> list[UserOut]:
 
 @router.put("/users/{user_id}")
 async def put_user(user_id: str, body: UserIn, c: Caller = Depends(owner)) -> list[UserOut]:
-    """A user's role (asked of HiroLeague: their core person's role; it refuses taking the only Owner's away and says
-    why), or No access, and with a users scope what is picked there (both the app's own)."""
-    u, role, core = await run_db(_checked_user, user_id, body)
-    if role is not None and core is not None and role.id != u.role_id and role.id != core.role_id:
-        await family.update_person(core.id, role_id=role.id)
+    """A user's roles (asked of HiroLeague: their core person's roles; it refuses taking the only Owner's away and says
+    why), No access, and with a users scope what is picked there (both the app's own)."""
+    u, roles, core = await run_db(_checked_user, user_id, body)
+    ids = [r.id for r in roles]
+    if body.role_ids is not None and core is not None and ids != list(core.role_ids):
+        await family.update_person(core.id, role_ids=ids)
     out = await run_db(_write_user, user_id, body)
-    log.info("Users: %s gave %s %s", c.name, u.name, f"the role {role.name}" if role else "No access")
+    if body.denied:
+        log.info("Users: %s gave %s No access", c.name, u.name)
+    else:
+        log.info("Users: %s gave %s the roles %s", c.name, u.name, ", ".join(r.name for r in roles))
     return out
 
 
@@ -373,9 +383,9 @@ class RoleOut(BaseModel):
     says: str
     built_in: bool
     core: bool  # in HiroLeague's family list (every role the app keeps is: the copy follows the core's)
-    rights: list[str]  # what it may do in the app, granted in HiroLeague ("<feature>.<right>")
+    rights: list[str]  # what it may do in the app, granted in HiroLeague ("<feature>.<action>", or ending ":own")
     access: dict[str, Literal["no", "see", "use"]]  # every feature's level, from the rights
-    users: list[str]  # the names of the users who have it
+    users: list[str]  # the names of the users who hold it (one may hold several roles)
 
 
 class RolesOut(BaseModel):
@@ -385,12 +395,12 @@ class RolesOut(BaseModel):
 
 
 def roles_out(session: Session) -> RolesOut:
-    users = session.exec(select(AppUser).where(col(AppUser.role_id).is_not(None)).order_by(col(AppUser.name))).all()
+    users = session.exec(select(AppUser).order_by(col(AppUser.name))).all()
     roles = session.exec(select(Role).order_by(col(Role.built_in).desc(), col(Role.created_at))).all()
     return RolesOut(
-        roles=[RoleOut.model_validate({**r.model_dump(), "rights": rights_of(r.id, r.rights),
-                                       "access": levels(r.id, r.rights),
-                                       "users": [u.name for u in users if u.role_id == r.id]}) for r in roles],
+        roles=[RoleOut.model_validate({**r.model_dump(), "rights": rights_of({r.id: r.rights}),
+                                       "access": levels({r.id: r.rights}),
+                                       "users": [u.name for u in users if r.id in u.role_ids]}) for r in roles],
         features=[FeatureOut.model_validate(f.model_dump()) for f in ext().features],
         admin_url=link.admin_url(),
     )

@@ -9,8 +9,9 @@ export type Me = {
 	name: string;
 	way: 'ha' | 'web' | 'dev';
 	state: 'ok' | 'waiting' | 'denied';
-	role_id: string | null;
-	role_name: string | null;
+	/** Every role they hold, in the roles' order; their rights add up. */
+	role_ids: string[];
+	role_names: string[];
 	owner: boolean;
 	access: Record<string, Access>;
 	rights?: string[];
@@ -22,8 +23,8 @@ export const getMe = async (): Promise<Me> => ({
 	name: 'Sample Person',
 	way: 'dev',
 	state: 'ok',
-	role_id: 'owner',
-	role_name: 'Owner',
+	role_ids: ['owner'],
+	role_names: ['Owner'],
 	owner: true,
 	access: { gallery: 'use' }
 });

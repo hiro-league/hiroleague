@@ -1,5 +1,5 @@
 <script lang="ts">
-	// A page outside the user's role (an old link, a typed address): says so, and offers the first page
+	// A page outside the user's roles (an old link, a typed address): says so, and offers the first page
 	// they have. The backend refuses the page's calls anyway (auth/guard.py).
 	import { resolve } from '$app/paths';
 	import { Button } from '$kit/components/ui/button/index.js';
@@ -19,7 +19,7 @@
 	<Card.Header class="items-center">
 		<DoorClosed class="mx-auto mb-2 size-10 text-muted-foreground" />
 		<Card.Title class="text-lg">{leftOut ? 'Not available' : `This page isn't part of your ${APP.name}`}</Card.Title>
-		<Card.Description>{leftOut ? "This feature isn't in this build." : `Your role (${who.me?.role_name}) doesn't include it.`}</Card.Description>
+		<Card.Description>{leftOut ? "This feature isn't in this build." : `Your roles (${who.me?.role_names.join(', ')}) don't include it.`}</Card.Description>
 	</Card.Header>
 	{#if start}
 		<Card.Content>

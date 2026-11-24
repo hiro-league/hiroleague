@@ -26,9 +26,11 @@ identity.setup(name="testapp", title="TestApp", package=Path(__file__).parent, d
 # (No testing.guard_network() here: these tests run in one process with the rest of the HiroLeague workspace, whose
 # own tests don't expect it. test_testing.py checks the guard in a process of its own.)
 
+from hiro_channel_sdk.access import ExtensionRight  # noqa: E402
+from hiro_commons.rules import LIST, Rule, by_lookup, by_person  # noqa: E402
+from hiro_commons.rules import for_features as _r  # noqa: E402
+
 from hiro_extension_kit.auth.access import right, see  # noqa: E402  (after identity: the kit's modules read it)
-from hiro_extension_kit.auth.rules import Rule  # noqa: E402
-from hiro_extension_kit.auth.rules import for_features as _r  # noqa: E402
 
 FEATURES = [
     ExtensionFeature(id="status", name="System health", rights=[
@@ -39,6 +41,10 @@ FEATURES = [
         right("diagnose", "Run diagnostics", "Start and stop live sessions")]),
     ExtensionFeature(id="logs", name="Logs", rights=[see("TestApp's logs")]),
     ExtensionFeature(id="settings", name="Settings", rights=[right("change", "Change", "Connections and keys")]),
+    # About people's things (Permissions phase 5): each action granted for the person's own notes or everyone's
+    ExtensionFeature(id="notes", name="Notes", rights=[
+        ExtensionRight(id="see", name="See", says="Read notes", personal=True),
+        ExtensionRight(id="change", name="Change", says="Write and remove notes", personal=True)]),
 ]
 RULES = (
     Rule("/api/health", "public"),
@@ -48,13 +54,16 @@ RULES = (
     Rule("/api/users", "owner"),
     Rule("/api/roles", "owner"),
     _r("/api/status", "status", "settings", methods=["GET"]),
-    _r("/api/service-status/alerts", "status", methods=["POST", "PUT", "DELETE"], right="alerts"),
+    _r("/api/service-status/alerts", "status", methods=["POST", "PUT", "DELETE"], action="alerts"),
     _r("/api/service-status", "status"),
     _r("/api/logs", "logs"),
     _r("/api/settings", "settings"),
     _r("/api/hiroleague", "settings"),
     _r("/api/ai/uses", "settings"),
     _r("/api/ai", "settings", "status", methods=["GET"]),
+    _r("/api/notes/people/{person_id}", "notes", whose=by_person("person_id")),  # a person's notes
+    _r("/api/notes/{note_id}", "notes", whose=by_lookup("note", "note_id")),  # one note: its writer, by lookup
+    _r("/api/notes", "notes", whose=LIST),  # every note the caller may see
 )
 PORT = 8199
 TEST_EXTENSION = extension.Extension(

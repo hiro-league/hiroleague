@@ -2,6 +2,7 @@
 // grants them (backend auth/api.py). Roles are added, renamed, removed and given rights in HiroLeague's People → Roles.
 import { Resource } from '$kit/state/resource.svelte';
 import { coreRolesUrl, getRoles } from './api';
+import { rightsText } from './rules';
 import type { Feature, Role } from './types';
 
 export class RolesAdmin {
@@ -11,11 +12,6 @@ export class RolesAdmin {
 	/** Where roles change: HiroLeague's People → Roles ("" while the core's admin address is unknown). */
 	editUrl = (role?: Role) => coreRolesUrl(this.roles.data?.admin_url, role?.id);
 
-	/** A role's rights in one feature, in words: "Everything", "See, Switch devices", or "" for none. */
-	rightsText = (role: Role, feature: Feature) => {
-		const have = feature.rights.filter((r) => role.rights.includes(`${feature.id}.${r.id}`));
-		if (!have.length) return '';
-		if (have.length === feature.rights.length && feature.rights.length > 1) return 'Everything'; // as HiroLeague's table says it
-		return have.map((r) => r.name).join(', ');
-	};
+	/** A role's rights in one feature, in words: "Everything", "See, Switch devices (their own)", or "" for none. */
+	rightsText = (role: Role, feature: Feature) => rightsText(role.rights, feature);
 }

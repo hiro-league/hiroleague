@@ -54,7 +54,7 @@ def test_who_is_asking_says_the_place_and_live_says_none(board, monkeypatch):
     from hiro_extension_kit.auth.api import MeOut
 
     def me():
-        return MeOut(id="p", name="P", way="dev", state="ok", role_id=None, role_name=None, owner=True, access={})
+        return MeOut(id="p", name="P", way="dev", state="ok", role_ids=[], role_names=[], owner=True, access={})
 
     board({"ha": "read"})
     assert me().place.place == "env3" and me().place.systems[0].name == "Home Assistant"

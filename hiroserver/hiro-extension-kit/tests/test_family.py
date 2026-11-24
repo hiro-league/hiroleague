@@ -127,12 +127,19 @@ def test_users_roles_follow_their_core_persons(fake_core):
     with Session(engine) as s:
         family.recompute_roles(s)
         s.commit()
-        assert s.get(AppUser, mark["person_id"]).role_id == "kid"  # type: ignore[union-attr]
+        assert s.get(AppUser, mark["person_id"]).role_ids == ["kid"]  # type: ignore[union-attr]
         assert s.get(AppUser, "cp-gone").role_id is None  # type: ignore[union-attr]  # waits
-    mark["role_id"] = "adult"
+    fake_core.give(mark, ["kid", "adult"])
     run(family.sync())
     with Session(engine) as s:
-        assert s.get(AppUser, mark["person_id"]).role_id == "adult"  # type: ignore[union-attr]
+        user, copy = s.get(AppUser, mark["person_id"]), s.get(CorePerson, mark["person_id"])
+        assert (user.role_ids, user.role_id) == (["adult", "kid"], "adult")  # type: ignore[union-attr]  # roles' order
+        assert copy.role_ids == ["adult", "kid"]  # type: ignore[union-attr]
+    fake_core.roles = [r for r in fake_core.roles if r["role_id"] != "adult"]  # the core removes a role they hold
+    fake_core.give(mark, ["kid"])
+    run(family.sync())
+    with Session(engine) as s:
+        assert s.get(AppUser, mark["person_id"]).role_ids == ["kid"]  # type: ignore[union-attr]
 
 
 def test_a_whatsapp_alert_reaches_a_core_person_with_a_number(fake_core):

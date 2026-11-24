@@ -11,9 +11,9 @@ from typing import Any
 
 from hiro_channel_sdk import ExtensionFeature, ExtensionSearchUse, ExtensionUse, ExtensionVoiceUse
 from hiro_commons.logging_foundation.story import Declared
+from hiro_commons.rules import Rule
 
 from .auth.identity import Caller
-from .auth.rules import Rule
 
 
 @dataclass(frozen=True)
@@ -54,8 +54,7 @@ class Extension:
     site_title: str  # its Apps card in the core ("Network")
     site_icon: str  # the card's icon ("network")
     features: Sequence[ExtensionFeature]  # what a role may do in it, granted per role in the core
-    # Every route's rule (auth/guard.py), first match wins. Only for an app on the kit's route check (HomeHiro keeps
-    # its own for now: its users come in one more way).
+    # Every route's rule (hiro_commons.rules, checked by auth/guard.py), first match wins.
     rules: Sequence[Rule] = ()
     knows: Sequence[dict[str, Any]] = ()  # the questions other apps may ask it (offers.knows)
     can_do: Sequence[dict[str, Any]] = ()  # what other apps may ask it to do, and sign-ins it offers (offers.can_do)

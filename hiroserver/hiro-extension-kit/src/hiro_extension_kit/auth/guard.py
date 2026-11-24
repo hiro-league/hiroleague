@@ -1,28 +1,30 @@
-"""The check every API request passes first: who is asking (api.py `caller`), and whether their role has the right
-the route needs (the app's rules, `Extension.rules`: rules.py says what each kind means; access.py the rights per
-role, set in HiroLeague).
+"""The check every API request passes first: who is asking (api.py `caller`), and whether their roles hold the
+permission the route needs, for whose record (the app's rules, `Extension.rules`, on `hiro_commons.rules`, which says
+what each kind of rule means; access.py the permissions; whose.py whose a record is).
 
-The owner has everything, and so does everyone with sign-in off (AUTH=off, a dev copy).
+A person's roles add up. A grant for everyone's passes; a grant for their own things passes only through the rule's
+`whose`, settled here before the handler runs. The owner has everything, and so does everyone with sign-in off
+(AUTH=off, a dev copy). The route gets the caller (`request.state.caller`), their rights (`request.state.rights`) and
+the reach (`request.state.reach`, which a list route takes through `whose.listed`).
 """
 
 from fastapi import Request
+from hiro_channel_sdk.access import SEE, Reach
+from hiro_commons.rules import Rule
+from hiro_commons.rules import rule_for as _rule_for
+from sqlmodel import Session
 
 from .. import identity
 from ..db import run_db
 from ..errors import NotAllowed
 from ..extension import ext
-from .models import AppUser, Role
-from .access import OWNER, SEE, can
+from . import whose
+from .access import Held, PersonRights, of_user, reach
 from .api import caller, not_linked, seen
 from .identity import Caller
-from .rules import Rule
+from .models import AppUser
 
-
-def _matches(rule: Rule, method: str, path: str) -> bool:
-    if rule.methods and method not in rule.methods:
-        return False
-    return path == rule.path or path.startswith(rule.path + "/")
-
+_RANK: dict[str, int] = {"no": 0, "own": 1, "all": 2}
 
 # The kit's own routes that every app mounts, with the kit's rule, before the app's own rules: an app needn't list them.
 KIT_RULES: tuple[Rule, ...] = (
@@ -33,14 +35,13 @@ KIT_RULES: tuple[Rule, ...] = (
 
 def rule_for(method: str, path: str) -> Rule | None:
     """The rule for a route (its path as declared, e.g. /api/service-status/alerts/{alert_id}), or None."""
-    method = "GET" if method == "HEAD" else method
-    return next((r for r in (*KIT_RULES, *ext().rules) if _matches(r, method, path)), None)
+    return _rule_for((*KIT_RULES, *ext().rules), method, path)
 
 
 def needed(rule: Rule, feature: str, method: str) -> str:
-    """The right a route needs in one of its features (the rule's own, else by method)."""
-    if rule.right:
-        return rule.right
+    """The action a route needs in one of its features (the rule's own, else by method)."""
+    if rule.action:
+        return rule.action
     if method in ("GET", "HEAD"):
         return SEE
     ids = [r.id for r in ext().by_id[feature].rights]
@@ -49,31 +50,71 @@ def needed(rule: Rule, feature: str, method: str) -> str:
     return next((r for r in ids if r != SEE), SEE)
 
 
-def allowed(rule: Rule, method: str, role_id: str | None, rights: list[str]) -> bool:
-    """Whether a role may call a route with this rule (for rules that name features): the right in any of them."""
-    return any(can(role_id, rights, f, needed(rule, f, method)) for f in rule.features)
+def needs_whose(rule: Rule) -> bool:
+    """Whether a rule may need a personal action (one granted for the person's own things or everyone's), so it must
+    say whose the record is."""
+    if rule.who != "features":
+        return False
+    by_id = ext().by_id
+    methods = rule.methods or ("GET", "POST", "PUT", "PATCH", "DELETE")
+    for f in rule.features:
+        personal = {r.id for r in by_id[f].rights if r.personal}
+        if any(needed(rule, f, m) in personal for m in methods):
+            return True
+    return False
+
+
+def reach_of(rule: Rule, method: str, roles: Held) -> Reach:
+    """How far a person's roles reach a route with this rule (for rules that name features): the widest of its
+    features."""
+    return max((reach(roles, f, needed(rule, f, method)) for f in rule.features), key=_RANK.__getitem__, default="no")
+
+
+def allowed(rule: Rule, method: str, roles: Held) -> bool:
+    """Whether a person's roles reach a route with this rule for everyone's records (a grant for their own things
+    reaches only through the rule's whose, which needs the request: `guard`)."""
+    return reach_of(rule, method, roles) == "all"
 
 
 def _refusal(rule: Rule, method: str) -> str:
     by_id = ext().by_id
     wanted = []
     for f in rule.features:
-        right = needed(rule, f, method)
-        name = next((r.name for r in by_id[f].rights if r.id == right), right)
-        wanted.append(by_id[f].name if right == SEE else f"{by_id[f].name}: {name}")
+        action = needed(rule, f, method)
+        name = next((r.name for r in by_id[f].rights if r.id == action), action)
+        wanted.append(by_id[f].name if action == SEE else f"{by_id[f].name}: {name}")
     if all(needed(rule, f, method) == SEE for f in rule.features):
-        return f"Your role doesn't include {' or '.join(wanted)}."
-    return f"Your role doesn't have the right for this ({' or '.join(wanted)}); ask the owner to give it in HiroLeague."
+        return f"Your roles don't include {' or '.join(wanted)}."
+    return f"Your roles don't have the right for this ({' or '.join(wanted)}); ask the owner to give it in HiroLeague."
 
 
-def _user_and_role(session, c: Caller) -> tuple[AppUser | None, Role | None]:
+def _rights_of(session: Session, c: Caller) -> PersonRights:
     # a signed-in person may reach a page before /api/me made their row: make it now
-    u = session.get(AppUser, c.user_id) or seen(session, c)
-    return u, (session.get(Role, u.role_id) if u and u.role_id and not u.denied else None)
+    user = session.get(AppUser, c.user_id) or seen(session, c)
+    return PersonRights(c.user_id, of_user(session, user))
+
+
+def _owners(session: Session, name: str, record_id: str) -> list[str]:
+    found = whose.lookup(name)
+    return [str(p) for p in found(session, record_id)] if found else []
+
+
+async def _theirs(request: Request, rule: Rule, person_id: str) -> bool:
+    """Whether the record a request names is the asker's, by the rule's whose (a list: always; the handler filters)."""
+    w = rule.whose
+    if w is None:
+        return False
+    if w.kind == "list":
+        return True
+    value = request.path_params.get(w.param) or request.query_params.get(w.param) or ""
+    if w.kind == "param":
+        return value == person_id
+    return bool(value) and person_id in await run_db(_owners, w.lookup, value)
 
 
 async def guard(request: Request) -> None:
-    """A dependency of every route (the app's app.py). Keeps the caller on request.state.caller for the route."""
+    """A dependency of every route (the app's app.py). Keeps the caller, their rights and the reach on request.state
+    for the route."""
     route = request.scope.get("route")
     path = getattr(route, "path", request.url.path)
     if not path.startswith("/api/"):
@@ -84,16 +125,22 @@ async def guard(request: Request) -> None:
         return
     c: Caller = await caller(request)
     request.state.caller = c
+    request.state.reach = "all"
     if c.way == "dev":
         return
     if not c.user_id:  # the app's other way in names someone not linked to a core person (HomeHiro: HA's add-on)
         raise NotAllowed(f"You can't use {identity.app().title} yet: {not_linked(c.name)}")
-    user, role = await run_db(_user_and_role, c)
-    if user is None or role is None:
+    rights: PersonRights = await run_db(_rights_of, c)
+    request.state.rights = rights
+    if not rights.roles:
         raise NotAllowed(f"You can't use {identity.app().title} yet: the owner hasn't given you a role.")
-    if role.id == OWNER or (rule is not None and rule.who == "signed_in"):
+    if rights.owner or (rule is not None and rule.who == "signed_in"):
         return
     if rule is None or rule.who == "owner":
         raise NotAllowed("Only an owner can do this.")
-    if not allowed(rule, method, role.id, role.rights):
+    got = reach_of(rule, method, rights.roles)
+    if got == "own" and await _theirs(request, rule, c.user_id):
+        request.state.reach = "own"
+        return
+    if got != "all":
         raise NotAllowed(_refusal(rule, method))

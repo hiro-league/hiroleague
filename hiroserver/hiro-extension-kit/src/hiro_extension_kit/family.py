@@ -1,16 +1,17 @@
-"""HiroLeague's family list in the app: who may sign in, with which role, and the numbers WhatsApp messages go to.
+"""HiroLeague's family list in the app: who may sign in, with which roles, and the numbers WhatsApp messages go to.
 
-The core owns the family: its people (name, what Hiro calls them, WhatsApp number, role) and the roles, with what each
-role may do in the app (`Role.rights`, granted in HiroLeague's People → Roles for the features the app declares,
+The core owns the family: its people (name, what Hiro calls them, WhatsApp number, their roles) and the roles, with what
+each role may do in the app (`Role.rights`, granted in HiroLeague's People → Roles for the features the app declares,
 `Extension.features`). The app keeps a copy (`CorePerson`, `Role`) and keeps only **No access** (`AppUser.denied`) as
 its own.
 
-A user is a core person: `AppUser.id` is the core's person id, and their role (`AppUser.role_id`) is a cache of that
-person's role in the copy, else they wait (`recompute_roles`).
+A user is a core person: `AppUser.id` is the core's person id, and their roles (`AppUser.role_ids`, `role_id` the
+first) are a cache of that person's roles the copy has, else they wait (`recompute_roles`). A person holds one or
+several roles, and their rights add up (Permissions phase 5).
 
 The copy is read from the core (`people.list`, through `hiroleague.link`) when the core says `resource.changed` for
 `people`, when the link connects, and in the link's slow round (follow.py): the `FamilySync` worker follows it. With
-the core down, the app keeps its last copy, so nobody is locked out. A change made here (a user's role) is asked of
+the core down, the app keeps its last copy, so nobody is locked out. A change made here (a user's roles) is asked of
 the core first (`people.update`); the core's refusals ("the only Owner") come back as `Invalid`, in its words. Open pages hear the notice "family".
 
 An app that took a feature over from another (`Extension.rights_from`: NetHiro and TrainHiro, from HomeHiro) asks the
@@ -58,7 +59,8 @@ class FamilyPerson:
     id: str
     name: str
     whatsapp: str
-    role_id: str
+    role_id: str  # the first of role_ids
+    role_ids: tuple[str, ...] = ()  # every role they hold, in the roles' order
 
 
 @dataclass(frozen=True)
@@ -107,7 +109,7 @@ async def ask(method: str, params: dict[str, Any] | None = None) -> dict[str, An
 def _person(raw: Any) -> FamilyPerson:
     with translate(FamilyError, "HiroLeague's answer about a person can't be read"):
         return FamilyPerson(id=str(raw["person_id"]), name=str(raw["name"]), whatsapp=str(raw.get("whatsapp") or ""),
-                            role_id=str(raw["role_id"]))
+                            role_id=str(raw["role_id"]), role_ids=tuple(str(r) for r in raw["role_ids"]))
 
 
 def _calls_them(raw: Any) -> str:
@@ -126,12 +128,15 @@ def _role(raw: Any) -> CoreRole:
 def _store_person(session: Session, p: FamilyPerson, calls_them: str, now: datetime) -> bool:
     """Put one core person into the copy; True when something changed."""
     row = session.get(CorePerson, p.id)
+    role_ids = list(p.role_ids)
     if row is None:
         session.add(CorePerson(id=p.id, name=p.name, calls_them=calls_them, whatsapp=p.whatsapp, role_id=p.role_id,
-                               synced_at=now))
+                               role_ids=role_ids, synced_at=now))
         return True
-    changed = (row.name, row.calls_them, row.whatsapp, row.role_id) != (p.name, calls_them, p.whatsapp, p.role_id)
-    row.name, row.calls_them, row.whatsapp, row.role_id, row.synced_at = p.name, calls_them, p.whatsapp, p.role_id, now
+    changed = ((row.name, row.calls_them, row.whatsapp, row.role_id, list(row.role_ids))
+               != (p.name, calls_them, p.whatsapp, p.role_id, role_ids))
+    row.name, row.calls_them, row.whatsapp, row.role_id = p.name, calls_them, p.whatsapp, p.role_id
+    row.role_ids, row.synced_at = role_ids, now
     session.add(row)
     return changed
 
@@ -145,9 +150,11 @@ def _sync_roles(session: Session, core: list[CoreRole], now: datetime) -> list[s
     for rid, r in local.items():
         if rid in wanted:
             continue
-        for u in session.exec(select(AppUser).where(AppUser.role_id == rid)):
-            u.role_id = None
-            session.add(u)
+        for u in session.exec(select(AppUser)):  # its users hold it no more (the recompute after the sync settles them)
+            if rid in u.role_ids or u.role_id == rid:
+                u.role_ids = [r for r in u.role_ids if r != rid]
+                u.role_id = u.role_ids[0] if u.role_ids else None
+                session.add(u)
         session.flush()
         session.delete(r)
         said.append(f"role {r.name} removed")
@@ -205,29 +212,37 @@ def _apply(session: Session, people: list[tuple[FamilyPerson, str]], roles: list
     return said
 
 
-def _user_role(session: Session, u: AppUser, roles: set[str]) -> str | None:
-    """A user's role: their core person's, when the app's copy has that role; else None (they wait)."""
+def _user_roles(session: Session, u: AppUser, roles: set[str]) -> list[str]:
+    """A user's roles: their core person's that the app's copy has, in the roles' order; none: they wait."""
     core = session.get(CorePerson, u.id)
-    return core.role_id if core and core.role_id in roles else None
+    return [r for r in core.role_ids if r in roles] if core else []
+
+
+def _set_roles(u: AppUser, role_ids: list[str]) -> bool:
+    """Give a user these roles (role_id the first); True when they changed."""
+    first = role_ids[0] if role_ids else None
+    if (list(u.role_ids), u.role_id) == (role_ids, first):
+        return False
+    u.role_ids, u.role_id = role_ids, first
+    return True
 
 
 def recompute_roles(session: Session) -> list[str]:
-    """Every user's role from the family list; what changed, in words. Not committed."""
+    """Every user's roles from the family list; what changed, in words. Not committed."""
     said = []
     names = {r.id: r.name for r in session.exec(select(Role))}
     for u in session.exec(select(AppUser)):
-        role = _user_role(session, u, set(names))
-        if role != u.role_id:
-            log.info("Family: %s's role is now %s (from HiroLeague's family list)", u.name, names.get(role or "", "none: waiting"))
-            u.role_id = role
+        if _set_roles(u, _user_roles(session, u, set(names))):
+            log.info("Family: %s's roles are now %s (from HiroLeague's family list)", u.name,
+                     ", ".join(names[r] for r in u.role_ids) or "none: waiting")
             session.add(u)
-            said.append(f"{u.name}'s role changed")
+            said.append(f"{u.name}'s roles changed")
     return said
 
 
 def recompute_user(session: Session, u: AppUser) -> None:
-    """One user's role from the family list, when they come in (auth/api.py `seen`). Not committed."""
-    u.role_id = _user_role(session, u, set(session.exec(select(Role.id))))
+    """One user's roles from the family list, when they come in (auth/api.py `seen`). Not committed."""
+    _set_roles(u, _user_roles(session, u, set(session.exec(select(Role.id)))))
 
 
 # --- the sync ------------------------------------------------------------------------------------------------------
@@ -320,8 +335,8 @@ def _store_and_recompute(session: Session, p: FamilyPerson, calls_them: str) -> 
     session.commit()
 
 
-async def update_person(core_person_id: str, **fields: str) -> FamilyPerson:
-    """Change a core person (name, role_id, calls_them, whatsapp): asked of the core, then written to the copy."""
+async def update_person(core_person_id: str, **fields: str | list[str]) -> FamilyPerson:
+    """Change a core person (name, role_ids, calls_them, whatsapp): asked of the core, then written to the copy."""
     answer = await ask(METHOD_PEOPLE_UPDATE, {"person_id": core_person_id, **fields})
     raw = answer.get("person")
     p = _person(raw)

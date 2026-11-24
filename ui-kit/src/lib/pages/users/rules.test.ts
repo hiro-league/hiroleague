@@ -1,24 +1,29 @@
 import { describe, expect, it } from 'vitest';
-import { change, choiceOf, hasScope, isWaiting, NO_ACCESS, roleSummary } from './rules';
-import type { AppUser } from './types';
-
-const user = (role_id: string | null, denied = false) => ({ role_id, denied }) as AppUser;
+import { change, hasScope, isWaiting, rightsText, roleSummary, toggleRole } from './rules';
 
 describe('users', () => {
 	it('waits only without a role and without No access', () => {
-		expect(isWaiting(user(null))).toBe(true);
-		expect(isWaiting(user(null, true))).toBe(false);
-		expect(isWaiting(user('kid'))).toBe(false);
+		expect(isWaiting({ role_ids: [], denied: false })).toBe(true);
+		expect(isWaiting({ role_ids: [], denied: true })).toBe(false);
+		expect(isWaiting({ role_ids: ['kid'], denied: false })).toBe(false);
 	});
 
-	it('turns a choice into what is saved, and back', () => {
-		expect(change(NO_ACCESS)).toEqual({ role_id: null, denied: true });
-		expect(change('adult')).toEqual({ role_id: 'adult', denied: false });
-		expect(change(NO_ACCESS, { areas: [], things: [] })).toEqual({ role_id: null, denied: true, areas: [], things: [] });
-		expect(change('kid', { areas: ['boys_bedroom'], things: ['t1'] })).toEqual({ role_id: 'kid', denied: false, areas: ['boys_bedroom'], things: ['t1'] });
-		expect(choiceOf(user(null, true))).toBe(NO_ACCESS);
-		expect(choiceOf(user('adult'))).toBe('adult');
-		expect(choiceOf(user(null))).toBeNull();
+	it('holds roles in the roles order, and lets one go', () => {
+		const order = ['owner', 'adult', 'kid'];
+		expect(toggleRole(['kid'], 'adult', order)).toEqual(['adult', 'kid']);
+		expect(toggleRole(['adult', 'kid'], 'adult', order)).toEqual(['kid']);
+		expect(toggleRole([], 'owner', order)).toEqual(['owner']);
+	});
+
+	it('sends the roles and No access, and the scope only where the app has one', () => {
+		expect(change(['adult', 'kid'], false)).toEqual({ role_ids: ['adult', 'kid'], denied: false });
+		expect(change(['kid'], true)).toEqual({ role_ids: ['kid'], denied: true });
+		expect(change(['kid'], false, { areas: ['boys_bedroom'], things: ['t1'] })).toEqual({
+			role_ids: ['kid'],
+			denied: false,
+			areas: ['boys_bedroom'],
+			things: ['t1']
+		});
 	});
 });
 
@@ -35,5 +40,20 @@ describe('roles', () => {
 		expect(hasScope({ access: { myroom: 'no' } }, 'myroom')).toBe(false);
 		expect(hasScope(undefined, 'myroom')).toBe(false);
 		expect(hasScope({ access: { myroom: 'use' } }, undefined)).toBe(false);
+	});
+});
+
+describe('rightsText', () => {
+	const see = { id: 'see', name: 'See', says: '' };
+	const notes = { id: 'notes', rights: [see, { id: 'change', name: 'Change', says: '' }] };
+
+	it('says what a role may do in a feature, their own things included', () => {
+		expect(rightsText(['notes.see', 'notes.change'], notes)).toBe('Everything');
+		expect(rightsText(['notes.see', 'notes.change:own'], notes)).toBe('See, Change (their own)');
+		expect(rightsText([], notes)).toBe('');
+	});
+
+	it('reads a feature by its declared keys, not by its id as a prefix', () => {
+		expect(rightsText(['notes.runs.see'], notes)).toBe(''); // another feature's key
 	});
 });

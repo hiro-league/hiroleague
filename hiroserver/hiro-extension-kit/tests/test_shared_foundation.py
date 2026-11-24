@@ -9,7 +9,8 @@ import pytest
 from sqlmodel import Session
 
 from hiro_extension_kit import hiroleague, testing
-from hiro_extension_kit.asked_for import AskedFor, asked_for
+from hiro_extension_kit.asked_for import asked_for
+from hiro_extension_kit.auth.access import PersonRights
 from hiro_extension_kit.auth.models import AppUser, CorePerson, Role
 from hiro_extension_kit.db import engine
 
@@ -54,9 +55,10 @@ def test_the_app_declares_what_it_tells_as_typed_entries():
 def _family(person_id: str, role_id: str, rights: list[str], *, denied: bool = False) -> None:
     with Session(engine) as s:
         s.merge(Role(id=role_id, name=role_id.title(), rights=rights, created_at=NOW, updated_at=NOW))
-        s.merge(CorePerson(id=person_id, name=person_id, role_id=role_id, synced_at=NOW))
+        s.merge(CorePerson(id=person_id, name=person_id, role_id=role_id, role_ids=[role_id], synced_at=NOW))
         if denied:
-            s.merge(AppUser(id=person_id, name=person_id, role_id=role_id, denied=True, first_seen=NOW, last_seen=NOW))
+            s.merge(AppUser(id=person_id, name=person_id, role_id=role_id, role_ids=[role_id], denied=True,
+                            first_seen=NOW, last_seen=NOW))
         s.commit()
 
 
@@ -67,8 +69,24 @@ def test_the_core_asking_for_itself_names_nobody():
 def test_an_ask_for_a_kid_gets_the_kids_rights():
     _family("cp-kid", "kid", ["logs.see"])
     who = run(asked_for({"_for_person": "cp-kid"}))
-    assert who == AskedFor("cp-kid", "kid", ("logs.see",))
+    assert who == PersonRights("cp-kid", {"kid": ["logs.see"]})
     assert who.can("logs") and not who.can("status") and not who.can("status", "alerts")
+
+
+def test_an_ask_adds_up_the_persons_roles_and_their_own_things():
+    """Someone who holds two roles gets what both grant; a grant for their own notes reaches their notes only."""
+    _family("cp-both", "kid", ["logs.see", "notes.see:own"])
+    with Session(engine) as s:
+        s.merge(Role(id="adult", name="Adult", rights=["status.see"], created_at=NOW, updated_at=NOW))
+        person = s.get(CorePerson, "cp-both")
+        assert person is not None
+        person.role_ids, person.role_id = ["adult", "kid"], "adult"
+        s.add(person)
+        s.commit()
+    who = run(asked_for({"_for_person": "cp-both"}))
+    assert who is not None and who.can("logs") and who.can("status") and not who.owner
+    assert who.can("notes", owners=["cp-both"]) and not who.can("notes", owners=["cp-sara"])
+    assert not who.can("notes")  # no record named: only a grant for everyone's would do
 
 
 def test_the_owner_may_do_everything():
@@ -81,4 +99,4 @@ def test_the_owner_may_do_everything():
 def test_someone_the_app_doesnt_know_or_shut_out_has_no_rights(person):
     _family("cp-denied", "adult", ["status.see", "logs.see"], denied=True)
     who = run(asked_for({"_for_person": person}))
-    assert who == AskedFor(person) and not who.can("status") and not who.can("logs")
+    assert who == PersonRights(person) and not who.can("status") and not who.can("logs")
