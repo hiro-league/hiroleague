@@ -18,6 +18,9 @@
   import { serverReadiness } from '$lib/runtime/server-readiness.svelte';
   import AdminRuntime from '$lib/shell/AdminRuntime.svelte';
   import AdminTopBar from '$lib/shell/AdminTopBar.svelte';
+  import { menuPreview } from '$lib/shell/menu-preview.svelte';
+  import MockupBadge from '$kit/ui/mockup-badge.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import { ADMIN_SHELL_CONTENT_PADDING, ADMIN_SHELL_HEADER_PADDING } from '$lib/styling/admin-tokens';
   import { cn } from '$kit/utils';
   import '../styles/app.css';
@@ -50,6 +53,14 @@
   {#snippet noPages()}<AppsOnlyView />{/snippet}
   {#snippet topBar()}<AdminTopBar />{/snippet}
   {#snippet banners()}
+    <!-- mockup: Permissions phase 2, People → Roles' "View as": the admin as that role sees it, on every page -->
+    {#if menuPreview.current}
+      <div class={cn('flex items-center gap-3 border-b border-primary/20 bg-primary/5 py-1.5 font-sans text-sm', ADMIN_SHELL_HEADER_PADDING)}>
+        <MockupBadge />
+        <span>Viewing as <span class="font-medium">{menuPreview.current.roleName}</span></span>
+        <Button size="sm" variant="outline" class="ml-auto" onclick={() => menuPreview.stop()}>Stop</Button>
+      </div>
+    {/if}
     {#if !serverReadiness.ready}
       <div class={cn('border-b border-warning/20 bg-warning/5', ADMIN_SHELL_HEADER_PADDING)}><ServerStartingBanner /></div>
     {/if}

@@ -10,6 +10,8 @@
   import type { AccessFeature, AccessSource, RoleAccess } from '$lib/api/people';
   import type { RolesController } from '../state/roles-controller.svelte';
   import { featureSummary } from '../reach';
+  import MockupBadge from '$kit/ui/mockup-badge.svelte';
+  import { CORE_AREAS, CORE_SOURCE, groupByArea } from '../core-features-mock';
 
   let { ctrl, onopen }: { ctrl: RolesController; onopen: (roleId: string) => void } = $props();
 
@@ -37,12 +39,22 @@
       {#each ctrl.shown as s (s.id)}
         <Table.Row class="bg-muted/40 hover:bg-muted/40">
           <Table.Cell colspan={ctrl.roles.length + 1} class="px-3 py-1.5 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
-            {s.name}
+            <span class="flex items-center gap-2">
+              {s.name}
+              <!-- mockup: the core's own features (Permissions phase 2) -->
+              {#if s.id === CORE_SOURCE}<MockupBadge class="normal-case" />{/if}
+            </span>
           </Table.Cell>
         </Table.Row>
-        {#each s.features as f (`${s.id}.${f.id}`)}
+        {#each groupByArea(s.features, s.id === CORE_SOURCE ? CORE_AREAS : {}) as group (group.area ?? group.features[0].id)}
+        {#if group.area !== null}
+          <Table.Row class="hover:bg-transparent">
+            <Table.Cell colspan={ctrl.roles.length + 1} class="px-3 pt-2 pb-1 text-xs font-semibold text-muted-foreground">{group.name}</Table.Cell>
+          </Table.Row>
+        {/if}
+        {#each group.features as f (`${s.id}.${f.id}`)}
           <Table.Row>
-            <Table.Cell class="px-3 py-2 whitespace-normal">
+            <Table.Cell class={cn('px-3 py-2 whitespace-normal', group.area !== null && 'pl-6')}>
               <span class="flex items-center gap-2">
                 {f.name}
                 {#if personalFeature(s, f)}
@@ -57,6 +69,7 @@
               <Table.Cell class={cn('px-3 py-2 text-xs whitespace-normal', text === '—' && 'text-muted-foreground/50')}>{text}</Table.Cell>
             {/each}
           </Table.Row>
+        {/each}
         {/each}
       {/each}
     </Table.Body>

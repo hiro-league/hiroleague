@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
+  import { who } from '$kit/state/who.svelte';
+  import { tabsFor, type CoreFeature } from '$lib/shell/core-access';
   import PageHeader from '$kit/ui/page-header.svelte';
   import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
   import StickyBar from '$kit/ui/sticky-bar.svelte';
@@ -34,6 +36,16 @@
   const PROFILES_SUBS: readonly CatalogTabPreference[] = ['profiles', 'voices', 'embedders', 'rerankers', 'uses'];
   const inProfiles = $derived(PROFILES_SUBS.includes(ctrl.activeTab));
 
+  // Permissions phase 2: Providers and Models need ai.providers (keys and costs), Profiles ai.profiles; a tab this
+  // person may not open falls back to the first they may
+  const featureOfTab = (id: CatalogTabPreference): CoreFeature => (PROFILES_SUBS.includes(id) ? 'ai.profiles' : 'ai.providers');
+  const tabsShown = $derived(tabsFor(tabDescriptors, featureOfTab, who.me?.access));
+  $effect(() => {
+    const active: CatalogTabPreference = inProfiles ? 'profiles' : ctrl.activeTab;
+    const first = tabsShown[0]?.id;
+    if (first && !tabsShown.some((t) => t.id === active)) untrack(() => void ctrl.switchTab(first));
+  });
+
   // Local servers (LM Studio, Ollama) and, once read, plan tools (Claude Code, Codex) draw their own
   // rows with live status; the table skips the catalog's rows for them.
   const replacedProviderIds = $derived(new Set<string>([...LOCAL_SERVER_IDS, ...ai.plans.map((t) => t.id)]));
@@ -50,7 +62,7 @@
     {#snippet tabs()}
     <PageTabs
       label="Providers and models sections"
-      tabs={tabDescriptors}
+      tabs={tabsShown}
       value={inProfiles ? 'profiles' : ctrl.activeTab}
       onchange={(id) => void ctrl.switchTab(id)}
     />

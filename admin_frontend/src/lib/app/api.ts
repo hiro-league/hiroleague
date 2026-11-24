@@ -5,6 +5,10 @@ import { ApiError } from '$kit/api/client';
 import type { Place } from '$kit/components/place';
 import { adminSession } from '$lib/runtime/admin-session.svelte';
 import { signOut as apiSignOut } from '$lib/api/auth';
+import { accessFromKeys, fullAccess } from '$lib/shell/core-access';
+import { menuPreview } from '$lib/shell/menu-preview.svelte';
+
+const OWNER_ROLE = 'owner';
 
 export type Access = 'no' | 'see' | 'use';
 
@@ -29,17 +33,20 @@ export async function getMe(): Promise<Me> {
   if (adminSession.state === 'unreachable') throw new ApiError(0, adminSession.error ?? "The server didn't answer.");
   const person = adminSession.person;
   if (adminSession.state !== 'signed-in' || !person) throw new ApiError(401, 'Sign in to the admin first.');
+  // mockup: People → Roles' "View as" shows the admin with a role's keys, as someone who isn't the owner
+  const preview = menuPreview.current;
   return {
     id: person.person_id,
     name: person.name,
     way: 'web',
     state: 'ok',
     role_id: person.role_id,
-    role_name: adminSession.roleName,
-    owner: false,
-    // the admin's one right today: a role either opens HiroLeague's settings (every page) or signs in for the
-    // apps only (no page: the layout shows it the apps)
-    access: adminSession.canOpenSettings ? { settings: 'use' } : {},
+    role_name: preview?.roleName ?? adminSession.roleName,
+    // the owner's first role is Owner (people.role_id keeps the first of the roles, in the roles' order)
+    owner: !preview && person.role_id === OWNER_ROLE,
+    // Permissions phase 2: each core feature's level. Until the session carries the person's keys, a role whose
+    // admin switch is on has every feature (as the core copies it), and any other role none
+    access: preview ? accessFromKeys(preview.keys) : adminSession.canOpenSettings ? fullAccess() : {},
     place: adminSession.place
   };
 }

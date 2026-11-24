@@ -16,6 +16,8 @@
   import type { AccessFeature, AccessSource, RoleAccess } from '$lib/api/people';
   import { OWNER, rightKey, type RolesController } from '../state/roles-controller.svelte';
   import type { Reach } from '../reach';
+  import MockupBadge from '$kit/ui/mockup-badge.svelte';
+  import { CORE_AREAS, CORE_SOURCE, groupByArea } from '../core-features-mock';
 
   let { ctrl, role, holders }: { ctrl: RolesController; role: RoleAccess; holders: string[] } = $props();
 
@@ -92,15 +94,24 @@
     <section class="grid gap-1.5" aria-label={`${s.name}: rights`}>
       <SectionLabel level={4}>
         {s.name}
-        {#snippet actions()}<span class="font-sans text-xs text-muted-foreground">{sourceLine(s)}</span>{/snippet}
+        {#snippet actions()}
+          <!-- mockup: the core's own features (Permissions phase 2) -->
+          {#if s.id === CORE_SOURCE}<MockupBadge />{/if}
+          <span class="font-sans text-xs text-muted-foreground">{sourceLine(s)}</span>
+        {/snippet}
       </SectionLabel>
       {#if s.features.length === 0}
         <p class="font-sans text-sm text-muted-foreground">Nothing to give here yet.</p>
       {:else}
         {@const g = ctrl.granted(role, s)}
         <div class="grid divide-y rounded-lg border">
-          {#each s.features as f (f.id)}
-            <div class="grid gap-2 px-3 py-2.5 lg:grid-cols-[220px_1fr] lg:items-center">
+          {#each groupByArea(s.features, s.id === CORE_SOURCE ? CORE_AREAS : {}) as group (group.area ?? group.features[0].id)}
+          {#if group.area !== null}
+            <!-- an area over its features (a permission is area.feature.action) -->
+            <div class="bg-muted/40 px-3 py-1.5 font-sans text-xs font-semibold text-muted-foreground">{group.name}</div>
+          {/if}
+          {#each group.features as f (f.id)}
+            <div class={cn('grid gap-2 px-3 py-2.5 lg:grid-cols-[220px_1fr] lg:items-center', group.area !== null && 'lg:pl-6')}>
               <span class="flex items-center gap-2 font-sans text-sm font-medium">
                 {f.name}
                 {#if personalFeature(s, f)}
@@ -139,6 +150,7 @@
                 {/each}
               </div>
             </div>
+          {/each}
           {/each}
         </div>
       {/if}

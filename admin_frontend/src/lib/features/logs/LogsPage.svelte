@@ -17,7 +17,10 @@
   import GraphRunsDetailPanel from '$lib/features/graph-runs/GraphRunsDetailPanel.svelte';
   import GraphRunsSubtabNav from '$lib/features/graph-runs/GraphRunsSubtabNav.svelte';
   import { createGraphRunsPageController } from '$lib/features/graph-runs/state/graph-runs-controller.svelte';
-  import { LOGS_TAB_DESCRIPTORS } from './shared/logs-page-config';
+  import { LOGS_TAB_DESCRIPTORS, LOGS_TAB_FEATURE } from './shared/logs-page-config';
+  import { untrack } from 'svelte';
+  import { who } from '$kit/state/who.svelte';
+  import { tabsFor } from '$lib/shell/core-access';
   import AiUsagePanel from '$lib/features/ai-usage/AiUsagePanel.svelte';
   // Logging and tracing plan, phase 6b: the stories, each drawn by its kind
   import StoriesPanel from './one-view/StoriesPanel.svelte';
@@ -36,6 +39,14 @@
   // Graph runs (second tab) — runs-only controller. `notify` drives the recall detail's
   // load/trace toasts.
   const runsCtrl = createGraphRunsPageController(notify);
+
+  // Permissions phase 2: only the tabs this person may open; one they may not falls back to the first they may
+  const tabsShown = $derived(tabsFor(LOGS_TAB_DESCRIPTORS, (id) => LOGS_TAB_FEATURE[id], who.me?.access));
+  $effect(() => {
+    const active = tabPrefs.activeTab;
+    const first = tabsShown[0]?.id;
+    if (first && !tabsShown.some((t) => t.id === active)) untrack(() => void tabPrefs.setActiveTab(first));
+  });
 
   const isRunsTab = $derived(tabPrefs.activeTab === 'runs');
   const isUsageTab = $derived(tabPrefs.activeTab === 'usage'); // Phase 7b: AI usage
@@ -135,7 +146,7 @@
     <PageTabs
       label="Logs sections"
       class="max-w-full flex-wrap"
-      tabs={LOGS_TAB_DESCRIPTORS}
+      tabs={tabsShown}
       value={tabPrefs.activeTab}
       onchange={(id) => {
         void tabPrefs.setActiveTab(id);

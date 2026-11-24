@@ -13,7 +13,8 @@ import {
 import { Action } from '$kit/state/action.svelte';
 import { Resource } from '$kit/state/resource.svelte';
 import type { Notify } from '$kit/ui/toast.svelte';
-import { reachOf, setReach, withReaches, type Reach } from '../reach';
+import { featureOfKey, reachOf, setReach, withReaches, type Reach } from '../reach';
+import { CORE_GRANTS_MOCK, CORE_SOURCE, coreSourceMock } from '../core-features-mock';
 
 export type RolesController = ReturnType<typeof createRolesController>;
 
@@ -38,7 +39,10 @@ export function createRolesController(
   firstRole: string | null = null
 ) {
   const access = new Resource(listAccess);
-  const sources = $derived(access.data?.sources ?? []);
+  // mockup: the core's own features (Permissions phase 2) stand in for what the core declares today, in one place so
+  // Roles and Compare show the same; their grants live here and are never sent (saveRights)
+  const sources = $derived((access.data?.sources ?? []).map((s) => (s.id === CORE_SOURCE ? coreSourceMock() : s)));
+  const coreGrants = $state<Record<string, string[]>>({ ...CORE_GRANTS_MOCK });
   const roles = $derived(access.data?.roles ?? []);
   const work = new Action();
 
@@ -69,7 +73,7 @@ export function createRolesController(
   /** Set a personal right's reach and save it at once; See follows (setReach), and the core keeps it as it says. */
   function setRightReach(role: RoleAccess, source: AccessSource, feature: AccessFeature, right: string, to: Reach) {
     const next = setReach(feature.rights, reaches(role, source, feature), right, to);
-    void run(() => setRoleRights(role.role_id, source.id, withReaches(granted(role, source), feature.id, next)));
+    saveRights(role, source, withReaches(granted(role, source), feature.id, next));
   }
 
   /** The new-role dialog: null = closed. */
@@ -87,7 +91,22 @@ export function createRolesController(
   }
 
   function granted(role: RoleAccess, source: AccessSource): Set<string> {
+    // mockup: the core's grants are this page's own until the core declares its features
+    if (source.id === CORE_SOURCE) {
+      if (role.role_id === OWNER) return new Set(source.features.flatMap((f) => f.rights.map((r) => rightKey(f.id, r.id))));
+      return new Set(coreGrants[role.role_id] ?? []);
+    }
     return new Set(role.rights[source.id] ?? []);
+  }
+
+  /** Save a role's keys in one source at once; the app follows. */
+  function saveRights(role: RoleAccess, source: AccessSource, keys: string[]) {
+    // mockup: the core's stay here (the core keeps only declared keys, and would drop these)
+    if (source.id === CORE_SOURCE) {
+      coreGrants[role.role_id] = keys;
+      return;
+    }
+    void run(() => setRoleRights(role.role_id, source.id, keys));
   }
 
   /** Tick or untick one right; ticking adds See, unticking See takes the feature's other rights away. */
@@ -99,9 +118,10 @@ export function createRolesController(
       if (feature.rights.some((r) => r.id === SEE)) next.add(rightKey(feature.id, SEE));
     } else {
       next.delete(key);
-      if (right === SEE) for (const k of [...next]) if (k.startsWith(`${feature.id}.`)) next.delete(k);
+      // a fix: by prefix, unticking `logs`'s See also took `logs.runs` and `logs.usage` away
+      if (right === SEE) for (const k of [...next]) if (featureOfKey(k) === feature.id) next.delete(k);
     }
-    void run(() => setRoleRights(role.role_id, source.id, [...next]));
+    saveRights(role, source, [...next]);
   }
 
   function saveSays(role: RoleAccess, says: string) {
@@ -143,6 +163,8 @@ export function createRolesController(
     submitNew,
     submitRemove,
     granted,
+    /** mockup: a role's keys in the core, for "View as". */
+    coreKeys: (role: RoleAccess) => [...granted(role, sources.find((s) => s.id === CORE_SOURCE) ?? coreSourceMock())],
     reach,
     reaches,
     setRightReach,

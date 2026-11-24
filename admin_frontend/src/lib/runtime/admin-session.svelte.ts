@@ -14,7 +14,6 @@ import {
   type SignedInPerson,
   type SignInOffer
 } from '$lib/api/auth';
-import type { PageRight } from '$lib/shell/nav';
 import { registerSignedOutHandler } from './sign-in-signal';
 
 type SessionState = 'checking' | 'signed-out' | 'signed-in' | 'unreachable';
@@ -93,10 +92,6 @@ function createAdminSession() {
     },
     get canOpenSettings() {
       return canOpenSettings;
-    },
-    /** Whether the person's role has a page's right (step 1d); `/auth/me` reports the one there is. */
-    hasRight(right: PageRight): boolean {
-      return right === 'open_settings' && canOpenSettings;
     },
     get roleName() {
       return roleName;
