@@ -16,12 +16,13 @@ from typing import Any
 
 import pytest
 
-from hirocli.domain import people
+from hirocli.domain import conversation_channel, people
 from hirocli.domain.access import set_rights
 from hirocli.domain.conversation_channel import create_channel
 from hirocli.domain.core_features import CORE_BY_ID
 from hirocli.domain.data_store import chat_user_id, get_default_user_id
 from hirocli.domain.people import add_person
+from hirocli.domain.preferences import io as preferences_io
 from hirocli.tools import all_tools
 from hirocli.tools.conversation import (
     ConversationChannelCreateTool,
@@ -124,7 +125,10 @@ class _Bus:
 def family(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """The owner (Misho, the seeded chat user) and a Kid (Mark) with the locked map's grants, each with a
     conversation of their own."""
-    monkeypatch.setattr(people, "get_domain_event_bus", _Bus)
+    # No bus runs in a test: without these, each new person, conversation and the first preferences save log "Domain
+    # event dropped", and the deploy's check on Simone writes those warnings into live's log store
+    for module in (people, conversation_channel, preferences_io):
+        monkeypatch.setattr(module, "get_domain_event_bus", _Bus)
     misho = add_person(tmp_path, name="Misho", role_ids=["owner"])
     mark = add_person(tmp_path, name="Mark", role_ids=["kid"])
     set_rights(tmp_path, "kid", "hiroleague", _KID)
@@ -140,6 +144,14 @@ def family(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         path=tmp_path, misho=acting(misho, owner_user, True), mark=acting(mark, mark_user, False),
         owners=owners, marks=marks,
     )
+
+
+def test_the_family_logs_no_warning(family: SimpleNamespace, caplog: pytest.LogCaptureFixture) -> None:
+    """The fixture's people and conversations leave no warning behind (the deploy's check runs these on Simone)."""
+    caplog.set_level(logging.WARNING, logger="DOMAIN.BUS")
+    create_channel(family.path, name="Another", character_id="hiro", user_id=family.mark.user_id)
+    ConversationChannelListTool().execute(workspace_path=family.path)  # its first read saves the preferences
+    assert [r for r in caplog.records if r.name == "DOMAIN.BUS"] == []
 
 
 def _registry() -> ToolRegistry:
