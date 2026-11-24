@@ -38,6 +38,8 @@ class PairingSession(BaseModel):
     ttl_seconds: int
     # Permissions phase 3: the person the device approved with this code belongs to ("" = the owner)
     person_id: str = ""
+    # An app's code that pairs one paired app again ("" = a new app): its new key replaces the old on the same record
+    extension_id: str = ""
 
     @property
     def expires_at(self) -> datetime:

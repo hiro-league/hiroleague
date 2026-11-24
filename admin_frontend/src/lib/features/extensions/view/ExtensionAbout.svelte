@@ -1,7 +1,7 @@
 <script lang="ts">
   // About one extension, read only, drawn from its description. One shape for a channel and an app; what only one
   // kind has (a linked account, a site, offers, AI uses) shows when it has it. Its settings are a panel of their own.
-  import { ExternalLink, Link2Off, PlugZap } from '@lucide/svelte';
+  import { ExternalLink, KeyRound, Link2Off, PlugZap } from '@lucide/svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import DetailSheet from '$kit/ui/detail-sheet.svelte';
@@ -101,6 +101,16 @@
       <Button variant="outline" disabled={!row.connected || ctrl.testing} onclick={() => void ctrl.testCall(row)}>
         <PlugZap size={15} /> Test call
       </Button>
+      {#if row.kind === 'app'}
+        <Button
+          variant="outline"
+          disabled={ctrl.busy}
+          title="For this app after it lost its key: it keeps its rights, AI picks and name"
+          onclick={() => void ctrl.pairAgain(row)}
+        >
+          <KeyRound size={15} /> Pair again
+        </Button>
+      {/if}
       <Button variant="destructive" disabled={row.mandatory || ctrl.busy} onclick={() => void ctrl.remove(row)}>
         <Link2Off size={15} /> Remove
       </Button>

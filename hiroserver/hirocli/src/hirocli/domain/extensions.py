@@ -57,10 +57,13 @@ class ExtensionNameTaken(ValueError):
     def __init__(self, name: str, holder: PairedExtension | None) -> None:
         if holder is None:
             message = f"“{name}” is HiroLeague's own name; an app can't take it."
+        elif holder.kind == KIND_CHANNEL:
+            message = f"A channel is already paired as “{name}”; an app can't take its name."
         else:
             message = (
-                f"Another {'channel' if holder.kind == KIND_CHANNEL else 'app'} is already paired as “{name}”. "
-                "Remove it in the core's admin (Extensions) first, then pair this one."
+                f"Another app is already paired as “{name}”. If this is that app and it lost its key, use Pair again "
+                "on its row in the core's admin (Extensions): it keeps its rights and AI picks. Otherwise remove it "
+                "there first."
             )
         super().__init__(message)
         self.name = name
@@ -138,9 +141,13 @@ def _pairing_session_file(workspace_path: Path) -> Path:
     return workspace_run_dir(workspace_path) / _PAIRING_SESSION_FILENAME
 
 
-def start_extension_pairing(workspace_path: Path, *, code_length: int, ttl_seconds: int) -> PairingSession:
-    """Create (and remember) a new pairing code; replaces any earlier one."""
+def start_extension_pairing(
+    workspace_path: Path, *, code_length: int, ttl_seconds: int, extension_id: str = ""
+) -> PairingSession:
+    """Create (and remember) a new pairing code; replaces any earlier one. With ``extension_id`` (a paired app's), the
+    code pairs that app again: its new key replaces the old one on the same record."""
     session = create_pairing_session(code_length=code_length, ttl_seconds=ttl_seconds)
+    session = session.model_copy(update={"extension_id": extension_id})
     workspace_run_dir(workspace_path).mkdir(parents=True, exist_ok=True)
     _pairing_session_file(workspace_path).write_text(session.model_dump_json(indent=2), encoding="utf-8")
     return session
@@ -252,6 +259,25 @@ def add_paired_extension(workspace_path: Path, *, name: str, public_key: str, in
         )
         conn.commit()
     return extension
+
+
+def rekey_paired_extension(
+    workspace_path: Path, extension_id: str, *, public_key: str, info: dict[str, Any]
+) -> PairedExtension | None:
+    """Pair a paired app again (it lost its key): its new key on its own record, so its id, name, rights, AI picks and
+    LAN name all stay. None when the record is gone (removed meanwhile)."""
+    ensure_db(workspace_path)
+    now = utc_iso(datetime.now(UTC))
+    with sqlite3.connect(str(db_path(workspace_path))) as conn:
+        cursor = conn.execute(
+            f"UPDATE {TABLE} SET public_key = ?, paired_at = ?, last_seen = ?, info = ? WHERE extension_id = ? "
+            "AND kind = ?",
+            (public_key, now, now, json.dumps(info), extension_id, KIND_APP),
+        )
+        conn.commit()
+        if cursor.rowcount == 0:
+            return None
+    return get_paired_extension(workspace_path, extension_id)
 
 
 def pair_started_extension(

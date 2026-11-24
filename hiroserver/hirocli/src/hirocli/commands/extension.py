@@ -60,6 +60,28 @@ def register(extension_app: typer.Typer, console: Console) -> None:
         console.print(f"  expires : [bold]{_human(result.expires_at)}[/bold]")
         console.print("Type both into the extension's settings (HomeHiro: Settings, HiroLeague).")
 
+    @extension_app.command("pair-again")
+    def extension_pair_again(
+        extension_id: str = typer.Argument(..., help="The app's extension ID (see `hiro extension list`)."),
+        workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help=_WORKSPACE_HELP),
+    ) -> None:
+        """A pairing code for one paired app that lost its key: it pairs again and keeps its rights, AI picks and
+        LAN name."""
+        from ..tools.extension import ExtensionPairAgainTool
+
+        log.info("hiro extension pair-again", extension_id=extension_id)
+        try:
+            result = ExtensionPairAgainTool().execute(extension_id=extension_id, workspace=workspace)
+        except (WorkspaceError, ValueError) as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+
+        console.print(f"[bold cyan]Pairing code to pair {result.pairs_again} again[/bold cyan]")
+        console.print(f"  address : [bold]{result.address}[/bold]")
+        console.print(f"  code    : [bold]{result.code}[/bold]")
+        console.print(f"  expires : [bold]{_human(result.expires_at)}[/bold]")
+        console.print(f"Type both into {result.pairs_again}'s settings. It keeps its rights, AI picks and name.")
+
     @extension_app.command("list")
     def extension_list(
         workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help=_WORKSPACE_HELP),

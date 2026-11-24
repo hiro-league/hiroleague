@@ -17,11 +17,19 @@
 >
   <Dialog.Content class="sm:max-w-md">
     <Dialog.Header>
-      <Dialog.Title>Pair an extension</Dialog.Title>
+      <Dialog.Title>
+        {ctrl.pairing?.pairs_again ? `Pair ${ctrl.pairing.pairs_again} again` : 'Pair an extension'}
+      </Dialog.Title>
     </Dialog.Header>
     {#if ctrl.pairing}
       <div class="grid justify-items-center gap-3 text-center">
-        <p class="font-sans text-sm text-muted-foreground">Type both into the extension's settings.</p>
+        <p class="font-sans text-sm text-muted-foreground">
+          {#if ctrl.pairing.pairs_again}
+            Type both into {ctrl.pairing.pairs_again}'s settings. It keeps its rights, AI picks and name.
+          {:else}
+            Type both into the extension's settings.
+          {/if}
+        </p>
         <div class="grid gap-1">
           <SectionLabel>Address</SectionLabel>
           <span class="font-mono text-base font-semibold break-all">{ctrl.pairing.address}</span>

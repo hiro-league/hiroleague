@@ -62,6 +62,8 @@ export type ExtensionPairingData = {
   code: string;
   expires_at: string;
   address: string;
+  /** A code that pairs one paired app again: its name ("" = a code for a new app). */
+  pairs_again: string;
 };
 
 export type ExtensionAddressData = Omit<ExtensionListen, 'listening' | 'error' | 'live_host'>;
@@ -77,6 +79,13 @@ export async function listExtensions(signal?: AbortSignal) {
 
 export async function generateExtensionPairingCode() {
   return apiRequest<ExtensionPairingData>('/extensions/pairing-code', { method: 'POST' });
+}
+
+/** A code for one paired app that lost its key: it pairs again keeping its rights, AI picks and LAN name. */
+export async function pairExtensionAgain(extensionId: string) {
+  return apiRequest<ExtensionPairingData>(`/extensions/${encodeURIComponent(extensionId)}/pair-again`, {
+    method: 'POST'
+  });
 }
 
 /** Remove one extension: an app is forgotten; a channel loses its settings and its program is uninstalled. */

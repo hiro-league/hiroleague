@@ -150,6 +150,16 @@ async def generate_extension_pairing_code(workspace_id: SelectedWorkspaceIdDep) 
     return asdict(result.data)
 
 
+@extensions_router.post("/extensions/{extension_id}/pair-again")
+async def pair_extension_again(extension_id: str, workspace_id: SelectedWorkspaceIdDep) -> Any:
+    """A pairing code for one paired app that lost its key: it pairs again on its own record, keeping its rights, AI
+    picks and LAN name."""
+    result = await run_in_threadpool(ExtensionService().pair_again_code, extension_id, workspace_id)
+    if not result.ok or result.data is None:
+        return _api_data(result)
+    return asdict(result.data)
+
+
 @extensions_router.delete("/extensions/{extension_id}", response_model=ExtensionRemoved)
 async def remove_extension(
     extension_id: str, request: Request, workspace_id: SelectedWorkspaceIdDep

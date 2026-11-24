@@ -114,6 +114,7 @@ from ..domain.extensions import (
     get_paired_extension,
     load_extension_pairing,
     pair_started_extension,
+    rekey_paired_extension,
     touch_paired_extension,
 )
 from ..domain.pairing import paired_device_ids
@@ -663,6 +664,8 @@ class ExtensionManager:
                 self._wrong_codes = 0
                 log.warning("⚠️ Too many wrong extension pairing codes — the code was dropped")
             raise _Denied(EXTENSION_DENIED_BAD_CODE, "the pairing code is wrong or has expired")
+        if session.extension_id:
+            return await self._pair_again(session.extension_id, info, public_key, dumped)
         try:
             extension = await asyncio.to_thread(
                 add_paired_extension, workspace, name=info.name, public_key=public_key, info=dumped
@@ -673,6 +676,31 @@ class ExtensionManager:
         await asyncio.to_thread(clear_extension_pairing, workspace)  # one code, one extension
         self._wrong_codes = 0
         log.info(f"✅ Extension paired — {info.name}", kind=extension.kind, extension_id=extension.extension_id)
+        return extension
+
+    async def _pair_again(
+        self, extension_id: str, info: ExtensionInfo, public_key: str, dumped: dict[str, Any]
+    ) -> PairedExtension:
+        """A code made to pair one app again (Pair again, after it lost its key): only that app takes it, and its new
+        key goes on its own record, so its id, name, rights, AI picks and LAN name stay."""
+        workspace = self._ctx.workspace_path
+        found = await asyncio.to_thread(get_paired_extension, workspace, extension_id)
+        if found is None or found.kind != KIND_APP:
+            await asyncio.to_thread(clear_extension_pairing, workspace)
+            raise _Denied(EXTENSION_DENIED_NOT_PAIRED, "the app this code pairs again was removed meanwhile")
+        if info.name != found.name:
+            # The code stays for the app it was made for.
+            raise _Denied(EXTENSION_DENIED_NAME_TAKEN,
+                          f"This code pairs “{found.name}” again, but this app is “{info.name}”.")
+        extension = await asyncio.to_thread(
+            rekey_paired_extension, workspace, extension_id, public_key=public_key, info=dumped
+        )
+        await asyncio.to_thread(clear_extension_pairing, workspace)  # one code, one pairing
+        if extension is None:
+            raise _Denied(EXTENSION_DENIED_NOT_PAIRED, "the app this code pairs again was removed meanwhile")
+        self._wrong_codes = 0
+        log.info(f"✅ Extension paired again — {found.name}: its rights, AI picks and name kept",
+                 extension_id=extension_id)
         return extension
 
     def _save_descriptor(self, name: str, info: ExtensionInfo) -> None:

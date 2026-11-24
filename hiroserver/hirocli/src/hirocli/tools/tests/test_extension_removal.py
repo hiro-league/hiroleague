@@ -112,3 +112,21 @@ def test_picks_match_the_whole_name() -> None:
 
     assert edits == {"ai.uses": {"homehiro:x": "p"}, "ai.folders": {"homehiro": []}}
     assert dropped == ["ai.uses: home:ask", "ai.folders: home"]
+
+
+def test_pair_again_makes_a_code_for_one_app_only(workspace) -> None:
+    from hirocli.domain.extensions import load_extension_pairing
+    from hirocli.tools.extension import ExtensionPairAgainTool
+
+    home = _id(workspace, "home")
+    result = ExtensionPairAgainTool().execute(home)
+
+    assert result.pairs_again == "home" and load_extension_pairing(workspace).extension_id == home
+    with pytest.raises(ValueError, match="isn't in the list"):
+        ExtensionPairAgainTool().execute("no-such-id")
+    with sqlite3.connect(str(db_path(workspace))) as conn:
+        conn.execute("INSERT INTO extension_records (extension_id, name, kind, public_key, paired_at, info, "
+                     "relays_chat, started_by_core) VALUES ('e-wa', 'whatsapp', 'channel', 'pk', '', '{}', 1, 1)")
+        conn.commit()
+    with pytest.raises(ValueError, match="channel"):
+        ExtensionPairAgainTool().execute("e-wa")

@@ -27,9 +27,11 @@ from ..domain.channel_descriptor import load_channel_descriptor
 from ..domain.features import feature_active
 from ..domain.events import DomainEvent, DomainEventType, get_domain_event_bus
 from ..domain.extensions import (
+    KIND_APP,
     KIND_CHANNEL,
     RESERVED_NAMES,
     PairedExtension,
+    get_paired_extension,
     list_paired_extensions,
     remove_paired_extension,
     start_extension_pairing,
@@ -77,6 +79,8 @@ class ExtensionAddResult:
     code: str
     expires_at: str
     address: str
+    # A code that pairs one paired app again: its name ("" = a code for a new app)
+    pairs_again: str = ""
 
 
 @dataclass
@@ -147,6 +151,41 @@ class ExtensionAddTool(Tool):
             code=session.code,
             expires_at=session.expires_at.isoformat().replace("+00:00", "Z"),
             address=extension_address(config),
+        )
+
+
+class ExtensionPairAgainTool(Tool):
+    surfaces = frozenset({"cli", "http"})
+    name = "extension_pair_again"
+    description = (
+        "Generate a pairing code for one paired app that lost its key: it pairs again keeping its rights, AI picks "
+        "and LAN name"
+    )
+    params = {
+        "extension_id": ToolParam(str, "The app's extension ID (see `hiro extension list`)"),
+        "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
+    }
+
+    def execute(self, extension_id: str, workspace: str | None = None) -> ExtensionAddResult:
+        workspace_path = _resolve_path(workspace)
+        ext = get_paired_extension(workspace_path, extension_id)
+        if ext is None:
+            raise ValueError("That extension isn't in the list any more.")
+        if ext.kind != KIND_APP:
+            raise ValueError(f"{ext.name} is a channel: the core pairs it by itself when it starts it.")
+        config = load_config(workspace_path)
+        session = start_extension_pairing(
+            workspace_path,
+            code_length=config.pairing_code_length,
+            ttl_seconds=config.pairing_code_ttl_seconds,
+            extension_id=ext.extension_id,
+        )
+        log.info(f"Pairing code to pair {ext.name} again", extension_id=ext.extension_id)
+        return ExtensionAddResult(
+            code=session.code,
+            expires_at=session.expires_at.isoformat().replace("+00:00", "Z"),
+            address=extension_address(config),
+            pairs_again=ext.name,
         )
 
 

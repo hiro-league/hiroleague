@@ -3,6 +3,7 @@ import {
   disableChannel,
   enableChannel,
   generateExtensionPairingCode,
+  pairExtensionAgain,
   installChannel,
   listAvailableChannels,
   listExtensions,
@@ -101,6 +102,17 @@ export function createExtensionsController(notify: Notify) {
   async function generatePairingCode() {
     await pairingAction.run(async () => {
       pairing = await generateExtensionPairingCode();
+    });
+    if (pairingAction.error) notify('error', pairingAction.error);
+  }
+
+  /** Pair one app again (it lost its key): a code only that app takes, keeping its rights, AI picks and name. */
+  async function pairAgain(row: ExtensionRow) {
+    await pairingAction.run(async () => {
+      const code = await pairExtensionAgain(row.extension_id);
+      // The code's dialog takes the app's panel's place: a dialog opened over the open panel closes at once.
+      pickedId = null;
+      pairing = code;
     });
     if (pairingAction.error) notify('error', pairingAction.error);
   }
@@ -252,6 +264,7 @@ export function createExtensionsController(notify: Notify) {
     openSettings,
     closePanel,
     generatePairingCode,
+    pairAgain,
     closePairing,
     copyPairing,
     toggle,

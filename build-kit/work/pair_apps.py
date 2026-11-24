@@ -6,9 +6,10 @@ Run in the core's own environment (it needs the SDK and the core's package), wit
 
 <name> is the app's extension name (home, net, train, study, reports), <key folder> where the app keeps its key
 (DATA_DIR/hiroleague). An app whose key the core already knows is left alone. Any other gets a fresh pairing code
-(the core's own, written to its workspace as `hiro extension add` does) and pairs with it, one app at a time, since
-the core keeps one code at a time. The app declares itself fully when it next connects; pairing only needs its name.
-Prints one line per app; exits 1 when one didn't pair.
+(the core's own, written to its workspace as `hiro extension add` does; for an app the core already holds by that
+name, one that pairs it again on its record, as `hiro extension pair-again` does) and pairs with it, one app at a
+time, since the core keeps one code at a time. The app declares itself fully when it next connects; pairing only needs
+its name. Prints one line per app; exits 1 when one didn't pair.
 """
 
 from __future__ import annotations
@@ -40,6 +41,21 @@ def known(workspace: Path, extension_id: str) -> bool:
         ).fetchone() is not None
     finally:
         con.close()
+
+
+def holder(workspace: Path, name: str) -> str:
+    """The id of the app this core already holds under *name* ("" when none): an app that lost its key pairs again on
+    that record, keeping its rights and AI picks (one name is one app, so a fresh pairing would be refused)."""
+    db = workspace / "db" / "workspace.db"
+    if not db.exists():
+        return ""
+    con = sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True)
+    try:
+        row = con.execute("select extension_id from extension_records where name = ? and kind = 'app'",
+                          (name,)).fetchone()
+    finally:
+        con.close()
+    return str(row[0]) if row else ""
 
 
 async def pair(url: str, name: str, folder: Path, code: str) -> str:
@@ -78,7 +94,8 @@ def main(argv: list[str]) -> int:
             print(f"{name}: paired already")
             continue
         folder.mkdir(parents=True, exist_ok=True)
-        code = start_extension_pairing(workspace, code_length=6, ttl_seconds=CODE_TTL_S).code
+        code = start_extension_pairing(workspace, code_length=6, ttl_seconds=CODE_TTL_S,
+                                       extension_id=holder(workspace, name)).code
         try:
             refused = asyncio.run(pair(url, name, folder, code))
         except Exception as exc:  # one app's failure is said and the others still pair

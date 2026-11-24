@@ -229,6 +229,51 @@ def test_a_paired_app_cant_take_another_apps_name_by_renaming_itself(tmp_path: P
     asyncio.run(scenario())
 
 
+def test_an_app_that_lost_its_key_pairs_again_on_its_own_record(tmp_path: Path) -> None:
+    """Pair again: a code made for one paired app; only that app takes it, and its new key goes on its record, so its
+    id (and with it its name, rights and AI picks) stays."""
+
+    async def scenario() -> None:
+        workspace = tmp_path / "ws"
+        port = _free_port()
+        manager, ctx = _core(workspace, port)
+        server = asyncio.create_task(manager.run())
+        await _wait_for(lambda: manager.listen_state()["listening"])
+
+        home = _client(port, tmp_path / "home")
+        runner = asyncio.create_task(home.run())
+        home.pair(start_extension_pairing(workspace, code_length=6, ttl_seconds=60).code)
+        await _wait_for(lambda: home.status == STATUS_CONNECTED)
+        await home.stop()
+        await runner
+        [paired] = list_paired_extensions(workspace)
+
+        # Its data folder was reset: a new key. A code for "home" again; another app can't take it.
+        session = start_extension_pairing(workspace, code_length=6, ttl_seconds=60, extension_id=paired.extension_id)
+        net = ExtensionClient(f"ws://127.0.0.1:{port}", ExtensionInfo(name="net"), ExtensionCredentials(tmp_path / "net"))
+        net_runner = asyncio.create_task(net.run())
+        net.pair(session.code)
+        await _wait_for(lambda: net.status == STATUS_NOT_PAIRED and "error" in net.status_detail)
+        assert "pairs “home” again" in net.status_detail["error"]
+
+        again = _client(port, tmp_path / "home-reset")
+        again_runner = asyncio.create_task(again.run())
+        again.pair(session.code)
+        await _wait_for(lambda: again.status == STATUS_CONNECTED)
+        assert ExtensionCredentials(tmp_path / "home-reset").extension_id() == paired.extension_id
+        [record] = list_paired_extensions(workspace)
+        assert record.extension_id == paired.extension_id and record.public_key != paired.public_key
+        assert load_extension_pairing(workspace) is None  # one code, one pairing
+
+        for client, task in ((net, net_runner), (again, again_runner)):
+            await client.stop()
+            await task
+        ctx.stop_event.set()
+        await asyncio.wait_for(server, 5)
+
+    asyncio.run(scenario())
+
+
 def test_listen_failure_does_not_raise(tmp_path: Path) -> None:
     async def scenario() -> None:
         port = _free_port()

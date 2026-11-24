@@ -19,6 +19,7 @@ from hirocli.tools.extension import (
     ExtensionAddressTool,
     ExtensionAddTool,
     ExtensionListTool,
+    ExtensionPairAgainTool,
     ExtensionRemoveResult,
     ExtensionRemoveTool,
 )
@@ -57,6 +58,15 @@ class ExtensionService:
             return Result.success(ExtensionAddTool().execute(workspace=workspace_id))
         except Exception as exc:
             log.warning("⚠️ Extension pairing code failed — HiroAdmin · extensions", workspace_id=workspace_id, error=str(exc), exc_info=True)
+            return Result.failure(str(exc))
+
+    def pair_again_code(self, extension_id: str, workspace_id: str | None) -> Result[ExtensionAddResult]:
+        if not workspace_id:
+            return Result.failure("No workspace selected.")
+        try:
+            return Result.success(ExtensionPairAgainTool().execute(extension_id=extension_id, workspace=workspace_id))
+        except ValueError as exc:
+            # The tool's refusal is written for a person (gone, or a channel).
             return Result.failure(str(exc))
 
     def find(self, extension_id: str, workspace_id: str | None) -> PairedExtension | None:
