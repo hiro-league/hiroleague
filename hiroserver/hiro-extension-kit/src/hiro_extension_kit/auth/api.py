@@ -147,9 +147,9 @@ def seen(session: Session, c: Caller) -> AppUser:
         log.info("Users: %s opened %s for the first time (%s, %s)%s", name, _title(), c.way, c.device,
                  "" if u.role_id else ", waiting for a role")
         return u
-    before = u.role_id
+    before = list(u.role_ids)
     family.recompute_user(session, u)
-    changed = u.role_id != before
+    changed = list(u.role_ids) != before
     if (u.name, u.last_way, u.last_device) != (name, c.way, c.device) or now - u.last_seen >= SEEN_EVERY:
         u.name, u.last_way, u.last_device, u.last_seen = name, c.way, c.device, now
         changed = True
@@ -324,7 +324,7 @@ def _checked_user(session: Session, user_id: str, body: UserIn) -> tuple[AppUser
     if scope is not None:
         scope.check(session, u, body.areas or [], body.things or [])
     core = session.get(CorePerson, user_id)  # the user is this core person
-    if body.role_ids is not None and [r.id for r in roles] != list(u.role_ids) and core is None:
+    if body.role_ids is not None and {r.id for r in roles} != set(u.role_ids) and core is None:
         raise Invalid(f"{u.name} isn't in HiroLeague's family list any more, so their roles can't be set here.")
     return u, roles, core
 
@@ -351,7 +351,7 @@ async def put_user(user_id: str, body: UserIn, c: Caller = Depends(owner)) -> li
     why), No access, and with a users scope what is picked there (both the app's own)."""
     u, roles, core = await run_db(_checked_user, user_id, body)
     ids = [r.id for r in roles]
-    if body.role_ids is not None and core is not None and ids != list(core.role_ids):
+    if body.role_ids is not None and core is not None and set(ids) != set(core.role_ids):  # the core orders them
         await family.update_person(core.id, role_ids=ids)
     out = await run_db(_write_user, user_id, body)
     if body.denied:

@@ -250,34 +250,22 @@ class AppContract:
         phase 5."""
         if self.rule_for is not None:
             pytest.skip("the app keeps its own route check")
-        from .auth import whose
-        from .auth.guard import needs_whose
+        from .auth.guard import rules_without_whose, unknown_lookups
         from .extension import ext
 
-        missing = sorted(r.path for r in ext().rules if needs_whose(r) and r.whose is None)
-        assert missing == [], "these rules' actions are personal: give each a whose (by_person, by_lookup or LIST)"
-        unknown = sorted(f"{r.path}: {r.whose.lookup}" for r in ext().rules
-                         if r.whose is not None and r.whose.kind == "lookup" and whose.lookup(r.whose.lookup) is None)
-        assert unknown == [], "these rules name a lookup nobody registered (auth.whose.register)"
+        assert rules_without_whose(ext().rules) == [], \
+            "these rules' actions are personal: give each a whose (by_person, by_lookup or LIST)"
+        assert unknown_lookups(ext().rules) == [], "these rules name a lookup nobody registered (auth.whose.register)"
 
     def test_a_list_route_takes_the_reach_it_filters_by(self):
         """A route whose rule is LIST is handed "own" or "all" (auth.whose.listed) and must take it, or a grant for
         their own things would show everyone's."""
         if self.rule_for is not None:
             pytest.skip("the app keeps its own route check")
-        from fastapi.routing import APIRoute
+        from .auth.guard import lists_without_reach
 
-        from .auth.guard import rule_for
-        from .auth.whose import listed
-
-        def takes_it(dependant: Any) -> bool:
-            return any(d.call is listed or takes_it(d) for d in dependant.dependencies)
-
-        blind = sorted(f"{m} {route.path}" for route in self.app.routes if isinstance(route, APIRoute)
-                       for m in route.methods
-                       if (rule := rule_for(m, route.path)) is not None and rule.whose is not None
-                       and rule.whose.kind == "list" and not takes_it(route.dependant))
-        assert blind == [], "these list routes don't take the reach: add `reach: Reach = Depends(listed)`"
+        assert lists_without_reach(self.app.routes) == [], \
+            "these list routes don't take the reach: add `reach: Reach = Depends(listed)`"
 
     def test_every_json_route_declares_its_answer(self):
         """So the frontend's types can be generated from the API description, and a changed answer shows up there

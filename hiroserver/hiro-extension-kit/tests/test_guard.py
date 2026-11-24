@@ -284,3 +284,37 @@ def test_a_list_is_handed_the_reach_it_filters_by(client, fake_core):
 def test_one_lookup_per_name():
     with pytest.raises(ValueError):
         whose.register("note", lambda _session, _note_id: [])
+
+
+def test_the_contract_finds_a_personal_rule_that_says_no_whose():
+    from hiro_commons.rules import for_features
+
+    from hiro_extension_kit.auth.guard import rules_without_whose
+    from hiro_extension_kit.extension import ext
+
+    assert rules_without_whose([for_features("/api/notes", "notes"), for_features("/api/logs", "logs")]) == ["/api/notes"]
+    assert rules_without_whose(ext().rules) == []  # the test app's own say it
+
+
+def test_the_contract_finds_a_lookup_nobody_registered():
+    from hiro_commons.rules import by_lookup, for_features
+
+    from hiro_extension_kit.auth.guard import unknown_lookups
+    from hiro_extension_kit.extension import ext
+
+    rule = for_features("/api/notes/{note_id}", "notes", whose=by_lookup("nobody", "note_id"))
+    assert unknown_lookups([rule]) == ["/api/notes/{note_id}: nobody"]
+    assert unknown_lookups(ext().rules) == []  # "note" is registered above
+
+
+def test_the_contract_finds_a_list_route_that_ignores_the_reach():
+    from hiro_extension_kit.auth.guard import lists_without_reach
+
+    blind = FastAPI()
+
+    @blind.get("/api/notes")
+    def notes() -> dict[str, str]:
+        return {}
+
+    assert lists_without_reach(blind.routes) == ["GET /api/notes"]
+    assert lists_without_reach(_pages().routes) == []  # the test app's list takes it

@@ -8,7 +8,11 @@ A person's roles add up. A grant for everyone's passes; a grant for their own th
 the reach (`request.state.reach`, which a list route takes through `whose.listed`).
 """
 
+from collections.abc import Iterable
+from typing import Any
+
 from fastapi import Request
+from fastapi.routing import APIRoute
 from hiro_channel_sdk.access import SEE, Reach
 from hiro_commons.rules import Rule
 from hiro_commons.rules import rule_for as _rule_for
@@ -62,6 +66,29 @@ def needs_whose(rule: Rule) -> bool:
         if any(needed(rule, f, m) in personal for m in methods):
             return True
     return False
+
+
+def rules_without_whose(rules: Iterable[Rule]) -> list[str]:
+    """The paths of rules under a personal action that don't say whose the record is (the contract's check)."""
+    return sorted(r.path for r in rules if needs_whose(r) and r.whose is None)
+
+
+def unknown_lookups(rules: Iterable[Rule]) -> list[str]:
+    """Rules naming a lookup nobody registered (auth.whose.register), as "<path>: <lookup>" (the contract's check)."""
+    return sorted(f"{r.path}: {r.whose.lookup}" for r in rules
+                  if r.whose is not None and r.whose.kind == "lookup" and whose.lookup(r.whose.lookup) is None)
+
+
+def lists_without_reach(routes: Iterable[Any]) -> list[str]:
+    """Routes whose rule is LIST but whose handler doesn't take the reach (whose.listed), as "<METHOD> <path>" (the
+    contract's check)."""
+
+    def takes_it(dependant: Any) -> bool:
+        return any(d.call is whose.listed or takes_it(d) for d in dependant.dependencies)
+
+    return sorted(f"{m} {route.path}" for route in routes if isinstance(route, APIRoute) for m in route.methods
+                  if (rule := rule_for(m, route.path)) is not None and rule.whose is not None
+                  and rule.whose.kind == "list" and not takes_it(route.dependant))
 
 
 def reach_of(rule: Rule, method: str, roles: Held) -> Reach:
