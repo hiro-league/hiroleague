@@ -17,7 +17,11 @@
   import GraphRunsDetailPanel from '$lib/features/graph-runs/GraphRunsDetailPanel.svelte';
   import GraphRunsSubtabNav from '$lib/features/graph-runs/GraphRunsSubtabNav.svelte';
   import { createGraphRunsPageController } from '$lib/features/graph-runs/state/graph-runs-controller.svelte';
-  import { LOGS_TAB_DESCRIPTORS } from './shared/logs-page-config';
+  import { LOGS_TAB_DESCRIPTORS, LOGS_TAB_FEATURE } from './shared/logs-page-config';
+  import { untrack } from 'svelte';
+  import { who } from '$kit/state/who.svelte';
+  import { can } from '$kit/state/pages';
+  import { tabsFor } from '$lib/shell/core-access';
   import AiUsagePanel from '$lib/features/ai-usage/AiUsagePanel.svelte';
   // Logging and tracing plan, phase 6b: the stories, each drawn by its kind
   import StoriesPanel from './one-view/StoriesPanel.svelte';
@@ -36,6 +40,14 @@
   // Graph runs (second tab) — runs-only controller. `notify` drives the recall detail's
   // load/trace toasts.
   const runsCtrl = createGraphRunsPageController(notify);
+
+  // Permissions phase 2: only the tabs this person may open; one they may not falls back to the first they may
+  const tabsShown = $derived(tabsFor(LOGS_TAB_DESCRIPTORS, (id) => LOGS_TAB_FEATURE[id], who.me?.access));
+  $effect(() => {
+    const active = tabPrefs.activeTab;
+    const first = tabsShown[0]?.id;
+    if (first && !tabsShown.some((t) => t.id === active)) untrack(() => void tabPrefs.setActiveTab(first));
+  });
 
   const isRunsTab = $derived(tabPrefs.activeTab === 'runs');
   const isUsageTab = $derived(tabPrefs.activeTab === 'usage'); // Phase 7b: AI usage
@@ -57,6 +69,8 @@
     tabPrefs.initialize();
     // The runs ledger controller lives at the page level so its state survives
     // tab switches; the logs feed controller starts inside LogsPanel's lifecycle.
+    // Permissions phase 2: it polls the graph runs (what Hiro recalled about people) only with Graph runs.
+    if (!can(who.me, 'logs.runs')) return;
     return runsCtrl.mount();
   });
 
@@ -94,7 +108,8 @@
 <section class={ADMIN_PAGE_MAX_W_WIDE}>
   <PageHeader title={pageTitle} children={isRunsTab ? runsNav : isStoriesTab ? storiesBar : undefined}>
     {#snippet adornment()}
-    {#if !isRunsTab && !isUsageTab && !isStoriesTab}
+    <!-- Permissions phase 2: opening a folder on the server's own screen is the owner's -->
+    {#if !isRunsTab && !isUsageTab && !isStoriesTab && who.me?.owner}
       <button
         class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-40"
         type="button"
@@ -135,7 +150,7 @@
     <PageTabs
       label="Logs sections"
       class="max-w-full flex-wrap"
-      tabs={LOGS_TAB_DESCRIPTORS}
+      tabs={tabsShown}
       value={tabPrefs.activeTab}
       onchange={(id) => {
         void tabPrefs.setActiveTab(id);

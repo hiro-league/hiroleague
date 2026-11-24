@@ -10,7 +10,8 @@ import pytest
 
 from hirocli.domain.access import CORE_SOURCE, list_sources, roles_with_rights, set_rights
 from hirocli.domain.extensions import add_paired_extension
-from hirocli.domain.people import PeopleError, get_role, set_role_admin
+from hirocli.domain.core_features import every_core_key
+from hirocli.domain.people import PeopleError, get_role
 from hirocli.runtime.people_for_extensions import handle_people_list, handle_roles_import_rights
 
 FEATURES = [
@@ -46,18 +47,21 @@ def test_set_rights_adds_see_refuses_unknown_and_owner(tmp_path: Path) -> None:
         set_rights(tmp_path, "owner", "home", [])
 
 
-def test_hiroleague_open_is_the_admin_switch(tmp_path: Path) -> None:
-    set_rights(tmp_path, "adult", CORE_SOURCE, ["admin.open"])
-    assert get_role(tmp_path, "adult").admin
-    set_rights(tmp_path, "adult", CORE_SOURCE, [])
-    assert not get_role(tmp_path, "adult").admin
+def test_the_cores_own_grants_are_kept_like_an_apps(tmp_path: Path) -> None:
+    """Permissions phase 2: the core's features are a source like an app's; see follows, as far as the grant."""
+    assert set_rights(tmp_path, "adult", CORE_SOURCE, ["memories.change:own", "logs.see"]).rights == {
+        CORE_SOURCE: ["memories.see:own", "memories.change:own", "logs.see"]}
+    assert not get_role(tmp_path, "adult").admin  # the Phase 8 switch is not written by a grant
+    with pytest.raises(PeopleError, match="no right called"):
+        set_rights(tmp_path, "adult", CORE_SOURCE, ["admin.open"])
+    with pytest.raises(PeopleError, match="isn't about people's own things"):
+        set_rights(tmp_path, "adult", CORE_SOURCE, ["logs.see:own"])
 
 
 def test_roles_with_rights_owner_has_all_but_not_for_owner(tmp_path: Path) -> None:
     add_paired_extension(tmp_path, name="home", public_key="k", info=INFO)
-    set_role_admin(tmp_path, "kid", False)
     roles = {r["role_id"]: r["rights"] for r in roles_with_rights(tmp_path)}
-    assert roles["owner"] == {CORE_SOURCE: ["admin.open"], "home": ["streams.see", "streams.edit", "streams.delete"]}
+    assert roles["owner"] == {CORE_SOURCE: every_core_key(), "home": ["streams.see", "streams.edit", "streams.delete"]}
     assert roles["kid"] == {CORE_SOURCE: [], "home": []}
 
 

@@ -18,6 +18,8 @@
   import { serverReadiness } from '$lib/runtime/server-readiness.svelte';
   import AdminRuntime from '$lib/shell/AdminRuntime.svelte';
   import AdminTopBar from '$lib/shell/AdminTopBar.svelte';
+  import { menuPreview } from '$lib/shell/menu-preview.svelte';
+  import { Button } from '$kit/components/ui/button/index.js';
   import { ADMIN_SHELL_CONTENT_PADDING, ADMIN_SHELL_HEADER_PADDING } from '$lib/styling/admin-tokens';
   import { cn } from '$kit/utils';
   import '../styles/app.css';
@@ -45,11 +47,23 @@
   {@render children?.()}
 {/if}
 
+<!-- Permissions phase 2, People → Roles' "View as": the admin as that role's people see it, on every page and on the
+     apps-only view a role with no page gets -->
+{#snippet previewBar()}
+  {#if menuPreview.current}
+    <div class={cn('flex items-center gap-3 border-b border-primary/20 bg-primary/5 py-1.5 font-sans text-sm', ADMIN_SHELL_HEADER_PADDING)}>
+      <span>Viewing as <span class="font-medium">{menuPreview.current.roleName}</span></span>
+      <Button size="sm" variant="outline" class="ml-auto" onclick={() => menuPreview.stop()}>Stop</Button>
+    </div>
+  {/if}
+{/snippet}
+
 <AppShell {mainClass}>
   {#snippet signedOut()}<SignInPage />{/snippet}
-  {#snippet noPages()}<AppsOnlyView />{/snippet}
+  {#snippet noPages()}{@render previewBar()}<AppsOnlyView />{/snippet}
   {#snippet topBar()}<AdminTopBar />{/snippet}
   {#snippet banners()}
+    {@render previewBar()}
     {#if !serverReadiness.ready}
       <div class={cn('border-b border-warning/20 bg-warning/5', ADMIN_SHELL_HEADER_PADDING)}><ServerStartingBanner /></div>
     {/if}

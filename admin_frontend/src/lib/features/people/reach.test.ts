@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { featureSummary, inRoleOrder, reachOf, setReach, withReaches } from './reach';
+import { featureOfKey, featureSummary, inRoleOrder, reachOf, setReach, withReaches } from './reach';
 
 describe('reachOf', () => {
   it('reads the plain key as everyone, :own as their own', () => {
@@ -83,6 +83,20 @@ describe('withReaches', () => {
       'auto.build'
     ]);
     expect(withReaches(keys, 'auto', { see: 'no', build: 'no' })).toEqual(['streams.see']);
+  });
+
+  it("keeps a nested feature's keys: logs beside logs.runs", () => {
+    const keys = ['logs.see', 'logs.runs.see', 'logs.usage.see:own'];
+    expect(withReaches(keys, 'logs', { see: 'no' })).toEqual(['logs.runs.see', 'logs.usage.see:own']);
+    expect(withReaches(keys, 'logs.runs', { see: 'no' })).toEqual(['logs.see', 'logs.usage.see:own']);
+  });
+});
+
+describe('featureOfKey', () => {
+  it('is everything before the action, with or without :own', () => {
+    expect(featureOfKey('logs.see')).toBe('logs');
+    expect(featureOfKey('ai.providers.change')).toBe('ai.providers');
+    expect(featureOfKey('conversations.see:own')).toBe('conversations');
   });
 });
 

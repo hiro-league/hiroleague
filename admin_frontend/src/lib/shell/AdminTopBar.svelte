@@ -13,8 +13,14 @@
   import { Button } from '$kit/components/ui/button/index.js';
   import { cn } from '$kit/utils';
   import StatusDot, { type DotTone } from '$kit/ui/status-dot.svelte';
+  import { can } from '$kit/state/pages';
+  import { who } from '$kit/state/who.svelte';
 
   const chatEngine = getChatEngine();
+  // Permissions phase 2: writing to Hiro from the admin stays the owner's until a turn is its writer's (phase 3);
+  // Settings needs its feature
+  const showChat = $derived(!!who.me?.owner);
+  const showSettings = $derived(can(who.me, 'settings'));
   let adminConfig = $state<AdminConfig>(DEFAULT_ADMIN_CONFIG);
   const adminDocsUrl = $derived(docsUrl(adminConfig, '/'));
   const status = $derived<WorkspaceStatusState>(liveStatus.payload?.workspace_status ?? 'stopped');
@@ -50,6 +56,7 @@
 <!-- min-h-16: the admin's pages pin their sticky headers 4rem from the top (`top-16`), the height this bar had
      in AdminShell; it keeps that height here so they still meet it. -->
 <div class="ml-auto flex min-h-16 items-center gap-2">
+  {#if showChat}
   <Button
     variant={chatOverlay.open ? 'default' : 'secondary'}
     size="icon-lg"
@@ -65,8 +72,11 @@
       <StatusDot size="md" pulse class="absolute -top-0.5 -right-0.5 rounded-full ring-2 ring-background" />
     {/if}
   </Button>
+  {/if}
   <!-- Quick access to workspace Settings, mirroring the menu's entry. -->
-  <Button variant="outline" size="icon-lg" href={`${base}/preferences`} aria-label="Settings" title="Settings"><Settings /></Button>
+  {#if showSettings}
+    <Button variant="outline" size="icon-lg" href={`${base}/preferences`} aria-label="Settings" title="Settings"><Settings /></Button>
+  {/if}
   <Button
     variant="outline"
     size="lg"

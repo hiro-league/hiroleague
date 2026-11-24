@@ -68,6 +68,16 @@ export function featureSummary(rights: readonly { id: string; name: string }[], 
 }
 
 /**
+ * The feature a key belongs to: everything before its action (an action is one word, a feature's id may carry its
+ * area: `logs.runs.see` is the feature `logs.runs`). Never match a feature's keys by prefix: `logs.` also starts the
+ * keys of `logs.runs` and `logs.usage`.
+ */
+export function featureOfKey(key: string): string {
+  const plain = key.endsWith(OWN_SUFFIX) ? key.slice(0, -OWN_SUFFIX.length) : key;
+  return plain.slice(0, plain.lastIndexOf('.'));
+}
+
+/**
  * A role's keys in one source with one feature's rights set to these reaches: that feature's keys (plain and `:own`)
  * are replaced, every other key stays. The core checks and orders what it is sent.
  */
@@ -76,7 +86,8 @@ export function withReaches(
   feature: string,
   reaches: Readonly<Record<string, Reach>>
 ): string[] {
-  const kept = [...keys].filter((k) => !k.startsWith(`${feature}.`));
+  // a fix: matching by prefix took a nested feature's keys (`logs.runs.see` for `logs`) away with this one's
+  const kept = [...keys].filter((k) => featureOfKey(k) !== feature);
   for (const [right, reach] of Object.entries(reaches)) {
     if (reach === 'all') kept.push(`${feature}.${right}`);
     else if (reach === 'own') kept.push(`${feature}.${right}${OWN_SUFFIX}`);

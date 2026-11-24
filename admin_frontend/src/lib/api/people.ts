@@ -80,6 +80,8 @@ export type AccessSource = {
   extension_id: string;
   connected: boolean;
   features: AccessFeature[];
+  /** The areas that group several features: {area id: name} (Permissions phase 2: the core's). */
+  areas: Record<string, string>;
 };
 /** A role with its rights in every source: {source id: ["<feature>.<right>", "<feature>.<right>:own", ...]}. */
 export type RoleAccess = Role & { rights: Record<string, string[]> };
@@ -87,6 +89,13 @@ export type AccessData = { sources: AccessSource[]; roles: RoleAccess[] };
 
 export async function listAccess() {
   return apiRequest<AccessData>('/people/access');
+}
+
+/** Permissions phase 2: what a role opens in the admin ("View as" on Roles). */
+export type AdminView = { owner: boolean; keys: string[]; levels: Record<string, 'no' | 'see' | 'use'> };
+
+export async function getRoleAdminView(roleId: string) {
+  return apiRequest<AdminView>(`/roles/${encodeURIComponent(roleId)}/admin-view`);
 }
 
 export async function setRoleRights(roleId: string, source: string, rights: string[]) {

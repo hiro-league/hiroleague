@@ -207,11 +207,11 @@ def register(people_app: typer.Typer, console: Console) -> None:
         off: bool = typer.Option(False, "--off", help="Switch it off instead."),
         workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help=_WORKSPACE_HELP),
     ) -> None:
-        """Let a role open HiroLeague's settings (--off: only the apps). Owner always can."""
+        """Give a role every permission in HiroLeague's own features (--off: none, only the apps). Owner has them all."""
         from ..tools.people import RoleAdminTool
 
         _run(console, lambda: RoleAdminTool().execute(role_id=role_id, admin=not off, workspace=workspace))
-        console.print("[green]Switched off.[/green]" if off else "[green]Switched on.[/green]")
+        console.print("[green]Every core permission taken away.[/green]" if off else "[green]Every core permission given.[/green]")
 
     @people_app.command("role-remove")
     def role_remove(

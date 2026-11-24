@@ -13,14 +13,17 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, Depends, FastAPI
 from fastapi.testclient import TestClient
 from hiro_channel_sdk.constants import METHOD_SIGN_IN_FINISH, METHOD_SIGN_IN_START
 from hiro_channel_sdk.extension import ExtensionRequestError
 
+from hirocli.admin_svelte.route_rules import require_rule
 from hirocli.admin_svelte.routes import auth as auth_routes
 from hirocli.admin_svelte.routes.auth import RequireSignIn, auth_router
+from hirocli.domain.access import CORE_SOURCE, set_rights
 from hirocli.domain.admin_sign_in import give_sign_in
+from hirocli.domain.core_features import every_core_key
 from hirocli.domain.people import PeopleError, add_person, list_roles, set_role_admin
 from hirocli.runtime import sign_in_for_extensions as sign_in
 from hirocli.runtime.request_handler import RequestRefused
@@ -61,7 +64,7 @@ def _app(workspace: Path, extensions: FakeExtensions) -> FastAPI:
         workspace_path=workspace, config=SimpleNamespace(admin_port=18083), extension_manager=extensions
     )
     app.add_middleware(RequireSignIn, ctx=app.state.ctx)
-    api = APIRouter(prefix="/api")
+    api = APIRouter(prefix="/api", dependencies=[Depends(require_rule)])  # as admin_svelte/api.py
     api.include_router(auth_router)
 
     @api.get("/secret")
@@ -100,7 +103,7 @@ def test_a_kid_signs_in_for_the_apps_only(family: dict[str, Any]) -> None:
     client = family["client"]
     _sign_in(client, "mark", "kid password")
     refused = client.get("/api/secret")
-    assert refused.status_code == 403 and refused.json()["detail"] == "Your role doesn't open HiroLeague's settings."
+    assert refused.status_code == 403 and refused.json()["detail"] == "Only an owner can do this."
     me = client.get("/api/auth/me").json()
     assert me["can_open_settings"] is False and me["role_name"] == "Kid"
     apps = client.get("/api/apps").json()["apps"]
@@ -111,8 +114,10 @@ def test_a_kid_signs_in_for_the_apps_only(family: dict[str, Any]) -> None:
          "here": False},
     ]
 
-    set_role_admin(family["path"], "kid", True)
-    assert client.get("/api/secret").json() == "settings"
+    # Every core permission opens the admin's pages, but a route with no rule stays the owner's
+    set_rights(family["path"], "kid", CORE_SOURCE, every_core_key())
+    assert client.get("/api/auth/me").json()["can_open_settings"] is True
+    assert client.get("/api/secret").status_code == 403
 
 
 def test_the_sign_in_page_lists_the_offered_sign_ins(family: dict[str, Any]) -> None:

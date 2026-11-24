@@ -5,6 +5,7 @@ import { ApiError } from '$kit/api/client';
 import type { Place } from '$kit/components/place';
 import { adminSession } from '$lib/runtime/admin-session.svelte';
 import { signOut as apiSignOut } from '$lib/api/auth';
+import { menuPreview } from '$lib/shell/menu-preview.svelte';
 
 export type Access = 'no' | 'see' | 'use';
 
@@ -16,6 +17,9 @@ export type Me = {
   state: 'ok' | 'waiting' | 'denied';
   role_id: string | null;
   role_name: string | null;
+  // Every role, in the roles' order: Permissions phase 5's UI kit reads these; the two above stay until it lands
+  role_ids: string[];
+  role_names: string[];
   owner: boolean;
   access: Record<string, Access>;
   rights?: string[];
@@ -29,17 +33,20 @@ export async function getMe(): Promise<Me> {
   if (adminSession.state === 'unreachable') throw new ApiError(0, adminSession.error ?? "The server didn't answer.");
   const person = adminSession.person;
   if (adminSession.state !== 'signed-in' || !person) throw new ApiError(401, 'Sign in to the admin first.');
+  // People → Roles' "View as": the admin as that role's people see it (never the owner: People stays shut)
+  const preview = menuPreview.current;
   return {
     id: person.person_id,
     name: person.name,
     way: 'web',
     state: 'ok',
     role_id: person.role_id,
-    role_name: adminSession.roleName,
-    owner: false,
-    // the admin's one right today: a role either opens HiroLeague's settings (every page) or signs in for the
-    // apps only (no page: the layout shows it the apps)
-    access: adminSession.canOpenSettings ? { settings: 'use' } : {},
+    role_name: preview?.roleName ?? adminSession.roleName,
+    role_ids: person.role_ids ?? [person.role_id],
+    role_names: preview ? [preview.roleName] : adminSession.roleNames,
+    owner: !preview && adminSession.owner,
+    // Permissions phase 2: each core feature's level, as the core worked it out (lib/shell/core-access.ts)
+    access: preview ? preview.levels : adminSession.levels,
     place: adminSession.place
   };
 }

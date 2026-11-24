@@ -31,6 +31,7 @@ from hirocli.tools.people import (
     PersonUpdateTool,
     RoleAddTool,
     RoleAdminTool,
+    RoleAdminViewTool,
     RoleRemoveTool,
     RoleRenameTool,
     RoleRightsTool,
@@ -156,10 +157,16 @@ async def rename_role(role_id: str, body: RoleBody, workspace_id: SelectedWorksp
 
 @people_router.put("/roles/{role_id}/admin")
 async def set_role_admin(role_id: str, body: RoleAdminBody, workspace_id: SelectedWorkspaceIdDep) -> Any:
-    """Phase 8: whether the role can open HiroLeague's settings."""
+    """Every core permission for the role, or none (the Roles page grants them one by one)."""
     return await _call(
         "switch the role", lambda: RoleAdminTool().execute(role_id=role_id, admin=body.admin, workspace=workspace_id)
     )
+
+
+@people_router.get("/roles/{role_id}/admin-view")
+async def role_admin_view(role_id: str, workspace_id: SelectedWorkspaceIdDep) -> Any:
+    """Permissions phase 2: what the role opens in the admin ("View as" on Roles)."""
+    return await _call("read what the role opens", lambda: RoleAdminViewTool().execute(role_id=role_id, workspace=workspace_id))
 
 
 @people_router.delete("/roles/{role_id}")

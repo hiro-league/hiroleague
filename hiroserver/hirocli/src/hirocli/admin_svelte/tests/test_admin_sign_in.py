@@ -6,9 +6,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, Depends, FastAPI
 from fastapi.testclient import TestClient
 
+from hirocli.admin_svelte.route_rules import require_rule
 from hirocli.admin_svelte.routes import auth as auth_routes
 from hirocli.admin_svelte.routes.auth import RequireSignIn, auth_router
 from hirocli.domain.admin_sign_in import give_sign_in
@@ -19,7 +20,7 @@ def _app(workspace: Path) -> FastAPI:
     app = FastAPI()
     app.state.ctx = SimpleNamespace(workspace_path=workspace, config=SimpleNamespace(admin_port=18083))
     app.add_middleware(RequireSignIn, ctx=app.state.ctx)
-    api = APIRouter(prefix="/api")
+    api = APIRouter(prefix="/api", dependencies=[Depends(require_rule)])  # as admin_svelte/api.py
     api.include_router(auth_router)
 
     @api.get("/secret")
@@ -51,6 +52,10 @@ def test_api_needs_a_sign_in_but_the_page_and_auth_dont(client: TestClient) -> N
         "signed_in": False,
         "person": None,
         "role_name": None,
+        "role_names": [],
+        "owner": False,
+        "core_keys": [],
+        "levels": {},
         "can_open_settings": False,
         "anyone_signs_in": True,
         "sign_in_offers": [],

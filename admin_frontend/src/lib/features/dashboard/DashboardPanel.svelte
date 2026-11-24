@@ -30,6 +30,7 @@
   </div>
 
   <section class="grid gap-4 md:grid-cols-3">
+    {#if ctrl.showProviders}
     <StatTile
       href={`${base}/catalog/?tab=active-providers`}
       title="Active Providers"
@@ -70,7 +71,9 @@
         </div>
       {/snippet}
     </StatTile>
+    {/if}
 
+    {#if ctrl.showServer}
     <StatTile
       href={`${base}/server/?tab=workspaces`}
       title="Workspaces"
@@ -117,7 +120,9 @@
       {/snippet}
     </StatTile>
 
-    {#if ctrl.gatewayActive}
+    {/if}
+
+    {#if ctrl.gatewayActive && ctrl.showServer}
       <StatTile
         href={`${base}/server/?tab=gateways`}
         title="Gateways"

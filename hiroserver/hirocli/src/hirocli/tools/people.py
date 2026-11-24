@@ -13,7 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ..domain.access import list_sources, roles_with_rights, set_rights
+from ..domain.access import admin_access, list_sources, roles_with_rights, set_rights
+from ..domain.core_features import CORE_SOURCE, every_core_key
 from ..domain.admin_sign_in import give_sign_in
 from ..domain.people import (
     OWNER_ROLE,
@@ -275,19 +276,23 @@ class RoleRenameTool(Tool):
 
 
 class RoleAdminTool(Tool):
-    """Phase 8: whether a role can open HiroLeague's settings; people without it sign in only for the apps."""
+    """Give a role every permission in HiroLeague's own features, or take them all away (Permissions phase 2: the
+    Roles page grants them one by one). Phase 8's switch is written beside them, for a release that reads only it."""
 
     surfaces = frozenset({"cli", "http"})
     name = "role_admin"
-    description = "Switch whether a role can open HiroLeague's settings (not Owner, which always can)"
+    description = "Give a role every permission in HiroLeague's own features, or none (not Owner, which has them all)"
     params = {
         "role_id": ToolParam(str, "The role's id"),
-        "admin": ToolParam(bool, "True: people with this role can open HiroLeague's settings"),
+        "admin": ToolParam(bool, "True: every core permission; False: none"),
         "workspace": _WORKSPACE,
     }
 
     def execute(self, role_id: str, admin: bool, workspace: str | None = None) -> RoleResult:
-        return RoleResult(role=set_role_admin(_resolve_path(workspace), role_id, admin).model_dump())
+        path = _resolve_path(workspace)
+        set_role_admin(path, role_id, admin)
+        role = set_rights(path, role_id, CORE_SOURCE, every_core_key() if admin else [])
+        return RoleResult(role=role.model_dump())
 
 
 class RoleRemoveTool(Tool):
@@ -304,6 +309,30 @@ class RoleRemoveTool(Tool):
 # ---------------------------------------------------------------------------
 # What each role may do (Phase 9a)
 # ---------------------------------------------------------------------------
+
+
+@dataclass
+class AdminViewResult:
+    owner: bool
+    keys: list[str]
+    levels: dict[str, str]
+
+
+class RoleAdminViewTool(Tool):
+    """Permissions phase 2: the admin as a role's people see it (People → Roles, "View as"): the role's keys in the
+    core, each core feature's level for the pages, and whether it is the owner's."""
+
+    surfaces = frozenset({"cli", "http"})
+    name = "role_admin_view"
+    description = "Show what a role opens in HiroLeague's admin: its core permissions and each feature's level"
+    params = {"role_id": ToolParam(str, "The role's id"), "workspace": _WORKSPACE}
+
+    def execute(self, role_id: str, workspace: str | None = None) -> AdminViewResult:
+        workspace_path = _resolve_path(workspace)
+        if role_id not in {r.role_id for r in list_roles(workspace_path)}:
+            raise PeopleError("That role doesn't exist.")
+        access = admin_access(workspace_path, [role_id])
+        return AdminViewResult(owner=access.owner, keys=access.keys, levels=access.levels)
 
 
 class AccessListTool(Tool):

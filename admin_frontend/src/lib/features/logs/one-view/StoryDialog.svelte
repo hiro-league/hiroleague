@@ -30,6 +30,8 @@
   import { getLogStory, type BriefLogLine, type LogStory, type StoryStepLine } from '$lib/api/logs';
   import { getGraphRun, getGraphRunsByStory, type GraphRunInspectResponse } from '$lib/api/graph-runs';
   import LogLevelIcon from '../shared/LogLevelIcon.svelte';
+  import { can } from '$kit/state/pages';
+  import { who } from '$kit/state/who.svelte';
   import { logLevelAccentClass, logLevelTextClass } from '../shared/logs-classes';
   import KindIcon from './KindIcon.svelte';
   import PartIcon from './PartIcon.svelte';
@@ -58,7 +60,9 @@
     run = null;
     loading = true;
     failure = null;
-    Promise.all([getLogStory(asked), getGraphRunsByStory(asked).catch(() => ({ run_ids: [] as string[] }))])
+    // Permissions phase 2: a story's graph run shows what Hiro recalled about people: only with Graph runs
+    const runsFor = can(who.me, 'logs.runs') ? getGraphRunsByStory(asked).catch(() => ({ run_ids: [] as string[] })) : Promise.resolve({ run_ids: [] as string[] });
+    Promise.all([getLogStory(asked), runsFor])
       .then(async ([s, runs]) => {
         if (asked !== storyId) return;
         story = s;

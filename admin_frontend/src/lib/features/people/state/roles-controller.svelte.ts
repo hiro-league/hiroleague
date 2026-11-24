@@ -1,6 +1,7 @@
 import { untrack } from 'svelte';
 import {
   addRole,
+  getRoleAdminView,
   listAccess,
   removeRole,
   renameRole,
@@ -13,7 +14,9 @@ import {
 import { Action } from '$kit/state/action.svelte';
 import { Resource } from '$kit/state/resource.svelte';
 import type { Notify } from '$kit/ui/toast.svelte';
-import { reachOf, setReach, withReaches, type Reach } from '../reach';
+import { menuPreview } from '$lib/shell/menu-preview.svelte';
+import { featureOfKey, reachOf, setReach, withReaches, type Reach } from '../reach';
+
 
 export type RolesController = ReturnType<typeof createRolesController>;
 
@@ -69,7 +72,7 @@ export function createRolesController(
   /** Set a personal right's reach and save it at once; See follows (setReach), and the core keeps it as it says. */
   function setRightReach(role: RoleAccess, source: AccessSource, feature: AccessFeature, right: string, to: Reach) {
     const next = setReach(feature.rights, reaches(role, source, feature), right, to);
-    void run(() => setRoleRights(role.role_id, source.id, withReaches(granted(role, source), feature.id, next)));
+    saveRights(role, source, withReaches(granted(role, source), feature.id, next));
   }
 
   /** The new-role dialog: null = closed. */
@@ -90,6 +93,19 @@ export function createRolesController(
     return new Set(role.rights[source.id] ?? []);
   }
 
+  /** Save a role's keys in one source at once; the app follows. */
+  function saveRights(role: RoleAccess, source: AccessSource, keys: string[]) {
+    void run(() => setRoleRights(role.role_id, source.id, keys));
+  }
+
+  /** "View as": the admin's menu and tabs as this role's people see them, from the levels the core works out. */
+  async function viewAs(role: RoleAccess) {
+    await work.run(async () => {
+      menuPreview.start(role.name, (await getRoleAdminView(role.role_id)).levels);
+    });
+    if (work.error) notify('error', work.error);
+  }
+
   /** Tick or untick one right; ticking adds See, unticking See takes the feature's other rights away. */
   function toggle(role: RoleAccess, source: AccessSource, feature: AccessFeature, right: string, on: boolean) {
     const next = granted(role, source);
@@ -99,9 +115,10 @@ export function createRolesController(
       if (feature.rights.some((r) => r.id === SEE)) next.add(rightKey(feature.id, SEE));
     } else {
       next.delete(key);
-      if (right === SEE) for (const k of [...next]) if (k.startsWith(`${feature.id}.`)) next.delete(k);
+      // a fix: by prefix, unticking `logs`'s See also took `logs.runs` and `logs.usage` away
+      if (right === SEE) for (const k of [...next]) if (featureOfKey(k) === feature.id) next.delete(k);
     }
-    void run(() => setRoleRights(role.role_id, source.id, [...next]));
+    saveRights(role, source, [...next]);
   }
 
   function saveSays(role: RoleAccess, says: string) {
@@ -143,6 +160,7 @@ export function createRolesController(
     submitNew,
     submitRemove,
     granted,
+    viewAs,
     reach,
     reaches,
     setRightReach,

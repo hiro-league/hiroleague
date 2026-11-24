@@ -11,6 +11,8 @@
   import LogLevelIcon from './shared/LogLevelIcon.svelte';
   import LogRowSourceIcon from './shared/LogRowSourceIcon.svelte';
   import { cn } from '$lib/utils';
+  import { can } from '$kit/state/pages';
+  import { who } from '$kit/state/who.svelte';
   import {
     formatLogDetailsClipboardText,
     logRowSourceLabel,
@@ -175,13 +177,16 @@
               <Button variant="outline" size="sm" href={`${base}/logs?story=${encodeURIComponent(activeRow.story_id)}`}>
                 Open its story
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                href={`${base}/logs?tab=runs&story=${encodeURIComponent(activeRow.story_id)}`}
-              >
-                Open its graph run
-              </Button>
+              <!-- Permissions phase 2: Graph runs is a feature of its own (logs.runs) -->
+              {#if can(who.me, 'logs.runs')}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  href={`${base}/logs?tab=runs&story=${encodeURIComponent(activeRow.story_id)}`}
+                >
+                  Open its graph run
+                </Button>
+              {/if}
             </div>
           </div>
         {/if}

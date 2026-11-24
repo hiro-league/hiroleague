@@ -8,6 +8,8 @@ export type SignedInPerson = {
   name: string;
   sign_in: string;
   role_id: string;
+  /** Every role they hold, in the roles' order (Permissions phase 1). */
+  role_ids: string[];
 };
 
 /** A way to sign in that a connected extension offers (Phase 8: HomeHiro offers Home Assistant's login). */
@@ -17,7 +19,15 @@ export type AuthMe = {
   signed_in: boolean;
   person: SignedInPerson | null;
   role_name: string | null;
-  /** Phase 8: whether their role opens HiroLeague's settings (Owner always); else only the Apps card. */
+  /** The names of every role they hold, in the roles' order. */
+  role_names: string[];
+  /** Whether they hold the Owner role: every page, People and roles included. */
+  owner: boolean;
+  /** Permissions phase 2: their keys in the core's own features, over all their roles. */
+  core_keys: string[];
+  /** Each core feature's level for the pages (only a grant for everyone's opens one). */
+  levels: Record<string, 'no' | 'see' | 'use'>;
+  /** Whether any page of the admin opens for them; else only the Apps card. */
   can_open_settings: boolean;
   /** False until `hiro people owner` gave someone a sign-in. */
   anyone_signs_in: boolean;

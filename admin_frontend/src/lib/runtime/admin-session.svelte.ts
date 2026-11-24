@@ -14,7 +14,6 @@ import {
   type SignedInPerson,
   type SignInOffer
 } from '$lib/api/auth';
-import type { PageRight } from '$lib/shell/nav';
 import { registerSignedOutHandler } from './sign-in-signal';
 
 type SessionState = 'checking' | 'signed-out' | 'signed-in' | 'unreachable';
@@ -23,9 +22,12 @@ function createAdminSession() {
   let state = $state<SessionState>('checking');
   let person = $state<SignedInPerson | null>(null);
   let anyoneSignsIn = $state(true);
-  // Phase 8: a role either opens HiroLeague's settings or signs in for the apps only.
+  // Permissions phase 2: whether any admin page opens, the Owner role, and each core feature's level
   let canOpenSettings = $state(false);
+  let owner = $state(false);
+  let levels = $state<Record<string, 'no' | 'see' | 'use'>>({});
   let roleName = $state<string | null>(null);
+  let roleNames = $state<string[]>([]);
   let offers = $state<SignInOffer[]>([]);
   // A test environment and what its core reaches, for the kit's banner; null in live and env0
   let place = $state<Place | null>(null);
@@ -37,7 +39,10 @@ function createAdminSession() {
       person = me.person;
       anyoneSignsIn = me.anyone_signs_in;
       canOpenSettings = me.can_open_settings;
+      owner = me.owner;
+      levels = me.levels ?? {};
       roleName = me.role_name;
+      roleNames = me.role_names ?? [];
       offers = me.sign_in_offers ?? [];
       place = me.place ?? null;
       state = me.signed_in ? 'signed-in' : 'signed-out';
@@ -70,6 +75,8 @@ function createAdminSession() {
     } finally {
       person = null;
       canOpenSettings = false;
+      owner = false;
+      levels = {};
       state = 'signed-out';
     }
   }
@@ -94,12 +101,18 @@ function createAdminSession() {
     get canOpenSettings() {
       return canOpenSettings;
     },
-    /** Whether the person's role has a page's right (step 1d); `/auth/me` reports the one there is. */
-    hasRight(right: PageRight): boolean {
-      return right === 'open_settings' && canOpenSettings;
+    get owner() {
+      return owner;
+    },
+    /** Each core feature's level for the pages, as the core worked it out from the person's roles. */
+    get levels() {
+      return levels;
     },
     get roleName() {
       return roleName;
+    },
+    get roleNames() {
+      return roleNames;
     },
     get place() {
       return place;
