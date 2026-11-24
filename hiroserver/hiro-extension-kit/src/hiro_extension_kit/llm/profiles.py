@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from hiro_channel_sdk import ExtensionRequestError
+from hiro_channel_sdk.constants import METHOD_AI_ASK, METHOD_AI_CHAT
 
 from .. import identity
 from .. import calls
@@ -33,8 +34,7 @@ from . import Detail, LLMError, core_ai, recorder
 
 log = identity.logger("llm")
 
-AI_ASK = "ai.ask"  # the core's request (extensions only)
-AI_CHAT = "ai.chat"  # a conversation whose model may call the app's tools (extensions only)
+
 def _use_names() -> dict[str, str]:
     """The kinds of use that ask an AI, as declared to the core (Extension.uses): id → name."""
     return {u.id: u.name for u in ext().uses}
@@ -176,14 +176,14 @@ async def _ask(profile_id: str | None, use: str, prompt: str, pictures: list[byt
     wait = (timeout or ASK_TIMEOUT) + SLACK
     started, clock = calls.start(), time.monotonic()
     try:
-        answer = await link.client.request(AI_ASK, params, timeout=wait)
+        answer = await link.client.request(METHOD_AI_ASK, params, timeout=wait)
     except ExtensionRequestError as exc:
         error = _refused(exc, use, wait)
         if isinstance(error, LLMError):  # the core tried (or may have): kept in the requests log as a failed try
             t = recorder.trying("HiroLeague", "", prompt, pictures, schema, detail if pictures else None, None, billing="api")
             t.failed(error, int((time.monotonic() - clock) * 1000))
         raise error from exc
-    calls.done(log, f"HiroLeague: {AI_ASK} ({_use_names().get(use, use)})", started, timeout=wait, paid=True)
+    calls.done(log, f"HiroLeague: {METHOD_AI_ASK} ({_use_names().get(use, use)})", started, timeout=wait, paid=True)
     a = asked(answer)
     _record(a, answer.get("tries"), prompt, pictures, schema, detail)
     return a
@@ -227,14 +227,14 @@ async def _chat(use: str, messages: list[dict[str, Any]], tools: list[dict[str, 
     wait = (timeout or ASK_TIMEOUT) + SLACK
     started, clock = calls.start(), time.monotonic()
     try:
-        answer = await link.client.request(AI_CHAT, params, timeout=wait)
+        answer = await link.client.request(METHOD_AI_CHAT, params, timeout=wait)
     except ExtensionRequestError as exc:
         error = _refused(exc, use, wait)
         if isinstance(error, LLMError):  # the core tried (or may have): kept in the requests log as a failed try
             t = recorder.trying("HiroLeague", "", prompt, [], schema or {}, None, None, billing="api")
             t.failed(error, int((time.monotonic() - clock) * 1000))
         raise error from exc
-    calls.done(log, f"HiroLeague: {AI_CHAT} ({_use_names().get(use, use)})", started, timeout=wait, paid=True)
+    calls.done(log, f"HiroLeague: {METHOD_AI_CHAT} ({_use_names().get(use, use)})", started, timeout=wait, paid=True)
     a = asked(answer)
     message = answer.get("message") if isinstance(answer.get("message"), dict) else {}
     calls_made = [c for c in message.get("tool_calls") or [] if isinstance(c, dict) and c.get("name")]

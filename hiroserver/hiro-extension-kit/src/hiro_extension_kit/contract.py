@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
+from hiro_channel_sdk.constants import METHOD_CORE_INFO
 from hiro_commons.logging_foundation.catches import silent_catches
 
 # The kit's own routes that answer something other than JSON, or nothing (an app mounts some or all of them).
@@ -278,7 +279,7 @@ class AppContract:
         from .testing import FakeCore
 
         core = FakeCore()
-        core.answers["core.info"] = {"name": "HiroLeague", "version": "0.0.0"}
+        core.answers[METHOD_CORE_INFO] = {"name": "HiroLeague", "version": "0.0.0"}
         monkeypatch.setattr(link, "client", core)
         story_id = "4bf92f3577b34da6a3ce929d0e0e4736"
         r = TestClient(self.app).post("/api/hiroleague/test", headers={"traceparent": f"00-{story_id}-00f067aa0ba902b7-01"})

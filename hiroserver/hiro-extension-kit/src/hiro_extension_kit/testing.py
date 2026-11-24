@@ -33,6 +33,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from hiro_channel_sdk.constants import (METHOD_EXTENSIONS_ASK, METHOD_PEOPLE_ADD, METHOD_PEOPLE_LIST,
+                                        METHOD_PEOPLE_UPDATE, METHOD_ROLES_ADD, METHOD_ROLES_IMPORT_RIGHTS,
+                                        METHOD_ROLES_REMOVE, METHOD_ROLES_RENAME)
+
 from .db import Database
 
 # --- no network beyond this computer -----------------------------------------------------------------------------
@@ -342,7 +346,7 @@ class FakeCore:
         from hiro_channel_sdk import ExtensionRequestError
 
         params = dict(params or {})
-        self._frame("extensions.ask", {"to": to, "method": method, "params": params, "timeout": timeout})
+        self._frame(METHOD_EXTENSIONS_ASK, {"to": to, "method": method, "params": params, "timeout": timeout})
         self.asked.append((f"ask:{method}", params))
         self.timeouts.append(timeout)
         if not self.connected:
@@ -365,11 +369,11 @@ class FakeCore:
             raise ExtensionRequestError("not_connected", "not connected to the core")
         if method in self.answers:
             return _answer(self.answers[method], params)
-        if method == "people.list":
+        if method == METHOD_PEOPLE_LIST:
             # Phase 9a: each role with its line and its rights here (none until granted or imported)
             roles = [{"says": "", "rights": [], **r} for r in self.roles]
             return {"people": copy.deepcopy(self.people), "roles": copy.deepcopy(roles)}
-        if method == "roles.import_rights":
+        if method == METHOD_ROLES_IMPORT_RIGHTS:
             if "copy_from" in params:  # Phase 9b: rights copied from another extension: none in this fake
                 return {"imported": []}
             # Phase 9a: fills only roles with no rights here yet (and an empty line), like the core
@@ -384,13 +388,13 @@ class FakeCore:
                     r["rights"] = list(entry.get("rights") or [])
                     imported.append(role_id)
             return {"imported": imported}
-        if method == "people.add":
+        if method == METHOD_PEOPLE_ADD:
             if not str(params.get("name") or "").strip():
                 self._refuse("Name is empty.")
             self._check(params.get("role_id") or "", params.get("whatsapp"), None)
             p = self.person(params["name"], params["role_id"], params.get("whatsapp") or "", params.get("calls_them") or "")
             return {"person": dict(p)}
-        if method == "people.update":
+        if method == METHOD_PEOPLE_UPDATE:
             p = self._find(params["person_id"])
             self._check(params.get("role_id"), params.get("whatsapp"), p["person_id"])
             if params.get("role_id") is not None and p["role_id"] == "owner" and params["role_id"] != "owner":
@@ -400,20 +404,20 @@ class FakeCore:
                 if params.get(k) is not None:
                     p[k] = params[k]
             return {"person": dict(p)}
-        if method == "roles.add":
+        if method == METHOD_ROLES_ADD:
             name = str(params.get("name") or "").strip()
             if any(r["name"].lower() == name.lower() for r in self.roles):
                 self._refuse(f"There is already a role called {name}.")
             r = {"role_id": name.lower().replace(" ", "-"), "name": name, "built_in": False}
             self.roles.append(r)
             return {"role": dict(r)}
-        if method == "roles.rename":
+        if method == METHOD_ROLES_RENAME:
             r = next((r for r in self.roles if r["role_id"] == params.get("role_id")), None)
             if r is None:
                 self._refuse("That role doesn't exist.")
             r["name"] = params["name"]  # type: ignore[index]
             return {"role": dict(r)}  # type: ignore[arg-type]
-        if method == "roles.remove":
+        if method == METHOD_ROLES_REMOVE:
             r = next((r for r in self.roles if r["role_id"] == params.get("role_id")), None)
             if r is None:
                 self._refuse("That role doesn't exist.")

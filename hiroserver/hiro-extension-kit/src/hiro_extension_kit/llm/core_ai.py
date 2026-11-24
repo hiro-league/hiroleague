@@ -20,7 +20,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from hiro_channel_sdk import ExtensionRequestError
-from hiro_channel_sdk.constants import RESOURCE_AI_PROFILES
+from hiro_channel_sdk.constants import METHOD_AI_PROFILES, METHOD_AI_USES_SET, RESOURCE_AI_PROFILES
 from pydantic import BaseModel
 from sqlmodel import Session
 
@@ -35,8 +35,6 @@ from ..extension import ext
 
 log = identity.logger("llm")
 
-AI_PROFILES = "ai.profiles"  # the core's request (extensions only)
-AI_USES_SET = "ai.uses.set"  # Phase 7b: pick a use's profile, saved in the core
 CACHE_KEY = "core_ai_profiles"  # the last list read, as JSON {"answer", "fetched_at"} (settings table)
 FRESH = timedelta(seconds=30)  # a page's read asks the core again when the last read is older
 TIMEOUT = 10.0  # seconds the core may take to answer
@@ -240,12 +238,12 @@ async def refresh() -> None:
             return
         started = calls.start()
         try:
-            answer = await client.request(AI_PROFILES, {}, timeout=TIMEOUT)
+            answer = await client.request(METHOD_AI_PROFILES, {}, timeout=TIMEOUT)
         except ExtensionRequestError as exc:
             _known.error = f"HiroLeague didn't send its AI profiles ({exc.code}): {exc.message}"
             log.warning("AI from HiroLeague: %s", _known.error)
             return
-        calls.done(log, f"HiroLeague: {AI_PROFILES}", started, timeout=TIMEOUT)
+        calls.done(log, f"HiroLeague: {METHOD_AI_PROFILES}", started, timeout=TIMEOUT)
         at = datetime.now(UTC)
         _known.answer, _known.fetched_at, _known.error = answer if isinstance(answer, dict) else {}, at, None
         try:
@@ -275,7 +273,7 @@ async def set_use(use: str, profile_id: str | None) -> None:
     if not link.client.connected:
         raise Unavailable(_no_core())
     try:
-        await link.client.request(AI_USES_SET, {"use": use, "profile": profile_id}, timeout=TIMEOUT)
+        await link.client.request(METHOD_AI_USES_SET, {"use": use, "profile": profile_id}, timeout=TIMEOUT)
     except ExtensionRequestError as exc:
         raise Invalid(f"Not saved in HiroLeague: {exc.message}") from exc
     await refresh()
