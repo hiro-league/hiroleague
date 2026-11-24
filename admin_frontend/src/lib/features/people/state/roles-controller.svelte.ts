@@ -68,7 +68,7 @@ export function createRolesController(
 
   /** Set a personal right's reach and save it at once; See follows (setReach), and the core keeps it as it says. */
   function setRightReach(role: RoleAccess, source: AccessSource, feature: AccessFeature, right: string, to: Reach) {
-    const next = setReach(feature.rights.map((r) => r.id), reaches(role, source, feature), right, to);
+    const next = setReach(feature.rights, reaches(role, source, feature), right, to);
     void run(() => setRoleRights(role.role_id, source.id, withReaches(granted(role, source), feature.id, next)));
   }
 

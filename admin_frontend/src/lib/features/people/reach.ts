@@ -21,24 +21,33 @@ export function reachOf(keys: ReadonlySet<string>, key: string): Reach {
   return 'no';
 }
 
+/** A feature's right as the reach rules need it: a right that isn't `personal` is everyone's or nothing. */
+export type ReachRight = { id: string; personal: boolean };
+
 /**
- * A feature's reaches after one right is set: `rights` are the feature's right ids, `reaches` what each has now.
- * Raising a right raises `see` to at least the same reach; lowering `see` lowers every other right to at most its reach.
+ * A feature's reaches after one right is set; `reaches` is what each right has now. As the core keeps them
+ * (hiro_channel_sdk.access.normalize):
+ * - raising a right raises `see` to at least the same reach, and to everyone's when `see` isn't personal;
+ * - lowering `see` lowers every other right to at most its reach, and drops a right that isn't personal when `see`
+ *   becomes their own (such a right has no "their own").
  */
 export function setReach(
-  rights: readonly string[],
+  rights: readonly ReachRight[],
   reaches: Readonly<Record<string, Reach>>,
   right: string,
   reach: Reach
 ): Record<string, Reach> {
+  const personal = new Map(rights.map((r) => [r.id, r.personal]));
+  const cap = (id: string, to: Reach): Reach => (to === 'own' && !personal.get(id) ? 'no' : to);
   const next: Record<string, Reach> = {};
-  for (const r of rights) next[r] = reaches[r] ?? 'no';
-  next[right] = reach;
-  if (!rights.includes(SEE)) return next;
+  for (const r of rights) next[r.id] = reaches[r.id] ?? 'no';
+  next[right] = personal.get(right) || reach === 'no' ? reach : 'all';
+  if (!personal.has(SEE)) return next;
   if (right === SEE) {
-    for (const r of rights) if (RANK[next[r]] > RANK[reach]) next[r] = reach;
-  } else if (RANK[next[SEE]] < RANK[reach]) {
-    next[SEE] = reach;
+    for (const r of rights) if (RANK[next[r.id]] > RANK[next[SEE]]) next[r.id] = cap(r.id, next[SEE]);
+  } else if (next[right] !== 'no') {
+    const wanted: Reach = personal.get(SEE) ? next[right] : 'all';
+    if (RANK[next[SEE]] < RANK[wanted]) next[SEE] = wanted;
   }
   return next;
 }

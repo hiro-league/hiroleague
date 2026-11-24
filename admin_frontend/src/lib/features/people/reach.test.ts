@@ -11,7 +11,11 @@ describe('reachOf', () => {
 });
 
 describe('setReach', () => {
-  const rights = ['see', 'build', 'run'];
+  const rights = [
+    { id: 'see', personal: true },
+    { id: 'build', personal: true },
+    { id: 'run', personal: true }
+  ];
 
   it('raises see to the reach of the right granted', () => {
     expect(setReach(rights, {}, 'build', 'own')).toEqual({ see: 'own', build: 'own', run: 'no' });
@@ -28,7 +32,30 @@ describe('setReach', () => {
   });
 
   it('leaves a feature without see alone', () => {
-    expect(setReach(['use'], {}, 'use', 'own')).toEqual({ use: 'own' });
+    expect(setReach([{ id: 'use', personal: true }], {}, 'use', 'own')).toEqual({ use: 'own' });
+  });
+
+  // A feature where only some rights are about people's things: what the core keeps, never a key it refuses.
+  const mixed = [
+    { id: 'see', personal: true },
+    { id: 'add', personal: true },
+    { id: 'grade', personal: false }
+  ];
+
+  it("drops a right that has no 'their own' when see becomes their own", () => {
+    expect(setReach(mixed, { see: 'all', add: 'all', grade: 'all' }, 'see', 'own')).toEqual({
+      see: 'own',
+      add: 'own',
+      grade: 'no'
+    });
+  });
+
+  it("raises a see that isn't personal to everyone's", () => {
+    const seeNotPersonal = [
+      { id: 'see', personal: false },
+      { id: 'edit', personal: true }
+    ];
+    expect(setReach(seeNotPersonal, {}, 'edit', 'own')).toEqual({ see: 'all', edit: 'own' });
   });
 });
 
