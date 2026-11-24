@@ -160,3 +160,18 @@ def test_an_extension_already_gone_is_a_404(monkeypatch: pytest.MonkeyPatch) -> 
     answer = asyncio.run(extensions.remove_extension("gone", _request(), workspace_id="w"))  # type: ignore[arg-type]
 
     assert isinstance(answer, JSONResponse) and answer.status_code == 404
+
+
+def test_removing_an_app_says_what_went_with_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    ext = PairedExtension(extension_id="id-home", name="home", kind=KIND_APP)
+    monkeypatch.setattr(extensions.ExtensionService, "find", lambda self, eid, w: ext)
+    monkeypatch.setattr(extensions.ExtensionService, "workspace_path", lambda self, w: None)
+    monkeypatch.setattr(extensions, "_live_manager", lambda request, path: None)
+    gone = ExtensionRemoveResult(True, "id-home", kind=KIND_APP, name="home", site_name="home.hiro.local",
+                                 rights_dropped={"adult": ["x.see"], "kid": ["x.see"]}, picks_dropped=["ai.uses: home:ask"])
+    monkeypatch.setattr(extensions.ExtensionService, "remove_extension", lambda self, eid, w: Result.success(gone))
+
+    answer = asyncio.run(extensions.remove_extension("id-home", _request(), workspace_id="w"))  # type: ignore[arg-type]
+
+    assert answer["message"] == ("home removed, with its name home.hiro.local, its rights in 2 role(s), 1 AI or voice "
+                                 "pick(s): it pairs again with a new code. Its own data stays.")

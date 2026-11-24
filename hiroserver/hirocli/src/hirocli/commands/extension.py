@@ -107,6 +107,7 @@ def register(extension_app: typer.Typer, console: Console) -> None:
         from hiro_commons.process import is_running, read_pid
 
         from ..constants import PID_FILENAME
+        from ..domain.extensions import KIND_APP, get_paired_extension
         from ..domain.workspace import resolve_workspace
         from ..domain.workspace_server_client import post_invoke_sync
         from ..tools.extension import ExtensionRemoveResult, ExtensionRemoveTool
@@ -115,10 +116,11 @@ def register(extension_app: typer.Typer, console: Console) -> None:
         try:
             entry, _ = resolve_workspace(workspace)
             workspace_path = Path(entry.path)
+            found = get_paired_extension(workspace_path, extension_id)
             live = is_running(read_pid(workspace_path, PID_FILENAME))
-            if live:
-                # The running core keeps preferences in memory and announces the names: it does the removal, or it
-                # would write the app's picks back and keep its name live.
+            if live and found is not None and found.kind == KIND_APP:
+                # The running core keeps preferences in memory and announces the names: it removes an app, or it
+                # would write the app's picks back and keep its name live. A channel touches neither: removed here.
                 out = post_invoke_sync(workspace_path, "extension_remove",
                                        {"extension_id": extension_id, "workspace": entry.id})
                 result = ExtensionRemoveResult(**out)
@@ -137,6 +139,8 @@ def register(extension_app: typer.Typer, console: Console) -> None:
         if result.rights_dropped or result.picks_dropped:
             console.print(f"Its rights in {len(result.rights_dropped)} role(s) and {len(result.picks_dropped)} AI or "
                           "voice pick(s) went with it.")
+        if result.kind != KIND_APP:
+            return
         if live:
             console.print("[dim]It is refused from its next connection; its own data stays where it is.[/dim]")
         else:

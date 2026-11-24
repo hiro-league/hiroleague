@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 from hiro_channel_sdk import ExtensionClient, ExtensionCredentials, ExtensionInfo
-from hiro_channel_sdk.extension import STATUS_CONNECTED
+from hiro_channel_sdk.extension import STATUS_CONNECTED, STATUS_NOT_PAIRED
 from hirocli.domain.extensions import start_extension_pairing
 
 WAIT_S = 30  # for the core to take a code
@@ -42,19 +42,23 @@ def known(workspace: Path, extension_id: str) -> bool:
         con.close()
 
 
-async def pair(url: str, name: str, folder: Path, code: str) -> bool:
-    """Connect once with the code; True once the core took it (the SDK saves the key and the id in *folder*)."""
+async def pair(url: str, name: str, folder: Path, code: str) -> str:
+    """Connect once with the code; the core's refusal in its words, or "" (the SDK saves the key and the id in
+    *folder* once the core took it)."""
     client = ExtensionClient(url, ExtensionInfo(name=name), ExtensionCredentials(folder))
     client.pair(code)
     runner = asyncio.create_task(client.run())
     try:
         for _ in range(WAIT_S * 10):
             if client.status == STATUS_CONNECTED:
-                return True
+                return ""
+            # Refused (another app holds the name, a wrong code): the core's words, not a wait to the end
+            if client.status == STATUS_NOT_PAIRED and client.status_detail.get("error"):
+                return str(client.status_detail["error"])
             if runner.done():
                 break
             await asyncio.sleep(0.1)
-        return False
+        return ""
     finally:
         await client.stop()
         runner.cancel()
@@ -76,7 +80,7 @@ def main(argv: list[str]) -> int:
         folder.mkdir(parents=True, exist_ok=True)
         code = start_extension_pairing(workspace, code_length=6, ttl_seconds=CODE_TTL_S).code
         try:
-            asyncio.run(pair(url, name, folder, code))
+            refused = asyncio.run(pair(url, name, folder, code))
         except Exception as exc:  # one app's failure is said and the others still pair
             print(f"{name}: pairing failed: {type(exc).__name__}: {exc}")
             failed += 1
@@ -85,7 +89,8 @@ def main(argv: list[str]) -> int:
         # took the code, before "connected" is seen. Paired = a key saved here that the core now knows.
         new_id = ExtensionCredentials(folder).extension_id()
         ok = bool(new_id) and known(workspace, new_id)
-        print(f"{name}: paired" if ok else f"{name}: the core didn't take the code within {WAIT_S} s")
+        why = refused or f"the core didn't take the code within {WAIT_S} s"
+        print(f"{name}: paired" if ok else f"{name}: {why}")
         failed += not ok
     return 1 if failed else 0
 

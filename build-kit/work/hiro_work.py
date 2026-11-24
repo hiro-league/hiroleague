@@ -1929,7 +1929,8 @@ def paired(env: int, a: appfile.App) -> bool:
         return False
     con = sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True)
     try:
-        return con.execute("select 1 from extensions where extension_id = ?", (ext_id,)).fetchone() is not None
+        # extension_records, the one extension manager's list (the old "extensions" table stays as it was copied)
+        return con.execute("select 1 from extension_records where extension_id = ?", (ext_id,)).fetchone() is not None
     finally:
         con.close()
 

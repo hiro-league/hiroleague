@@ -410,10 +410,10 @@ def test_an_app_is_paired_only_when_this_core_knows_its_key(tmp_path, monkeypatc
     db = hw.core_workspace(1) / "db" / "workspace.db"
     db.parent.mkdir(parents=True)
     with sqlite3.connect(db) as con:
-        con.execute("create table extensions (extension_id text)")
+        con.execute("create table extension_records (extension_id text)")
     assert not hw.paired(1, net)  # a key this core doesn't know
     with sqlite3.connect(db) as con:
-        con.execute("insert into extensions values ('abc')")
+        con.execute("insert into extension_records values ('abc')")
     assert hw.paired(1, net)
 
 

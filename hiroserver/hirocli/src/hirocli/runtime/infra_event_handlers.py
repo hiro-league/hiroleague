@@ -52,6 +52,14 @@ class InfraEventHandlers:
         get_domain_event_bus().subscribe(DomainEventType.DEVICES_CHANGED, self._on_devices_changed)
         # A person or a role changed: a chat channel hears again who may talk (Permissions phase 3)
         get_domain_event_bus().subscribe(DomainEventType.PEOPLE_CHANGED, self._on_people_changed)
+        # An app removed (the admin, the CLI through /invoke): its connection closes now, so it can't claim its name or
+        # set its picks again before it is refused at its next sign-in.
+        get_domain_event_bus().subscribe(DomainEventType.EXTENSION_REMOVED, self._on_extension_removed)
+
+    async def _on_extension_removed(self, event: DomainEvent) -> None:
+        if event.workspace_path != self._ctx.workspace_path or self._extensions is None:
+            return
+        await self._extensions.disconnect(str(event.payload.get("extension_id") or ""))
 
     async def _on_people_changed(self, event: DomainEvent) -> None:
         if event.workspace_path != self._ctx.workspace_path or self._extensions is None:

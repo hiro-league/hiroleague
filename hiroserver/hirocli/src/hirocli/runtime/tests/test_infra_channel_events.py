@@ -54,3 +54,25 @@ async def test_events_from_an_unknown_sender_are_ignored() -> None:
     await h.handle_channel_status("e-gone", "channel.status", {"state": "connected"})  # no longer connected
     await h.handle_channel_pairing("e-gone", "channel.pairing", {"kind": "qr", "qr": "X"})
     assert h._ctx.channel_status == {}
+
+
+@pytest.mark.asyncio
+async def test_a_removed_app_is_cut_off_at_once() -> None:
+    # Installing apps, phase 2: removed through the CLI (/invoke), an app still connected can't claim its name or set
+    # its picks again before its next sign-in is refused.
+    from pathlib import Path
+
+    from hirocli.domain.events import DomainEvent, DomainEventType
+
+    closed: list[str] = []
+
+    async def disconnect(extension_id: str) -> bool:
+        closed.append(extension_id)
+        return True
+
+    h = InfraEventHandlers(SimpleNamespace(workspace_path=Path("ws")))  # type: ignore[arg-type]
+    h._extensions = SimpleNamespace(disconnect=disconnect)  # type: ignore[assignment]
+    removed = {"extension_id": "e-probe", "name": "probe", "site_name": ""}
+    await h._on_extension_removed(DomainEvent(DomainEventType.EXTENSION_REMOVED, Path("ws"), removed))
+    await h._on_extension_removed(DomainEvent(DomainEventType.EXTENSION_REMOVED, Path("other"), removed))
+    assert closed == ["e-probe"]
