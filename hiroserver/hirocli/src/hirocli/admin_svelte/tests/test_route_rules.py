@@ -7,6 +7,7 @@ features, and each of its routes' methods needs an action one of them declares.
 from __future__ import annotations
 
 import importlib
+import logging
 import pkgutil
 from pathlib import Path
 
@@ -43,6 +44,16 @@ def _every_admin_route() -> list[tuple[str, str]]:
 EVERY_ROUTE = _every_admin_route()
 
 
+def test_the_real_router_checks_every_route() -> None:
+    """api.py's router, as the admin mounts it, runs the rule on every route: the sign-in middleware refuses no one
+    by their roles, so this dependency is the only gate."""
+    from hirocli.admin_svelte.api import api_router
+
+    unchecked = [r.path for r in api_router.routes
+                 if isinstance(r, APIRoute) and not any(d.dependency is require_rule for d in r.dependencies)]
+    assert [r for r in api_router.routes if isinstance(r, APIRoute)] and unchecked == []
+
+
 def test_every_route_is_found() -> None:
     paths = {p for _, p in EVERY_ROUTE}
     assert len(EVERY_ROUTE) > 150
@@ -58,6 +69,16 @@ def test_every_route_has_a_rule(method: str, path: str) -> None:
     if rule.who == "features":
         actions = {needed(rule, f, method) in {r.id for r in BY_ID[f].rights} for f in rule.features}
         assert True in actions, f"{method} {path}: none of {rule.features} declares what it needs"
+
+
+def test_the_admins_pages_name_the_cores_features() -> None:
+    """The admin's frontend names the core's features by hand (lib/shell/core-access.ts): the same ids, in order."""
+    import re
+
+    ts = Path(__file__).parents[6] / "admin_frontend" / "src" / "lib" / "shell" / "core-access.ts"
+    listed = re.search(r"CORE_FEATURES = \[(.*?)\] as const", ts.read_text(encoding="utf-8"), re.S)
+    assert listed is not None
+    assert re.findall(r"'([^']+)'", listed.group(1)) == list(BY_ID)
 
 
 def _access(*keys: str) -> AdminAccess:
@@ -76,8 +97,9 @@ def test_logs_see_reaches_the_logs_and_nothing_else() -> None:
     shell = {("GET", "/api/config"), ("GET", "/api/runtime/status"), ("GET", "/api/events/status")}
     signing_in = {(m, p) for m, p in reached if p.startswith("/api/auth/") or p == "/api/apps"}
     elsewhere = reached - shell - signing_in - {(m, p) for m, p in reached if p.startswith("/api/logs/")}
-    # the folder button on the Logs tab, and the devices' names the Logs filters show
-    assert elsewhere == {("POST", "/api/workspaces/open-folder"), ("GET", "/api/devices")}
+    # the devices' names the Logs filters show
+    assert elsewhere == {("GET", "/api/devices")}
+    assert not _allows(adult, "POST", "/api/workspaces/open-folder")  # any folder on the server's screen: the owner's
     assert not _allows(adult, "POST", "/api/logs/clear")  # logs has no change: the owner's
     assert not _allows(adult, "POST", "/api/graph-runs/tail") and not _allows(adult, "GET", "/api/ai/usage")
     assert not _allows(adult, "GET", "/api/people") and not _allows(adult, "PUT", "/api/roles/{role_id}/rights/{source}")
@@ -141,7 +163,7 @@ def _app(workspace: Path) -> FastAPI:
     return app
 
 
-def test_an_adult_given_logs_see_through_the_admin(tmp_path: Path) -> None:
+def test_an_adult_given_logs_see_through_the_admin(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     auth_routes._failures.clear()
     joe = add_person(tmp_path, name="Joe", role_id="adult")
     give_sign_in(tmp_path, joe.person_id, sign_in="joe", password="adult password")
@@ -150,7 +172,10 @@ def test_an_adult_given_logs_see_through_the_admin(tmp_path: Path) -> None:
     client = TestClient(_app(tmp_path))
     assert client.post("/api/auth/sign-in", json={"sign_in": "joe", "password": "adult password"}).status_code == 200
     assert client.get("/api/logs/stories").json() == "stories"
-    refused = client.get("/api/graph-runs/r1")
+    with caplog.at_level(logging.WARNING, logger="ADMIN.RULES"):
+        refused = client.get("/api/graph-runs/r1")
+    assert any(r.levelno == logging.WARNING and "Admin route refused" in r.getMessage() and "Joe" in r.getMessage()
+               for r in caplog.records)
     assert refused.status_code == 403 and refused.json()["detail"].startswith("Your roles don't include Graph runs")
     assert client.get("/api/unruled").status_code == 403
     me = client.get("/api/auth/me").json()

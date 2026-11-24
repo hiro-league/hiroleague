@@ -20,6 +20,7 @@
   import type { KnowledgeScannedFile } from '$lib/api/knowledge';
   import type { KnowledgeIngestModel } from '$lib/features/knowledge/state/knowledge-ingest.svelte';
   import { fileName, formatBytes, relativeFolderPath } from '$lib/features/knowledge/shared/knowledge-pure';
+  import { who } from '$kit/state/who.svelte';
   import {
     KNOWLEDGE_FIELD_LABEL,
     KNOWLEDGE_FIELD_LABEL_TEXT,
@@ -52,6 +53,8 @@
     <div class={KNOWLEDGE_FIELD_LABEL}>
       <span class={KNOWLEDGE_FIELD_LABEL_TEXT}>Folder</span>
       <span class="flex flex-wrap items-center gap-2">
+        <!-- Permissions phase 2: opening a folder on the server's own screen is the owner's -->
+        {#if who.me?.owner}
         <Button
           type="button"
           variant="outline"
@@ -64,6 +67,7 @@
         >
           <FolderOpen size={16} />
         </Button>
+        {/if}
         <label class="block min-w-[300px] flex-1">
           <Input
             class="w-full"

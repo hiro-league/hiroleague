@@ -44,8 +44,9 @@ ADMIN_RULES: tuple[Rule, ...] = (
     R("/api/runtime/status", *ADMIN),
     R("/api/events/status", *ADMIN),
     # Server: workspaces, gateways, metrics
-    R("/api/workspaces/open-folder", "server", "knowledge", "logs", action=SEE),  # a folder on the server's own screen
-    R("/api/open-path", "server", action=SEE),
+    # Any folder, opened on the server's own screen: the owner's
+    Rule("/api/workspaces/open-folder", "owner"),
+    Rule("/api/open-path", "owner"),
     R("/api/workspaces", "server"),
     R("/api/gateways", "server"),
     R("/api/metrics", "server"),
@@ -80,8 +81,9 @@ ADMIN_RULES: tuple[Rule, ...] = (
     R("/api/knowledge/events", "knowledge", "memories"),
     R("/api/knowledge/embedders", "settings", "ai.profiles"),
     R("/api/knowledge/rerankers", "settings", "ai.profiles"),
-    R("/api/knowledge/scan-folder", "knowledge", action=SEE),
-    R("/api/knowledge/preview-file", "knowledge", action=SEE),
+    # Reading a folder or a file of the server to ingest it: changing the knowledge base (known limit: any path)
+    R("/api/knowledge/scan-folder", "knowledge", action="change"),
+    R("/api/knowledge/preview-file", "knowledge", action="change"),
     R("/api/knowledge/answer", "knowledge", action=SEE),
     R("/api/knowledge/search", "knowledge", action=SEE),
     R("/api/knowledge", "knowledge"),

@@ -5,6 +5,7 @@
   import ChatMessageBubble from '$lib/features/chat-channels/messages/ChatMessageBubble.svelte';
   import ChatComposerOptions from '$lib/features/chat-channels/messages/ChatComposerOptions.svelte';
   import ChatMessageComposer from '$lib/features/chat-channels/messages/ChatMessageComposer.svelte';
+  import { who } from '$kit/state/who.svelte';
   import ChatMessagesToolbar from '$lib/features/chat-channels/messages/ChatMessagesToolbar.svelte';
   import { agentMetadataByReplyId } from '$lib/features/chat-channels/messages/agent-message-meta';
   import type { ChatChannelsPageController } from '$lib/features/chat-channels/state/chat-channels-controller.svelte';
@@ -223,7 +224,8 @@
             {/if}
           </div>
         {/if}
-        {#if ctrl.selectedChannelId && channels.length > 0 && !channelsError}
+        <!-- Permissions phase 2: writing to Hiro from the admin stays the owner's until a turn is its writer's (phase 3) -->
+        {#if ctrl.selectedChannelId && channels.length > 0 && !channelsError && who.me?.owner}
           <ChatMessageComposer bind:this={composerRef} {ctrl} {dense} {compactComposer} />
         {/if}
       </div>

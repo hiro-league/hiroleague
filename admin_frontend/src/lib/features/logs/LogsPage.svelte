@@ -108,7 +108,8 @@
 <section class={ADMIN_PAGE_MAX_W_WIDE}>
   <PageHeader title={pageTitle} children={isRunsTab ? runsNav : isStoriesTab ? storiesBar : undefined}>
     {#snippet adornment()}
-    {#if !isRunsTab && !isUsageTab && !isStoriesTab}
+    <!-- Permissions phase 2: opening a folder on the server's own screen is the owner's -->
+    {#if !isRunsTab && !isUsageTab && !isStoriesTab && who.me?.owner}
       <button
         class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-40"
         type="button"
