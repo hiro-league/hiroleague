@@ -3,4 +3,4 @@ paths:
   - "hiroserver/**/*.py"
 ---
 
-for the server side, most of its functionality is exposable to the user as CLI command, AI Agent Tool, HTTP Request or Admin UI feature. Before building functionality exposed to any of these, consider using the Tools Architecture (Check MintDocs) and notify the user that you're using it.
+Server functionality people reach as a CLI command, an AI agent tool, an HTTP request or an admin UI feature is built as a `Tool` first, one operation for every surface (backend guide §3.3; mintdocs `architecture/misc/tools-architecture.mdx`). Say so when you build on it.
