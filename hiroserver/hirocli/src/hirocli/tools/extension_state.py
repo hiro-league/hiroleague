@@ -26,9 +26,9 @@ _TIMEOUT_S = 15.0
 
 
 def _for_whom() -> dict[str, Any]:
-    """The params of the ask: the person chatting, when the core knows who it is (a WhatsApp sender in the family list),
-    so the app answers by their rights (unified communication, phase 3). Otherwise none: the core asks for itself
-    (the CLI, the HTTP surface, and a phone's chat until phones are tied to people)."""
+    """The params of the ask: the person chatting, the turn's writer (a device's person, a WhatsApp sender, the admin's
+    signed-in person: Permissions phase 3), so the app answers by their rights (unified communication, phase 3).
+    Otherwise none: the core asks for itself (the CLI, the HTTP surface)."""
     person = usage_person.get()
     return {FOR_PERSON: person} if person else {}
 

@@ -802,6 +802,10 @@ class ExtensionManager:
             # holds when a gateway run elsewhere doesn't.
             log.warning(f"⚠️ {LOG_IN} Refused — {sender_id or 'unknown'} is not a paired device", channel=conn.name)
             return
+        if conn.name == MANDATORY_CHANNEL_NAME:
+            # A device that writes is connected: the gateway announces a device only when it connects, so after the
+            # core restarts this is how the core learns who is on (Permissions phase 3: replies go to them)
+            self._ctx.device_targeting.connected(sender_id)
         device = self._device_label(sender_id) if sender_id else "unknown"
         # The resolved name rides along so downstream components can log it.
         routing_meta = data.setdefault("routing", {}).setdefault("metadata", {})

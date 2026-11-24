@@ -123,6 +123,13 @@ def _audio_extension_for_media_type(media_type: str) -> str:
     return audio_extension_for_media_type(media_type)
 
 
+def turn_may_use_tools(routing_metadata: dict[str, Any]) -> bool:
+    """Permissions phase 3, until phase 4 holds each tool to the person's rights: Hiro's tools act with the owner's
+    reach, so only the owner's turns get them. Everyone else talks with no tools (the always-on ones too, but for an ask
+    to an app, which answers for the turn's person), and sees nobody else's things."""
+    return bool(routing_metadata.get(PERSON_OWNER_METADATA_KEY))
+
+
 class AgentManager:
     """Owns the agent graph instance and dispatches per-message graph runs."""
 
@@ -416,9 +423,7 @@ class AgentManager:
         tools_enabled = bool(prefs.chat.tools_enabled) and routing_tools_enabled(
             msg.routing.metadata
         )
-        # Permissions phase 3, until phase 4 holds each tool to the person's rights: Hiro's tools act with the owner's
-        # reach, so only the owner's turns get them. Everyone else talks with no tools, and sees nobody else's things.
-        if tools_enabled and not msg.routing.metadata.get(PERSON_OWNER_METADATA_KEY):
+        if tools_enabled and not turn_may_use_tools(msg.routing.metadata):
             tools_enabled = False
             log.fineinfo(f"{LOG_IN} tools off — {peer} isn't the owner (until tools follow each person's rights)")
 

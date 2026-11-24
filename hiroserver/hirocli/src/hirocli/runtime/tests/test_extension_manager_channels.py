@@ -233,3 +233,49 @@ def test_an_app_may_not_relay_chat(tmp_path: Path, caplog) -> None:
         await asyncio.wait_for(server, 5)
 
     asyncio.run(scenario())
+
+
+class _ChatChannel(_Plugin):
+    """A chat channel strangers can write to: its settings declare allowed_senders, as WhatsApp's do."""
+
+    @property
+    def info(self) -> ChannelInfo:
+        schema = {"type": "object", "properties": {"allowed_senders": {"type": "array"}, "owner_number": {}}}
+        return ChannelInfo(name="chat", version="1.0", description="test", config_schema=schema)
+
+
+def test_a_chat_channel_is_handed_who_may_talk_and_not_its_own_list(tmp_path: Path, monkeypatch) -> None:
+    """Permissions phase 3: the core's list (the numbers of the people who may talk), over the stored owner number
+    and list, at the plugin's start and again when the core pushes its settings."""
+    from hirocli.domain import people
+    from hirocli.domain.access import set_rights
+
+    monkeypatch.setattr(people, "get_domain_event_bus", lambda: SimpleNamespace(publish=lambda _e: None))
+    workspace = tmp_path / "ws"
+    people.add_person(workspace, name="Misho", role_ids=["owner"], whatsapp="201000000001")
+    people.add_person(workspace, name="Mona", role_ids=["adult"], whatsapp="201000000002")
+
+    async def scenario() -> None:
+        save_channel_config(workspace, ChannelConfig(
+            name="chat", enabled=False, config={"owner_number": "209", "allowed_senders": ["208"]}))
+        port = _free_port()
+        manager, _chat = _core(workspace, port)
+        server = asyncio.create_task(manager.run())
+        await _wait_for(lambda: manager.listen_state()["listening"])
+        plugin = _ChatChannel()
+        runner = PluginRunner(plugin, f"ws://127.0.0.1:{port}", tmp_path / "keys",
+                              pairing_code=manager._new_start_code("chat"))
+        running = asyncio.create_task(runner.run())
+        try:
+            await _wait_for(lambda: plugin.starts == 1)
+            assert plugin.config == {"allowed_senders": ["201000000001"]}  # Mona's role may not talk yet
+            set_rights(workspace, "adult", "hiroleague", ["assistant.talk"])
+            await manager.push_config("chat")
+            await _wait_for(lambda: plugin.config == {"allowed_senders": ["201000000001", "201000000002"]})
+        finally:
+            runner.stop()
+            await asyncio.wait_for(running, 5)
+            manager._ctx.stop_event.set()
+            await asyncio.wait_for(server, 5)
+
+    asyncio.run(scenario())

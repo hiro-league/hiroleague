@@ -15,6 +15,7 @@ from hirocli.domain.config import Config
 from hirocli.domain.events import DomainEventType
 from hirocli.domain.pairing import ApprovedDevice, paired_device_ids, revoke_approved_device, upsert_approved_device
 from hirocli.runtime.builtin_gateway import BuiltinGateway, gateway_command
+from hirocli.runtime.device_targeting import DeviceTargeting
 from hiro_channel_sdk.models import ContentItem, MessageRouting, UnifiedMessage
 from hirocli.runtime.extension_manager import ExtensionManager, _Connection
 from hirocli.runtime.infra_event_handlers import InfraEventHandlers
@@ -59,7 +60,8 @@ def test_the_core_refuses_a_frame_from_a_device_no_longer_paired(tmp_path: Path,
     monkeypatch.setattr(pairing, "get_domain_event_bus", _Bus)
     upsert_approved_device(tmp_path, _device("mobile-a"))
     ctx = SimpleNamespace(
-        workspace_path=tmp_path, config=Config(), device_names=SimpleNamespace(resolve=lambda device_id: device_id)
+        workspace_path=tmp_path, config=Config(), device_names=SimpleNamespace(resolve=lambda device_id: device_id),
+        device_targeting=DeviceTargeting(tmp_path),
     )
     manager = ExtensionManager(ctx, None)  # type: ignore[arg-type]
     chat: list[str] = []

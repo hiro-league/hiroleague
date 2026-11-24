@@ -320,3 +320,92 @@ def test_a_dropped_message_says_why_once_at_info(family: SimpleNamespace, monkey
     _receive(family.path, _whatsapp("209999999999"))
     assert [(level, "nobody in the family list" in text) for level, text, _ in lines] == [("info", True)]
     assert lines[0][2]["channel"] == "whatsapp"
+
+
+# -- what the build could not show in env1 ---------------------------------------------------------------------------
+
+
+def _attachment(path: Path, channel_id: int, user_id: int, external_id: str, blob: str) -> None:
+    from hirocli.domain.message_attachments import insert_attachment
+    from hirocli.domain.message_store import _sync_save
+
+    pk = _sync_save(path, external_id=external_id, channel_id=channel_id, user_id=user_id, sender_type="user",
+                    sender_id="x", content_type="audio", body="", metadata={}, created_at=None)
+    media = f"media/{external_id}.ogg"
+    (path / "data" / "media").mkdir(parents=True, exist_ok=True)
+    (path / "data" / media).write_bytes(b"same bytes")
+    insert_attachment(path, message_pk=pk, slot_index=0, content_type="audio", blob_id=blob, media_type="audio/ogg",
+                      size=10, media_path=media)
+
+
+def test_another_persons_file_answers_as_not_found_by_ref_and_by_blob(family: SimpleNamespace) -> None:
+    from hirocli.domain.files_resolver import resolve_blob_id_with_kind, resolve_ref
+
+    owner_user = chat_user_id(family.path, family.misho.person_id, owner=True)
+    _receive(family.path, _whatsapp(family.mona.whatsapp))
+    mona_user = chat_user_id(family.path, family.mona.person_id, owner=False)
+    owners, monas = (c.id for c in sorted(_list_channels(family.path), key=lambda c: c.user_id))
+    blob = "sha256:" + "a" * 64
+    _attachment(family.path, owners, owner_user, "m-owner", blob)  # the same bytes in both conversations
+    _attachment(family.path, monas, mona_user, "m-mona", blob)
+    with pytest.raises(FileNotFoundError):
+        resolve_ref(family.path, "message_attachment:m-owner:0", requesting_device_id="dev-mona")
+    resolve_ref(family.path, "message_attachment:m-mona:0", requesting_device_id="dev-mona")
+    *_, detail = resolve_blob_id_with_kind(family.path, blob, requesting_device_id="dev-mona")
+    assert detail["message_external_id"] == "m-mona"  # her own row, though the owner's is older
+    *_, detail = resolve_blob_id_with_kind(family.path, blob, requesting_device_id="dev-misho")
+    assert detail["message_external_id"] == "m-owner"
+
+
+def test_every_reply_frame_names_its_conversation(family: SimpleNamespace) -> None:
+    from hirocli.runtime.envelope_factory import EnvelopeFactory
+    from hirocli.runtime.graph_event_subscriber import _build_reply_envelope, _build_voiced_envelope
+
+    inbound = _receive(family.path, _from_device("dev-mona", 1)).ran  # not hers: refused
+    assert inbound == []
+    inbound = _receive(family.path, _whatsapp(family.mona.whatsapp)).ran[0]
+    frames = [
+        _build_reply_envelope(inbound, "hello", "r1"),
+        _build_voiced_envelope(inbound=inbound, reply_id="r1", audio_b64="", media_type="audio/ogg", duration_ms=0,
+                               attachment_data={}),
+        EnvelopeFactory.transcript_event(inbound, "hi"),
+        EnvelopeFactory.user_message_mirror(inbound),
+    ]
+    assert all(f.routing.metadata.get("chat_channel_id") for f in frames)
+
+
+def test_with_none_known_on_a_reply_goes_to_every_device_of_the_person(family: SimpleNamespace) -> None:
+    targeting = DeviceTargeting(family.path)  # a core just restarted: the gateway announced nobody yet
+    assert targeting.for_person(family.mona.person_id) == ["dev-mona"]
+    targeting.connected("dev-misho")
+    assert targeting.for_person(family.mona.person_id) == ["dev-mona"]
+    assert targeting.for_person(family.misho.person_id) == ["dev-misho"]
+
+
+def test_only_the_owners_turns_get_tools_until_phase_4(family: SimpleNamespace) -> None:
+    from hirocli.runtime.agent_manager import turn_may_use_tools
+
+    owner = _receive(family.path, _whatsapp(family.misho.whatsapp)).ran[0]
+    mona = _receive(family.path, _whatsapp(family.mona.whatsapp)).ran[0]
+    assert turn_may_use_tools(owner.routing.metadata)
+    assert not turn_may_use_tools(mona.routing.metadata)
+
+
+def test_a_change_to_people_or_roles_pushes_the_list_again(family: SimpleNamespace) -> None:
+    from hirocli.domain.events import DomainEvent, DomainEventType
+    from hirocli.runtime.infra_event_handlers import InfraEventHandlers
+
+    pushed: list[str] = []
+
+    class _Extensions:
+        def get_connected_channels(self) -> list[str]:
+            return ["devices", "whatsapp"]
+
+        async def push_config(self, name: str) -> None:
+            pushed.append(name)
+
+    handlers = InfraEventHandlers(SimpleNamespace(workspace_path=family.path))  # type: ignore[arg-type]
+    handlers._extensions = _Extensions()  # type: ignore[assignment]
+    asyncio.run(handlers._on_people_changed(DomainEvent(DomainEventType.PEOPLE_CHANGED, family.path, {})))
+    asyncio.run(handlers._on_people_changed(DomainEvent(DomainEventType.PEOPLE_CHANGED, family.path / "x", {})))
+    assert pushed == ["whatsapp"]  # the chat channel, once: never the devices channel, nor another workspace's

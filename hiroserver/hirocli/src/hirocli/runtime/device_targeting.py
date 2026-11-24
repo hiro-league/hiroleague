@@ -67,10 +67,13 @@ class DeviceTargeting:
         return self.for_person(self._person_of_user(user_id))
 
     def for_person(self, person_id: str) -> list[str]:
-        """A person's connected devices."""
+        """A person's connected devices; all their paired devices when none is known to be on. The gateway announces
+        a device only when it connects, so after the core restarts it may not know who is on yet: a frame to a device
+        that isn't on is dropped by the gateway, a frame withheld from one that is would be lost."""
         if not person_id:
             return []
-        return sorted(device_ids_of(self._workspace_path, person_id) & self._connected)
+        paired = device_ids_of(self._workspace_path, person_id)
+        return sorted((paired & self._connected) or paired)
 
     def _person_of_user(self, user_id: int) -> str:
         person_id = person_of_chat_user(self._workspace_path, user_id)
