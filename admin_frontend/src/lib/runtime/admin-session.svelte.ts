@@ -27,6 +27,7 @@ function createAdminSession() {
   let owner = $state(false);
   let levels = $state<Record<string, 'no' | 'see' | 'use'>>({});
   let roleName = $state<string | null>(null);
+  let roleNames = $state<string[]>([]);
   let offers = $state<SignInOffer[]>([]);
   // A test environment and what its core reaches, for the kit's banner; null in live and env0
   let place = $state<Place | null>(null);
@@ -41,6 +42,7 @@ function createAdminSession() {
       owner = me.owner;
       levels = me.levels ?? {};
       roleName = me.role_name;
+      roleNames = me.role_names ?? [];
       offers = me.sign_in_offers ?? [];
       place = me.place ?? null;
       state = me.signed_in ? 'signed-in' : 'signed-out';
@@ -108,6 +110,9 @@ function createAdminSession() {
     },
     get roleName() {
       return roleName;
+    },
+    get roleNames() {
+      return roleNames;
     },
     get place() {
       return place;

@@ -52,6 +52,7 @@ def test_api_needs_a_sign_in_but_the_page_and_auth_dont(client: TestClient) -> N
         "signed_in": False,
         "person": None,
         "role_name": None,
+        "role_names": [],
         "owner": False,
         "core_keys": [],
         "levels": {},

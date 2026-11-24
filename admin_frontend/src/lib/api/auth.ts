@@ -8,6 +8,8 @@ export type SignedInPerson = {
   name: string;
   sign_in: string;
   role_id: string;
+  /** Every role they hold, in the roles' order (Permissions phase 1). */
+  role_ids: string[];
 };
 
 /** A way to sign in that a connected extension offers (Phase 8: HomeHiro offers Home Assistant's login). */
@@ -17,6 +19,8 @@ export type AuthMe = {
   signed_in: boolean;
   person: SignedInPerson | null;
   role_name: string | null;
+  /** The names of every role they hold, in the roles' order. */
+  role_names: string[];
   /** Whether they hold the Owner role: every page, People and roles included. */
   owner: boolean;
   /** Permissions phase 2: their keys in the core's own features, over all their roles. */

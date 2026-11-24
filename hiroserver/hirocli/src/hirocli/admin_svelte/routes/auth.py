@@ -46,7 +46,7 @@ from hirocli.domain.admin_sign_in import (
     start_session,
 )
 from hirocli.domain.access import admin_access
-from hirocli.domain.people import anyone_signs_in, get_person, get_role
+from hirocli.domain.people import anyone_signs_in, get_person, get_role, list_roles
 from hirocli.runtime.sign_in_for_extensions import (
     CODES,
     app_entry,
@@ -171,12 +171,15 @@ async def who_am_i(request: Request) -> Any:
     anyone = await run_in_threadpool(anyone_signs_in, workspace_path)
     role = await run_in_threadpool(get_role, workspace_path, person.role_id) if person else None
     access = await run_in_threadpool(admin_access, workspace_path, person.role_ids) if person else None
+    names = {r.role_id: r.name for r in await run_in_threadpool(list_roles, workspace_path)} if person else {}
     # Phase 8: the ways to sign in connected extensions offer (the sign-in page's buttons).
     offers = [{"id": o.id, "label": o.label, "extension": o.extension} for o in list_sign_in_offers(_manager(request))]
     return {
             "signed_in": person is not None,
             "person": _public(person) if person else None,
             "role_name": role.name if role else None,
+            # Every role they hold, in the roles' order (Permissions phase 5's UI kit reads them)
+            "role_names": [names[r] for r in person.role_ids if r in names] if person else [],
             # Permissions phase 2: their keys in the core over all their roles, each core feature's level for the
             # pages (the menu and the tabs read them), and whether any page opens at all
             "owner": bool(access and access.owner),

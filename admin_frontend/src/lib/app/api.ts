@@ -17,6 +17,9 @@ export type Me = {
   state: 'ok' | 'waiting' | 'denied';
   role_id: string | null;
   role_name: string | null;
+  // Every role, in the roles' order: Permissions phase 5's UI kit reads these; the two above stay until it lands
+  role_ids: string[];
+  role_names: string[];
   owner: boolean;
   access: Record<string, Access>;
   rights?: string[];
@@ -39,6 +42,8 @@ export async function getMe(): Promise<Me> {
     state: 'ok',
     role_id: person.role_id,
     role_name: preview?.roleName ?? adminSession.roleName,
+    role_ids: person.role_ids ?? [person.role_id],
+    role_names: preview ? [preview.roleName] : adminSession.roleNames,
     owner: !preview && adminSession.owner,
     // Permissions phase 2: each core feature's level, as the core worked it out (lib/shell/core-access.ts)
     access: preview ? preview.levels : adminSession.levels,
