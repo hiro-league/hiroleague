@@ -168,6 +168,8 @@ class AdminAccess(BaseModel):
     owner: bool
     keys: list[str]
     levels: dict[str, str]
+    # Each role the person holds, with its keys in the core: what the SDK's one check adds up (route_rules.py)
+    roles: dict[str, list[str]] = {}
 
     @property
     def opens_admin(self) -> bool:
@@ -178,9 +180,7 @@ def admin_access(workspace_path: Path, role_ids: list[str]) -> AdminAccess:
     """A person's access to the admin from the roles they hold: the owner has every feature; anyone else the keys their
     roles add up to. An unknown role adds nothing."""
     owner = OWNER_ROLE in role_ids
-    keys: set[str] = set()
-    for role in list_roles(workspace_path):
-        if role.role_id in role_ids:
-            keys.update(rights_in(role, CORE_SOURCE, CORE_FEATURES))
+    roles = {r.role_id: rights_in(r, CORE_SOURCE, CORE_FEATURES) for r in list_roles(workspace_path) if r.role_id in role_ids}
+    keys = {k for held in roles.values() for k in held}
     ordered = [k for k in declared_keys(CORE_FEATURES) if k in keys]
-    return AdminAccess(owner=owner, keys=ordered, levels=admin_levels(ordered, owner))
+    return AdminAccess(owner=owner, keys=ordered, levels=admin_levels(ordered, owner), roles=roles)

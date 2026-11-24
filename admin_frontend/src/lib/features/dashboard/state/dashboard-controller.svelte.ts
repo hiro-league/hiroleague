@@ -2,6 +2,8 @@ import { createActiveProvidersStore } from '$lib/catalog/active-providers/active
 import { listGateways, listWorkspaces, type GatewayRow, type WorkspaceRow } from '$lib/api/server';
 import { featureErrorFrom } from '$lib/runtime/feature-errors';
 import { isFeatureActive } from '$lib/shell/features';
+import { can } from '$kit/state/pages';
+import { who } from '$kit/state/who.svelte';
 import { activeProviderDisplayNames, activeProviderOverflowCount } from '../shared/dashboard-derive';
 import { findGatewayLink, type GatewayLink } from '../shared/dashboard-gateway';
 
@@ -30,16 +32,19 @@ export function createDashboardController() {
   // The gateway feature is remote-device connectivity only; when hidden its admin API is unmounted,
   // so skip the call (avoids a 404) and report no gateways. The panel hides the gateway cards to match.
   const gatewayActive = isFeatureActive('gateway');
+  // Permissions phase 2: each card shows under its page's feature, and only its calls are made
+  const showProviders = $derived(can(who.me, 'ai.providers'));
+  const showServer = $derived(can(who.me, 'server'));
 
   async function load() {
     loading = true;
     error = null;
     try {
       const [workspacePayload, gatewayRows] = await Promise.all([
-        listWorkspaces(),
-        gatewayActive ? listGateways().then((payload) => payload) : Promise.resolve([] as GatewayRow[])
+        showServer ? listWorkspaces() : Promise.resolve({ workspaces: [] as WorkspaceRow[] }),
+        gatewayActive && showServer ? listGateways().then((payload) => payload) : Promise.resolve([] as GatewayRow[])
       ]);
-      await activeProvidersStore.load({ silent: true });
+      if (showProviders) await activeProvidersStore.load({ silent: true });
       workspaces = workspacePayload.workspaces;
       gateways = gatewayRows;
     } catch (err) {
@@ -52,6 +57,12 @@ export function createDashboardController() {
   }
 
   return {
+    get showProviders() {
+      return showProviders;
+    },
+    get showServer() {
+      return showServer;
+    },
     get activeProvidersStore() {
       return activeProvidersStore;
     },

@@ -12,6 +12,7 @@
 import { listCatalogModels, type CatalogModelRow } from '$lib/api/catalog';
 import { listPeople, type Person } from '$lib/api/people';
 import { errorMessage } from '$kit/api/client';
+import { who } from '$kit/state/who.svelte';
 import { getPreferences, patchPreferences } from '$lib/api/preferences';
 import {
   getVoiceCatalog,
@@ -74,7 +75,8 @@ export class VoiceController {
       }),
       getVoiceCatalog().catch(() => null),
       listVoiceUses().catch(() => null),
-      listPeople().catch(() => null),
+      // the family list is the owner's (Permissions phase 2): anyone else gets no "send it to" choice
+      who.me?.owner ? listPeople().catch(() => null) : Promise.resolve(null),
       // Hiro's voice lives in preferences; a failed read leaves it as it was (not "none").
       getPreferences().catch(() => null),
       // Speech models for the picker; a failed read keeps the last list.

@@ -1,12 +1,12 @@
 """The admin's own sign-in (the plan's Phase 6), and one sign-in for the extensions' sites (Phase 8).
 
 Every other ``/api`` route needs a signed-in session (``RequireSignIn`` below, added
-as middleware in admin/run.py). Sign-ins belong to the workspace this server runs
+as middleware in admin/run.py), then its rule (admin_svelte/route_rules.py). Sign-ins belong to the workspace this server runs
 (the hosting workspace), whichever workspace the admin is looking at.
 
 Permissions phase 2: a person opens the admin's pages their roles' core permissions reach
-(domain/core_features.py); someone whose roles reach none may call only the sign-in routes and ``/api/apps``
-(the dashboard's Apps card). An extension's site sends a signed-out browser here
+(domain/core_features.py), each route by its rule; someone whose roles reach none may call only the sign-in routes
+and ``/api/apps`` (the dashboard's Apps card). An extension's site sends a signed-out browser here
 (``/sign-in?for=<extension>&next=<path>``); once signed in, ``/api/auth/for/<extension>``
 sends it back with a one-time code (runtime/sign_in_for_extensions.py). A connected extension
 may offer a way to sign in (Home Assistant's login): ``/api/auth/with/<id>`` starts it there,
@@ -45,7 +45,7 @@ from hirocli.domain.admin_sign_in import (
     session_person,
     start_session,
 )
-from hirocli.domain.access import AdminAccess, admin_access
+from hirocli.domain.access import admin_access
 from hirocli.domain.people import anyone_signs_in, get_person, get_role
 from hirocli.runtime.sign_in_for_extensions import (
     CODES,
@@ -63,9 +63,6 @@ log = Logger.get("ADMIN.AUTH")
 auth_router = APIRouter()
 
 AUTH_PREFIX = "/api/auth/"
-# Phase 8: what someone whose role doesn't open HiroLeague's settings may still call.
-LIMITED_PREFIXES = (AUTH_PREFIX, "/api/apps")
-NOT_FOR_YOUR_ROLE = "Your roles don't open this part of HiroLeague."
 
 # Wrong passwords: at most this many per sign-in name in the window, then wait.
 _MAX_FAILURES = 10
@@ -141,14 +138,9 @@ async def signed_in_person(request: Request) -> Any:
     return await run_in_threadpool(session_person, _workspace_path(request), token)
 
 
-def route_allows(access: AdminAccess, method: str, path: str) -> bool:
-    """Whether this access opens one admin route. Fails closed: until each route has its rule (phase 5's
-    ``hiro_commons.rules``, then the admin's own list), only the owner passes."""
-    return access.owner
-
-
 class RequireSignIn:
-    """ASGI middleware: every /api route but /api/auth/* needs a signed-in session.
+    """ASGI middleware: every /api route but /api/auth/* needs a signed-in session. The person is kept on the
+    request's state for the route's rule (route_rules.require_rule, a dependency of every /api route).
 
     Plain ASGI rather than Starlette's BaseHTTPMiddleware, which wraps streaming
     responses: the admin's live streams (SSE) pass through untouched.
@@ -168,13 +160,7 @@ class RequireSignIn:
                 denied = api_failure("Sign in to the admin first.", 401)
                 await denied(scope, receive, send)
                 return
-            # Signed in for the apps only (Adult and Kid by default), or for some pages: the rest stays shut.
-            if not path.startswith(LIMITED_PREFIXES):
-                access = await run_in_threadpool(admin_access, self.workspace_path, person.role_ids)
-                if not route_allows(access, scope.get("method", "GET"), path):
-                    refused = api_failure(NOT_FOR_YOUR_ROLE, 403)
-                    await refused(scope, receive, send)
-                    return
+            scope.setdefault("state", {})["admin_person"] = person
         await self.app(scope, receive, send)
 
 

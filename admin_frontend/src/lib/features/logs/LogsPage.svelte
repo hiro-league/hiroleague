@@ -20,6 +20,7 @@
   import { LOGS_TAB_DESCRIPTORS, LOGS_TAB_FEATURE } from './shared/logs-page-config';
   import { untrack } from 'svelte';
   import { who } from '$kit/state/who.svelte';
+  import { can } from '$kit/state/pages';
   import { tabsFor } from '$lib/shell/core-access';
   import AiUsagePanel from '$lib/features/ai-usage/AiUsagePanel.svelte';
   // Logging and tracing plan, phase 6b: the stories, each drawn by its kind
@@ -68,6 +69,8 @@
     tabPrefs.initialize();
     // The runs ledger controller lives at the page level so its state survives
     // tab switches; the logs feed controller starts inside LogsPanel's lifecycle.
+    // Permissions phase 2: it polls the graph runs (what Hiro recalled about people) only with Graph runs.
+    if (!can(who.me, 'logs.runs')) return;
     return runsCtrl.mount();
   });
 

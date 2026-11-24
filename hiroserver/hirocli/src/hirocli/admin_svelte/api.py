@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from hirocli.domain.features import feature_active
 from hirocli.admin_svelte.routes.ai import ai_router
@@ -35,8 +35,10 @@ from hirocli.admin_svelte.routes.preferences import preferences_router
 from hirocli.admin_svelte.routes.providers import providers_router
 from hirocli.admin_svelte.routes.runtime import runtime_router
 from hirocli.admin_svelte.routes.workspaces import workspaces_router
+from hirocli.admin_svelte.route_rules import require_rule
 
-api_router = APIRouter(prefix="/api", tags=["hiro-admin"])
+# Permissions phase 2: every route below answers by its rule (route_rules.py); a route with no rule, the owner only.
+api_router = APIRouter(prefix="/api", tags=["hiro-admin"], dependencies=[Depends(require_rule)])
 # The admin's own sign-in (Phase 6); every other route needs it (middleware in admin/run.py).
 api_router.include_router(auth_router)
 api_router.include_router(workspaces_router)

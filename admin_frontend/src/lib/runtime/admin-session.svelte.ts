@@ -39,7 +39,7 @@ function createAdminSession() {
       anyoneSignsIn = me.anyone_signs_in;
       canOpenSettings = me.can_open_settings;
       owner = me.owner;
-      levels = me.levels;
+      levels = me.levels ?? {};
       roleName = me.role_name;
       offers = me.sign_in_offers ?? [];
       place = me.place ?? null;

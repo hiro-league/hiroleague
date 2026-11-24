@@ -13,11 +13,12 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, Depends, FastAPI
 from fastapi.testclient import TestClient
 from hiro_channel_sdk.constants import METHOD_SIGN_IN_FINISH, METHOD_SIGN_IN_START
 from hiro_channel_sdk.extension import ExtensionRequestError
 
+from hirocli.admin_svelte.route_rules import require_rule
 from hirocli.admin_svelte.routes import auth as auth_routes
 from hirocli.admin_svelte.routes.auth import RequireSignIn, auth_router
 from hirocli.domain.access import CORE_SOURCE, set_rights
@@ -63,7 +64,7 @@ def _app(workspace: Path, extensions: FakeExtensions) -> FastAPI:
         workspace_path=workspace, config=SimpleNamespace(admin_port=18083), extension_manager=extensions
     )
     app.add_middleware(RequireSignIn, ctx=app.state.ctx)
-    api = APIRouter(prefix="/api")
+    api = APIRouter(prefix="/api", dependencies=[Depends(require_rule)])  # as admin_svelte/api.py
     api.include_router(auth_router)
 
     @api.get("/secret")
@@ -102,7 +103,7 @@ def test_a_kid_signs_in_for_the_apps_only(family: dict[str, Any]) -> None:
     client = family["client"]
     _sign_in(client, "mark", "kid password")
     refused = client.get("/api/secret")
-    assert refused.status_code == 403 and refused.json()["detail"] == "Your roles don't open this part of HiroLeague."
+    assert refused.status_code == 403 and refused.json()["detail"] == "Only an owner can do this."
     me = client.get("/api/auth/me").json()
     assert me["can_open_settings"] is False and me["role_name"] == "Kid"
     apps = client.get("/api/apps").json()["apps"]
