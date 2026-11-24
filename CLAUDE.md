@@ -25,15 +25,15 @@ TrainHiro, StudyHiro and EvalHiro.
 The core of Hiro League: the family list, roles and the one sign-in; WhatsApp, AI and voices; the admin; the SDK and the
 two kits. What it is for people: [the introduction](../hiro-docs/mintdocs/hiro/get-started/introduction.mdx).
 
-The Hiro League standard (hiro-docs `standards/`: the repo map, building and releasing, working rules, the design) loads
-in every session through `~/.claude/rules/hiro-league.md`, and the coding guides load with the code. This file adds
-only the core's own facts.
+The Hiro League standard (hiro-docs `standards/`: the repo map, the task workflow, the working rules) loads in every
+session through `~/.claude/CLAUDE.md`; the design and the coding guides are read when needed (the standard's README
+says when). This file adds only the core's own facts.
 
 ## The admin UI in dev
 
 Check the admin from the **Vite dev site on the environment's 7N02** (env0: `http://127.0.0.1:7002`, started by
 `hiro-work up 0`), not the admin the core serves itself, which is rebuilt rarely and usually stale. The environments
-and their ports: hiro-docs `standards/workflow.md`.
+and their ports: hiro-docs `standards/workflow/environments.md`.
 
 ## Adding a `preferences.json` field
 
@@ -57,7 +57,7 @@ persists on Save.
 ## Architecture
 
 - **How the core, the apps and the kits fit together** is the Hiro League design (hiro-docs `standards/design.md`),
-  loaded in every session.
+  read when needed (the standard's README says when).
 - **The core's internals** (Extension Manager, Communication Manager, Agent Manager, message persistence, resource sync,
   the protocol...) are the mintdocs **Architecture** tab (`../hiro-docs/mintdocs/docs.json`). Those pages are older than
   the code in places: check a page against the code before relying on it.

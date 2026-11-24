@@ -26,5 +26,5 @@ must **persist on Save**. Do the whole round trip, in order:
    automatically; don't edit path lists in `shared/preferences-edits-policy.ts`. After changing the save policy, run its
    test (`npx vitest related --run src/lib/features/preferences/shared/preferences-edits-policy.ts`).
 
-Then the one check before the commit (`./scripts/check.sh`, building-and-releasing.md). A backend field change needs a
+Then the one check before the commit (`./scripts/check.sh`, hiro-docs `standards/workflow/check-command.md`). A backend field change needs a
 **server restart** to take effect.
