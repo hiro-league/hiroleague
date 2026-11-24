@@ -9,10 +9,11 @@ from types import SimpleNamespace
 import pytest
 
 from hirocli.domain.access import CORE_SOURCE, list_sources, roles_with_rights, set_rights
-from hirocli.domain.extensions import add_paired_extension
+from hirocli.domain.extensions import add_paired_extension, touch_paired_extension
 from hirocli.domain.core_features import every_core_key
 from hirocli.domain.people import PeopleError, get_role
 from hirocli.runtime.people_for_extensions import handle_people_list, handle_roles_import_rights
+from hirocli.runtime.request_handler import RequestRefused
 
 FEATURES = [
     {"id": "streams", "name": "Streams", "rights": [
@@ -133,3 +134,48 @@ def test_existing_grants_keep_their_meaning(tmp_path: Path) -> None:
     add_paired_extension(tmp_path, name="home", public_key="k", info=personal)
     roles = {r["role_id"]: r["rights"] for r in roles_with_rights(tmp_path)}
     assert roles["kid"]["home"] == ["streams.see", "myroom.use"]
+
+
+# Permissions phase 6: HomeHiro renames its permissions to the standard and groups Dashboard in an area.
+RENAMED_INFO = {"name": "home", "areas": {"dashboard": "Dashboard", "bad": 3}, "features": [
+    {"id": "dashboard.control", "name": "Control", "rights": [{"id": "see", "name": "See"}, {"id": "switch", "name": "Switch"}]},
+    {"id": "streams", "name": "Streams", "rights": [
+        {"id": "see", "name": "See"}, {"id": "change", "name": "Add and change"}, {"id": "delete", "name": "Delete"}]},
+    {"id": "myroom", "name": "My room", "not_for_owner": True, "rights": [
+        {"id": "see", "name": "See", "personal": True}, {"id": "switch", "name": "Switch", "personal": True}]},
+]}
+RENAMED = {"streams.edit": ["streams.change"], "myroom.use": ["myroom.see:own", "myroom.switch:own"]}
+
+
+def test_renamed_rights_move_once_beside_the_old_keys(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    set_rights(tmp_path, "adult", "home", ["streams.see", "streams.edit"])
+    set_rights(tmp_path, "kid", "home", ["myroom.use"])
+    touch_paired_extension(tmp_path, ctx.msg.routing.sender_id, info=RENAMED_INFO)
+    assert asyncio.run(handle_roles_import_rights({"renamed": RENAMED}, ctx)) == {"imported": ["adult", "kid"]}
+    # the old keys stay stored, for the release before; read, a role has the new ones only, meaning what they meant
+    assert get_role(tmp_path, "kid").rights["home"] == ["myroom.use", "myroom.see:own", "myroom.switch:own"]
+    roles = {r["role_id"]: r["rights"]["home"] for r in roles_with_rights(tmp_path)}
+    assert roles["kid"] == ["myroom.see:own", "myroom.switch:own"]
+    assert roles["adult"] == ["streams.see", "streams.change"]
+    assert asyncio.run(handle_roles_import_rights({"renamed": RENAMED}, ctx)) == {"imported": []}  # asked again: nothing
+    # a save keeps the new keys only
+    assert set_rights(tmp_path, "kid", "home", roles["kid"]).rights["home"] == ["myroom.see:own", "myroom.switch:own"]
+
+
+def test_a_rename_to_a_key_the_app_doesnt_declare_or_from_one_it_still_does_is_refused(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    touch_paired_extension(tmp_path, ctx.msg.routing.sender_id, info=RENAMED_INFO)
+    with pytest.raises(RequestRefused, match="doesn't declare"):
+        asyncio.run(handle_roles_import_rights({"renamed": {"streams.edit": ["streams.nope"]}}, ctx))
+    with pytest.raises(RequestRefused, match="still declares"):
+        asyncio.run(handle_roles_import_rights({"renamed": {"streams.see": ["streams.change"]}}, ctx))
+    with pytest.raises(RequestRefused, match="renamed must be"):
+        asyncio.run(handle_roles_import_rights({"renamed": ["streams.edit"]}, ctx))
+
+
+def test_an_apps_areas_reach_the_roles_page(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    touch_paired_extension(tmp_path, ctx.msg.routing.sender_id, info=RENAMED_INFO)
+    home = next(s for s in list_sources(tmp_path) if s.id == "home")
+    assert home.areas == {"dashboard": "Dashboard"}  # anything but text is skipped

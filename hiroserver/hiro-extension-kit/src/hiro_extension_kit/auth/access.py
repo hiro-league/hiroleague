@@ -41,6 +41,12 @@ def right(rid: str, name: str, says: str) -> ExtensionRight:
     return ExtensionRight(id=rid, name=name, says=says)
 
 
+def personal(rid: str, name: str, says: str) -> ExtensionRight:
+    """An action about people's own things (Permissions phase 6: HomeHiro's My room), granted for their own or
+    everyone's; a route under it says whose a record is (`whose=`)."""
+    return ExtensionRight(id=rid, name=name, says=says, personal=True)
+
+
 def held(session: Session, role_ids: Iterable[str]) -> dict[str, list[str]]:
     """The roles a person holds, each with its keys here, in the order given. A role the app's copy doesn't have yet
     is left out."""

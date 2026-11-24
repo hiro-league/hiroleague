@@ -38,7 +38,7 @@ class Source(BaseModel):
     kind: str  # "core" | "extension"
     extension_id: str = ""
     features: list[ExtensionFeature]
-    # The areas that group several features ({area id: name}): the core's; an app declares none yet
+    # The areas that group several features ({area id: name}): the core's, and an app's as it declares them
     areas: dict[str, str] = {}
 
 
@@ -59,8 +59,17 @@ def list_sources(workspace_path: Path) -> list[Source]:
     for ext in list_paired_extensions(workspace_path):
         features = _declared(ext)
         if features and ext.name:
-            sources.append(Source(id=ext.name, name=_title(ext), kind="extension", extension_id=ext.extension_id, features=features))
+            sources.append(Source(id=ext.name, name=_title(ext), kind="extension", extension_id=ext.extension_id,
+                                  features=features, areas=_areas(ext)))
     return sources
+
+
+def _areas(ext: PairedExtension) -> dict[str, str]:
+    """The areas an extension last declared (Permissions phase 6); anything but {id: name} text is skipped."""
+    raw = ext.info.get("areas")
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): str(v) for k, v in raw.items() if isinstance(k, str) and isinstance(v, str) and k and v}
 
 
 def _title(ext: PairedExtension) -> str:
@@ -137,6 +146,32 @@ def copy_rights(workspace_path: Path, source: str, copy_from: str) -> list[str]:
             continue
         set_role_rights(workspace_path, role.role_id, source, normalize(features, role.rights.get(copy_from, [])))
         filled.append(role.role_id)
+    return filled
+
+
+def rename_rights(workspace_path: Path, source: str, renamed: dict[str, list[str]]) -> list[str]:
+    """Permissions phase 6: an app renamed some of its permissions. Each role holding an old key, one the app no
+    longer declares, gets the new keys beside it; the old key stays stored, unread (``rights_in`` keeps to what is
+    declared), so the release before still reads every grant as it was, and the role's next save keeps only new keys.
+    Asked again, it changes nothing. Returns the role ids given new keys."""
+    features = source_features(workspace_path, source)
+    known = set(declared_keys(features))
+    for old, new in renamed.items():
+        if old.removesuffix(OWN) in {k.removesuffix(OWN) for k in known}:
+            raise PeopleError(f"{source} still declares {old}: only a permission it no longer has can be renamed.")
+        if not new or set(new) - known:
+            raise PeopleError(f"{old} is renamed to {', '.join(sorted(set(new) - known)) or 'nothing'}, which "
+                              f"{source} doesn't declare.")
+    filled: list[str] = []
+    for role in list_roles(workspace_path):
+        if role.role_id == OWNER_ROLE:
+            continue
+        stored = list(role.rights.get(source, []))
+        added = [k for old in stored if old in renamed for k in renamed[old] if k not in stored]
+        added = list(dict.fromkeys(added))
+        if added:
+            set_role_rights(workspace_path, role.role_id, source, stored + added)
+            filled.append(role.role_id)
     return filled
 
 

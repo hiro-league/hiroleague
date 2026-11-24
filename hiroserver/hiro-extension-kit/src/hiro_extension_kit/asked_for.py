@@ -34,6 +34,12 @@ def _read(session: Session, person_id: str) -> PersonRights:
     return PersonRights(person_id, access.held(session, person.role_ids))
 
 
+async def person(person_id: str) -> PersonRights:
+    """Any person with their rights here, read from the family copy without a request: the people an app's own work
+    runs as (HomeHiro's automations, Permissions phase 6). Someone unknown, or given No access, has none."""
+    return await run_db(_read, person_id)
+
+
 async def asked_for(params: dict[str, Any]) -> PersonRights | None:
     """The person the core asks for, with their rights; None when the core asks for itself."""
     person_id = params.get(FOR_PERSON)

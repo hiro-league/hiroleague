@@ -9,7 +9,7 @@ import pytest
 from sqlmodel import Session
 
 from hiro_extension_kit import hiroleague, testing
-from hiro_extension_kit.asked_for import asked_for
+from hiro_extension_kit.asked_for import asked_for, person
 from hiro_extension_kit.auth.access import PersonRights
 from hiro_extension_kit.auth.models import AppUser, CorePerson, Role
 from hiro_extension_kit.db import engine
@@ -71,6 +71,13 @@ def test_an_ask_for_a_kid_gets_the_kids_rights():
     who = run(asked_for({"_for_person": "cp-kid"}))
     assert who == PersonRights("cp-kid", {"kid": ["logs.see"]})
     assert who.can("logs") and not who.can("status") and not who.can("status", "alerts")
+
+
+def test_any_person_is_read_with_their_rights_without_an_ask():
+    """Permissions phase 6: the people an app's own work runs as (an automation's), read from the family copy."""
+    _family("cp-kid2", "kid", ["logs.see"])
+    assert run(person("cp-kid2")) == PersonRights("cp-kid2", {"kid": ["logs.see"]})
+    assert run(person("nobody")) == PersonRights("nobody")
 
 
 def test_an_ask_adds_up_the_persons_roles_and_their_own_things():

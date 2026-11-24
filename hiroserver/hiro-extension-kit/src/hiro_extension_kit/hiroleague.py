@@ -89,7 +89,8 @@ def info_for(site_url: str) -> ExtensionInfo:
     return ExtensionInfo(name=e.name, version=e.version, description=e.description, offers=offers, uses=list(e.uses), voice_uses=list(e.voice_uses),
                          embed_uses=list(e.embed_uses), rerank_uses=list(e.rerank_uses),
                          repo=e.repo,  # its repo: CodeHiro keeps a report for it (HiroLeague's extensions.list)
-                         features=list(e.features))  # its features and rights, granted per role in HiroLeague
+                         features=list(e.features),  # its features and rights, granted per role in HiroLeague
+                         areas=dict(e.areas))  # the areas that group them (Permissions phase 6)
 
 
 class LinkSettings(Protocol):

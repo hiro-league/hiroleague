@@ -17,11 +17,14 @@ the core first (`people.update`); the core's refusals ("the only Owner") come ba
 An app that took a feature over from another (`Extension.rights_from`: NetHiro and TrainHiro, from HomeHiro) asks the
 core once, on its first connection, to copy each role's rights there into the app's features
 (`roles.import_rights {"copy_from": "home"}`, `_copy_rights_once`), so every role keeps exactly the rights it had.
+An app that renamed its permissions (`Extension.renamed_rights`) asks the same way, once per list
+(`{"renamed": {...}}`, `_rename_rights_once`): each role holding an old key gets the new ones beside it.
 
 Backend kit, step 3: each app had its own copy of this module, the same but for that.
 """
 
 import asyncio
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -46,6 +49,8 @@ EVERY = 600.0  # seconds: the backstop read of the core's list
 TIMEOUT = 15.0  # seconds per request to the core
 # Setting: when each role's rights were copied from the app named in `Extension.rights_from` by the core (ISO time)
 RIGHTS_COPIED = "rights_copied"
+# Setting: the renamed permissions the core last moved in each role (`Extension.renamed_rights`, as sorted JSON)
+RIGHTS_RENAMED = "rights_renamed"
 
 
 class FamilyError(OutsideError):
@@ -268,6 +273,31 @@ async def _copy_rights_once() -> None:
              _app_named(source), ", ".join(answer.get("imported") or []) or "no role")
 
 
+async def _rename_rights_once() -> None:
+    """Ask the core once to give each role that holds a permission the app renamed (`Extension.renamed_rights`) the
+    new keys beside it, so nobody gains or loses a right (Permissions phase 6). Recorded as the list it moved, so a
+    later list is asked again. Not done (an older core, or not answering): logged, and asked again on the next round."""
+    renamed = {k: list(v) for k, v in ext().renamed_rights.items()}
+    if not renamed:
+        return
+    said = json.dumps(renamed, sort_keys=True)
+    if await run_db(settings.get, RIGHTS_RENAMED) == said:
+        return
+    try:
+        answer = await ask(METHOD_ROLES_IMPORT_RIGHTS, {"renamed": renamed})
+    except AppError as exc:
+        failed(log, "Family: moving each role's renamed rights (asked again next round)", exc)
+        return
+    await run_db(_mark_rights_renamed, said)
+    log.info("Family: HiroLeague moved each role's renamed rights (%s given the new ones)",
+             ", ".join(answer.get("imported") or []) or "no role")
+
+
+def _mark_rights_renamed(session: Session, said: str) -> None:
+    settings.put(session, RIGHTS_RENAMED, said)
+    session.commit()
+
+
 def _app_named(extension: str) -> str:
     """An extension's name as people know it, for the log: "home" is HomeHiro."""
     return "HomeHiro" if extension == "home" else extension
@@ -282,6 +312,7 @@ async def sync() -> list[str]:
     """Read the core's list into the copy; what changed, in words. Raises when the core can't be asked."""
     async with lock:
         await _copy_rights_once()  # before the list: the roles then come with the rights copied
+        await _rename_rights_once()  # the same for renamed rights
         answer = await ask(METHOD_PEOPLE_LIST)
         with translate(FamilyError, "HiroLeague's family list can't be read"):
             people = [(_person(p), _calls_them(p)) for p in answer["people"]]

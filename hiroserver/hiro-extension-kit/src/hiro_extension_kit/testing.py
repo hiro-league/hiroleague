@@ -385,6 +385,15 @@ class FakeCore:
         if method == METHOD_ROLES_IMPORT_RIGHTS:
             if "copy_from" in params:  # Phase 9b: rights copied from another extension: none in this fake
                 return {"imported": []}
+            if "renamed" in params:  # Permissions phase 6: the new keys beside each old one a role holds, like the core
+                moved = []
+                for r in self.roles:
+                    held = list(r.get("rights") or [])
+                    added = [k for old in held for k in params["renamed"].get(old, []) if k not in held]
+                    if r["role_id"] != "owner" and added:
+                        r["rights"] = held + list(dict.fromkeys(added))
+                        moved.append(r["role_id"])
+                return {"imported": moved}
             # Phase 9a: fills only roles with no rights here yet (and an empty line), like the core
             imported = []
             for role_id, entry in (params.get("roles") or {}).items():

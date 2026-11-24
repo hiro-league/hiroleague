@@ -94,6 +94,10 @@ class Extension:
     # "home"), and that feature's name for the log line ("System health"). None: nothing to copy.
     rights_from: str | None = None
     rights_from_what: str = ""
+    # Permissions phase 6: the areas that group several of its features ({area id: name}), shown on the core's Roles
+    # page; and the permissions it renamed ({old key: [new keys]}), moved once in each role by the core (family.py).
+    areas: Mapping[str, str] = field(default_factory=dict)
+    renamed_rights: Mapping[str, Sequence[str]] = field(default_factory=dict)
     by_id: dict[str, ExtensionFeature] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:

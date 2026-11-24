@@ -27,7 +27,7 @@ from hiro_channel_sdk.constants import (
 )
 from hiro_commons.log import Logger
 
-from ..domain.access import copy_rights, import_rights, roles_for_extension
+from ..domain.access import copy_rights, import_rights, rename_rights, roles_for_extension
 from ..domain.people import (
     PeopleError,
     Person,
@@ -159,9 +159,17 @@ async def handle_roles_import_rights(params: dict[str, Any], ctx: RequestContext
         filled = await _change(ctx, f"rights copied for {name} from {copy_from}",
                                lambda: copy_rights(_workspace(ctx), name, copy_from))
         return {"imported": filled}
+    renamed = params.get("renamed")
+    if renamed is not None:
+        # Permissions phase 6: an app renamed some of its permissions; each role holding an old key gets the new ones.
+        if not isinstance(renamed, dict) or not all(
+                isinstance(k, str) and isinstance(v, list) and all(isinstance(x, str) for x in v) for k, v in renamed.items()):
+            raise RequestRefused("invalid_params", "renamed must be {old key: [new keys]}")
+        filled = await _change(ctx, f"rights renamed for {name}", lambda: rename_rights(_workspace(ctx), name, renamed))
+        return {"imported": filled}
     roles = params.get("roles")
     if not isinstance(roles, dict):
-        raise RequestRefused("invalid_params", "roles must be {role_id: {rights: [...], says?: str}}, or copy_from")
+        raise RequestRefused("invalid_params", "roles must be {role_id: {rights: [...], says?: str}}, or copy_from, or renamed")
     filled = await _change(ctx, f"rights imported for {name}", lambda: import_rights(_workspace(ctx), name, roles))
     return {"imported": filled}
 

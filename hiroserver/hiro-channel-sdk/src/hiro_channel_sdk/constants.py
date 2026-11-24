@@ -137,6 +137,9 @@ NOTIFY_MAX_RECIPIENTS: int = 10
 #                    for in this extension yet (and an empty ``says``), never overwrites what the admin set.
 #                    Or {copy_from: "<another extension's name>"} (Phase 9b): an app taking features over from another
 #                    gets, for each role with none here yet, its rights there in the features this app declares.
+#                    Or {renamed: {old key: [new keys]}} (Permissions phase 6): an app that renamed its permissions
+#                    has each role that holds an old key, one it no longer declares, given the new keys beside it;
+#                    the old key stays stored, unread, until the role is next saved. Asked again, it changes nothing.
 #   When the list changes the core sends resource.changed {resource: RESOURCE_PEOPLE} (below): read people.list again.
 #   A refused change answers error code "invalid_params" with the reason for people.
 METHOD_PEOPLE_LIST: str = "people.list"

@@ -69,6 +69,27 @@ def test_a_core_that_cant_copy_the_rights_yet_is_asked_again(fake_core):
     assert [m for m, _ in fake_core.asked].count("roles.import_rights") == 2
 
 
+def test_renamed_rights_are_moved_once_per_list(fake_core, monkeypatch):
+    """Permissions phase 6: an app that renamed its permissions asks the core once to move each role's; a new list
+    is asked again."""
+    import dataclasses
+
+    from hiro_extension_kit import extension
+
+    renamed = dataclasses.replace(extension.ext(), renamed_rights={"status.alerts": ["status.see"]})
+    monkeypatch.setattr(family, "ext", lambda: renamed)
+    fake_core.roles[1]["rights"] = ["status.alerts"]
+    run(family.sync())
+    run(family.sync())
+    asks = [p for m, p in fake_core.asked if m == "roles.import_rights" and "renamed" in p]
+    assert asks == [{"renamed": {"status.alerts": ["status.see"]}}]
+    with Session(engine) as s:
+        assert s.get(Role, fake_core.roles[1]["role_id"]).rights == ["status.alerts", "status.see"]  # type: ignore[union-attr]
+    monkeypatch.setattr(family, "ext", lambda: dataclasses.replace(renamed, renamed_rights={"status.x": ["status.see"]}))
+    run(family.sync())
+    assert len([p for m, p in fake_core.asked if m == "roles.import_rights" and "renamed" in p]) == 2
+
+
 def test_two_roles_swapping_names_in_the_core_dont_trip_the_unique_name(fake_core):
     run(family.sync())
     fake_core.roles[1]["name"], fake_core.roles[2]["name"] = "Kid", "Adult"

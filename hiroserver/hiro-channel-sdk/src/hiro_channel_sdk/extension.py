@@ -143,6 +143,9 @@ class ExtensionInfo(BaseModel):
     repo: str = ""
     # Phase 9a: its features and the rights in each; the core's admin grants them per role (access.py).
     features: list[ExtensionFeature] = Field(default_factory=list)
+    # Permissions phase 6: the areas that group several of its features ({area id: name}, "dashboard": "Dashboard"),
+    # named on the Roles page as the core's are; a feature's id carries its area ("dashboard.control").
+    areas: dict[str, str] = Field(default_factory=dict)
     # A channel plugin's settings form (a JSON Schema) and how its account is linked (capabilities.py): the core's
     # admin draws them. None = none.
     config_schema: dict[str, Any] | None = None
