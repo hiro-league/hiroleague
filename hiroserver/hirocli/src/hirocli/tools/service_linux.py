@@ -70,8 +70,10 @@ def uninstall(*, workspace: str | None = None) -> ServiceUninstallResult:
         )
     removed = uninstall_service(name)
     env_file = env_file_path(name)
+    left = env_file.exists()
     return ServiceUninstallResult(
-        service=unit_file_name(name), removed=removed, secrets_file=str(env_file) if env_file.exists() else None,
+        service=unit_file_name(name), removed=removed, secrets_file=str(env_file) if left else None,
+        delete_secrets=f"sudo rm {env_file}" if left else None,
     )
 
 

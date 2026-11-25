@@ -135,8 +135,10 @@ def uninstall(*, workspace: str | None = None) -> ServiceUninstallResult:
     if wrapper is not None:
         kept.append(str(wrapper.parent.parent))
     secrets = env.get(ENV_SECRETS_FILE)
+    left = bool(secrets) and Path(secrets).exists()
     return ServiceUninstallResult(
-        service=name, removed=True, secrets_file=secrets if secrets and Path(secrets).exists() else None, kept=kept,
+        service=name, removed=True, secrets_file=secrets if left else None, kept=kept,
+        delete_secrets=f'Remove-Item "{secrets}"   (in an administrator PowerShell)' if left else None,
     )
 
 

@@ -27,6 +27,7 @@ class ServiceUninstallResult:
     removed: bool  # False: it was not installed
     secrets_file: str | None  # secrets file left in place, if any
     kept: list[str] = field(default_factory=list)  # folders left in place (the data, the program)
+    delete_secrets: str | None = None  # how to delete the secrets file, when one was left
 
 
 @dataclass

@@ -78,8 +78,10 @@ def uninstall(*, workspace: str | None = None) -> ServiceUninstallResult:
     label = ms.label(workspace)
     removed = uninstall_service(label)
     secrets = ms.secrets_file(workspace)
+    left = secrets.exists()
     return ServiceUninstallResult(
-        service=label, removed=removed, secrets_file=secrets.as_posix() if secrets.exists() else None,
+        service=label, removed=removed, secrets_file=secrets.as_posix() if left else None,
+        delete_secrets=f"sudo rm '{secrets.as_posix()}'" if left else None,
     )
 
 

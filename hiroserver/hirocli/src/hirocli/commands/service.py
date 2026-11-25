@@ -208,7 +208,10 @@ def register(service_app: typer.Typer, console: Console) -> None:
         for folder in result.get("kept") or []:
             console.print(f"Kept: {folder}")
         if result["secrets_file"]:
-            console.print(f"The secrets file was kept: {result['secrets_file']}. Delete it if you no longer need it.")
+            console.print(
+                f"The secrets file was kept: {result['secrets_file']}. Delete it if you no longer need it: "
+                f"[cyan]{result['delete_secrets']}[/cyan]"
+            )
 
     @service_app.command("status")
     def status(
