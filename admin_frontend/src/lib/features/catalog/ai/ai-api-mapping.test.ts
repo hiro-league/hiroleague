@@ -62,8 +62,13 @@ describe('profile mapping', () => {
   });
 
   it('turns empty or zero limits into no limit and trims instructions', () => {
-    const profile = { ...profileFromRow(row), instructions: '  ', budget: { costPerDay: 0, perHour: 0, atOnce: 9 } };
-    expect(profileToPrefs(profile)).toMatchObject({ instructions: '', max_cost_day: null, max_per_hour: null, at_once: 4 });
+    const profile = { ...profileFromRow(row), instructions: '  ', budget: { costPerDay: 0, perHour: 0, atOnce: 0 } };
+    expect(profileToPrefs(profile)).toMatchObject({ instructions: '', max_cost_day: null, max_per_hour: null, at_once: 1 });
+  });
+
+  it('keeps any number of asks at once, rounded', () => {
+    const profile = { ...profileFromRow(row), budget: { ...profileFromRow(row).budget, atOnce: 12.4 } };
+    expect(profileToPrefs(profile).at_once).toBe(12);
   });
 });
 

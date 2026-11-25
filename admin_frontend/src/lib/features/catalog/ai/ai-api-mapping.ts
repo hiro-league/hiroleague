@@ -62,7 +62,7 @@ export function profileToPrefs(profile: AiProfile): AiProfilePrefs {
     instructions: profile.instructions.trim(),
     max_cost_day: positiveOrNull(profile.budget.costPerDay),
     max_per_hour: positiveOrNull(profile.budget.perHour) === null ? null : Math.round(profile.budget.perHour ?? 0),
-    at_once: Math.min(4, Math.max(1, Math.round(profile.budget.atOnce || 1))),
+    at_once: Math.max(1, Math.round(profile.budget.atOnce || 1)),
     fallback: profile.fallbackId || null,
     // Phase 7b step 5: a job's default profile stays one when edited (its Restore default needs it).
     preset: profile.preset ?? null
