@@ -49,10 +49,19 @@ class SitesListResult:
 @dataclass
 class SitesChangeResult:
     name: str
-    change: str  # added | removed
-    kind: str  # extra | site
+    change: str  # added | removed | refused
+    kind: str = ""  # extra | site
     target: str = ""
     paths: list[str] = field(default_factory=list)
+    # A refusal is an answer, not an error (the name taken, a rule broken): its code and its words for people. Raised,
+    # it would reach the HTTP surface as an unexpected failure.
+    code: str = ""
+    reason: str = ""
+
+
+def _refused(name: str, exc: SiteNameError) -> SitesChangeResult:
+    log.info(f"Site refused — {name} · {exc.code}")
+    return SitesChangeResult(name=name, change="refused", code=exc.code, reason=str(exc))
 
 
 def _path(workspace: str | None) -> Path:
@@ -118,6 +127,14 @@ class SitesAddTool(Tool):
         workspace: str | None = None,
     ) -> SitesChangeResult:
         workspace_path = _path(workspace)
+        try:
+            return self._add(workspace_path, name, app, target, paths)
+        except SiteNameError as exc:
+            return _refused(name, exc)
+
+    def _add(
+        self, workspace_path: Path, name: str, app: str | None, target: str | None, paths: list[str] | None,
+    ) -> SitesChangeResult:
         taken = taken_by_core(load_config(workspace_path))
         if app:
             if target or paths:
@@ -145,7 +162,10 @@ class SitesRemoveTool(Tool):
 
     def execute(self, name: str, workspace: str | None = None) -> SitesChangeResult:
         workspace_path = _path(workspace)
-        kind = remove_site(workspace_path, name)
+        try:
+            kind = remove_site(workspace_path, name)
+        except SiteNameError as exc:
+            return _refused(name, exc)
         clean = name.strip().lower()
         log.info(f"🗑️ {'Extra name' if kind == 'extra' else 'Site'} removed — {clean}")
         _changed(workspace_path, clean, "removed")

@@ -84,7 +84,8 @@ def render(sites: list[Site], admin: AdminAddress, *, http_port: int = 80, bind:
         "# Loaded by Hiro League through Caddy's admin API (docs/site-names-design.md): the whole configuration, built",
         "# from the names the core serves. Change names with `hiro sites`; the core loads this again on each change.",
         "{",
-        f"\tadmin {admin.caddy}",
+        # Quoted: the Mac's socket is under "Application Support", and an unquoted space splits the address.
+        f'\tadmin "{admin.caddy}"',
         "\tauto_https off",
     ]
     if http_port != 80:

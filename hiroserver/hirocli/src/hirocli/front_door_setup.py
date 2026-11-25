@@ -209,8 +209,9 @@ def install_windows(home: Path, core_python: Path) -> FrontDoorSetup:
         stop_timeout_s=15,
     )
     install_service(spec, home / "service")
-    # The account exists from here on: it reads its program, and only it (and administrators) touch its state.
-    grant_read(caddy_home, service_id=SERVICE)
+    # The account exists from here on: it reads its program and its WinSW (home\service), as the core's account does,
+    # and only it (and administrators) touch its state. The data folder and secrets file keep their own permissions.
+    grant_read(home, service_id=SERVICE)
     for folder in (caddy_home / "config", caddy_home / "data", caddy_home / "logs"):
         folder.mkdir(parents=True, exist_ok=True)
         lock_folder(folder, service_id=SERVICE, service_rights="M")

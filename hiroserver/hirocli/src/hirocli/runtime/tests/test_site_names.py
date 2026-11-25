@@ -211,7 +211,7 @@ def test_every_load_is_the_whole_configuration_with_its_admin_block() -> None:
     ]
     text = render(sites, parse_admin("unix//run/hiro-caddy/admin.sock|0660"))
     # A load without its admin block moves Caddy's API to localhost:2019 (Nov 25, 2026): every load carries it.
-    assert "\tadmin unix//run/hiro-caddy/admin.sock|0660\n\tauto_https off\n}" in text
+    assert '\tadmin "unix//run/hiro-caddy/admin.sock|0660"\n\tauto_https off\n}' in text
     assert "http_port" not in text and "default_bind" not in text
     assert text.index("http://192.168.1.10 {") < text.index("http://home.hiro.local {")
     assert "frigate.local" not in text  # announced only: no block
@@ -224,6 +224,9 @@ def test_every_load_is_the_whole_configuration_with_its_admin_block() -> None:
 
     elsewhere = render(sites, parse_admin("127.0.0.1:18079"), http_port=7548, bind="127.0.0.1")
     assert "\thttp_port 7548\n\tdefault_bind 127.0.0.1\n}" in elsewhere
+    # The Mac's socket sits under "Application Support": quoted, or Caddy splits the address at the space.
+    mac = render(sites, parse_admin("unix//Library/Application Support/HiroLeague/caddy/run/admin.sock"))
+    assert '\tadmin "unix//Library/Application Support/HiroLeague/caddy/run/admin.sock"\n' in mac
 
 
 # ---------------------------------------------------------------------------
@@ -330,7 +333,7 @@ def test_claiming_announces_the_name_and_loads_the_front_door_once_per_change(tm
         content_type, body = caddy.loads[-1]
         assert content_type == "text/caddyfile"
         assert "http://reports.hiro.local {" in body and "http://reports.local {" not in body
-        assert f"\tadmin {caddy.address}\n" in body
+        assert f'\tadmin "{caddy.address}"\n' in body
         again = await names.claim("ext-reports", "reports.hiro.local", 8120)
         assert again["proxied"] is True and len(caddy.loads) == 2  # nothing changed: nothing loaded
 
@@ -357,6 +360,19 @@ def test_caddy_refusing_keeps_the_claim_says_why_and_is_tried_again(tmp_path: Pa
     said = [(r.levelno, r.getMessage()) for r in caplog.records if r.name.endswith("SITE_NAMES")]
     assert sum(1 for level, m in said if level == logging.WARNING and "Caddy kept what it had" in m) == 1
     assert any("Caddy took the names again" in m for _, m in said)
+
+
+def test_a_round_of_trying_again_that_fails_is_logged_and_the_loop_goes_on(tmp_path: Path, caplog) -> None:
+    caplog.set_level(logging.INFO)
+    names = _names(tmp_path, None)
+
+    async def broken() -> Any:
+        raise OSError("disk gone")
+
+    names._apply = broken  # type: ignore[method-assign]
+    asyncio.run(names._retry())  # returns: the loop's next round comes
+    assert any(r.levelno == logging.ERROR and "a round of serving the names failed" in r.getMessage()
+               for r in caplog.records)
 
 
 def test_a_front_door_away_is_said_in_words(tmp_path: Path) -> None:
@@ -444,11 +460,11 @@ def test_the_sites_tools_add_list_and_remove(tmp_path: Path, monkeypatch) -> Non
     assert (extra.kind, extra.target) == ("extra", "127.0.0.1:8100")
     tv = sites_tools.SitesAddTool().execute("192.168.1.10", target="8100", paths=["/tv"])
     assert (tv.kind, tv.paths) == ("site", ["/tv"])
-    with pytest.raises(SiteNameError) as caught:
-        sites_tools.SitesAddTool().execute("x.local", app="nobody")
-    assert caught.value.code == "not_found"
-    with pytest.raises(SiteNameError):
-        sites_tools.SitesAddTool().execute("gate.hiro.local", target="1")  # the core's
+    # A refusal is the tool's answer (in words), not an error the HTTP surface would log as unexpected.
+    nobody = sites_tools.SitesAddTool().execute("x.local", app="nobody")
+    assert (nobody.change, nobody.code) == ("refused", "not_found") and "No app is called nobody" in nobody.reason
+    assert sites_tools.SitesAddTool().execute("gate.hiro.local", target="1").code == "taken"  # the core's
+    assert sites_tools.SitesRemoveTool().execute("home.hiro.local").code == "invalid"  # the app's own
 
     listed = {s["name"]: (s["kind"], s["owner"], s["announced"]) for s in sites_tools.SitesListTool().execute().sites}
     assert listed == {

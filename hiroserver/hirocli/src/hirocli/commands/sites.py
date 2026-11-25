@@ -82,10 +82,13 @@ def register(sites_app: typer.Typer, console: Console) -> None:
             # The workspace unknown, the name refused, or the running server not answering (its words in the error).
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1) from exc
+        if result.change == "refused":
+            console.print(f"[red]{result.reason}[/red]")
+            raise typer.Exit(1)
         goes = result.target or "announced only"
         if result.paths:
             goes += f", only {' '.join(result.paths)}"
-        console.print(f"[green]Added[/green] [bold]{result.name}[/bold] → {goes}")
+        console.print(f"[green]Added[/green] [bold]{result.name}[/bold], which goes to {goes}")
         if not live:
             console.print("[dim]The core serves it at its next start.[/dim]")
 
@@ -105,6 +108,9 @@ def register(sites_app: typer.Typer, console: Console) -> None:
         except (WorkspaceError, SiteNameError, RuntimeError, OSError, httpx.HTTPError) as exc:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1) from exc
+        if result.change == "refused":
+            console.print(f"[red]{result.reason}[/red]")
+            raise typer.Exit(1)
         console.print(f"[green]Removed[/green] [bold]{result.name}[/bold].")
         if not live:
             console.print("[dim]The core stops serving it at its next start.[/dim]")

@@ -108,13 +108,21 @@ class SiteNames:
             while True:
                 await asyncio.sleep(RETRY_LOAD_S)
                 if self._door_failed:
-                    async with self._lock:
-                        await self._apply()
+                    await self._retry()
         finally:
             bus.unsubscribe(DomainEventType.EXTENSION_REMOVED, self._on_change)
             bus.unsubscribe(DomainEventType.SITES_CHANGED, self._on_change)
             if self._publisher is not None:
                 await self._publisher.close()
+
+    async def _retry(self) -> None:
+        """One round of trying the front door again: a round that fails is logged, and the next one comes."""
+        try:
+            async with self._lock:
+                await self._apply()
+        except Exception:  # noqa: BLE001 — the loop must outlive one bad round (backend §1.3); logged with its traceback
+            log.error("❌ Site names — a round of serving the names failed; the next one is in "
+                      f"{RETRY_LOAD_S:.0f}s", exc_info=True)
 
     async def claim(self, extension_id: str, name: str, port: int) -> dict[str, Any]:
         """Give the extension its main name, announce it and proxy it; raises SiteNameError."""
