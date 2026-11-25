@@ -324,3 +324,38 @@ def test_a_checkout_install_rebuilds_its_packages_and_pins_its_lock(tmp_path, mo
     ((cmd, cwd),) = exported
     assert cmd[:3] == ["uv", "export", "--frozen"] and "--package" in cmd and "hiroleague" in cmd
     assert cwd == root
+
+
+def _fake_uv(home_line: str):
+    """A uv that installs a release whose tool environment runs on the Python ``home_line`` names."""
+
+    def run(cmd, **kw):
+        if "tool" in cmd:
+            assert "--managed-python" in cmd  # never a Python from someone's profile
+            bin_dir, tools = Path(kw["env"]["UV_TOOL_BIN_DIR"]), Path(kw["env"]["UV_TOOL_DIR"])
+            bin_dir.mkdir(parents=True)
+            (bin_dir / "hiro.exe").write_bytes(b"")
+            (tools / "hiroleague").mkdir(parents=True)
+            (tools / "hiroleague" / "pyvenv.cfg").write_text(f"home = {home_line}\nversion_info = 3.12.10\n", encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0)
+
+    return run
+
+
+def test_a_release_on_a_python_in_someones_profile_is_refused(tmp_path, monkeypatch) -> None:
+    lay = ws.Layout(home=tmp_path / "HiroLeague", data_dir=tmp_path / "HiroLeague" / "data")
+    monkeypatch.setattr(ws.shutil, "which", lambda name: r"C:\uv\uv.exe")
+    monkeypatch.setattr(ws.subprocess, "run", _fake_uv(r"C:\Users\michel\AppData\Local\Programs\Python\Python312"))
+
+    with pytest.raises(ServiceError, match="could not start it"):
+        ws.install_release(lay, "hiroleague==0.2.0")
+    assert list(lay.releases_dir.iterdir()) == []
+
+
+def test_a_release_on_the_homes_own_python_is_kept(tmp_path, monkeypatch) -> None:
+    lay = ws.Layout(home=tmp_path / "HiroLeague", data_dir=tmp_path / "HiroLeague" / "data")
+    monkeypatch.setattr(ws.shutil, "which", lambda name: r"C:\uv\uv.exe")
+    monkeypatch.setattr(ws.subprocess, "run", _fake_uv(str(lay.python_dir / "cpython-3.12.10-windows-x86_64-none")))
+
+    exe = ws.install_release(lay, "hiroleague==0.2.0")
+    assert exe.name == "hiro.exe" and exe.is_file()

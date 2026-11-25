@@ -144,6 +144,24 @@ def _checkout_args(uv: str, source: Path, release: Path) -> list[str]:
     return out
 
 
+def python_home_of(release: Path) -> Path | None:
+    """The Python a release's tool environment runs on (``home`` in its ``pyvenv.cfg``)."""
+    for cfg in sorted(release.glob("tools/*/pyvenv.cfg")):
+        try:
+            for line in cfg.read_text(encoding="utf-8").splitlines():
+                key, sep, value = line.partition("=")
+                if sep and key.strip() == "home":
+                    return Path(value.strip())
+        except OSError:
+            log.debug("A pyvenv.cfg can't be read", path=str(cfg), exc_info=True)
+    return None
+
+
+def _is_within(path: Path, folder: Path) -> bool:
+    child, parent = PureWindowsPath(path), PureWindowsPath(folder)
+    return child == parent or parent in child.parents
+
+
 def install_release(lay: Layout, source: str) -> Path:
     """Install Hiro League (``source``: a package spec or a checkout's path) into a new release folder; return its
     ``hiro.exe``. A failed install leaves nothing behind."""
@@ -159,7 +177,9 @@ def install_release(lay: Layout, source: str) -> Path:
     }
     log.info("Installing Hiro League for the service", source=source, release=str(release))
     try:
-        args = [uv, "tool", "install", "--python", PYTHON_VERSION]
+        # --managed-python: uv's own Python, in the Hiro home. Without it uv takes a Python already on this PC, which
+        # sits in a person's profile the service's account can't read (seen Nov 25, 2026: every start exited 103).
+        args = [uv, "tool", "install", "--python", PYTHON_VERSION, "--managed-python"]
         if Path(source).is_dir():
             args += _checkout_args(uv, Path(source), release)
         # Its output goes to this terminal: a first install takes minutes, and the person watches it.
@@ -175,6 +195,14 @@ def install_release(lay: Layout, source: str) -> Path:
         check = subprocess.run([str(exe), "--help"], capture_output=True, timeout=300, check=False)  # noqa: S603
         if check.returncode != 0:
             raise ServiceError(f"The new install's hiro.exe does not run ({exe}); nothing was changed.")
+        # The check above runs as the person installing, who can read their own profile: prove the Python is one
+        # the service's account can read too.
+        python_home = python_home_of(release)
+        if python_home is None or not _is_within(python_home, lay.home):
+            raise ServiceError(
+                f"The new install's Python is {python_home or 'unknown'}, outside {lay.home}: the service's account "
+                "could not start it. Nothing was changed."
+            )
     except (ServiceError, OSError, subprocess.TimeoutExpired) as exc:
         shutil.rmtree(release, ignore_errors=True)  # only the folder this install made
         if isinstance(exc, ServiceError):
