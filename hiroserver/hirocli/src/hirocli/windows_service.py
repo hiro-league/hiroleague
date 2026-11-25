@@ -87,9 +87,18 @@ def layout(home: str | None, data_dir: str | None) -> Layout:
 
 
 def installed_package_spec() -> str:
-    """What to install for the service when the install names nothing: this same version of Hiro League."""
+    """What to install for the service when the install names nothing: this same Hiro League.
+
+    Run from a checkout, that is the checkout itself: its version number (0.2.0) also names an older release on PyPI,
+    which knows nothing of the service's data folder or secrets file.
+    """
     from importlib.metadata import PackageNotFoundError, version
 
+    from hiro_commons.process import find_workspace_root
+
+    root = find_workspace_root(Path(__file__))
+    if root is not None and (root / "hiroleague" / "pyproject.toml").is_file():
+        return str(root / "hiroleague")
     try:
         return f"hiroleague=={version('hiroleague')}"
     except PackageNotFoundError:

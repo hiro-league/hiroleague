@@ -189,7 +189,9 @@ def test_status_reads_the_service_and_its_configuration(windows, tmp_path, monke
     service_dir.mkdir()
     secrets = tmp_path / "hiro.env"
     secrets.write_text("", encoding="utf-8")
-    spec = ws.build_spec(exe=tmp_path / "bin" / "hiro.exe", lay=ws.Layout(home=tmp_path, data_dir=tmp_path / "data"), workspace=None)
+    # The program is a Windows path on every system (WinSW refuses anything else); the files the status reads are real.
+    exe = Path(r"C:\HiroLeague\releases\r1\bin\hiro.exe")
+    spec = ws.build_spec(exe=exe, lay=ws.Layout(home=tmp_path, data_dir=tmp_path / "data"), workspace=None)
     (service_dir / "hiro.xml").write_text(w.render_config(spec), encoding="utf-8")
     monkeypatch.setattr(
         service_windows, "service_state",
@@ -372,3 +374,19 @@ def test_a_checkout_without_its_admin_pages_is_refused_with_the_build_command(tm
         ws._checkout_args("uv", root / "hiroleague", tmp_path / "releases" / "r1")
     assert "run package:python" in str(info.value)
     assert str(tmp_path / "hiroleague" / "admin_frontend") in str(info.value)
+
+
+def test_from_a_checkout_the_install_defaults_to_that_checkout(monkeypatch, tmp_path) -> None:
+    from hiro_commons import process
+
+    (tmp_path / "hiroleague").mkdir()
+    (tmp_path / "hiroleague" / "pyproject.toml").write_text('[project]\nname = "hiroleague"\n', encoding="utf-8")
+    monkeypatch.setattr(process, "find_workspace_root", lambda start=None: tmp_path)
+    assert ws.installed_package_spec() == str(tmp_path / "hiroleague")
+
+
+def test_an_installed_hiro_defaults_to_its_own_version(monkeypatch) -> None:
+    from hiro_commons import process
+
+    monkeypatch.setattr(process, "find_workspace_root", lambda start=None: None)
+    assert ws.installed_package_spec().startswith("hiroleague==")
