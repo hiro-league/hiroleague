@@ -127,7 +127,7 @@ def build_plan(
             "instructions": str(p.get("instructions") or ""),
             "max_cost_day": float(p["max_cost_day"]) if p.get("max_cost_day") else None,
             "max_per_hour": int(p["max_per_hour"]) if p.get("max_per_hour") else None,
-            "at_once": min(4, max(1, int(p.get("at_once") or 1))),
+            "at_once": max(1, int(p.get("at_once") or 1)),
         }
         try:
             AiProfile.model_validate(fields)

@@ -36,10 +36,11 @@ def test_profile_field_bounds() -> None:
     with pytest.raises(ValidationError):
         AiProfile(label="x" * 81, model=API_MODEL)
     with pytest.raises(ValidationError):
-        AiProfile(label="P", model=API_MODEL, at_once=5)
+        AiProfile(label="P", model=API_MODEL, at_once=0)
     with pytest.raises(ValidationError):
         AiProfile(label="P", model=API_MODEL, temperature=2.5)
     assert AiProfile(label="P", model=API_MODEL, fallback="  ").fallback is None
+    assert AiProfile(label="P", model=API_MODEL, at_once=50).at_once == 50  # no upper limit
 
 
 def test_fallbacks_must_exist_never_loop_and_stay_within_three() -> None:

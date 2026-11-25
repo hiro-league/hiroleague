@@ -22,7 +22,7 @@ Stored like `image_profiles` (preferences.json, its own page edits it through th
 | instructions | str (optional, may be empty) | appended to every question |
 | max_cost_day | float USD or None | API models; "day" = the home's local day |
 | max_per_hour | int or None | plan and local models |
-| at_once | int 1–4 (default 1) | parallel asks on this profile |
+| at_once | int ≥ 1 (default 1) | parallel asks on this profile |
 | fallback | profile_id or None | chain ≤ 3 after the profile itself, no loops (validated on write) |
 
 Reuse `model_factory` / `ModelTuning` for the API path (it already handles each provider's thinking/temperature

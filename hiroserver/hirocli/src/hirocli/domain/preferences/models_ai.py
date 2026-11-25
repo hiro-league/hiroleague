@@ -50,7 +50,8 @@ class AiProfile(BaseModel):
     instructions: str = Field(default="", max_length=8000, description="Appended to every question")
     max_cost_day: float | None = Field(default=None, gt=0, description="USD a day (API models)")
     max_per_hour: int | None = Field(default=None, ge=1, description="Asks an hour (plan and local models)")
-    at_once: int = Field(default=1, ge=1, le=4)
+    # Any whole number from 1: the owner sets how many asks a profile may run together.
+    at_once: int = Field(default=1, ge=1)
     fallback: str | None = None
     # Phase 7b step 5: the job (``jobs.JOB_PRESETS`` id: "chat", "memory", …) this profile was made for
     # as its default, so the admin shows "Default", hides Delete and offers Restore default (which
