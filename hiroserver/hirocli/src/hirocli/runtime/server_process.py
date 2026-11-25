@@ -54,6 +54,7 @@ from hirocli.runtime.request_handler import RequestHandler
 from hirocli.runtime.resource_change_broadcaster import ResourceChangeBroadcaster
 from hirocli.runtime.resource_versioning import ResourceVersionStore
 from hirocli.runtime.server_context import ServerContext
+from hirocli.runtime.service_watch import watch_service_wrapper
 from hirocli.services.metrics import MetricsCollector
 from hirocli.tools import all_tools
 from hirocli.tools.registry import RuntimeContext, ToolRegistry
@@ -348,6 +349,9 @@ async def _main(
     ]
     if admin_task is not None:
         coros.append(admin_task)
+    if os.environ.get(ENV_SERVICE_MANAGER) == "winsw":
+        # WinSW doesn't take its children with it: the server stops itself when its WinSW is gone (service_watch).
+        coros.append(watch_service_wrapper(stop_event))
 
     # Each part's failure is logged when it happens, with its traceback: gather's return_exceptions alone kept it
     # until the end, and the cancel at shutdown dropped it unread.

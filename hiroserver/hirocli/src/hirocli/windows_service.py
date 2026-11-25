@@ -38,6 +38,8 @@ log = Logger.get("CLI.SERVICE")
 PYTHON_VERSION = "3.12"
 DATA_FOLDER = "data"
 SERVICE_LOGS_FOLDER = "service-logs"
+# Where a checkout keeps the admin's built pages, from its uv workspace's root (admin_svelte/static_server.py).
+ADMIN_ASSETS = Path("hirocli/src/hirocli/admin_svelte/static")
 # uv downloads Python and every package on a first install: minutes on a slow line.
 _INSTALL_TIMEOUT_S = 1800
 
@@ -120,6 +122,13 @@ def _checkout_args(uv: str, source: Path, release: Path) -> list[str]:
     root = next((p for p in (source, *source.parents) if (p / "uv.lock").is_file()), None)
     if root is None:
         return ["--refresh"]
+    # The admin's pages are built into the package by npm, not by uv: a checkout without them would give a service
+    # whose admin never opens (seen Nov 25, 2026). Simone's deploy builds them first; so must whoever installs here.
+    if not (root / ADMIN_ASSETS / "index.html").is_file():
+        raise ServiceError(
+            f"This checkout's admin pages aren't built, so the service's admin would not open. Build them first: "
+            f"npm --prefix {root.parent / 'admin_frontend'} run package:python"
+        )
     names = {
         name
         for pyproject in root.glob("**/pyproject.toml")

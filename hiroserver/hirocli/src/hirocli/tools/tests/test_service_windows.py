@@ -305,6 +305,8 @@ def test_a_checkout_install_rebuilds_its_packages_and_pins_its_lock(tmp_path, mo
     (root / "hirocli").mkdir()
     (root / ".venv" / "lib").mkdir(parents=True)
     (root / "uv.lock").write_text("", encoding="utf-8")
+    (root / ws.ADMIN_ASSETS).mkdir(parents=True)
+    (root / ws.ADMIN_ASSETS / "index.html").write_text("<html></html>", encoding="utf-8")
     (root / "hiroleague" / "pyproject.toml").write_text('[project]\nname = "hiroleague"\n', encoding="utf-8")
     (root / "hirocli" / "pyproject.toml").write_text('[project]\nname = "hirocli"\n', encoding="utf-8")
     (root / ".venv" / "lib" / "pyproject.toml").write_text('[project]\nname = "somebody-else"\n', encoding="utf-8")
@@ -359,3 +361,14 @@ def test_a_release_on_the_homes_own_python_is_kept(tmp_path, monkeypatch) -> Non
 
     exe = ws.install_release(lay, "hiroleague==0.2.0")
     assert exe.name == "hiro.exe" and exe.is_file()
+
+
+def test_a_checkout_without_its_admin_pages_is_refused_with_the_build_command(tmp_path) -> None:
+    root = tmp_path / "hiroleague" / "hiroserver"
+    (root / "hiroleague").mkdir(parents=True)
+    (root / "uv.lock").write_text("", encoding="utf-8")
+
+    with pytest.raises(ServiceError, match="admin pages aren't built") as info:
+        ws._checkout_args("uv", root / "hiroleague", tmp_path / "releases" / "r1")
+    assert "run package:python" in str(info.value)
+    assert str(tmp_path / "hiroleague" / "admin_frontend") in str(info.value)
