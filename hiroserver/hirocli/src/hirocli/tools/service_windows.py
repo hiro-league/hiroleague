@@ -6,6 +6,7 @@ and the CLI asks for elevation (one UAC prompt) and runs it again.
 
 from __future__ import annotations
 
+import dataclasses
 import subprocess
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -29,9 +30,11 @@ from hiro_commons.winsw_service import (
     stop_service,
 )
 
+from .. import front_door_setup as door
 from .. import linux_service as ls
 from .. import windows_service as ws
 from ..constants import ENV_DATA_DIR, ENV_SECRETS_FILE
+from ..domain.front_door import ENV_FRONT_DOOR
 from .service_models import ServiceControlResult, ServiceInstallResult, ServiceStatusResult, ServiceUninstallResult
 
 log = Logger.get("TOOLS.SERVICE")
@@ -94,6 +97,11 @@ def install(
     lock_program_folder(lay.home)
     exe = ws.install_release(lay, source or ws.installed_package_spec())
     spec = ws.build_spec(exe=exe, lay=lay, workspace=workspace)
+    # The machine's front door, set up by the default service only (one per machine); its firewall rule for names
+    # follows this release's Python.
+    front = door.install_windows(lay.home, door.which_python(exe.parent.parent)) if not workspace else None
+    if front is not None:
+        spec = dataclasses.replace(spec, environment={**spec.environment, ENV_FRONT_DOOR: front.admin})
     install_service(spec, lay.service_dir)
     # The account exists from here on: it may read the program, and its data folder and secrets file are locked to it.
     grant_read(lay.home, service_id=name)
@@ -117,6 +125,9 @@ def install(
         restart_command=f"Restart-Service {name}   (in an administrator PowerShell)",
         logs=str(lay.logs_dir),
         data_dir=str(lay.data_dir),
+        front_door=front.service if front else None,
+        front_door_account=front.account if front else None,
+        firewall=front.firewall if front else [],
     )
 
 
@@ -126,8 +137,9 @@ def uninstall(*, workspace: str | None = None) -> ServiceUninstallResult:
     if not is_admin():
         raise NeedsAdminError("Removing the HiroLeague service", command_line("uninstall", *_options(workspace)))
     state = service_state(name)
+    front_removed = door.uninstall_windows() if not workspace else False
     if not state.installed:
-        return ServiceUninstallResult(service=name, removed=False, secrets_file=None)
+        return ServiceUninstallResult(service=name, removed=False, secrets_file=None, front_door_removed=front_removed)
     _, env, _ = _config(name, state.binary_path)
     remove_service(name)
     wrapper = ws.exe_from_config(state.binary_path)
@@ -139,6 +151,7 @@ def uninstall(*, workspace: str | None = None) -> ServiceUninstallResult:
     return ServiceUninstallResult(
         service=name, removed=True, secrets_file=secrets if left else None, kept=kept,
         delete_secrets=f'Remove-Item "{secrets}"   (in an administrator PowerShell)' if left else None,
+        front_door_removed=front_removed,
     )
 
 

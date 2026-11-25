@@ -8,6 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from hiro_commons import systemd_service as sd
+from hirocli import front_door_setup as door
 from hirocli import linux_service as ls
 from hirocli.constants import ENV_SERVICE_MANAGER, SERVICE_RESTART_EXIT_CODE
 from hirocli.tools import service as service_tools
@@ -43,6 +44,13 @@ def linux_as_root(monkeypatch, linux_as_user):
         return True
 
     monkeypatch.setattr(service_linux, "install_service", fake_install)
+
+    def fake_door(user):
+        calls["door"] = user.name
+        return door.FrontDoorSetup(admin=door.LINUX_ADMIN, program="/opt/hiroleague/caddy/2.11.9/caddy",
+                                   service="hiro-caddy.service", account="hiro-caddy")
+
+    monkeypatch.setattr(door, "install_linux", fake_door)
     return calls
 
 
@@ -129,6 +137,35 @@ def test_install_as_root_runs_as_the_chosen_user(linux_as_root, user) -> None:
 def test_install_as_root_defaults_to_the_installing_user(linux_as_root) -> None:
     service_tools.ServiceInstallTool().execute()
     assert linux_as_root["spec"].user == "michel"
+
+
+def test_the_default_service_sets_up_the_front_door_and_is_given_its_address(linux_as_root) -> None:
+    result = service_tools.ServiceInstallTool().execute(user="michel")
+    # Set up for the core's account (it joins Caddy's group), before the core starts with the address.
+    assert linux_as_root["door"] == "michel"
+    assert linux_as_root["spec"].environment["HIRO_FRONT_DOOR"] == "unix//run/hiro-caddy/admin.sock|0660"
+    assert (result.front_door, result.front_door_account) == ("hiro-caddy.service", "hiro-caddy")
+
+
+def test_a_named_workspace_leaves_the_machines_front_door_alone(linux_as_root) -> None:
+    result = service_tools.ServiceInstallTool().execute(user="michel", workspace="home")
+    assert "door" not in linux_as_root and "HIRO_FRONT_DOOR" not in linux_as_root["spec"].environment
+    assert result.front_door is None
+
+
+def test_caddys_unit_binds_port_80_by_its_capability_alone_and_resumes_what_it_had() -> None:
+    from pathlib import PurePosixPath
+
+    unit = door.render_linux_unit(PurePosixPath("/opt/hiroleague/caddy/2.11.9/caddy"))
+    for line in (
+        "User=hiro-caddy", "Group=hiro-caddy", "Type=notify",
+        "AmbientCapabilities=CAP_NET_BIND_SERVICE", "CapabilityBoundingSet=CAP_NET_BIND_SERVICE",
+        "RuntimeDirectory=hiro-caddy", "RuntimeDirectoryMode=0750",
+        "Environment=XDG_CONFIG_HOME=/opt/hiroleague/caddy/config",
+        "ExecStart=/opt/hiroleague/caddy/2.11.9/caddy run --resume --config /opt/hiroleague/caddy/initial.json",
+        "Restart=on-failure", "WantedBy=multi-user.target",
+    ):
+        assert f"\n{line}\n" in unit, line
 
 
 def test_service_tools_are_cli_only() -> None:

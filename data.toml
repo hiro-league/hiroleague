@@ -18,11 +18,11 @@ kind = "database"
 live = "copy"
 envs = "copy"
 # Per-place rows: sign-in sessions, the extensions (the paired apps and the channel plugins, WhatsApp among them: their
-# keys and settings; extension_records, and the two tables it was copied from), the devices (their keys), LAN names,
-# characters (their folders are the place's own), local model servers, and "Sign in with Home Assistant" (its address,
-# its token and who is who)
+# keys and settings; extension_records, and the two tables it was copied from), the devices (their keys), LAN names
+# and the owner's other sites (each points at this machine's address and ports), characters (their folders are the
+# place's own), local model servers, and "Sign in with Home Assistant" (its address, its token and who is who)
 place_tables = ["admin_sessions", "extension_records", "extensions", "devices", "channel_plugins", "site_names",
-                "characters", "local_models", "ha_sign_in", "ha_logins"]
+                "other_sites", "characters", "local_models", "ha_sign_in", "ha_logins"]
 why = "the family list, roles, rights and the AI usage log"
 
 [[item]]

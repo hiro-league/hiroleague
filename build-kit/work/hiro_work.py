@@ -700,8 +700,7 @@ def configure(env: int, task: str | None = None) -> None:
         cfg.update(gateway_builtin=True, gateway_port=p["core-gateway"], gateway_url=f"ws://127.0.0.1:{p['core-gateway']}")
         # Left out rather than null: the core's config takes these as text when present (extension_host absent =
         # loopback; no LAN names in env1..env5)
-        for key in ("extension_host", *(("site_names_ip", "site_names_caddy_file", "site_names_caddy_reload")
-                                        if env else ())):
+        for key in ("extension_host", *(("site_names_ip",) if env else ())):
             if cfg.get(key) is None or env:
                 cfg.pop(key, None)
         cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")

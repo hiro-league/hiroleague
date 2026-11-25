@@ -102,6 +102,9 @@ dependencies = [
     "langchain-qdrant>=1.1.0",
     "graphiti-core==0.29.1",
     "kuzu==0.11.3",
+    # Announces the names the core serves (home.hiro.local...) on the LAN on Windows and Mac, inside the core (the
+    # front door, docs/site-names-design.md). Linux announces with avahi-publish, the system's own way.
+    "zeroconf>=0.154.0 ; sys_platform != 'linux'",
 ]
 
 [project.urls]

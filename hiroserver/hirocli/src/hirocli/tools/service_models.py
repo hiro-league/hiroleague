@@ -19,6 +19,11 @@ class ServiceInstallResult:
     restart_command: str  # how to load them
     logs: str  # where to read what the service prints
     data_dir: str | None = None  # Windows: the service's own data folder (HIRO_DATA_DIR)
+    # The front door the install set up (the default service only: one per machine): its service, the account it runs
+    # as, and the firewall rules added (Windows).
+    front_door: str | None = None
+    front_door_account: str | None = None
+    firewall: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -28,6 +33,7 @@ class ServiceUninstallResult:
     secrets_file: str | None  # secrets file left in place, if any
     kept: list[str] = field(default_factory=list)  # folders left in place (the data, the program)
     delete_secrets: str | None = None  # how to delete the secrets file, when one was left
+    front_door_removed: bool = False  # the default service's uninstall removes the front door too
 
 
 @dataclass

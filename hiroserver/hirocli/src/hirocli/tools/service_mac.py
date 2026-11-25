@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import plistlib
 
@@ -17,8 +18,10 @@ from hiro_commons.launchd_service import (
 from hiro_commons.log import Logger
 from hiro_commons.systemd_service import NeedsRootError, default_service_user, resolve_service_user, write_env_file
 
+from .. import front_door_setup as door
 from .. import linux_service as ls
 from .. import mac_service as ms
+from ..domain.front_door import ENV_FRONT_DOOR
 from .service_models import ServiceControlResult, ServiceInstallResult, ServiceStatusResult, ServiceUninstallResult
 
 log = Logger.get("TOOLS.SERVICE")
@@ -55,6 +58,10 @@ def install(*, user: str | None = None, workspace: str | None = None, **_: objec
     secrets = ms.secrets_file(workspace)
     created = write_env_file(secrets, ms.env_file_content(name, service_user.name, workspace), service_user)
     spec = ms.build_spec(exe=exe, user=service_user, workspace=workspace)
+    # The machine's front door, set up by the default service only (one per machine).
+    front = door.install_mac(service_user, ms.HOME) if not workspace else None
+    if front is not None:
+        spec = dataclasses.replace(spec, environment={**spec.environment, ENV_FRONT_DOOR: front.admin})
     path = install_service(spec)
     return ServiceInstallResult(
         service=spec.label,
@@ -68,6 +75,8 @@ def install(*, user: str | None = None, workspace: str | None = None, **_: objec
         edit_secrets=f"sudo nano '{secrets.as_posix()}'",
         restart_command=f"sudo launchctl kickstart -k system/{spec.label}",
         logs=f"{ms.log_file(workspace).as_posix()} (before the server's own log opens), then the workspace's logs",
+        front_door=front.service if front else None,
+        front_door_account=front.account if front else None,
     )
 
 
@@ -77,11 +86,12 @@ def uninstall(*, workspace: str | None = None) -> ServiceUninstallResult:
         raise _needs_root("uninstall", "Removing", user=None, workspace=workspace)
     label = ms.label(workspace)
     removed = uninstall_service(label)
+    front_removed = door.uninstall_mac() if not workspace else False
     secrets = ms.secrets_file(workspace)
     left = secrets.exists()
     return ServiceUninstallResult(
         service=label, removed=removed, secrets_file=secrets.as_posix() if left else None,
-        delete_secrets=f"sudo rm '{secrets.as_posix()}'" if left else None,
+        delete_secrets=f"sudo rm '{secrets.as_posix()}'" if left else None, front_door_removed=front_removed,
     )
 
 

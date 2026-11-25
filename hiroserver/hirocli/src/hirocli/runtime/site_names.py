@@ -1,19 +1,21 @@
-"""Apps' LAN names, set up by the core (docs/site-names-design.md).
+"""Every name on the LAN, served by the core (docs/site-names-design.md): announced, and loaded into the front door.
 
-An extension's address setting claims a name (``sites.claim {name, port}``). The core keeps the claim
-(domain/site_names.py), publishes the name on the LAN with one ``avahi-publish -a -R <name> <ip>`` per name (an
-ordinary user may: no sudo), writes every claimed name into the Caddy file it owns and runs the reload command. At
-start it does the same for every kept claim, and for its own two names (``hiro.local``, the gateway's), except one the
-hand-written Caddyfile still serves. A removed app's name goes at once (``extension.removed`` on the bus). A machine
-that isn't set up (no ``site_names_ip`` in the workspace config) keeps the claims and publishes nothing; the answer
-says so.
+An app's address setting claims its main name (``sites.claim {name, port}``); the owner adds extra names and other
+sites (``hiro sites``); the core serves its own two (``hiro.local``, the gateway's). At start, and on every change
+(a claim, a removed app, ``hiro sites``), the core:
+
+- announces each served name on the LAN (runtime/name_publisher.py: avahi on Linux, zeroconf on Windows and Mac), on
+  a machine set up for it (``site_names_ip``, ``hiro extension names``);
+- loads the front door's whole configuration through Caddy's admin API (runtime/front_door.py), when this core runs
+  the machine's front door (``HIRO_FRONT_DOOR``, set by ``hiro service install``). A load Caddy refuses leaves it
+  serving what it had; the core tries again until it takes one.
+
+A machine with neither keeps the claims, and the claim's answer says so.
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -21,17 +23,19 @@ from hiro_channel_sdk.constants import METHOD_SITES_CLAIM
 from hiro_commons.log import Logger
 
 from ..domain.events import DomainEvent, DomainEventType, get_domain_event_bus
+from ..domain.front_door import render
 from ..domain.site_names import (
-    SiteName,
+    Site,
     SiteNameError,
-    caddy_names,
     claim,
     core_names,
-    gateway_name,
     list_claims,
-    render_caddy,
+    list_other_sites,
     served,
+    taken_by_core,
 )
+from .front_door import FrontDoor, FrontDoorError, from_environment
+from .name_publisher import NamePublisher, make_publisher
 from .request_handler import EXTENSIONS_ONLY, RequestContext, RequestRefused
 from .whatsapp_for_extensions import sender_label
 
@@ -40,21 +44,25 @@ if TYPE_CHECKING:
 
 log = Logger.get("SITE_NAMES")
 
-RESTART_PUBLISHER_S = 5.0  # an avahi-publish that ended (avahi restarted) is started again after this long
-RELOAD_TIMEOUT_S = 60.0
+RETRY_LOAD_S = 30.0  # a load Caddy refused (or Caddy away) is tried again this often
 
 
 class SiteNames:
-    """Publishes each claimed name and keeps Caddy's file in step. One per running server."""
+    """Announces every served name and keeps the front door in step. One per running server."""
 
-    def __init__(self, ctx: ServerContext) -> None:
+    def __init__(self, ctx: ServerContext, *, front_door: FrontDoor | None = None, door_note: str = "") -> None:
         self._ctx = ctx
-        self._publishers: dict[str, asyncio.Task[None]] = {}
+        if front_door is None and not door_note:
+            front_door, door_note = from_environment()
+        self._door = front_door
+        self._door_note = door_note
+        self._publisher: NamePublisher | None = None
         self._lock = asyncio.Lock()
-        # The core's names left to the hand-written Caddyfile or an app's claim, as last said (each change logged once).
-        self._left: frozenset[str] = frozenset()
+        self._loaded = ""  # the configuration Caddy took last
+        self._door_failed = ""  # why the last load failed (said once, and once more when it works again)
+        self._clashes: frozenset[str] = frozenset()
 
-    # -- the machine's setup (workspace config) ----------------------------------------------
+    # -- the machine's setup -------------------------------------------------------------------
 
     @property
     def _cfg(self) -> Any:
@@ -63,196 +71,131 @@ class SiteNames:
     def _ip(self) -> str:
         return (self._cfg.site_names_ip or "").strip()
 
-    def _caddy_file(self) -> Path | None:
-        p = (self._cfg.site_names_caddy_file or "").strip()
-        return Path(p).expanduser() if p else None
-
-    def _caddy_main(self) -> Path | None:
-        p = (self._cfg.site_names_caddy_main or "").strip()
-        return Path(p).expanduser() if p else None
-
-    def hand_written(self) -> set[str]:
-        """Names Caddy's hand-written file serves: taken, never touched."""
-        try:
-            return caddy_names(self._caddy_main())
-        except OSError as exc:
-            log.warning("⚠️ Site names — couldn't read the hand-written Caddyfile", error=str(exc))
-            return set()
-
-    def _core_names(self) -> list[SiteName]:
+    def _core_names(self) -> list[Any]:
         cfg = self._cfg
         return core_names(admin_port=cfg.admin_port, gateway_url=cfg.gateway_url, gateway_port=cfg.gateway_port,
                           gateway_builtin=cfg.gateway_builtin)
 
-    def _taken(self, hand: set[str]) -> set[str]:
-        """What no app may claim: the hand-written names and the core's own (its gateway's name even when the gateway
-        runs elsewhere: devices are given it)."""
-        gate = gateway_name(self._cfg.gateway_url)
-        return hand | {c.name for c in self._core_names()} | ({gate} if gate else set())
+    def taken(self) -> set[str]:
+        """What no app or site may take: the core's own names. The tables refuse the rest."""
+        return taken_by_core(self._cfg)
+
+    def _publisher_for_ip(self) -> NamePublisher | None:
+        ip = self._ip()
+        if not ip:
+            return None
+        if self._publisher is None or getattr(self._publisher, "ip", ip) != ip:
+            self._publisher = make_publisher(ip)
+        return self._publisher
 
     # -- lifecycle -----------------------------------------------------------------------------
 
     async def run(self) -> None:
-        """Publish every kept claim and the core's names and write Caddy's file, then keep the publishers alive until
-        the server stops."""
+        """Serve every name, then follow each change and try a refused load again, until the server stops."""
         bus = get_domain_event_bus()
-        bus.subscribe(DomainEventType.EXTENSION_REMOVED, self._on_extension_removed)
-        claims = await asyncio.to_thread(list_claims, Path(self._ctx.workspace_path))
-        if self._ip():
-            async with self._lock:
-                await self._apply(claims, self.hand_written())
-            own = [c.name for c in self._core_names() if c.name not in self._left]
-            log.info(f"✅ Site names ready — {len(claims)} app name(s), the core's: {', '.join(own) or 'none'}",
-                     names=", ".join(c.name for c in claims))
-        elif claims:
-            log.info("Site names kept, not published — this machine isn't set up (hiro extension names)")
+        bus.subscribe(DomainEventType.EXTENSION_REMOVED, self._on_change)
+        bus.subscribe(DomainEventType.SITES_CHANGED, self._on_change)
         try:
-            await asyncio.Event().wait()
+            async with self._lock:
+                sites, _ = await self._apply()
+            names = ", ".join(s.name for s in sites)
+            if self._ip() or self._door:
+                log.info(f"✅ Site names ready — {len(sites)} name(s)", names=names,
+                         announced=bool(self._ip()), front_door=self._door.admin.caddy if self._door else "")
+            elif sites:
+                log.info("Site names kept, not served — this machine isn't set up (hiro extension names, "
+                         "hiro service install)", names=names)
+            while True:
+                await asyncio.sleep(RETRY_LOAD_S)
+                if self._door_failed:
+                    await self._retry()
         finally:
-            bus.unsubscribe(DomainEventType.EXTENSION_REMOVED, self._on_extension_removed)
-            for task in self._publishers.values():
-                task.cancel()
-            await asyncio.gather(*self._publishers.values(), return_exceptions=True)
-            self._publishers.clear()
+            bus.unsubscribe(DomainEventType.EXTENSION_REMOVED, self._on_change)
+            bus.unsubscribe(DomainEventType.SITES_CHANGED, self._on_change)
+            if self._publisher is not None:
+                await self._publisher.close()
+
+    async def _retry(self) -> None:
+        """One round of trying the front door again: a round that fails is logged, and the next one comes."""
+        try:
+            async with self._lock:
+                await self._apply()
+        except Exception:  # noqa: BLE001 — the loop must outlive one bad round (backend §1.3); logged with its traceback
+            log.error("❌ Site names — a round of serving the names failed; the next one is in "
+                      f"{RETRY_LOAD_S:.0f}s", exc_info=True)
 
     async def claim(self, extension_id: str, name: str, port: int) -> dict[str, Any]:
-        """Give the extension its name, publish it and proxy it; raises SiteNameError."""
+        """Give the extension its main name, announce it and proxy it; raises SiteNameError."""
         async with self._lock:
-            hand = self.hand_written()
-            kept, old = await asyncio.to_thread(
-                claim, Path(self._ctx.workspace_path), extension_id, name, port, self._taken(hand)
-            )
-            published = proxied = False
-            note = ""
-            if not self._ip():
-                note = "This server isn't set up to publish names (hiro extension names); the name is kept for later."
-            else:
-                claims = await asyncio.to_thread(list_claims, Path(self._ctx.workspace_path))
-                proxied, note = await self._apply(claims, hand)
-                published = kept.name in self._publishers
+            kept, old = await asyncio.to_thread(claim, Path(self._ctx.workspace_path), extension_id, name, port,
+                                                self.taken())
+            _, (proxied, note) = await self._apply()
         if old:
             log.info(f"Site name dropped — {old} · replaced by {kept.name}", extension_id=extension_id)
-        return {
-            "name": kept.name,
-            "url": f"http://{kept.name}",
-            "published": published,
-            "proxied": proxied,
-            "note": note,
-        }
+        publisher = self._publisher if self._ip() else None
+        published = publisher is not None and kept.name in publisher.announced
+        if publisher is None:
+            note = " ".join(n for n in ("This server isn't set up to announce names (hiro extension names); the "
+                                        "name is kept for later.", note) if n)
+        elif publisher.note:
+            note = " ".join(n for n in (publisher.note, note) if n)
+        return {"name": kept.name, "url": f"http://{kept.name}", "published": published, "proxied": proxied,
+                "note": note}
 
-    async def _on_extension_removed(self, event: DomainEvent) -> None:
-        """An app was removed: its claim is gone from the table, so publish and proxy what is left."""
-        if not _same_place(event.workspace_path, self._ctx.workspace_path) or not event.payload.get("site_name"):
+    async def _on_change(self, event: DomainEvent) -> None:
+        """A name changed elsewhere (an app removed, ``hiro sites``): serve what the tables hold now."""
+        if not _same_place(event.workspace_path, self._ctx.workspace_path):
             return
-        if not self._ip():
-            return  # nothing was published; the claim is gone, and that is all there is
         async with self._lock:
-            claims = await asyncio.to_thread(list_claims, Path(self._ctx.workspace_path))
-            proxied, note = await self._apply(claims, self.hand_written())
-        log.info(f"Site name gone with its app — {event.payload['site_name']} · {event.payload.get('name') or '?'}",
-                 proxied=proxied, note=note)
+            await self._apply()
+        if event.type == DomainEventType.EXTENSION_REMOVED and event.payload.get("site_name"):
+            log.info(f"Site name gone with its app — {event.payload['site_name']} · {event.payload.get('name') or '?'}")
 
-    # -- applying ------------------------------------------------------------------------------
+    # -- serving -------------------------------------------------------------------------------
 
-    async def _apply(self, claims: list[SiteName], hand: set[str]) -> tuple[bool, str]:
-        """Publish exactly the apps' claims and the core's names it may take, and write them into Caddy's file;
-        (Caddy reloaded, a note when not)."""
-        plan = served(claims, self._core_names(), hand)
-        self._say_left(plan.deferred, plan.clashes)
-        claims = plan.names
-        wanted = {c.name for c in claims}
-        for name in list(self._publishers):
-            if name not in wanted:
-                self._publishers.pop(name).cancel()
-        if shutil.which("avahi-publish") is None:
-            note = "avahi-publish isn't installed here, so names aren't published on the LAN."
-            log.warning(f"⚠️ Site names — {note}")
-        else:
-            note = ""
-            for name in wanted - set(self._publishers):
-                self._publishers[name] = asyncio.create_task(self._publish(name), name=f"site-name:{name}")
-        proxied, caddy_note = await self._write_caddy(claims)
-        return proxied, " ".join(n for n in (note, caddy_note) if n)
+    async def _apply(self) -> tuple[list[Site], tuple[bool, str]]:
+        """Announce exactly the served names and load them into the front door; (the sites, (proxied, note))."""
+        workspace = Path(self._ctx.workspace_path)
+        claims = await asyncio.to_thread(list_claims, workspace)
+        others = await asyncio.to_thread(list_other_sites, workspace)
+        plan = served(claims, self._core_names(), others)
+        self._say_clashes(plan.clashes)
+        publisher = self._publisher_for_ip()
+        if publisher is not None:
+            await publisher.sync({s.name for s in plan.sites if s.announce})
+        return plan.sites, await self._load(plan.sites)
 
-    async def _publish(self, name: str) -> None:
-        """Keep ``name`` published: avahi-publish runs as long as the name is claimed, restarted if it ends."""
-        ip = self._ip()
-        while True:
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    "avahi-publish", "-a", "-R", name, ip,
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-            except OSError as exc:
-                log.error(f"❌ Site name not published — {name}", error=str(exc))
-                return
-            log.info(f"⬆️ Site name published — {name} · {ip}")
-            try:
-                _, err = await proc.communicate()
-            except asyncio.CancelledError:
-                with contextlib.suppress(ProcessLookupError):
-                    proc.terminate()
-                with contextlib.suppress(Exception):
-                    await asyncio.wait_for(proc.wait(), timeout=5)
-                log.info(f"Site name unpublished — {name}")
-                raise
-            log.warning(
-                f"⚠️ Site name publisher ended — {name} · restarting in {RESTART_PUBLISHER_S:.0f}s",
-                code=proc.returncode,
-                error=(err or b"").decode(errors="replace").strip()[:300],
-            )
-            await asyncio.sleep(RESTART_PUBLISHER_S)
-
-    async def _write_caddy(self, claims: list[SiteName]) -> tuple[bool, str]:
-        target = self._caddy_file()
-        if target is None:
-            return False, "No Caddy file is set (hiro extension names), so the name isn't proxied."
-        text = render_caddy(claims)
-        try:
-            current = target.read_text(encoding="utf-8") if target.is_file() else None
-            if current != text:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                tmp = target.with_suffix(target.suffix + ".tmp")
-                tmp.write_text(text, encoding="utf-8")
-                tmp.replace(target)
-        except OSError as exc:
-            log.error("❌ Site names — couldn't write the Caddy file", path=str(target), error=str(exc))
-            return False, f"Couldn't write the Caddy file: {exc}"
-        if current == text:
+    async def _load(self, sites: list[Site]) -> tuple[bool, str]:
+        """Load the front door's whole configuration when it changed; (Caddy has it, a note when not)."""
+        if self._door is None:
+            return False, self._door_note
+        text = render(sites, self._door.admin, http_port=self._door.http_port, bind=self._door.bind)
+        if text == self._loaded:
             return True, ""
-        return await self._reload_caddy()
-
-    async def _reload_caddy(self) -> tuple[bool, str]:
-        command = [str(a) for a in (self._cfg.site_names_caddy_reload or []) if str(a)]
-        if not command:
-            return False, "No Caddy reload command is set (hiro extension names); Caddy reads the file at its next start."
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *command, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE
-            )
-            _, err = await asyncio.wait_for(proc.communicate(), timeout=RELOAD_TIMEOUT_S)
-        except (OSError, asyncio.TimeoutError) as exc:
-            log.error("❌ Site names — Caddy reload failed", command=" ".join(command), error=str(exc))
-            return False, f"Caddy didn't reload: {exc}"
-        if proc.returncode != 0:
-            detail = (err or b"").decode(errors="replace").strip()[:300]
-            log.error("❌ Site names — Caddy reload failed", command=" ".join(command), error=detail)
-            return False, f"Caddy didn't reload: {detail or proc.returncode}"
-        log.info("✅ Site names — Caddy reloaded", command=" ".join(command))
+            await self._door.load(text)
+        except FrontDoorError as exc:
+            reason = str(exc)
+            if reason != self._door_failed:
+                log.warning(f"⚠️ Front door — Caddy kept what it had; trying again every {RETRY_LOAD_S:.0f}s",
+                            error=reason)
+            self._door_failed = reason
+            return False, reason
+        if self._door_failed:
+            log.info("✅ Front door — Caddy took the names again")
+        self._door_failed = ""
+        self._loaded = text
+        proxied = sum(1 for s in sites if s.upstream)
+        log.info(f"✅ Front door loaded — {proxied} name(s) proxied", names=", ".join(s.name for s in sites if s.upstream))
         return True, ""
 
-    def _say_left(self, deferred: frozenset[str], clashes: frozenset[str]) -> None:
-        """Say once which of the core's names it leaves alone, and when it takes one."""
-        left = deferred | clashes
-        for name in sorted(deferred - self._left):
-            log.info(f"Site names — {name} stays with the hand-written Caddyfile; the core takes it once that block "
-                     "is gone")
-        for name in sorted(clashes - self._left):
+    def _say_clashes(self, clashes: frozenset[str]) -> None:
+        """Say once which of the core's names an app holds, and when the core takes one back."""
+        for name in sorted(clashes - self._clashes):
             log.warning(f"⚠️ Site names — {name} is the core's, but an app claimed it first; the app keeps it")
-        for name in sorted(self._left - left):
+        for name in sorted(self._clashes - clashes):
             log.info(f"✅ Site names — the core serves {name} now")
-        self._left = left
+        self._clashes = clashes
 
 
 def _same_place(a: object, b: object) -> bool:

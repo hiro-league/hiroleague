@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import shlex
 import socket
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -117,12 +116,9 @@ class ExtensionAddressResult:
 
 @dataclass
 class ExtensionNamesResult:
-    """This machine's setup for apps' LAN names (docs/site-names-design.md)."""
+    """This machine's setup for the names the core serves (docs/site-names-design.md)."""
 
     ip: str
-    caddy_file: str
-    caddy_main: str
-    caddy_reload: list[str]
     names: list[dict[str, Any]]
     changed: bool
     restart_required: bool
@@ -518,54 +514,35 @@ class ExtensionAddressTool(Tool):
 
 
 class ExtensionNamesTool(Tool):
-    """Apps' LAN names: show or set this machine's setup, and list the names apps have claimed."""
+    """The machine's address the names the core serves point at, and the names apps claimed."""
 
     surfaces = frozenset({"cli", "http"})
     name = "extension_names"
     description = (
-        "Show or set how apps' LAN names are set up on this machine: the LAN address names point at (empty = off), "
-        "the Caddy file the core writes, the hand-written Caddyfile (its names are taken), and the command that "
-        "reloads Caddy. Lists the names apps claimed. Needs a restart."
+        "Show or set the LAN address the names this machine serves point at (empty = names not announced), and list "
+        "the names apps claimed. Needs a restart."
     )
     params = {
         "ip": ToolParam(str, "LAN address the names point at; empty string = names off; omit to keep", required=False),
-        "caddy_file": ToolParam(str, "File the core writes for Caddy; omit to keep", required=False),
-        "caddy_main": ToolParam(str, "The hand-written Caddyfile; omit to keep", required=False),
-        "caddy_reload": ToolParam(str, "Command that reloads Caddy, e.g. 'docker restart caddy'; omit to keep", required=False),
         "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
     }
 
-    def execute(
-        self,
-        ip: str | None = None,
-        caddy_file: str | None = None,
-        caddy_main: str | None = None,
-        caddy_reload: str | None = None,
-        workspace: str | None = None,
-    ) -> ExtensionNamesResult:
+    def execute(self, ip: str | None = None, workspace: str | None = None) -> ExtensionNamesResult:
         workspace_path = _resolve_path(workspace)
         config = load_config(workspace_path)
         before = config.model_dump()
         if ip is not None:
             config.site_names_ip = ip.strip()
-        if caddy_file is not None:
-            config.site_names_caddy_file = caddy_file.strip()
-        if caddy_main is not None:
-            config.site_names_caddy_main = caddy_main.strip()
-        if caddy_reload is not None:
-            config.site_names_caddy_reload = shlex.split(caddy_reload)
         changed = config.model_dump() != before
         if changed:
             save_config(workspace_path, config)
         names = [
-            {"name": c.name, "extension_id": c.extension_id, "port": c.port, "claimed_at": c.claimed_at}
+            {"name": c.name, "extension_id": c.extension_id, "port": c.port, "claimed_at": c.claimed_at,
+             "extra": c.extra}
             for c in list_claims(workspace_path)
         ]
         return ExtensionNamesResult(
             ip=config.site_names_ip,
-            caddy_file=config.site_names_caddy_file,
-            caddy_main=config.site_names_caddy_main,
-            caddy_reload=list(config.site_names_caddy_reload),
             names=names,
             changed=changed,
             restart_required=changed,

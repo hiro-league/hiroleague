@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 from hiro_commons.log import Logger
 from hiro_commons.systemd_service import (
     NeedsRootError,
@@ -20,7 +22,9 @@ from hiro_commons.systemd_service import (
     unit_path,
 )
 
+from .. import front_door_setup as door
 from .. import linux_service as ls
+from ..domain.front_door import ENV_FRONT_DOOR
 from .service_models import ServiceControlResult, ServiceInstallResult, ServiceStatusResult, ServiceUninstallResult
 
 log = Logger.get("TOOLS.SERVICE")
@@ -43,6 +47,11 @@ def install(*, user: str | None = None, workspace: str | None = None, **_: objec
     spec = ls.build_spec(exe=exe, user=service_user.name, group=service_user.group, workspace=workspace)
     # Fail before writing anything when the service user can't even start `hiro`.
     check_user_can_run(service_user, [exe, "--help"])
+    # The machine's front door, set up by the default service only (one per machine), before the core starts: the
+    # core's account joins Caddy's group here, which a process started after it has.
+    front = door.install_linux(service_user) if not workspace else None
+    if front is not None:
+        spec = dataclasses.replace(spec, environment={**spec.environment, ENV_FRONT_DOOR: front.admin})
     env_created = install_service(spec, service_user, ls.env_file_content(spec.name, service_user.name), start=True)
     unit = unit_file_name(spec.name)
     return ServiceInstallResult(
@@ -57,6 +66,8 @@ def install(*, user: str | None = None, workspace: str | None = None, **_: objec
         edit_secrets=f"sudoedit {spec.env_file}",
         restart_command=f"sudo systemctl restart {unit}",
         logs=_logs(unit),
+        front_door=front.service if front else None,
+        front_door_account=front.account if front else None,
     )
 
 
@@ -69,11 +80,12 @@ def uninstall(*, workspace: str | None = None) -> ServiceUninstallResult:
             ls.sudo_command(ls.hiro_executable(), "uninstall", user=None, workspace=workspace),
         )
     removed = uninstall_service(name)
+    front_removed = door.uninstall_linux() if not workspace else False
     env_file = env_file_path(name)
     left = env_file.exists()
     return ServiceUninstallResult(
         service=unit_file_name(name), removed=removed, secrets_file=str(env_file) if left else None,
-        delete_secrets=f"sudo rm {env_file}" if left else None,
+        delete_secrets=f"sudo rm {env_file}" if left else None, front_door_removed=front_removed,
     )
 
 

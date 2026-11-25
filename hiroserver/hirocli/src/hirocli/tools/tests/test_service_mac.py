@@ -11,6 +11,7 @@ import pytest
 from hiro_commons import launchd_service as ld
 from hiro_commons.env_file import parse_env_text
 from hiro_commons.systemd_service import NeedsRootError, ServiceUser
+from hirocli import front_door_setup as door
 from hirocli import linux_service as ls
 from hirocli import mac_service as ms
 from hirocli.constants import ENV_SECRETS_FILE, ENV_SERVICE_MANAGER
@@ -49,6 +50,13 @@ def mac_as_root(monkeypatch, mac):
         return ld.plist_path(spec.label)
 
     monkeypatch.setattr(service_mac, "install_service", fake_install)
+
+    def fake_door(user, home):
+        calls.append(("front_door", user.name))
+        return door.FrontDoorSetup(admin=door.mac_admin(home), program="caddy", service=door.MAC_LABEL,
+                                   account=user.name)
+
+    monkeypatch.setattr(door, "install_mac", fake_door)
     return calls
 
 
@@ -92,8 +100,9 @@ def test_install_without_root_says_exactly_what_to_run_and_why(mac) -> None:
 def test_install_as_root_checks_the_user_then_writes_secrets_then_loads_it(mac_as_root) -> None:
     result = service_tools.ServiceInstallTool().execute()
 
-    assert [c[0] for c in mac_as_root] == ["check", "home", "secrets", "install"]
+    assert [c[0] for c in mac_as_root] == ["check", "home", "secrets", "front_door", "install"]
     spec = mac_as_root[-1][1]
+    assert spec.environment["HIRO_FRONT_DOOR"] == "unix//Library/Application Support/HiroLeague/caddy/run/admin.sock"
     assert spec.label == "com.hiroleague.hiro"
     assert spec.user == "michel"
     assert result.manager == "launchd"
