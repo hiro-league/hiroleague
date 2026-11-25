@@ -50,6 +50,9 @@ part "build-kit: bash -n" "build-kit" \
 # every core (-n auto): its git tests on temporary repos took about 2 min one after another, 25 s side by side.
 part "build-kit: hiro-work tests" "build-kit/work build-kit/check-engine.sh data.toml" \
     bash -c "cd '${REPO_ROOT}/hiroserver' && uv run python -m pytest ../build-kit/work -q -p no:cacheprovider -n auto"
+# An app's package (build-kit/package.py) and the test app it builds: the builder's own rules, and ruff over both
+part "build-kit: package" "build-kit/package.py build-kit/test_package.py build-kit/test-app hiroserver/hiro-channel-sdk" \
+    bash -c "cd '${REPO_ROOT}/hiroserver' && uv run ruff check ../build-kit/package.py ../build-kit/test_package.py ../build-kit/test-app/backend/src && uv run python -m pytest ../build-kit/test_package.py -q -p no:cacheprovider"
 # What every area reads: the workspace's own settings and lock, and the runner
 ws="hiroserver/pyproject.toml hiroserver/uv.lock scripts/run-tests.sh"
 # The lint every Hiro League repo follows (build-kit/ruff-rules.toml, which each app's pyproject extends too), over

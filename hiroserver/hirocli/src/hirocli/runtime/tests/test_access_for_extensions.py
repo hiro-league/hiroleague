@@ -34,7 +34,7 @@ def _ctx(workspace: Path) -> SimpleNamespace:
 
 def test_sources_are_hiroleague_then_each_extension_with_features(tmp_path: Path) -> None:
     add_paired_extension(tmp_path, name="home", public_key="k", info=INFO)
-    add_paired_extension(tmp_path, name="quiet", public_key="k2", info={"name": "quiet"})
+    add_paired_extension(tmp_path, name="example.quiet", public_key="k2", info={"name": "example.quiet"})
     sources = list_sources(tmp_path)
     assert [(s.id, s.name) for s in sources] == [(CORE_SOURCE, "HiroLeague"), ("home", "Home")]
 

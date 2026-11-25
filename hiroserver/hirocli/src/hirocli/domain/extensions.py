@@ -35,6 +35,7 @@ from hiro_commons.timestamps import utc_iso
 
 from .config import workspace_run_dir
 from .db import db_path, ensure_db
+from .extension_keys import CORE_KEY, key_refusal, same_dashed
 from .pairing import PairingSession, create_pairing_session
 
 logger = logging.getLogger(__name__)
@@ -47,16 +48,21 @@ KIND_CHANNEL = "channel"  # a channel plugin: the core starts it and makes its c
 TABLE = "extension_records"
 
 # Names no extension may take: the core's own source, under which its admin grants are kept (core_features.CORE_SOURCE).
-RESERVED_NAMES = frozenset({"hiroleague"})
+RESERVED_NAMES = frozenset({CORE_KEY})
 
 
 class ExtensionNameTaken(ValueError):
     """An app's name is its key (rights, AI picks, asks are kept under it), so one name is one app. The message is for
-    people."""
+    people: ``refusal`` is the key rule's words (extension_keys.key_refusal) when no extension holds it."""
 
-    def __init__(self, name: str, holder: PairedExtension | None) -> None:
+    def __init__(self, name: str, holder: PairedExtension | None, *, refusal: str = "") -> None:
         if holder is None:
-            message = f"“{name}” is HiroLeague's own name; an app can't take it."
+            message = refusal or f"“{name}” is HiroLeague's own name; an app can't take it."
+        elif holder.name != name:
+            message = (
+                f"“{holder.name}” is already paired, and “{name}” would share its service and its address "
+                f"({holder.name.replace('.', '-')}). Pick another key."
+            )
         elif holder.kind == KIND_CHANNEL:
             message = f"A channel is already paired as “{name}”; an app can't take its name."
         else:
@@ -71,18 +77,23 @@ class ExtensionNameTaken(ValueError):
 
 
 def name_holder(workspace_path: Path, name: str, *, besides: str = "") -> PairedExtension | None:
-    """The extension that holds ``name``, other than ``besides`` (an extension id), or None."""
+    """The extension that holds ``name``, or its dashed form (``acme-weather`` for ``acme.weather``: one service
+    account, one address), other than ``besides`` (an extension id), or None."""
     return next(
-        (e for e in list_paired_extensions(workspace_path, kind=None) if e.name == name and e.extension_id != besides),
+        (
+            e for e in list_paired_extensions(workspace_path, kind=None)
+            if (e.name == name or same_dashed(e.name, name)) and e.extension_id != besides
+        ),
         None,
     )
 
 
 def check_name_free(workspace_path: Path, name: str, *, besides: str = "") -> None:
-    """Raise ExtensionNameTaken when ``name`` is reserved or another extension holds it (design.md §9: a second
-    ``home`` would take HomeHiro's rights, picks and asks)."""
-    if name in RESERVED_NAMES:
-        raise ExtensionNameTaken(name, None)
+    """Raise ExtensionNameTaken when the key rule refuses ``name`` (extension_keys) or another extension holds it or
+    its dashed form (design.md §9: a second ``home`` would take HomeHiro's rights, picks and asks)."""
+    refusal = key_refusal(name)
+    if refusal:
+        raise ExtensionNameTaken(name, None, refusal=refusal)
     holder = name_holder(workspace_path, name, besides=besides)
     if holder is not None:
         raise ExtensionNameTaken(name, holder)

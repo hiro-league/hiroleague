@@ -79,7 +79,7 @@ def test_the_running_core_hears_the_removal(workspace, monkeypatch) -> None:
 
 
 def test_an_app_with_no_name_grant_or_pick_is_removed_all_the_same(workspace) -> None:
-    lone = add_paired_extension(workspace, name="lone", public_key="pk-lone", info={"name": "lone"})
+    lone = add_paired_extension(workspace, name="example.lone", public_key="pk-lone", info={"name": "example.lone"})
 
     result = ExtensionRemoveTool().execute(lone.extension_id)
 

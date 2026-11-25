@@ -1,0 +1,33 @@
+[project]
+# The test app the core installs, upgrades and removes ("Installing apps", phase 5). Its key is example.hello: a
+# publisher's key, since only Hiro League's own extensions have a bare one. Built into a package by
+# build-kit/package.py; never deployed, never in apps.toml.
+name = "example-hello"
+version = "0.1.0"
+description = "Hello: the test app the core installs, upgrades and removes"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.20.0",
+    "fastapi[standard]>=0.141.1",
+    "hiro-channel-sdk",
+    "hiro-extension-kit",
+    "sqlmodel>=0.0.46",
+]
+
+[project.scripts]
+# The program its service runs (the manifest's command)
+example-hello = "hello.main:serve"
+
+[tool.uv.sources]
+hiro-channel-sdk = { path = "../../../hiroserver/hiro-channel-sdk", editable = true }
+hiro-extension-kit = { path = "../../../hiroserver/hiro-extension-kit", editable = true }
+
+[build-system]
+requires = ["uv_build>=0.11.28,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "hello"
+
+[tool.ruff]
+extend = "../../ruff-rules.toml"
