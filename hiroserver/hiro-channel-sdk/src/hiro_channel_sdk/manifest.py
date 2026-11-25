@@ -31,8 +31,10 @@ MANIFEST_FILE = "hiro-extension.toml"
 KIND_APP = "app"
 KIND_CHANNEL = "channel"
 
-KEY_MAX = 64  # long enough for any publisher.name; a service account's name on Windows stops at 256, Linux's at 32
-_PART = r"[a-z][a-z0-9-]*"
+# Its service account is hiro-<key, dashed>, and an account's name on Linux stops at 32 characters (useradd)
+KEY_MAX = 27
+# A part ends with a letter or a digit, as an address's label must (the dashed key is the label of its address)
+_PART = r"[a-z](?:[a-z0-9-]*[a-z0-9])?"
 _KEY = re.compile(rf"{_PART}(?:\.{_PART})?")
 # A version as the build writes it (PEP 440's release segment, with an optional pre-release or local part)
 _VERSION = re.compile(r"\d+(?:\.\d+)*(?:(?:a|b|rc)\d+)?(?:\.dev\d+)?(?:\+[a-z0-9.]+)?")
@@ -53,7 +55,7 @@ def key_problem(key: str) -> str | None:
     if not _KEY.fullmatch(key):
         return (
             f"The key {key!r} isn't name or publisher.name: each part lowercase letters, digits and dashes, starting "
-            "with a letter."
+            "with a letter and ending with a letter or a digit."
         )
     return None
 

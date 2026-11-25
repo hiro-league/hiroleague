@@ -26,12 +26,12 @@ predeploy = "python -m acme_weather.predeploy"
 """
 
 
-@pytest.mark.parametrize("key", ["home", "acme.weather", "a1-b.c-2", "x"])
+@pytest.mark.parametrize("key", ["home", "acme.weather", "a1-b.c-2", "x", "a" * 13 + "." + "b" * 13])
 def test_a_key_is_name_or_publisher_dot_name(key: str) -> None:
     assert key_problem(key) is None
 
 
-@pytest.mark.parametrize("key", ["", "Home", "1home", "-home", "acme.", ".weather", "a.b.c", "acme_weather", "a" * 65])
+@pytest.mark.parametrize("key", ["", "Home", "1home", "-home", "home-", "acme-.weather", "acme.", ".weather", "a.b.c", "acme_weather", "a" * 28])
 def test_a_key_outside_the_grammar_is_said_in_words(key: str) -> None:
     assert key_problem(key)
 
