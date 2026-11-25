@@ -630,7 +630,8 @@ class ExtensionClient:
             await self._set_status(STATUS_DISCONNECTED, {"error": denied.message})
             return
         elif denied.reason == EXTENSION_DENIED_NAME_TAKEN:
-            # Another app holds the name this one declares: the core's words say which and what to do. Pairing drops
+            # The name this one declares isn't its own (another app holds it, or it was paired under another name):
+            # the core's words say which and what to do. Pairing drops
             # its code (a new one once the other app is removed); a paired app keeps its key and tries again later.
             if self._pairing_code is None:
                 await self._set_status(STATUS_DISCONNECTED, {"error": denied.message})

@@ -68,7 +68,9 @@ EXTENSION_DENIED_NOT_PAIRED: str = "not_paired"        # unknown extension_id (n
 EXTENSION_DENIED_BAD_CODE: str = "bad_code"            # pairing code wrong or expired
 EXTENSION_DENIED_BAD_SIGNATURE: str = "bad_signature"  # challenge signature didn't verify
 EXTENSION_DENIED_BAD_FRAME: str = "bad_frame"          # first frame unreadable or incomplete
-EXTENSION_DENIED_NAME_TAKEN: str = "name_taken"        # another extension holds the name it declares (one name, one app)
+EXTENSION_DENIED_NAME_TAKEN: str = "name_taken"        # the name it declares isn't its own: another extension holds it
+#                                                         (one name, one app), or it was paired under another name
+#                                                         (an app's name is fixed at pairing)
 
 EXTENSION_CHANNEL: str = "extension"  # routing.channel on every extension message
 CORE_SENDER_ID: str = "server"        # routing.sender_id on messages the core sends (same as to devices)
