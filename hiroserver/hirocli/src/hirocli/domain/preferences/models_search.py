@@ -31,7 +31,8 @@ from .defaults import pref_field
 
 SEARCH_PROFILE_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 # No dots: a use key is one segment of a preferences PATCH path ("embedding.uses.eval:embedding").
-_USE_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+# "<extension key>:<use id>"; a publisher's key has one dot (acme.weather:summary), domain/extension_keys.py
+_USE_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}(?:\.[A-Za-z0-9][A-Za-z0-9_-]{0,63})?:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 # Local embedders are FastEmbed's sentence-transformers models (services/knowledge/embedder_registry.py).
 LOCAL_EMBEDDER_PREFIX = "sentence-transformers/"
 RERANK_DEVICES: tuple[str, ...] = ("cpu", "cuda")

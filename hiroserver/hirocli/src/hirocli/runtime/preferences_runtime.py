@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from threading import RLock
-from typing import Any, get_origin
+from typing import Any, get_args, get_origin
 
 from pydantic import BaseModel, ValidationError
 
@@ -167,8 +167,10 @@ def _set_path(root: dict[str, Any], path: str, value: Any) -> None:
         if schema is dict or get_origin(schema) is dict:
             if not isinstance(node, dict):
                 raise PreferencePathError(f"Cannot update preference path: {path}")
-            if is_last:
-                node[part] = value
+            if is_last or _holds_plain_values(schema):
+                # A map of plain values (ai.uses, voice.uses) is keyed by "<extension key>:<use>", and a publisher's
+                # key has a dot (acme.weather): the rest of the path is that one key, never more levels.
+                node[".".join(parts[index:])] = value
                 return
             node = node.setdefault(part, {})
             schema = Any
@@ -181,10 +183,23 @@ def _set_path(root: dict[str, Any], path: str, value: Any) -> None:
 
 def _field_schema(annotation: Any) -> Any:
     # `get_origin` handles `dict[str, T]`, `typing.Dict[...]`, etc. uniformly (vs. the raw
-    # `__origin__` attribute, which isn't present on every typing form).
-    if get_origin(annotation) is dict:
-        return dict
+    # `__origin__` attribute, which isn't present on every typing form). A dict keeps its value type, which says
+    # whether its keys may hold dots (_holds_plain_values).
     return annotation
+
+
+def _holds_plain_values(schema: Any) -> bool:
+    """A dict whose values are neither models nor dicts (``dict[str, str | None]``, ``dict[str, list[str]]``): its
+    keys are its last level."""
+    args = get_args(schema)
+    if len(args) != 2:
+        return False
+    value = args[1]
+    kinds = [a for a in (get_args(value) or (value,)) if a is not type(None)]
+    return all(
+        not (isinstance(k, type) and issubclass(k, BaseModel)) and k is not dict and get_origin(k) is not dict
+        for k in kinds
+    )
 
 
 def _validate_knowledge_embedding_transition(

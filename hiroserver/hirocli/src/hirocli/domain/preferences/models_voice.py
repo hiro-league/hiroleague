@@ -27,7 +27,8 @@ from .defaults import pref_field
 
 VOICE_PROFILE_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 # No dots: a use key is one segment of a preferences PATCH path ("voice.uses.home:speak").
-_USE_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+# "<extension key>:<use id>"; a publisher's key has one dot (acme.weather:summary), domain/extension_keys.py
+_USE_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}(?:\.[A-Za-z0-9][A-Za-z0-9_-]{0,63})?:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 # The providers whose speech the core speaks (catalog provider ids).
 VOICE_PROVIDERS: tuple[str, ...] = ("google", "openai")
 

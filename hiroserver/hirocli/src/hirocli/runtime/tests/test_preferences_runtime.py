@@ -127,3 +127,14 @@ def test_runtime_update_migrates_saved_version_to_current_schema(tmp_path) -> No
     runtime.update("chat.max_messages", 7)
 
     assert load_preferences(tmp_path).version == 5
+
+
+def test_a_use_of_a_publishers_app_keeps_its_dotted_key_whole(tmp_path) -> None:
+    # A publisher's key has a dot (example.hello): its pick is ai.uses["example.hello:summary"], not ai.uses.example
+    runtime = WorkspacePreferencesRuntime(tmp_path)
+
+    updated = runtime.update_many({"ai.uses.example.hello:summary": None, "ai.folders.example.hello": ["C:/x"]})
+
+    assert "example.hello:summary" in updated.ai.uses and "example" not in updated.ai.uses
+    assert updated.ai.folders["example.hello"] == ["C:/x"]
+    assert "example.hello:summary" in load_preferences(tmp_path).ai.uses

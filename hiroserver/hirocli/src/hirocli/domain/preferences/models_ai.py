@@ -34,7 +34,8 @@ AI_PLAN_PROVIDERS: tuple[str, ...] = ("claude_code", "codex")
 
 AI_PROFILE_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 # No dots: a use key is one segment of a preferences PATCH path ("ai.uses.home:ask").
-_USE_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+# "<extension key>:<use id>"; a publisher's key has one dot (acme.weather:summary), domain/extension_keys.py
+_USE_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}(?:\.[A-Za-z0-9][A-Za-z0-9_-]{0,63})?:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
 
 class AiProfile(BaseModel):
