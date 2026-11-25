@@ -194,26 +194,31 @@ _DDL = [
         expires_at  TEXT NOT NULL
     )
     """,
-    # "Sign in with Home Assistant", run by the core (domain/home_assistant_sign_in.py): one row, its address, the
-    # owner's switch and the last good connection test; the access token is in the OS keyring. Kept until the owner
-    # disconnects it.
+    # "Sign in with Home Assistant", run by the core (domain/home_assistant_sign_in.py): one row, the address the core
+    # reaches HA at and the one people's browsers use, the access token (never answered or logged, as an app keeps its
+    # HA token: the live core's keyring is locked without a login session), the owner's switch and the last good
+    # connection test. Per place (data.toml). Kept until the owner disconnects it.
     """
     CREATE TABLE IF NOT EXISTS ha_sign_in (
-        id          INTEGER PRIMARY KEY CHECK (id = 1),
-        address     TEXT NOT NULL DEFAULT '',
-        enabled     INTEGER NOT NULL DEFAULT 0,
-        version     TEXT NOT NULL DEFAULT '',
-        checked_at  TEXT NOT NULL DEFAULT ''
+        id            INTEGER PRIMARY KEY CHECK (id = 1),
+        address       TEXT NOT NULL DEFAULT '',
+        link_address  TEXT NOT NULL DEFAULT '',
+        token         TEXT NOT NULL DEFAULT '',
+        enabled       INTEGER NOT NULL DEFAULT 0,
+        version       TEXT NOT NULL DEFAULT '',
+        checked_at    TEXT NOT NULL DEFAULT ''
     )
     """,
-    # Who is who: each Home Assistant person with a login, and the family person it signs in as ('' = nobody).
-    # Refreshed by each connection test; a login gone from Home Assistant is dropped then.
+    # Who is who: each Home Assistant person with a login, the family person the owner linked it to ('' = nobody: it
+    # can't sign in) and the one suggested by name (only a suggestion: it signs nobody in). Refreshed by each
+    # connection test; a login gone from Home Assistant is dropped then.
     """
     CREATE TABLE IF NOT EXISTS ha_logins (
-        ha_user_id  TEXT PRIMARY KEY,
-        name        TEXT NOT NULL DEFAULT '',
-        login       TEXT NOT NULL DEFAULT '',
-        person_id   TEXT NOT NULL DEFAULT ''
+        ha_user_id    TEXT PRIMARY KEY,
+        name          TEXT NOT NULL DEFAULT '',
+        login         TEXT NOT NULL DEFAULT '',
+        person_id     TEXT NOT NULL DEFAULT '',
+        suggested_id  TEXT NOT NULL DEFAULT ''
     )
     """,
 ]
@@ -306,6 +311,16 @@ _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
     ("admin_sessions", "person_id",  "TEXT NOT NULL DEFAULT ''"),
     ("admin_sessions", "created_at", "TEXT NOT NULL DEFAULT ''"),
     ("admin_sessions", "expires_at", "TEXT NOT NULL DEFAULT ''"),
+    ("ha_sign_in", "address",      "TEXT NOT NULL DEFAULT ''"),
+    ("ha_sign_in", "link_address", "TEXT NOT NULL DEFAULT ''"),
+    ("ha_sign_in", "token",        "TEXT NOT NULL DEFAULT ''"),
+    ("ha_sign_in", "enabled",      "INTEGER NOT NULL DEFAULT 0"),
+    ("ha_sign_in", "version",      "TEXT NOT NULL DEFAULT ''"),
+    ("ha_sign_in", "checked_at",   "TEXT NOT NULL DEFAULT ''"),
+    ("ha_logins", "name",          "TEXT NOT NULL DEFAULT ''"),
+    ("ha_logins", "login",         "TEXT NOT NULL DEFAULT ''"),
+    ("ha_logins", "person_id",     "TEXT NOT NULL DEFAULT ''"),
+    ("ha_logins", "suggested_id",  "TEXT NOT NULL DEFAULT ''"),
 ]
 
 

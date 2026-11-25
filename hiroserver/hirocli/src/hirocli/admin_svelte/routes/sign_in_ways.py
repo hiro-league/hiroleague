@@ -32,11 +32,13 @@ class HaLoginOut(BaseModel):
     ha_user_id: str
     name: str
     login: str
-    person_id: str
+    person_id: str  # who the owner linked it to; '' = nobody (it can't sign in)
+    suggested_id: str  # who it seems to be by name: a suggestion, it signs nobody in
 
 
 class HaSignInOut(BaseModel):
-    address: str
+    address: str  # where the core reaches Home Assistant
+    link_address: str  # where people's browsers log in; '' = the same
     token_set: bool
     enabled: bool
     connected: bool
@@ -47,7 +49,8 @@ class HaSignInOut(BaseModel):
 
 class ConnectBody(BaseModel):
     address: str
-    token: str = ""  # "" = the one kept (Test again)
+    link_address: str = ""
+    token: str = ""  # "" = the one kept (Test again), for the same address only
 
 
 class EnabledBody(BaseModel):
@@ -65,7 +68,7 @@ def _workspace(request: Request) -> Path:
 def _state(workspace: Path) -> HaSignInOut:
     ha = ha_sign_in.read(workspace)
     return HaSignInOut(
-        address=ha.address, token_set=ha.token_set, enabled=ha.enabled, connected=ha.connected, version=ha.version,
+        address=ha.address, link_address=ha.link_address, token_set=ha.token_set, enabled=ha.enabled, connected=ha.connected, version=ha.version,
         checked_at=ha.checked_at,
         logins=[HaLoginOut(**lg.__dict__) for lg in ha_sign_in.logins(workspace)],
     )
@@ -81,12 +84,21 @@ async def connect_home_assistant(body: ConnectBody, request: Request) -> HaSignI
     """Test the connection with the address and token given (or the token kept), and keep them when it works."""
     workspace = _workspace(request)
     address = body.address.strip().rstrip("/")
-    token = body.token.strip() or (await run_in_threadpool(ha_sign_in.token, workspace) or "")
+    link_address = body.link_address.strip().rstrip("/")
+    if link_address and not link_address.startswith(("http://", "https://")):
+        return api_failure("The address in browsers must start with http:// or https://.", 400)
+    token = body.token.strip()
+    if not token:
+        # The token kept goes only to the address it was kept for: a new address needs it typed again
+        kept = await run_in_threadpool(ha_sign_in.read, workspace)
+        if kept.address != address:
+            return api_failure("Type the access token again for a new address.", 400)
+        token = await run_in_threadpool(ha_sign_in.token, workspace)
     if not address or not token:
         return api_failure("Type Home Assistant's address and an access token.", 400)
     try:
         version, found = await home_assistant.check(address, token)
-        await run_in_threadpool(ha_sign_in.connected, workspace, address, token, version, found)
+        await run_in_threadpool(ha_sign_in.connected, workspace, address, link_address, token, version, found)
     except (HomeAssistantError, HaSignInError) as exc:
         log.warning("⚠️ Home Assistant not connected for sign-in", error=str(exc))
         return api_failure(str(exc), 502 if isinstance(exc, HomeAssistantError) else 400)

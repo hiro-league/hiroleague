@@ -2,11 +2,15 @@
 // core (admin_svelte/routes/sign_in_ways.py); the access token is kept by the core and never answered.
 import { api } from '$kit/api/client';
 
-/** A Home Assistant person with a login, and who they are in the family list ('' = nobody: they can't sign in). */
-export type HaLogin = { ha_user_id: string; name: string; login: string; person_id: string };
+/** A Home Assistant person with a login: who the owner linked it to ('' = nobody: it can't sign in), and who it seems
+ * to be by name (a suggestion: it signs nobody in until the owner links it). */
+export type HaLogin = { ha_user_id: string; name: string; login: string; person_id: string; suggested_id: string };
 
 export type HaSignIn = {
+  /** Where the core reaches Home Assistant. */
   address: string;
+  /** Where people's browsers log in; '' = the same. */
+  link_address: string;
   token_set: boolean;
   enabled: boolean;
   /** The last connection test worked: the switch may be turned on. */
@@ -20,9 +24,9 @@ const BASE = 'sign-in/home-assistant';
 
 export const getHaSignIn = (signal?: AbortSignal) => api<HaSignIn>(BASE, { signal });
 
-/** Test the connection and keep it when it works; an empty token tests the one kept. */
-export const connectHa = (address: string, token: string) =>
-  api<HaSignIn>(`${BASE}/connection`, { method: 'PUT', body: { address, token } });
+/** Test the connection and keep it when it works; an empty token tests the one kept (same address only). */
+export const connectHa = (address: string, linkAddress: string, token: string) =>
+  api<HaSignIn>(`${BASE}/connection`, { method: 'PUT', body: { address, link_address: linkAddress, token } });
 
 export const disconnectHa = () => api<HaSignIn>(`${BASE}/connection`, { method: 'DELETE' });
 

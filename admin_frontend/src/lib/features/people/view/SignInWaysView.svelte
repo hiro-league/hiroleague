@@ -29,6 +29,7 @@
   const ROW = 'flex items-center justify-between gap-4 px-3 py-3';
   const options = $derived([{ value: '', label: 'Nobody' }, ...family.map((p) => ({ value: p.person_id, label: p.name }))]);
   const state = $derived(ha.data);
+  const nameOf = (personId: string) => family.find((p) => p.person_id === personId)?.name ?? '';
 </script>
 
 <div class="grid gap-4">
@@ -75,13 +76,16 @@
       {/if}
     {/snippet}
     <div class="grid max-w-xl gap-4">
-      <Field label="Address" for="{uid}-address">
-        <Input id="{uid}-address" bind:value={ha.form.value.address} placeholder="http://homeassistant.local" spellcheck="false" />
+      <Field label="Address" for="{uid}-address" hint="Where HiroLeague reaches Home Assistant">
+        <Input id="{uid}-address" bind:value={ha.form.value.address} placeholder="http://192.168.1.11" spellcheck="false" />
+      </Field>
+      <Field label="Address in browsers" for="{uid}-link" hint="Where people log in; empty: the address above">
+        <Input id="{uid}-link" bind:value={ha.form.value.linkAddress} placeholder="http://homeassistant.local" spellcheck="false" />
       </Field>
       <Field
         label="Access token"
         for="{uid}-token"
-        hint={state?.token_set ? 'Kept. Type a new one to replace it.' : 'A long-lived token, made in your Home Assistant profile'}
+        hint={state?.token_set ? 'Kept. Type a new one to replace it (needed for a new address).' : 'A long-lived token, made in your Home Assistant profile'}
       >
         <Input id="{uid}-token" bind:value={ha.form.value.token} type="password" autocomplete="off" />
       </Field>
@@ -123,6 +127,17 @@
                   onchange={(v) => void ha.link(login.ha_user_id, v)}
                   label="Who {login.name} is in the family list"
                 />
+                {#if !login.person_id && login.suggested_id && nameOf(login.suggested_id)}
+                  <Button
+                    variant="link"
+                    size="sm"
+                    class="h-auto px-0 text-xs"
+                    disabled={ha.linking.busy(login.ha_user_id)}
+                    onclick={() => void ha.link(login.ha_user_id, login.suggested_id)}
+                  >
+                    Link to {nameOf(login.suggested_id)}
+                  </Button>
+                {/if}
                 {#if ha.linking.error(login.ha_user_id)}
                   <p class="mt-1 text-xs text-destructive">{ha.linking.error(login.ha_user_id)}</p>
                 {/if}

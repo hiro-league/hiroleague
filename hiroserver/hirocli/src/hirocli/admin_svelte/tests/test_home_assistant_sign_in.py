@@ -1,7 +1,7 @@
 """'Sign in with Home Assistant', run by the core (trust fixes, Nov 25): an option the owner adds on People → Sign-in.
 
-Against a fake Home Assistant on 127.0.0.1 (fake_home_assistant.py). The OS keyring is stood in for by a dict: the
-token is kept there, never in the database or an answer.
+Against a fake Home Assistant on 127.0.0.1 (fake_home_assistant.py). The access token is kept by the core and never
+answered.
 """
 
 from __future__ import annotations
@@ -23,7 +23,6 @@ from hirocli.admin_svelte.routes.auth import RequireSignIn, auth_router
 from hirocli.admin_svelte.routes.sign_in_ways import sign_in_ways_router
 from hirocli.admin_svelte.tests.fake_home_assistant import FakeHa, RunningFakeHa
 from hirocli.domain import home_assistant_sign_in as ha_sign_in
-from hirocli.domain import keyring_secrets
 from hirocli.domain.admin_sign_in import give_sign_in
 from hirocli.domain.home_assistant_sign_in import HaLogin, HaSignInError
 from hirocli.domain.people import add_person
@@ -42,17 +41,7 @@ def ha() -> Iterator[FakeHa]:
 
 
 @pytest.fixture
-def kept(monkeypatch: pytest.MonkeyPatch) -> dict[tuple[str, str], str]:
-    """The OS keyring, stood in for."""
-    store: dict[tuple[str, str], str] = {}
-    monkeypatch.setattr(keyring_secrets, "set_secret", lambda s, u, v: store.__setitem__((s, u), v))
-    monkeypatch.setattr(keyring_secrets, "get_secret", lambda s, u: store.get((s, u)))
-    monkeypatch.setattr(keyring_secrets, "delete_secret", lambda s, u: store.pop((s, u), None))
-    return store
-
-
-@pytest.fixture
-def family(tmp_path: Path, kept: dict) -> dict[str, Any]:
+def family(tmp_path: Path) -> dict[str, Any]:
     auth_routes._failures.clear()
     sign_in.CODES.__init__()
     michel = add_person(tmp_path, name="Michel", role_id="owner")
@@ -67,29 +56,31 @@ def family(tmp_path: Path, kept: dict) -> dict[str, Any]:
     api.include_router(auth_router)
     api.include_router(sign_in_ways_router)
     app.include_router(api)
-    return {"path": tmp_path, "michel": michel, "mark": mark, "kept": kept,
-            "client": TestClient(app, follow_redirects=False)}
+    return {"path": tmp_path, "michel": michel, "mark": mark, "client": TestClient(app, follow_redirects=False)}
 
 
 def _sign_in(client: TestClient, name: str, password: str) -> None:
     assert client.post("/api/auth/sign-in", json={"sign_in": name, "password": password}).status_code == 200
 
 
-def _connected(family: dict[str, Any], ha: FakeHa, on: bool = True) -> None:
+def _connected(family: dict[str, Any], ha: FakeHa, on: bool = True, link: str = "") -> None:
+    """Connected, Mark's login linked to Mark (the owner's link); Michel's only suggested."""
     version, found = asyncio.run(home_assistant.check(ha.url, ha.admin_token))
-    ha_sign_in.connected(family["path"], ha.url, ha.admin_token, version, found)
+    ha_sign_in.connected(family["path"], ha.url, link, ha.admin_token, version, found)
+    ha_sign_in.link(family["path"], "u-mark", family["mark"].person_id)
     ha_sign_in.set_enabled(family["path"], on)
 
 
 # --- who is who ----------------------------------------------------------------------------------------------------
 
 
-def test_a_new_login_is_suggested_as_the_one_family_person_of_its_name_and_a_kept_link_stays() -> None:
+def test_a_login_is_only_suggested_by_name_and_linked_only_as_the_owner_linked_it() -> None:
     found = [HaLogin("u1", "Michel", "michel"), HaLogin("u2", "mark ", "mark"), HaLogin("u3", "Mona", "mona"),
              HaLogin("u4", "Joe", "joe")]
     family = {"p-michel": "Michel", "p-mark": "Mark", "p-joe": "Joe", "p-joe2": "joe"}
-    kept = {"u1": ""}  # the owner said nobody: kept
-    assert [lg.person_id for lg in ha_sign_in.suggested(found, kept, family)] == ["", "p-mark", "", ""]
+    out = ha_sign_in.suggested(found, {"u3": "p-michel"}, family)
+    assert [lg.suggested_id for lg in out] == ["p-michel", "p-mark", "", ""]  # Joe twice: no suggestion
+    assert [lg.person_id for lg in out] == ["", "", "p-michel", ""]  # only the owner's link
 
 
 # --- the connection test -------------------------------------------------------------------------------------------
@@ -133,13 +124,16 @@ def test_the_owner_connects_links_and_turns_it_on_and_the_token_never_leaves(fam
     state = r.json()
     assert r.status_code == 200 and state["connected"] and state["version"] == "2026.11.2" and state["token_set"]
     assert state["address"] == ha.url
-    assert {lg["name"]: lg["person_id"] for lg in state["logins"]} == {
+    assert {lg["name"]: lg["suggested_id"] for lg in state["logins"]} == {
         "Guest": "", "Mark": family["mark"].person_id, "Michel": family["michel"].person_id}
+    assert {lg["person_id"] for lg in state["logins"]} == {""}  # suggested, linked to nobody yet
     assert ha.admin_token not in r.text  # the token is kept in the keyring, never answered
-    assert list(family["kept"].values()) == [ha.admin_token]
+    assert ha_sign_in.token(family["path"]) == ha.admin_token
 
-    # Test again with the token kept; a bad one is refused in words, and the last good connection stays
+    # Test again with the token kept; a new address needs it typed again; a bad one is refused in words
     assert client.put("/api/sign-in/home-assistant/connection", json={"address": ha.url}).status_code == 200
+    moved = client.put("/api/sign-in/home-assistant/connection", json={"address": "http://elsewhere.local"})
+    assert moved.status_code == 400 and "again for a new address" in moved.json()["detail"]
     bad = client.put("/api/sign-in/home-assistant/connection", json={"address": ha.url, "token": "wrong"})
     assert bad.status_code == 502 and "didn't accept the access token" in bad.json()["detail"]
 
@@ -171,11 +165,12 @@ def test_switching_it_on_needs_a_connection(family: dict[str, Any]) -> None:
 
 
 def test_signing_in_with_home_assistant_is_run_by_the_core(family: dict[str, Any], ha: FakeHa) -> None:
-    _connected(family, ha)
+    _connected(family, ha, link="http://homeassistant.local")
     client = family["client"]
     start = client.get("/api/auth/with/home_assistant", params={"for": "home", "next": "/people"})
     where = urlsplit(start.headers["location"])
-    assert start.status_code == 303 and f"{where.scheme}://{where.netloc}{where.path}" == f"{ha.url}/auth/authorize"
+    # The browser logs in at the address people use; the core trades the code at its own
+    assert start.status_code == 303 and f"{where.scheme}://{where.netloc}{where.path}" == "http://homeassistant.local/auth/authorize"
     asked = {k: v[0] for k, v in parse_qs(where.query).items()}
     assert asked["client_id"] == "http://testserver/"
     assert asked["redirect_uri"] == "http://testserver/api/auth/with/callback"
@@ -190,14 +185,17 @@ def test_signing_in_with_home_assistant_is_run_by_the_core(family: dict[str, Any
     assert "signin_error" in again.headers["location"]  # a state works once
 
 
-def test_a_login_linked_to_nobody_is_told_why_and_not_signed_in(family: dict[str, Any], ha: FakeHa) -> None:
+@pytest.mark.parametrize(("user", "name"), [("u-guest", "Guest"), ("u-michel", "Michel")])
+def test_a_login_the_owner_didnt_link_signs_nobody_in_even_when_suggested(
+        family: dict[str, Any], ha: FakeHa, user: str, name: str) -> None:
+    # Michel's login is suggested as the Owner by name: a suggestion signs nobody in
     _connected(family, ha)
     client = family["client"]
     state = parse_qs(urlsplit(client.get("/api/auth/with/home_assistant").headers["location"]).query)["state"][0]
-    ha.codes["code-2"] = "u-guest"
+    ha.codes["code-2"] = user
     r = client.get("/api/auth/with/callback", params={"code": "code-2", "state": state})
     assert parse_qs(urlsplit(r.headers["location"]).query)["signin_error"] == [
-        "Guest's Home Assistant login isn't linked to anyone in the family list. The owner links it on People → Sign-in."]
+        f"{name}'s Home Assistant login isn't linked to anyone in the family list. The owner links it on People → Sign-in."]
     assert client.get("/api/auth/me").json()["signed_in"] is False
 
 

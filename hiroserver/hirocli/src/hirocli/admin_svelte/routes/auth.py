@@ -193,8 +193,9 @@ async def who_am_i(request: Request) -> Any:
             "anyone_signs_in": anyone,
             "sign_in_offers": offers,
             # A test environment and what its core reaches (its switchboard), for the banner on every page; None in
-            # live and env0. The core's own three: the apps' other systems are theirs.
-            "place": switchboard.page(("ai", "voices", "whatsapp")),
+            # live and env0. The core's own: AI, voices, WhatsApp, and Home Assistant for its sign-in; the apps' other
+            # systems are theirs.
+            "place": switchboard.page(("ai", "voices", "whatsapp", "ha")),
         }
 
 
@@ -331,7 +332,8 @@ async def sign_in_with(method: str, request: Request, next: str = "/") -> Redire
     origin = _origin(request)
     log.info("⬆️ Home Assistant sign-in started")
     return RedirectResponse(
-        home_assistant.authorize_url(ha.address, f"{origin}/", f"{origin}/api/auth/with/callback", state), status_code=303
+        home_assistant.authorize_url(ha.browser_address, f"{origin}/", f"{origin}/api/auth/with/callback", state),
+        status_code=303,
     )
 
 
