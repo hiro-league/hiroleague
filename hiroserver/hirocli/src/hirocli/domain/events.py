@@ -46,9 +46,12 @@ class DomainEventType:
     # An extension said something it keeps changed (its resource.changed, unified communication phase 3): payload
     # {extension, resource, ids}. A hint: whoever keeps a copy reads it again from the extension.
     EXTENSION_RESOURCE_CHANGED = "extension.resource_changed"
-    # An app was removed (tools/extension.py): payload {extension_id, name, site_name}. Its LAN name, if it had one,
-    # is gone from the claims: the running core stops announcing it and writes Caddy's file again.
+    # An app was removed (tools/extension.py): payload {extension_id, name, site_name}. Its LAN names, if it had any,
+    # are gone from the claims: the running core stops announcing them and loads the front door again.
     EXTENSION_REMOVED = "extension.removed"
+    # The owner added or removed an extra name or an other site (tools/sites.py): payload {name, change}. The running
+    # core announces what the tables hold now and loads the front door again.
+    SITES_CHANGED = "sites.changed"
 
 
 @dataclass(frozen=True)

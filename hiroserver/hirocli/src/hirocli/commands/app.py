@@ -24,6 +24,7 @@ from .catalog import register as register_catalog_commands
 from .provider import register as register_provider_commands
 from .provider import register_models_command
 from .service import register as register_service_commands
+from .sites import register as register_sites_commands
 from .message import register as register_message_commands
 from .workspace import register as register_workspace_commands
 
@@ -141,6 +142,11 @@ provider_app = typer.Typer(
     help="Manage workspace provider credentials (API keys, local endpoints).",
     add_completion=False,
 )
+sites_app = typer.Typer(
+    name="sites",
+    help="Every name this machine serves on the LAN: apps' names, extra names beside them, and other sites.",
+    add_completion=False,
+)
 service_app = typer.Typer(
     name="service",
     help="Run the Hiro server as a system service: systemd, a Windows service or a Mac LaunchDaemon (starts at boot, restarts on failure).",
@@ -175,6 +181,7 @@ app.add_typer(catalog_app, name="catalog")
 app.add_typer(provider_app, name="provider")
 app.add_typer(message_app, name="message")
 app.add_typer(service_app, name="service")
+app.add_typer(sites_app, name="sites")
 
 register_root_commands(app, console)
 register_models_command(app, console)
@@ -196,3 +203,4 @@ register_catalog_commands(catalog_app, console)
 register_provider_commands(provider_app, console)
 register_message_commands(message_app, console)
 register_service_commands(service_app, console)
+register_sites_commands(sites_app, console)

@@ -166,6 +166,11 @@ def register(service_app: typer.Typer, console: Console) -> None:
             console.print(f"  Secrets: {result['secrets_file']} [dim](new; only the service and administrators can read it)[/dim]")
         else:
             console.print(f"  Secrets: {result['secrets_file']} [dim](kept as it was)[/dim]")
+        if result.get("front_door"):
+            console.print(f"  Front door: {result['front_door']} [dim](Caddy on port 80, runs as "
+                          f"{result['front_door_account']}; the core loads every name into it)[/dim]")
+        for rule in result.get("firewall") or []:
+            console.print(f"  Firewall:   {rule}")
         port = _first_admin_port()
         console.print("\n[bold]Next steps[/bold]")
         console.print(f"  1. Add your provider API keys:  [cyan]{result['edit_secrets']}[/cyan]  (e.g. OPENAI_API_KEY=...)")
@@ -204,6 +209,8 @@ def register(service_app: typer.Typer, console: Console) -> None:
             console.print(f"[green]Service removed:[/green] {result['service']} is stopped and no longer starts at boot.")
         else:
             console.print(f"[yellow]{result['service']} is not installed; nothing to remove.[/yellow]")
+        if result.get("front_door_removed"):
+            console.print("The front door (Caddy) was removed too: nothing on this machine answers on port 80 now.")
         console.print("[dim]Your workspace (data, settings) was not touched.[/dim]")
         for folder in result.get("kept") or []:
             console.print(f"Kept: {folder}")

@@ -154,14 +154,27 @@ _DDL = [
     "CREATE INDEX IF NOT EXISTS ai_calls_profile_hour ON ai_calls (profile_id, hour)",
     # Phase 7a: the models a local server (LM Studio / Ollama) last reported, so AI profiles can
     # point at them without catalog rows and still read while the PC is off.
-    # Each app's LAN name (docs/site-names-design.md): claimed from its address setting, published and proxied by the
-    # core (runtime/site_names.py). One per extension.
+    # Each app's LAN names (docs/site-names-design.md): its main one, claimed from its address setting, and the extra
+    # ones the owner adds beside it (extra = 1); announced and proxied by the core (runtime/site_names.py). Kept until
+    # the app or the owner drops it, or the app is removed.
     """
     CREATE TABLE IF NOT EXISTS site_names (
         name          TEXT PRIMARY KEY,
         extension_id  TEXT NOT NULL,
         port          INTEGER NOT NULL,
-        claimed_at    TEXT NOT NULL DEFAULT ''
+        claimed_at    TEXT NOT NULL DEFAULT '',
+        extra         INTEGER NOT NULL DEFAULT 0
+    )
+    """,
+    # The sites the owner adds that are no app (hiro sites add): a name or the machine's address, its target on this
+    # machine (empty = the name is only announced) and the paths it is limited to (a JSON list; empty = all). Kept
+    # until the owner removes it.
+    """
+    CREATE TABLE IF NOT EXISTS other_sites (
+        name      TEXT PRIMARY KEY,
+        target    TEXT NOT NULL DEFAULT '',
+        paths     TEXT NOT NULL DEFAULT '[]',
+        added_at  TEXT NOT NULL DEFAULT ''
     )
     """,
     """
@@ -264,6 +277,8 @@ _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
     ("site_names", "extension_id", "TEXT NOT NULL DEFAULT ''"),
     ("site_names", "port",         "INTEGER NOT NULL DEFAULT 0"),
     ("site_names", "claimed_at",   "TEXT NOT NULL DEFAULT ''"),
+    # Installing apps, phase 4: a name the owner added beside the app's main one.
+    ("site_names", "extra",        "INTEGER NOT NULL DEFAULT 0"),
     # roles, people, admin_sessions (Phase 6)
     ("roles", "name",     "TEXT NOT NULL DEFAULT ''"),
     ("roles", "built_in", "INTEGER NOT NULL DEFAULT 0"),
