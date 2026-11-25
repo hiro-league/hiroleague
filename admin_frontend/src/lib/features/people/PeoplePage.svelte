@@ -26,6 +26,8 @@
   import { Resource } from '$kit/state/resource.svelte';
   import { listDevices } from '$lib/api/devices';
   import { devicesOf } from '../devices/shared/device-people';
+  import SignInWaysView from './view/SignInWaysView.svelte';
+  import { createHomeAssistantSignIn } from './state/home-assistant-sign-in.svelte';
 
   // Phase 9a: an app's Edit link opens People → Roles at one role (?tab=roles&role=kid).
   const asked = page.url.searchParams;
@@ -35,14 +37,18 @@
   // Permissions phase 3: each person's devices, beside their WhatsApp address
   const devices = new Resource(listDevices);
 
-  type Tab = 'people' | 'roles' | 'compare';
-  const TABS: Tab[] = ['people', 'roles', 'compare'];
+  // The Sign-in tab (trust fixes): the core runs "Sign in with Home Assistant", an option the owner adds
+  const ha = createHomeAssistantSignIn();
+
+  type Tab = 'people' | 'roles' | 'compare' | 'sign-in';
+  const TABS: Tab[] = ['people', 'roles', 'compare', 'sign-in'];
   const askedTab = asked.get('tab');
   let tab = $state<Tab>(TABS.find((t) => t === askedTab) ?? 'people');
   const tabDescriptors = [
     { id: 'people' as const, label: 'People' },
     { id: 'roles' as const, label: 'Roles' },
-    { id: 'compare' as const, label: 'Compare' }
+    { id: 'compare' as const, label: 'Compare' },
+    { id: 'sign-in' as const, label: 'Sign-in' }
   ];
   // "View as" the role shown on Roles: the admin's menu and tabs as its people see them (Permissions phase 2)
   const shownRole = $derived(roles.roles.find((r) => r.role_id === roles.role));
@@ -75,7 +81,7 @@
         </Button>
       {/if}
     {/snippet}
-    {#if tab !== 'people'}
+    {#if tab === 'roles' || tab === 'compare'}
       <AppFilter sources={roles.sources} value={roles.app} onchange={(next) => (roles.app = next)} />
     {/if}
   </PageHeader>
@@ -84,6 +90,8 @@
     <RolesView ctrl={roles} people={ctrl.people} rolesOf={ctrl.rolesOf} />
   {:else if tab === 'compare'}
     <CompareView ctrl={roles} onopen={openRole} />
+  {:else if tab === 'sign-in'}
+    <SignInWaysView {ha} family={ctrl.people} />
   {:else}
     <PeopleListCard {ctrl} devicesOf={(personId) => devicesOf(devices.data ?? [], personId)} />
   {/if}

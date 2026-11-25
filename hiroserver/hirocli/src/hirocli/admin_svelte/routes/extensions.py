@@ -22,7 +22,10 @@ from hiro_channel_sdk.constants import METHOD_EXTENSION_INFO
 from hiro_channel_sdk.extension import ExtensionRequestError
 
 from hirocli.admin.features.extensions.service import ExtensionService
+from hirocli.domain import approvals
 from hirocli.domain.extensions import KIND_CHANNEL
+from hirocli.runtime.approval_effects import after_approval
+from hirocli.tools.extension import ExtensionApprovalTool, ExtensionApproveTool
 from hirocli.tools.channel import mandatory_channel
 from hirocli.admin_svelte.deps import SelectedWorkspaceIdDep
 from hirocli.admin_svelte.result_payload import _api_data, api_failure
@@ -65,6 +68,10 @@ class ExtensionRow(BaseModel):
     # A channel with an account (pairing): whether it is linked now, and to which account.
     linked: bool | None
     account: str
+    # Permissions phase 8: an app never answered (it gets nothing it asks for), and an app with something that waits
+    pending: bool = False
+    waits: bool = False
+    waiting_count: int = 0
 
 
 class ExtensionListen(BaseModel):
@@ -117,8 +124,11 @@ async def list_extensions(request: Request, workspace_id: SelectedWorkspaceIdDep
     live = manager.snapshot(kind=None) if manager is not None else {}
     statuses = getattr(request.app.state.ctx, "channel_status", {}) if manager is not None else {}
     extensions = []
+    views = await run_in_threadpool(_approval_views, workspace_path, [e["extension_id"] for e in listed.data or []
+                                                                      if e["kind"] != KIND_CHANNEL])
     for ext in listed.data or []:
         conn = live.get(ext["extension_id"])
+        approval = views.get(ext["extension_id"])
         status = statuses.get(ext["name"], {}) if ext["kind"] == KIND_CHANNEL else {}
         extensions.append(
             {
@@ -130,6 +140,9 @@ async def list_extensions(request: Request, workspace_id: SelectedWorkspaceIdDep
                 "version": (conn["info"].get("version") if conn else None) or ext["version"],
                 "linked": (status.get("state") in _LINKED_STATES) if ext["pairing"] and manager is not None else None,
                 "account": str(status.get("account") or ""),
+                "pending": bool(approval and approval.pending),
+                "waits": bool(approval and approval.waits),
+                "waiting_count": sum(1 for i in approval.items if i.waiting) if approval else 0,
             }
         )
     listen = asdict(address.data) if address.ok and address.data is not None else {}
@@ -140,6 +153,77 @@ async def list_extensions(request: Request, workspace_id: SelectedWorkspaceIdDep
     else:
         listen.update({"listening": None, "error": None, "live_host": None})
     return {"listen": listen, "extensions": extensions}
+
+
+def _approval_views(workspace_path: Path | None, extension_ids: list[str]) -> dict[str, approvals.AppApproval]:
+    if workspace_path is None:
+        return {}
+    out = {}
+    for eid in extension_ids:
+        found = approvals.view(workspace_path, eid)
+        if found is not None:
+            out[eid] = found
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Permissions phase 8: what an app is approved for (the owner's alone: route_rules.py)
+# ---------------------------------------------------------------------------
+
+
+class ApprovalItem(BaseModel):
+    permission: str
+    subject: str
+    words: str
+    required: bool
+    why: str
+    approved: bool
+    waiting: bool
+    understood: bool
+
+
+class AppApproval(BaseModel):
+    extension_id: str
+    name: str
+    approved_for_everything: bool
+    pending: bool
+    waits: bool
+    items: list[ApprovalItem]
+    claimed: list[str] = []
+
+
+class ApproveBody(BaseModel):
+    """The optional items switched on, as "permission" or "permission:subject"; every required one goes with them."""
+
+    optional: list[str] = []
+
+
+@extensions_router.get("/extensions/{extension_id}/approval", response_model=AppApproval)
+async def get_extension_approval(extension_id: str, workspace_id: SelectedWorkspaceIdDep) -> Any:
+    """What the app asks to do on its own, what is approved and what waits."""
+    try:
+        result = await run_in_threadpool(ExtensionApprovalTool().execute, extension_id, workspace_id)
+    except ValueError as exc:
+        return api_failure(str(exc), 404)
+    return asdict(result)
+
+
+@extensions_router.put("/extensions/{extension_id}/approval", response_model=AppApproval)
+async def approve_extension(
+    extension_id: str, body: ApproveBody, request: Request, workspace_id: SelectedWorkspaceIdDep
+) -> Any:
+    """The owner's yes: every required item, and the optional ones switched on. The app's LAN name is claimed and
+    the app is told, when the running server serves this workspace."""
+    try:
+        result = await run_in_threadpool(
+            ExtensionApproveTool().execute, extension_id, body.optional, False, workspace_id
+        )
+    except (ValueError, LookupError) as exc:
+        return api_failure(str(exc), 404)
+    workspace_path = await run_in_threadpool(ExtensionService().workspace_path, workspace_id)
+    if _live_manager(request, workspace_path) is not None:
+        await after_approval(request.app.state.ctx, result.extension_id, result.claimed)
+    return asdict(result)
 
 
 @extensions_router.post("/extensions/pairing-code")

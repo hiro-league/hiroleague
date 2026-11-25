@@ -8,9 +8,10 @@ Permissions phase 2: a person opens the admin's pages their roles' core permissi
 (domain/core_features.py), each route by its rule; someone whose roles reach none may call only the sign-in routes
 and ``/api/apps`` (the dashboard's Apps card). An extension's site sends a signed-out browser here
 (``/sign-in?for=<extension>&next=<path>``); once signed in, ``/api/auth/for/<extension>``
-sends it back with a one-time code (runtime/sign_in_for_extensions.py). A connected extension
-may offer a way to sign in (Home Assistant's login): ``/api/auth/with/<id>`` starts it there,
-``/api/auth/with/callback`` finishes it.
+sends it back with a one-time code (runtime/sign_in_for_extensions.py). "Sign in with Home Assistant" is an option the
+owner adds (People → Sign-in, domain/home_assistant_sign_in.py), run by the core itself: ``/api/auth/with/home_assistant``
+sends the browser to Home Assistant's login page, ``/api/auth/with/callback`` asks Home Assistant who logged in. No app
+takes part in a sign-in.
 
 The session cookie is HttpOnly, SameSite=Lax (Phase 8, was Strict: an extension's site sends the
 browser here, and a Strict cookie isn't sent on that arrival), Secure when the request came over
@@ -31,8 +32,6 @@ from fastapi import APIRouter, Request
 
 from hirocli.admin_svelte.result_payload import api_failure
 from fastapi.responses import JSONResponse, RedirectResponse
-from hiro_channel_sdk.constants import METHOD_SIGN_IN_FINISH, METHOD_SIGN_IN_START
-from hiro_channel_sdk.extension import ExtensionRequestError
 from hiro_commons import switchboard
 from hiro_commons.log import Logger
 from pydantic import BaseModel
@@ -45,6 +44,7 @@ from hirocli.domain.admin_sign_in import (
     session_person,
     start_session,
 )
+from hirocli.domain import home_assistant_sign_in as ha_sign_in
 from hirocli.domain.access import admin_access
 from hirocli.domain.people import anyone_signs_in, get_person, get_role, list_roles
 from hirocli.runtime.sign_in_for_extensions import (
@@ -52,17 +52,20 @@ from hirocli.runtime.sign_in_for_extensions import (
     app_entry,
     back_url,
     find_site,
-    list_sign_in_offers,
     list_sites,
     local_path,
     sites_for_roles,
 )
+from hirocli.services import home_assistant
+from hirocli.services.home_assistant import HomeAssistantError
 
 log = Logger.get("ADMIN.AUTH")
 
 auth_router = APIRouter()
 
 AUTH_PREFIX = "/api/auth/"
+
+HOME_ASSISTANT = "home_assistant"  # the one other way to sign in, the id its routes take
 
 # Wrong passwords: at most this many per sign-in name in the window, then wait.
 _MAX_FAILURES = 10
@@ -172,8 +175,9 @@ async def who_am_i(request: Request) -> Any:
     role = await run_in_threadpool(get_role, workspace_path, person.role_id) if person else None
     access = await run_in_threadpool(admin_access, workspace_path, person.role_ids) if person else None
     names = {r.role_id: r.name for r in await run_in_threadpool(list_roles, workspace_path)} if person else {}
-    # Phase 8: the ways to sign in connected extensions offer (the sign-in page's buttons).
-    offers = [{"id": o.id, "label": o.label, "extension": o.extension} for o in list_sign_in_offers(_manager(request))]
+    # The other ways to sign in the sign-in page shows: Home Assistant, while the owner has it on and it is reached
+    ha = await run_in_threadpool(ha_sign_in.read, workspace_path)
+    offers = [{"id": HOME_ASSISTANT, "label": "Home Assistant"}] if ha.offered else []
     return {
             "signed_in": person is not None,
             "person": _public(person) if person else None,
@@ -189,8 +193,9 @@ async def who_am_i(request: Request) -> Any:
             "anyone_signs_in": anyone,
             "sign_in_offers": offers,
             # A test environment and what its core reaches (its switchboard), for the banner on every page; None in
-            # live and env0. The core's own three: the apps' other systems are theirs.
-            "place": switchboard.page(("ai", "voices", "whatsapp")),
+            # live and env0. The core's own: AI, voices, WhatsApp, and Home Assistant for its sign-in; the apps' other
+            # systems are theirs.
+            "place": switchboard.page(("ai", "voices", "whatsapp", "ha")),
         }
 
 
@@ -276,31 +281,36 @@ async def sign_in_for(extension: str, request: Request, next: str = "/") -> Redi
 
 @auth_router.get("/auth/with/callback")
 async def sign_in_with_callback(request: Request, code: str = "", state: str = "") -> RedirectResponse:
-    """The offered sign-in came back: the extension says who it is; start a session here."""
+    """Home Assistant sent the browser back: the core asks Home Assistant who logged in, and starts a session for the
+    family person that login is linked to."""
     started = CODES.finish(state)
     if started is None or not code:
         return _to_sign_in_page("", "", "The sign-in didn't come back as it started (another tab, or it took too long).")
-    manager = _manager(request)
-    if manager is None:
-        return _to_sign_in_page(started.for_extension, started.next_path, "The app that offers this sign-in isn't connected.")
-    origin = _origin(request)
-    params = {
-        "method": started.method,
-        "code": code,
-        "client_id": f"{origin}/",
-        "redirect_uri": f"{origin}/api/auth/with/callback",
-    }
-    try:
-        answer = await manager.request(started.extension_id, METHOD_SIGN_IN_FINISH, params)
-    except ExtensionRequestError as exc:
-        log.warning("⚠️ Offered sign-in refused", method=started.method, error=str(exc))
-        return _to_sign_in_page(started.for_extension, started.next_path, exc.message)
     workspace_path = _workspace_path(request)
-    person = await run_in_threadpool(get_person, workspace_path, str(answer.get("person_id") or ""))
+    ha = await run_in_threadpool(ha_sign_in.read, workspace_path)
+    access_token = await run_in_threadpool(ha_sign_in.token, workspace_path)
+    if not ha.offered or not access_token:
+        return _to_sign_in_page(started.for_extension, started.next_path, "Signing in with Home Assistant is off.")
+    try:
+        person_token, refresh = await home_assistant.exchange_code(ha.address, f"{_origin(request)}/", code)
+        ha_user_id, ha_name = await home_assistant.current_user(ha.address, person_token)
+    except HomeAssistantError as exc:
+        log.warning("⚠️ Home Assistant sign-in failed", error=str(exc))
+        return _to_sign_in_page(started.for_extension, started.next_path, str(exc))
+    if refresh:
+        try:
+            await home_assistant.revoke(ha.address, refresh)
+        except HomeAssistantError as exc:  # signed in all the same; HA keeps an unused login in their profile
+            log.warning("⚠️ Home Assistant's sign-in token wasn't handed back", error=str(exc))
+    person_id = await run_in_threadpool(ha_sign_in.person_of, workspace_path, ha_user_id)
+    person = await run_in_threadpool(get_person, workspace_path, person_id) if person_id else None
     if person is None:
-        return _to_sign_in_page(started.for_extension, started.next_path, "That person isn't in the family list.")
+        log.info(f"Home Assistant sign-in refused — {ha_name} isn't linked to anyone in the family list")
+        return _to_sign_in_page(started.for_extension, started.next_path, (
+            f"{ha_name}'s Home Assistant login isn't linked to anyone in the family list. The owner links it on "
+            "People → Sign-in."))
     token, _expires = await run_in_threadpool(start_session, workspace_path, person.person_id)
-    log.info(f"✅ Admin signed in — {person.name} · {started.method}")
+    log.info(f"✅ Admin signed in — {person.name} · Home Assistant")
     if started.for_extension:
         target = f"/api/auth/for/{started.for_extension}?{urlencode({'next': started.next_path})}"
     else:
@@ -310,41 +320,21 @@ async def sign_in_with_callback(request: Request, code: str = "", state: str = "
     return response
 
 
-def _offer(manager: Any, method: str) -> Any:
-    """The first connected extension offering this way to sign in, or None. (The routes' ``next``
-    parameter shadows the builtin, so the lookup lives here.)"""
-    for offer in list_sign_in_offers(manager):
-        if offer.id == method:
-            return offer
-    return None
-
-
 @auth_router.get("/auth/with/{method}")
 async def sign_in_with(method: str, request: Request, next: str = "/") -> RedirectResponse:
-    """Start a way to sign in a connected extension offers (Home Assistant's login): off to its page."""
+    """Start signing in with Home Assistant: off to its own login page, with this admin's address as the client."""
     for_extension = request.query_params.get("for", "")
-    manager = _manager(request)
-    offer = _offer(manager, method)
-    if offer is None or manager is None:
+    workspace_path = _workspace_path(request)
+    ha = await run_in_threadpool(ha_sign_in.read, workspace_path)
+    if method != HOME_ASSISTANT or not ha.offered:
         return _to_sign_in_page(for_extension, next, "That way to sign in isn't available right now.")
-    state = CODES.start(offer.extension_id, method, for_extension, local_path(next))
+    state = CODES.start(method, for_extension, local_path(next))
     origin = _origin(request)
-    params = {
-        "method": method,
-        "client_id": f"{origin}/",
-        "redirect_uri": f"{origin}/api/auth/with/callback",
-        "state": state,
-    }
-    try:
-        answer = await manager.request(offer.extension_id, METHOD_SIGN_IN_START, params)
-    except ExtensionRequestError as exc:
-        log.warning(f"⚠️ Offered sign-in didn't start — {offer.label} · {offer.extension}", error=str(exc))
-        return _to_sign_in_page(for_extension, next, f"{offer.label} sign-in didn't start: {exc.message}")
-    url = str(answer.get("url") or "")
-    if not url.startswith(("http://", "https://")):
-        return _to_sign_in_page(for_extension, next, f"{offer.label} sign-in didn't start.")
-    log.info(f"⬆️ Offered sign-in started — {offer.label} · {offer.extension}")
-    return RedirectResponse(url, status_code=303)
+    log.info("⬆️ Home Assistant sign-in started")
+    return RedirectResponse(
+        home_assistant.authorize_url(ha.browser_address, f"{origin}/", f"{origin}/api/auth/with/callback", state),
+        status_code=303,
+    )
 
 
 @auth_router.get("/apps")

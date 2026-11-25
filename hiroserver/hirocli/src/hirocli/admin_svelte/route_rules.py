@@ -51,6 +51,8 @@ ADMIN_RULES: tuple[Rule, ...] = (
     R("/api/gateways", "server"),
     R("/api/metrics", "server"),
     # Extensions and the channel plugins
+    # Permissions phase 8: approving an app reaches people and roles: the owner's alone
+    Rule("/api/extensions/{extension_id}/approval", "owner"),
     R("/api/extensions", "extensions"),
     R("/api/channels", "extensions"),
     # Devices: Logs reads their names
@@ -114,6 +116,8 @@ ADMIN_RULES: tuple[Rule, ...] = (
     # People and roles are the owner's
     Rule("/api/people", "owner"),
     Rule("/api/roles", "owner"),
+    # The ways into HiroLeague (People → Sign-in): the owner's
+    Rule("/api/sign-in", "owner"),
 )
 
 

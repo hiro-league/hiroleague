@@ -70,6 +70,7 @@ from .constants import (
 )
 from .models import ContentItem, EventPayload, MessageRouting, UnifiedMessage
 from .access import ExtensionFeature
+from .approvals import AppAsk
 from .offers import ExtensionOffers
 
 EXTENSION_AREA = "EXTENSION"
@@ -151,6 +152,9 @@ class ExtensionInfo(BaseModel):
     # admin draws them. None = none.
     config_schema: dict[str, Any] | None = None
     capabilities: dict[str, Any] | None = None
+    # Permissions phase 8: what it asks to do on its own (approvals.py); None = a kit from before, whose approval
+    # doesn't change; [] = it asks for nothing.
+    asks: list[AppAsk] | None = None
 
 
 class ExtensionRequestError(Exception):
@@ -630,7 +634,8 @@ class ExtensionClient:
             await self._set_status(STATUS_DISCONNECTED, {"error": denied.message})
             return
         elif denied.reason == EXTENSION_DENIED_NAME_TAKEN:
-            # Another app holds the name this one declares: the core's words say which and what to do. Pairing drops
+            # The name this one declares isn't its own (another app holds it, or it was paired under another name):
+            # the core's words say which and what to do. Pairing drops
             # its code (a new one once the other app is removed); a paired app keeps its key and tries again later.
             if self._pairing_code is None:
                 await self._set_status(STATUS_DISCONNECTED, {"error": denied.message})
@@ -685,9 +690,12 @@ class ExtensionClient:
                 log.info("✅ Extension paired with the core", extension=self._info.name)
             self._core = dict(reply.get("core") or {})
             self._ws = ws
+            # Permissions phase 8: the welcome says what the app is approved for and what waits; the kit keeps it
+            approval = reply.get("approval")
             await self._set_status(
                 STATUS_CONNECTED,
-                {"core": dict(self._core), "extension_id": str(reply["extension_id"])},
+                {"core": dict(self._core), "extension_id": str(reply["extension_id"]),
+                 **({"approval": approval} if approval is not None else {})},
             )
             log.info("✅ Extension connected to the core", extension=self._info.name, url=self._url)
             try:

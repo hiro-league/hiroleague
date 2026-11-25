@@ -7,6 +7,8 @@ the paid clip in AI usage. A use with no profile is no_profile; the app can't ca
 
 from __future__ import annotations
 
+from hirocli.runtime.tests.approved import approve_every_app
+
 import asyncio
 import base64
 import json
@@ -81,15 +83,18 @@ def test_an_extension_speaks_with_its_uses_profile_from_the_cache_the_second_tim
         manager, handler, ctx = _core(workspace, port)
         server = asyncio.create_task(manager.run())
         await _wait_for(lambda: manager.listen_state()["listening"])
-        info = ExtensionInfo(name="home", voice_uses=[ExtensionVoiceUse(id="speak", name="Speak")])
+        # "story" is declared with no profile picked: no_profile (Permissions phase 8 refuses an undeclared use)
+        info = ExtensionInfo(name="home", voice_uses=[ExtensionVoiceUse(id="speak", name="Speak"),
+                                                      ExtensionVoiceUse(id="story", name="Story")])
         client = ExtensionClient(f"ws://127.0.0.1:{port}", info, ExtensionCredentials(tmp_path / "home"))
         running = asyncio.create_task(client.run())
         await _wait_for(lambda: client.status == STATUS_NOT_PAIRED)
         client.pair(start_extension_pairing(workspace, code_length=6, ttl_seconds=60).code)
         await _wait_for(lambda: client.status == STATUS_CONNECTED)
+        approve_every_app(workspace)  # Permissions phase 8: not what this test is about
 
         [paired] = list_paired_extensions(workspace)
-        assert paired.declared_voice_uses() == [{"id": "speak", "name": "Speak"}]
+        assert paired.declared_voice_uses() == [{"id": "speak", "name": "Speak"}, {"id": "story", "name": "Story"}]
 
         listed = await client.request(METHOD_VOICE_PROFILES)
         assert listed["uses"] == {"speak": "door", "story": None}
@@ -122,7 +127,7 @@ def test_an_extension_speaks_with_its_uses_profile_from_the_cache_the_second_tim
         assert ctx.preferences.current.voice.uses["home:speak"] is None
         await client.request("voice.uses.set", {"use": "speak", "profile": "door"})
         assert ctx.preferences.current.voice.uses["home:speak"] == "door"
-        for bad in ({"use": "story", "profile": "door"}, {"use": "speak", "profile": "gone"}):
+        for bad in ({"use": "tale", "profile": "door"}, {"use": "speak", "profile": "gone"}):
             with pytest.raises(ExtensionRequestError) as err:
                 await client.request("voice.uses.set", bad)
             assert err.value.code == "invalid"

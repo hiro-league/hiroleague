@@ -13,7 +13,7 @@ data: HomeHiro's users' My room picks are carried over (step 3).
 | --- | --- |
 | Addresses | HiroLeague `hiro.local`; Home `home.hiro.local` if that name resolves on the family's phones and PCs (tested first), else `homehiro.local` stays. `homehiro.local` then sends you on |
 | One sign-in | An extension's site sends a signed-out visitor to HiroLeague's sign-in page; HiroLeague sends them back with a one-time code; the extension asks the core whose code it is, then keeps its own sign-in |
-| Sign-in page | HiroLeague's name + password always work. "Sign in with Home Assistant" shows only when a connected extension offers it; the extension checks the HA login and answers which person it is. The core knows nothing about HA |
+| Sign-in page | HiroLeague's name + password always work. "Sign in with Home Assistant" is an option the owner adds (People → Sign-in): the core runs it itself, with its own connection to HA and its own who-is-who. No app offers a sign-in or says who signed in (trust fixes, Nov 25) |
 | HA app | HomeHiro's entry in the Home Assistant app works as today (HA's add-on headers + PROXY_SECRET) |
 | HiroLeague's settings | One switch per role, "can open HiroLeague's settings": Owner on (always), Adult and Kid off by default. Anyone else signed in sees only the dashboard's Apps card |
 | Apps card | Each extension declares its site (title, icon, address, roles that see it) in `offers.shows`; HiroLeague's dashboard shows them, each opening in a new tab |
@@ -46,21 +46,20 @@ browser ─GET home.hiro.local/api/auth/hiro?code=…──▶ HomeHiro
 ### B. "Sign in with Home Assistant" on the core's sign-in page
 
 ```
-sign-in page shows the button when a connected extension offers sign_in "home_assistant"
+People → Sign-in (the owner): HA's address + a long-lived token → Connect (the core tests it, reads HA's people with
+   a login) → who is who (each HA login → a family person; suggested by name) → the switch on
+sign-in page shows the button while the switch is on and the last test worked
 browser ─GET hiro.local/api/auth/with/home_assistant?next=…──▶ core
-   core ─ext request sign_in.start {client_id: http://hiro.local/, redirect_uri: …/api/auth/with/callback, state}──▶ HomeHiro
-        ◀── {url: HA's authorize URL} (HomeHiro knows HA's address)
-   ◀── 303 HA's login page
+   ◀── 303 HA's /auth/authorize (client_id http://hiro.local/, redirect_uri …/api/auth/with/callback, state)
 HA ──303 hiro.local/api/auth/with/callback?code&state──▶ core
-   core ─ext request sign_in.finish {code, client_id}──▶ HomeHiro
-        HomeHiro trades the code with HA (client_id = the core's address), finds the HA user's
-        person through its links ◀── {person_id} or a reason ("Michel's HA user isn't linked to a person")
+   core trades the code with HA (/auth/token), asks whose it is (auth/current_user), hands the refresh token back
+   (/auth/revoke), finds the family person the HA login is linked to (none: the page says the owner links it)
    core starts its session ──303──▶ next (or back into flow A)
 ```
 
-- HomeHiro already has every piece (ha/login.py, People's links). It moves from its own routes into two
-  extension request handlers. It hands HA's refresh token back at once, as today.
-- The core stores nothing about HA: no address, no token, no HA user ids.
+- The core keeps HA's address and who is who in `workspace.db` (`ha_sign_in`, `ha_logins`), and the token in the OS
+  keyring (domain/home_assistant_sign_in.py); the client is services/home_assistant.py. It only reads HA.
+- HomeHiro keeps its own links for HA's add-on (flow C); they don't sign anyone in to the core.
 
 ### C. Inside the HA app (unchanged)
 
@@ -78,9 +77,8 @@ person isn't linked to a core person waits, as today.
 - **Sign-in for extensions:** `GET /sign-in` (the SPA's sign-in page reads `for` and `next`),
   `GET /api/auth/for/{extension}?next=` (signed in → 303 with a code; else 401 for the page to show the form),
   extension request `auth.code` (EXTENSIONS_ONLY).
-- **Offered sign-ins:** `offers.can_do` entry `{"kind": "sign_in", "id": "home_assistant", "label": "Home Assistant"}`;
-  extension requests `sign_in.start` / `sign_in.finish` (core → extension). `/api/auth/me` lists the offered
-  sign-ins of connected extensions, for the page's buttons.
+- **Sign in with Home Assistant:** the owner's routes `/api/sign-in/home-assistant` (state, connection, enabled,
+  logins); `/api/auth/me` lists it in `sign_in_offers` while it is offered, for the page's button.
 - **Apps card:** `offers.shows` entry `{"kind": "site", "title": "Home", "icon": "house", "url": "http://home.hiro.local", "roles": []}`
   (`roles: []` = every role). `GET /api/apps` lists the ones the caller's role sees, with online/offline.
 - **Sessions:** `SESSION_DAYS = 90`; cookie `SameSite=Lax`.
@@ -94,8 +92,7 @@ person isn't linked to a core person waits, as today.
 - **Signed out → the core:** `/api/me` without a session answers 401 with `signin_url`
   (`<core admin address>/sign-in?for=<pairing name>&next=<path>`); the app goes there instead of showing
   its own sign-in page. `GET /api/auth/hiro?code&next` redeems the code (`auth.code`) and starts the session.
-- **Its own HA sign-in goes:** `/api/auth/login`, `/api/auth/callback` and `components/sign-in.svelte`.
-  ha/login.py stays, used by the `sign_in.start` / `sign_in.finish` handlers.
+- **It has no HA sign-in of its own:** signing in with HA is the core's (flow B).
 - **Users are core people:** `AppUser.id` becomes the core person id (was the HA user id). A migration
   re-keys existing rows through People's links, keeping My room picks, `denied` and seen-times; rows with no
   linked person are dropped (they could only wait). `ha_group`, `ha_owner` and the "Owner while not linked"

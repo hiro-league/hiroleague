@@ -3,11 +3,10 @@
 import pytest
 from pydantic import ValidationError
 
-from hiro_channel_sdk import ExtensionInfo, MethodEntry, PageLink, SignInEntry, SiteEntry, TellsEntry
+from hiro_channel_sdk import ExtensionInfo, MethodEntry, PageLink, SiteEntry, TellsEntry
 
 # Each entry as the apps on the build kit write it today (HomeHiro's extension.py, the kit's site entry).
 HOME_KNOWS = {"method": "home.devices", "name": "Home's devices", "says": "The home's devices"}
-HOME_SIGN_IN = {"kind": "sign_in", "id": "home_assistant", "label": "Home Assistant"}
 SITE = {"kind": "site", "title": "Home", "icon": "house", "url": "http://homehiro.local", "roles": []}
 
 
@@ -16,19 +15,17 @@ def test_todays_descriptions_fit_their_types() -> None:
         "name": "home",
         "offers": {
             "knows": [HOME_KNOWS],
-            "can_do": [HOME_SIGN_IN, {"method": "home.speak", "name": "Say it", "says": "On a camera speaker"}],
+            "can_do": [{"method": "home.speak", "name": "Say it", "says": "On a camera speaker"}],
             "tells": [{"resource": "presence", "name": "Who is home"}],
             "shows": [SITE],
         },
     })
     assert isinstance(info.offers.knows[0], MethodEntry)
-    assert isinstance(info.offers.can_do[0], SignInEntry)
-    assert isinstance(info.offers.can_do[1], MethodEntry)
+    assert isinstance(info.offers.can_do[0], MethodEntry)
     assert isinstance(info.offers.tells[0], TellsEntry)
     assert isinstance(info.offers.shows[0], SiteEntry)
     # Stored and read back as plain JSON, as the core keeps it.
     dumped = info.model_dump(mode="json")["offers"]
-    assert dumped["can_do"][0] == HOME_SIGN_IN
     assert dumped["shows"][0] == SITE
 
 
@@ -37,7 +34,7 @@ def test_todays_descriptions_fit_their_types() -> None:
     [
         ("knows", {"name": "No method"}),  # a method entry without its method
         ("knows", {**HOME_KNOWS, "colour": "red"}),  # a field no type has
-        ("can_do", {"kind": "sign_in", "label": "No id"}),
+        ("can_do", {"kind": "sign_in", "id": "home_assistant", "label": "Home Assistant"}),  # no app offers a sign-in
         ("tells", {"name": "No resource"}),
         ("shows", {**SITE, "kind": "page"}),  # a kind the slot doesn't know
     ],

@@ -220,6 +220,24 @@ class AppContract:
         assert named - declared == set(), "named in the code but not declared in Extension(stories=...)"
         assert declared - named == set(), "declared in Extension(stories=...) but never named in the code"
 
+    # --- what it asks the owner to approve ---
+
+    def test_what_it_asks_to_do_on_its_own_is_understood_and_says_why(self):
+        """Permissions phase 8: each thing the app asks to do on its own (`Extension(asks=...)`) is a permission the
+        SDK knows (approvals.ASKABLE: one the core doesn't know is never approved), says why in a line for the owner,
+        and an ask of another app names it (`to`). An app that declares none yet (None) is left as it is."""
+        from hiro_channel_sdk.approvals import APPS_ASK, ASKABLE
+
+        from .extension import ext
+
+        asks = ext().asks
+        if asks is None:
+            pytest.skip("the app doesn't declare what it asks yet (Extension.asks is None)")
+        assert [a.permission for a in asks if a.permission not in ASKABLE] == [], f"not one of {sorted(ASKABLE)}"
+        assert [a.permission for a in asks if not a.why.strip()] == [], "say why, in a line for the owner"
+        assert [a for a in asks if a.permission == APPS_ASK and not (a.to or "").strip()] == [], \
+            "an ask of another app names it: ask(APPS_ASK, why, to='home')"
+
     # --- the port it serves on ---
 
     def test_it_declares_the_port_it_listens_on(self):

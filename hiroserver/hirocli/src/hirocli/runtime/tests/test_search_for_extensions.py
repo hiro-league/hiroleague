@@ -7,6 +7,8 @@ and a device can't call any of it.
 
 from __future__ import annotations
 
+from hirocli.runtime.tests.approved import approve_every_app
+
 import asyncio
 import json
 import socket
@@ -137,6 +139,7 @@ def test_embed_rerank_and_memory_settings_answer_an_extension(tmp_path: Path, mo
         await _wait_for(lambda: client.status == STATUS_NOT_PAIRED)
         client.pair(start_extension_pairing(workspace, code_length=6, ttl_seconds=60).code)
         await _wait_for(lambda: client.status == STATUS_CONNECTED)
+        approve_every_app(workspace)  # Permissions phase 8: not what this test is about
 
         # The declared uses are kept with the paired extension.
         [paired] = list_paired_extensions(workspace)
@@ -184,9 +187,9 @@ def test_embed_rerank_and_memory_settings_answer_an_extension(tmp_path: Path, mo
         assert {"chunking", "retrieval", "answering", "rewrite"} <= set(knowledge["knowledge"])
         assert set(knowledge["embedder"]) == {"profile_id", "model"} and knowledge["sparse_model"] == "Qdrant/bm25"
 
-        # Refusals: a use with no profile, no texts, a bad top_n.
+        # Refusals: a use it doesn't declare (Permissions phase 8), no texts, a bad top_n, a profile that's gone.
         for method, params, code in (
-            (METHOD_AI_EMBED, {"use": "other", "texts": ["x"]}, "no_profile"),
+            (METHOD_AI_EMBED, {"use": "other", "texts": ["x"]}, "invalid"),
             (METHOD_AI_EMBED, {"use": "embedding", "texts": []}, "invalid"),
             (METHOD_AI_EMBED, {"texts": ["x"]}, "invalid"),
             (METHOD_AI_RERANK, {"use": "reranking", "query": "q", "documents": ["d"], "top_n": 0}, "invalid"),

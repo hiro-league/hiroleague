@@ -4,8 +4,10 @@ what each kind of rule means; access.py the permissions; whose.py whose a record
 
 A person's roles add up. A grant for everyone's passes; a grant for their own things passes only through the rule's
 `whose`, settled here before the handler runs. The owner has everything, and so does everyone with sign-in off
-(AUTH=off, a dev copy). The route gets the caller (`request.state.caller`), their rights (`request.state.rights`) and
-the reach (`request.state.reach`, which a list route takes through `whose.listed`).
+(AUTH=off, a dev copy). The route gets the caller (`request.state.caller`), their rights (`request.state.rights`),
+the reach (`request.state.reach`, which a list route takes through `whose.listed`) and the person's proof from the core
+(`request.state.core_token`, read with api.py's `core_token(request)`; None with sign-in off), which the route passes to
+the helpers that ask the core for them (Permissions phase 8).
 """
 
 from collections.abc import Iterable
@@ -140,8 +142,8 @@ async def _theirs(request: Request, rule: Rule, person_id: str) -> bool:
 
 
 async def guard(request: Request) -> None:
-    """A dependency of every route (the app's app.py). Keeps the caller, their rights and the reach on request.state
-    for the route."""
+    """A dependency of every route (the app's app.py). Keeps the caller, their rights, the reach and the person's proof
+    from the core (api.py `caller`) on request.state for the route."""
     route = request.scope.get("route")
     path = getattr(route, "path", request.url.path)
     if not path.startswith("/api/"):

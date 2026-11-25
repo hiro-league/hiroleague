@@ -199,6 +199,12 @@ class FakeExtensions:
         return {"state": {"people": [{"name": "Joe", "presence": "home", "room": "Kitchen"}]}}
 
 
+@pytest.fixture(autouse=True)
+def _every_app_tells_hiro(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Permissions phase 8: these tests are about what Hiro reads, not about approvals (tested below)."""
+    monkeypatch.setattr("hirocli.tools.extension_state._approved_to_tell", lambda _w, ids: set(ids))
+
+
 def _tool(extensions: FakeExtensions | None) -> ExtensionStateTool:
     tool = ExtensionStateTool()
     tool.attach_runtime(SimpleNamespace(comm_manager=SimpleNamespace(ctx=SimpleNamespace(extension_manager=extensions))))

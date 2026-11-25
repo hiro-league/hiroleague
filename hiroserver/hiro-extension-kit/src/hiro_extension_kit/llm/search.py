@@ -16,7 +16,7 @@ from hiro_channel_sdk import ExtensionRequestError
 from hiro_channel_sdk.constants import METHOD_AI_EMBED, METHOD_AI_RERANK, METHOD_KNOWLEDGE_SETTINGS, METHOD_MEMORY_SETTINGS
 
 from .. import calls, identity
-from ..errors import Invalid, Unavailable
+from ..errors import Invalid, Unavailable, refusal
 from ..extension import ext
 from ..hiroleague import link
 from . import LLMError
@@ -71,6 +71,8 @@ def _use(given: str | None, declared: Any, what: str) -> str:
 
 def _refused(exc: ExtensionRequestError, use: str, what: str) -> Exception:
     """The core's refusal as the error callers handle."""
+    if (refused := refusal(exc)) is not None:  # not approved for the search models (Permissions phase 8)
+        return refused
     if exc.code == "not_connected":
         return Unavailable(_no_core())
     if exc.code == "no_profile":

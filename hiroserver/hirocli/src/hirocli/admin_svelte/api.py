@@ -34,6 +34,7 @@ from hirocli.admin_svelte.routes.people import people_router
 from hirocli.admin_svelte.routes.preferences import preferences_router
 from hirocli.admin_svelte.routes.providers import providers_router
 from hirocli.admin_svelte.routes.runtime import runtime_router
+from hirocli.admin_svelte.routes.sign_in_ways import sign_in_ways_router
 from hirocli.admin_svelte.routes.workspaces import workspaces_router
 from hirocli.admin_svelte.route_rules import require_rule
 
@@ -88,6 +89,8 @@ api_router.include_router(voice_router)  # Phase 7b: voice profiles, voices, Try
 api_router.include_router(search_router)  # the extensions' embedding and reranking uses
 # The family list, its roles and admin sign-ins (Phase 6). Always mounted.
 api_router.include_router(people_router)
+# People → Sign-in: the ways into HiroLeague, "Sign in with Home Assistant" an option the owner adds
+api_router.include_router(sign_in_ways_router)
 api_router.include_router(logs_router)
 # Feature-gated: metrics_router is exclusive to the Metrics feature (only the Server-page Metrics
 # subtab calls /metrics/*), so the whole router is gated — no shared-endpoint split needed.

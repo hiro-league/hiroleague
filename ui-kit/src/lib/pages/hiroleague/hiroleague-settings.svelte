@@ -15,6 +15,7 @@
 	import { Resource } from '$kit/state/resource.svelte';
 	import { ask } from '$kit/ui/confirm.svelte';
 	import Feedback from '$kit/ui/feedback.svelte';
+	import Notice from '$kit/ui/notice.svelte';
 	import {
 		forgetHiroLeague,
 		getHiroLeague,
@@ -24,6 +25,7 @@
 		testHiroLeague,
 		type HiroLeagueStatus
 	} from './api';
+	import { waitingLine } from './approval';
 	import SiteAddress from './site-address.svelte';
 
 	let { after }: { after?: Snippet<[HiroLeagueStatus]> } = $props();
@@ -163,6 +165,26 @@
 					{current.error}
 				{/if}
 			</p>
+		{/if}
+
+		<!-- Permissions phase 8: what the app asks to do that waits for the owner's yes in HiroLeague, as the core last
+		     said (its welcome, approval.changed) -->
+		{#if current?.waiting?.length}
+			<Notice tone="info" title="Waits for the owner's approval in HiroLeague">
+				<ul class="list-disc pl-4">
+					{#each current.waiting as w (`${w.permission} ${w.subject ?? ''}`)}
+						<li>{waitingLine(w)}</li>
+					{/each}
+				</ul>
+				Until the owner says yes, {APP.name} works with what was approved before.
+				{#snippet actions()}
+					{#if current.admin_url}
+						<Button size="sm" variant="outline" href="{current.admin_url.replace(/\/+$/, '')}/extensions?show=approval" target="_blank" rel="noreferrer">
+							Open in HiroLeague <ExternalLink class="size-3" />
+						</Button>
+					{/if}
+				{/snippet}
+			</Notice>
 		{/if}
 
 		{#if current && current.status !== 'no_address'}

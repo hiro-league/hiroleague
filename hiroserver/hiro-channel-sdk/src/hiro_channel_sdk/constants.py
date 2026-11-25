@@ -68,7 +68,9 @@ EXTENSION_DENIED_NOT_PAIRED: str = "not_paired"        # unknown extension_id (n
 EXTENSION_DENIED_BAD_CODE: str = "bad_code"            # pairing code wrong or expired
 EXTENSION_DENIED_BAD_SIGNATURE: str = "bad_signature"  # challenge signature didn't verify
 EXTENSION_DENIED_BAD_FRAME: str = "bad_frame"          # first frame unreadable or incomplete
-EXTENSION_DENIED_NAME_TAKEN: str = "name_taken"        # another extension holds the name it declares (one name, one app)
+EXTENSION_DENIED_NAME_TAKEN: str = "name_taken"        # the name it declares isn't its own: another extension holds it
+#                                                         (one name, one app), or it was paired under another name
+#                                                         (an app's name is fixed at pairing)
 
 EXTENSION_CHANNEL: str = "extension"  # routing.channel on every extension message
 CORE_SENDER_ID: str = "server"        # routing.sender_id on messages the core sends (same as to devices)
@@ -108,7 +110,9 @@ WHATSAPP_ERROR_FAILED: str = "whatsapp_failed"                # WhatsApp refused
 #                    in its own voice from `text`. Hiro's own preferences decide text or a voice
 #                    note. medium: NOTIFY_MEDIUM_WHATSAPP only for now. Since Phase 6 `person` is a
 #                    person id from the core's family list (people.list); the core finds their
-#                    number. Extensions only; a failed person doesn't stop the others.
+#                    number. Extensions only; a failed person doesn't stop the others. Permissions phase 8:
+#                    an app tells people only through notify, so it also takes a picture (image_b64) or a voice
+#                    note (voice_b64, voice_seconds, waveform_b64, transcript), with or without text.
 METHOD_EXTENSION_STATE: str = "extension.state"
 METHOD_NOTIFY: str = "notify"
 NOTIFY_MEDIUM_WHATSAPP: str = "whatsapp"
@@ -238,21 +242,15 @@ VOICE_ERROR_FAILED: str = "failed"          # the provider failed (the message s
 #   auth.code        extension → core, {code} → {person_id, name, role_id, role_ids, role_name}: role_ids every
 #                    role they hold, role_id the first (role_name its name). One use, 60 s, only by the
 #                    extension the code was made for. Error: invalid_code.
-#   sign_in.start    core → extension, {method, client_id, redirect_uri, state} → {url}: where to send the browser
-#                    to sign in (e.g. Home Assistant's login page). `method` is the id the extension offered.
-#   sign_in.finish   core → extension, {method, code, client_id, redirect_uri} → {person_id}: who signed in, as a
-#                    core person. Errors: not_linked (signed in, but not a person in the family list; the message
-#                    says why, for people), failed.
-# An extension offers a sign-in in offers.can_do: {"kind": "sign_in", "id": "home_assistant", "label": "Home
-# Assistant"}; and its site in offers.shows: {"kind": "site", "title": "Home", "icon": "house",
-# "url": "http://homehiro.local", "roles": []} (roles [] = every role).
+# An extension declares its site in offers.shows: {"kind": "site", "title": "Home", "icon": "house",
+# "url": "http://homehiro.local", "roles": []} (roles [] = every role). No extension offers a way to sign in: the core
+# runs every sign-in, "Sign in with Home Assistant" included, and only tells an app who signed in (auth.code).
+#   auth.code also answers {token}: the person's proof for this app alone (Permissions phase 8). The app sends it as
+#                    `_signed_in` with each ask a page makes for that person; it lasts while it is used (90 days).
+#   auth.end         extension → core, {token} → {}: the person signed out of the app; their proof ends.
 METHOD_AUTH_CODE: str = "auth.code"
-METHOD_SIGN_IN_START: str = "sign_in.start"
-METHOD_SIGN_IN_FINISH: str = "sign_in.finish"
+METHOD_AUTH_END: str = "auth.end"
 AUTH_ERROR_INVALID_CODE: str = "invalid_code"
-SIGN_IN_ERROR_NOT_LINKED: str = "not_linked"
-SIGN_IN_ERROR_FAILED: str = "failed"
-OFFER_KIND_SIGN_IN: str = "sign_in"
 OFFER_KIND_SITE: str = "site"
 AUTH_CODE_SECONDS: int = 60
 

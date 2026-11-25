@@ -101,13 +101,26 @@ def parse_recipients(raw: Any, workspace_path: Path) -> list[Recipient]:
     return out
 
 
-def check_request(medium: str, text: str, style: str) -> None:
+# Permissions phase 8: an app tells people only through notify, so it carries what whatsapp.send did: a picture or a
+# voice note (base64), with the voice note's length and waveform, and its transcript for the owner's conversation
+MEDIA_KEYS = ("image_b64", "voice_b64", "voice_seconds", "waveform_b64", "transcript")
+
+
+def media_of(params: dict[str, Any]) -> dict[str, Any]:
+    """The picture or voice note an ask carries; raises NotifyInvalid for both at once."""
+    media = {key: params[key] for key in MEDIA_KEYS if params.get(key) not in (None, "")}
+    if media.get("image_b64") and media.get("voice_b64"):
+        raise NotifyInvalid("Send a picture or a voice note, not both")
+    return media
+
+
+def check_request(medium: str, text: str, style: str, media: dict[str, Any] | None = None) -> None:
     """Raises NotifyInvalid for an unknown medium or style, or nothing to tell."""
     if medium not in MEDIUMS:
         raise NotifyInvalid(f"Unknown medium {medium!r} (one of: {', '.join(MEDIUMS)})")
     if style not in STYLES:
         raise NotifyInvalid(f"Unknown style {style!r} (one of: {', '.join(STYLES)})")
-    if not text.strip():
+    if not text.strip() and not (media or {}).get("image_b64") and not (media or {}).get("voice_b64"):
         raise NotifyInvalid("Nothing to tell: the text is empty")
 
 
@@ -138,9 +151,12 @@ async def notify(
     text: str,
     style: str,
     asked_by: str,
+    media: dict[str, Any] | None = None,
 ) -> list[NotifyResult]:
     """Tell each person; one result per person, in the order given. Raises NotifyInvalid."""
-    check_request(medium, text, style)
+    media = media or {}
+    check_request(medium, text, style, media)
+    sent_media = {k: v for k, v in media.items() if k != "transcript"}
     owner = owner_number(server_ctx)
     results: list[NotifyResult] = []
     for who in recipients:
@@ -151,12 +167,13 @@ async def notify(
             results.append(NotifyResult(who.person_id, who.name, False, f"{who.name} has no WhatsApp number"))
             continue
         try:
-            body = await _body(server_ctx, who, text.strip(), style, is_owner)
+            body = await _body(server_ctx, who, text.strip(), style, is_owner) if text.strip() else ""
             channels = server_ctx.extension_manager
             if channels is None:
                 raise ChannelCallError("WhatsApp isn't running in HiroLeague", "not_running")
             await channels.call_channel(
-                WHATSAPP_CHANNEL, WHATSAPP_CALL_SEND, {"to": who.number, "text": body}, timeout=SEND_TIMEOUT_S
+                WHATSAPP_CHANNEL, WHATSAPP_CALL_SEND, {"to": who.number, "text": body, **sent_media},
+                timeout=SEND_TIMEOUT_S,
             )
         except ChannelCallError as exc:
             reason = "WhatsApp isn't running in HiroLeague" if exc.reason == "not_running" else str(exc)
@@ -169,7 +186,7 @@ async def notify(
             continue
         log.info(f"⬆️ Notify sent — {label} · for {asked_by}", style=style, medium=medium, chars=len(body))
         if is_owner:
-            await record_for_owner(server_ctx, {"text": body}, asked_by)
+            await record_for_owner(server_ctx, {"text": body, **media}, asked_by)
         results.append(NotifyResult(who.person_id, who.name, True))
     return results
 
@@ -186,6 +203,7 @@ async def handle_notify(params: dict[str, Any], ctx: RequestContext) -> dict[str
             text=str(params.get("text") or ""),
             style=str(params.get("style") or NOTIFY_STYLE_EXACT),
             asked_by=sender_label(ctx),
+            media=media_of(params),
         )
     except NotifyInvalid as exc:
         raise RequestRefused("invalid_params", str(exc)) from exc

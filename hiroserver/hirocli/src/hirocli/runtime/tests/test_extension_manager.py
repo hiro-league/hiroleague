@@ -192,7 +192,7 @@ def test_a_second_app_with_a_taken_name_is_refused_and_the_code_stays(tmp_path: 
     assert len(refused) == 2 and all(r.levelno == logging.WARNING for r in refused)
 
 
-def test_a_paired_app_cant_take_another_apps_name_by_renaming_itself(tmp_path: Path) -> None:
+def test_a_paired_apps_name_is_fixed_at_pairing(tmp_path: Path) -> None:
     async def scenario() -> None:
         workspace = tmp_path / "ws"
         port = _free_port()
@@ -210,16 +210,25 @@ def test_a_paired_app_cant_take_another_apps_name_by_renaming_itself(tmp_path: P
         await net.stop()
         await net_runner
 
-        # NetHiro starts again declaring "home": refused, and it keeps its key (it is still NetHiro).
-        renamed = ExtensionClient(f"ws://127.0.0.1:{port}", ExtensionInfo(name="home"),
-                                  ExtensionCredentials(tmp_path / "net"))
-        renamed_runner = asyncio.create_task(renamed.run())
-        await _wait_for(lambda: "already paired as “home”" in str(renamed.status_detail.get("error", "")))
-        assert ExtensionCredentials(tmp_path / "net").extension_id() is not None
-        assert sorted(e.name for e in list_paired_extensions(workspace)) == ["home", "net"]
+        # NetHiro starts again declaring another app's name, then a free one: both refused, and it keeps its key (it
+        # is still NetHiro); its record keeps its name.
+        for other in ("home", "network"):
+            renamed = ExtensionClient(f"ws://127.0.0.1:{port}", ExtensionInfo(name=other),
+                                      ExtensionCredentials(tmp_path / "net"))
+            renamed_runner = asyncio.create_task(renamed.run())
+            await _wait_for(lambda r=renamed: "name is fixed at pairing" in str(r.status_detail.get("error", "")))
+            assert f"paired as “net” and now calls itself “{other}”" in renamed.status_detail["error"]
+            assert ExtensionCredentials(tmp_path / "net").extension_id() is not None
+            assert sorted(e.name for e in list_paired_extensions(workspace)) == ["home", "net"]
+            await renamed.stop()
+            await renamed_runner
 
-        await renamed.stop()
-        await renamed_runner
+        # Its name back: it connects as before
+        back = ExtensionClient(f"ws://127.0.0.1:{port}", ExtensionInfo(name="net"), ExtensionCredentials(tmp_path / "net"))
+        back_runner = asyncio.create_task(back.run())
+        await _wait_for(lambda: back.status == STATUS_CONNECTED)
+        await back.stop()
+        await back_runner
         home, home_runner = clients[0]
         await home.stop()
         await home_runner

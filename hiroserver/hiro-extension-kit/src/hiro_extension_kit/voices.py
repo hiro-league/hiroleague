@@ -15,6 +15,9 @@ edited only in the core's admin.
 Old picks keep working: the core's import (`hiro voice import-homehiro`) kept HomeHiro's TTS profile ids as `hh-<id>`,
 and `resolve` asks with that id when the core has it.
 
+The core's no to the app (Permissions phase 8: not approved to speak) or to the person signed in (picking the default
+needs Profiles: change in HiroLeague) is the kit's error for it, in the core's words (errors.refusal).
+
 Backend kit, step 5: HomeHiro's and NetHiro's copies; HomeHiro's had all of it, NetHiro's the list.
 """
 
@@ -35,10 +38,10 @@ from sqlmodel import Session
 from . import identity, settings
 from . import calls
 from .db import engine, run_db
-from .errors import Invalid, OutsideError, Unavailable, failed
+from .errors import Invalid, OutsideError, Unavailable, failed, refusal
 from hiro_channel_sdk.workers import Worker
 from .extension import ext
-from .hiroleague import link
+from .hiroleague import as_person, link
 
 log = identity.logger("voices")
 
@@ -226,6 +229,8 @@ def name_of(profile_id: str | None) -> str | None:
 
 def _refused(exc: ExtensionRequestError) -> Exception:
     """The core's refusal as the error callers handle."""
+    if (refused := refusal(exc)) is not None:
+        return refused
     if exc.code == "not_connected":
         return Unavailable(f"Not said: {_no_core()}")
     if exc.code == "no_profile":
@@ -267,13 +272,17 @@ async def speak(profile_id: str | None, text: str, *, label: str = "") -> Spoken
         raise VoiceError(f"HiroLeague's clip can't be read ({type(exc).__name__})") from exc
 
 
-async def set_default(profile_id: str | None) -> None:
-    """Pick the profile the app's voice use speaks with (saved in the core's voice.uses)."""
+async def set_default(profile_id: str | None, *, signed_in: str | None) -> None:
+    """Pick the profile the app's voice use speaks with (saved in the core's voice.uses), for the person signed in
+    (`signed_in`: their proof, `request.state.core_token`; their roles need Profiles: change in HiroLeague)."""
     if not link.client.connected:
         raise Unavailable(_no_core())
+    params = as_person({"use": _voice_use(), "profile": profile_id}, signed_in)
     try:
-        await link.client.request(METHOD_VOICE_USES_SET, {"use": _voice_use(), "profile": profile_id}, timeout=TIMEOUT)
+        await link.client.request(METHOD_VOICE_USES_SET, params, timeout=TIMEOUT)
     except ExtensionRequestError as exc:
+        if (refused := refusal(exc)) is not None:
+            raise refused from exc
         raise Invalid(f"Not saved in HiroLeague: {exc.message}") from exc
     await refresh()
 

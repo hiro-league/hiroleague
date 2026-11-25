@@ -8,7 +8,7 @@
 	import CheckboxField from '$kit/ui/checkbox-field.svelte';
 	import { Checkbox } from '$kit/components/ui/checkbox/index.js';
 	import { dateTime } from '$kit/format/time';
-	import { roleSummary } from './rules';
+	import { OWNER, OWNER_IN_HIROLEAGUE, roleSummary } from './rules';
 	import type { UsersAdmin } from './users-admin.svelte';
 
 	let { ua }: { ua: UsersAdmin } = $props();
@@ -35,14 +35,18 @@
 		<h3 class="font-medium">Roles</h3>
 		{#each roles as r (r.id)}
 			{@const held = ua.form.value.roleIds.includes(r.id)}
+			{@const owner = r.id === OWNER}
 			{#snippet says()}{r.says}{/snippet}
-			<CheckboxField
-				label={r.name}
-				checked={held}
-				disabled={ua.form.value.denied || (held && ua.form.value.roleIds.length === 1)}
-				details={says}
-				onchange={() => ua.toggleRole(r.id)}
-			/>
+			<!-- The Owner role shows who holds it, but no app gives or takes it: the reason on hover -->
+			<div title={owner ? OWNER_IN_HIROLEAGUE : undefined}>
+				<CheckboxField
+					label={r.name}
+					checked={held}
+					disabled={owner || ua.form.value.denied || (held && ua.form.value.roleIds.length === 1)}
+					details={says}
+					onchange={() => ua.toggleRole(r.id)}
+				/>
+			</div>
 		{/each}
 		<p class="text-xs text-muted-foreground">Their rights add up. The roles are kept in HiroLeague's family list; what each may do in {APP.name} is under Roles.</p>
 	</section>

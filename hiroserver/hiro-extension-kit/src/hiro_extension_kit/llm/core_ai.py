@@ -11,6 +11,9 @@ that was. A read that fails keeps the last list and says why.
 
 The core's answer is read loosely (`parse`, pure): a field it leaves out is left empty here, never a failure, so the
 two sides can grow apart a little without breaking the pickers.
+
+Picking a use's profile is done for the person signed in (`set_use`'s `signed_in`, Permissions phase 8): the core
+answers by their rights, and its no comes back as the kit's error for it, in its words (errors.refusal).
 """
 
 import asyncio
@@ -26,9 +29,9 @@ from pydantic import BaseModel
 
 from .. import identity
 from .. import calls
-from ..errors import Invalid, Unavailable, failed
+from ..errors import Invalid, Unavailable, failed, refusal
 from hiro_channel_sdk.workers import Worker
-from ..hiroleague import link
+from ..hiroleague import as_person, link
 from ..extension import ext
 
 log = identity.logger("llm")
@@ -265,14 +268,18 @@ async def read() -> CoreAi:
                   profiles=profiles, uses=uses_of(profiles, uses))
 
 
-async def set_use(use: str, profile_id: str | None) -> None:
-    """Phase 7b: pick the profile one of the app's uses asks with, saved in the core's ai.uses (`ai.uses.set`);
-    the list is read again so the page shows it."""
+async def set_use(use: str, profile_id: str | None, *, signed_in: str | None) -> None:
+    """Phase 7b: pick the profile one of the app's uses asks with, saved in the core's ai.uses (`ai.uses.set`), for
+    the person signed in (`signed_in`: their proof, `request.state.core_token`; their roles need Profiles: change in
+    HiroLeague); the list is read again so the page shows it."""
     if not link.client.connected:
         raise Unavailable(_no_core())
+    params = as_person({"use": use, "profile": profile_id}, signed_in)
     try:
-        await link.client.request(METHOD_AI_USES_SET, {"use": use, "profile": profile_id}, timeout=TIMEOUT)
+        await link.client.request(METHOD_AI_USES_SET, params, timeout=TIMEOUT)
     except ExtensionRequestError as exc:
+        if (refused := refusal(exc)) is not None:
+            raise refused from exc
         raise Invalid(f"Not saved in HiroLeague: {exc.message}") from exc
     await refresh()
 

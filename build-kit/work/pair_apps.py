@@ -9,7 +9,7 @@ Run in the core's own environment (it needs the SDK and the core's package), wit
 (the core's own, written to its workspace as `hiro extension add` does; for an app the core already holds by that
 name, one that pairs it again on its record, as `hiro extension pair-again` does) and pairs with it, one app at a
 time, since the core keeps one code at a time. The app declares itself fully when it next connects; pairing only needs
-its name. Prints one line per app; exits 1 when one didn't pair.
+its name. Each app is then approved for what it asks, with nobody clicking (Permissions phase 8). Prints one line per app; exits 1 when one didn't pair.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from pathlib import Path
 
 from hiro_channel_sdk import ExtensionClient, ExtensionCredentials, ExtensionInfo
 from hiro_channel_sdk.extension import STATUS_CONNECTED, STATUS_NOT_PAIRED
+from hirocli.domain import approvals
 from hirocli.domain.extensions import start_extension_pairing
 
 WAIT_S = 30  # for the core to take a code
@@ -106,8 +107,12 @@ def main(argv: list[str]) -> int:
         # took the code, before "connected" is seen. Paired = a key saved here that the core now knows.
         new_id = ExtensionCredentials(folder).extension_id()
         ok = bool(new_id) and known(workspace, new_id)
+        if ok:
+            # Permissions phase 8: an environment is the owner's test copy and nobody clicks there. The app is approved
+            # as one from before approvals: its first connect with its declaration approves exactly what it asks.
+            approvals.write(workspace, new_id, None)
         why = refused or f"the core didn't take the code within {WAIT_S} s"
-        print(f"{name}: paired" if ok else f"{name}: {why}")
+        print(f"{name}: paired, approved for what it asks" if ok else f"{name}: {why}")
         failed += not ok
     return 1 if failed else 0
 

@@ -2,10 +2,10 @@
 app's profile pickers: read by every role that edits one of those
 (auth/guard.py)."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-from ..hiroleague import link
+from ..hiroleague import core_token, link
 from . import core_ai
 from .core_ai import CoreAi
 
@@ -28,7 +28,8 @@ class UsePick(BaseModel):
 
 
 @router.put("/uses/{use}")
-async def set_use(use: str, body: UsePick) -> CoreAiOut:
-    """Phase 7b: pick the core's profile one of the app's uses asks with, saved in HiroLeague (`ai.uses.set`)."""
-    await core_ai.set_use(use, body.profile_id)
+async def set_use(request: Request, use: str, body: UsePick) -> CoreAiOut:
+    """Phase 7b: pick the core's profile one of the app's uses asks with, saved in HiroLeague (`ai.uses.set`) for the
+    person signed in: the core answers by their rights (Permissions phase 8)."""
+    await core_ai.set_use(use, body.profile_id, signed_in=core_token(request))
     return await core_ai_profiles()

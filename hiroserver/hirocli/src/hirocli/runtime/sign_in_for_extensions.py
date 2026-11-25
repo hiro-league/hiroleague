@@ -6,12 +6,11 @@ declared, with a one-time code; the extension redeems the code over its paired c
 (``auth.code``) and keeps its own sign-in. Contract: hiro_channel_sdk.constants (Phase 8 block) and
 docs/phase8-one-sign-in-design.md.
 
-An extension may also offer a way to sign in (HomeHiro: Home Assistant's login). The core shows the
-button and asks the extension to start (``sign_in.start``) and finish (``sign_in.finish``) it; the
-extension answers which person signed in. The core keeps nothing about how they did.
+No extension offers a way to sign in: "Sign in with Home Assistant" is the core's own (domain/home_assistant_sign_in.py),
+so no app ever says who signed in.
 
-What lives here: the one-time codes (memory only: they last a minute and die with the process), the
-``auth.code`` handler, and reading what extensions declare (their sites and offered sign-ins).
+What lives here: the one-time codes and the started Home Assistant sign-ins (memory only: they last minutes and die
+with the process), the ``auth.code`` handler, and reading the sites extensions declare.
 """
 
 from __future__ import annotations
@@ -20,7 +19,7 @@ import asyncio
 import hashlib
 import secrets
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode, urlsplit
@@ -29,12 +28,13 @@ from hiro_channel_sdk.constants import (
     AUTH_CODE_SECONDS,
     AUTH_ERROR_INVALID_CODE,
     METHOD_AUTH_CODE,
+    METHOD_AUTH_END,
     METHOD_SITES_LIST,
-    OFFER_KIND_SIGN_IN,
     OFFER_KIND_SITE,
 )
 from hiro_commons.log import Logger
 
+from ..domain import approvals, person_tokens
 from ..domain.extensions import list_paired_extensions
 from ..domain.access import admin_access
 from ..domain.people import get_person, get_role
@@ -46,8 +46,7 @@ if TYPE_CHECKING:
 
 log = Logger.get("SIGN_IN")
 
-# A sign-in started with an extension's offered way (Home Assistant's login page) must come back
-# within this long.
+# A sign-in started at Home Assistant's login page must come back within this long.
 SIGN_IN_STATE_SECONDS = 600
 
 
@@ -67,16 +66,6 @@ class Site:
     url: str  # its origin, e.g. http://homehiro.local
     roles: tuple[str, ...]  # () = every role
     online: bool
-
-
-@dataclass(frozen=True)
-class SignInOffer:
-    """A way to sign in that a connected extension offers (offers.can_do, kind "sign_in")."""
-
-    extension_id: str
-    extension: str
-    id: str  # e.g. "home_assistant"
-    label: str  # e.g. "Home Assistant"
 
 
 def origin_of(url: str) -> str | None:
@@ -114,21 +103,38 @@ def _site_from(extension_id: str, info: dict[str, Any], online: bool) -> Site | 
     return None
 
 
+def _approved_site(workspace_path: Path, site: Site) -> Site | None:
+    """Permissions phase 8: people, sign-in codes and card links go only to the address the owner approved. A new
+    address waits, and the approved one stays in use meanwhile; an app approved for no address shows no card."""
+    from hiro_channel_sdk.approvals import SITE_ADDRESS
+
+    approval = approvals.read(workspace_path, site.extension_id)
+    if approval is None or approval.approved is None:
+        return site
+    addresses = [origin_of(i.subject) for i in approval.approved if i.permission == SITE_ADDRESS]
+    if site.url in addresses:
+        return site
+    kept = next((a for a in reversed(addresses) if a), None)
+    return replace(site, url=kept) if kept else None
+
+
 def list_sites(manager: ExtensionManager | None, workspace_path: Path) -> list[Site]:
-    """Every paired extension's declared site: live info when connected, else what it last declared."""
+    """Every paired extension's declared site: live info when connected, else what it last declared; at the address
+    the owner approved (Permissions phase 8)."""
     live = manager.snapshot() if manager is not None else {}
     sites: list[Site] = []
     seen: set[str] = set()
     for eid, conn in live.items():
         site = _site_from(eid, conn.get("info") or {}, online=True)
         if site is not None:
-            sites.append(site)
             seen.add(eid)
+            if (site := _approved_site(workspace_path, site)) is not None:
+                sites.append(site)
     for paired in list_paired_extensions(workspace_path):
         if paired.extension_id in seen:
             continue
         site = _site_from(paired.extension_id, paired.info or {}, online=False)
-        if site is not None:
+        if site is not None and (site := _approved_site(workspace_path, site)) is not None:
             sites.append(site)
     return sites
 
@@ -144,27 +150,6 @@ def find_site(manager: ExtensionManager | None, workspace_path: Path, extension:
         if extension in (site.extension, site.extension_id):
             return site
     return None
-
-
-def list_sign_in_offers(manager: ExtensionManager | None) -> list[SignInOffer]:
-    """The ways to sign in that connected extensions offer (shown only while they're connected)."""
-    if manager is None:
-        return []
-    offers: list[SignInOffer] = []
-    for eid, conn in manager.snapshot().items():
-        info = conn.get("info") or {}
-        for item in _offers(info, "can_do", OFFER_KIND_SIGN_IN):
-            offer_id = str(item.get("id") or "").strip()
-            if offer_id:
-                offers.append(
-                    SignInOffer(
-                        extension_id=eid,
-                        extension=str(info.get("name") or conn.get("name") or eid),
-                        id=offer_id,
-                        label=str(item.get("label") or offer_id),
-                    )
-                )
-    return offers
 
 
 def back_url(site: Site, code: str, next_path: str) -> str:
@@ -192,9 +177,8 @@ class _Code:
 
 @dataclass
 class _Started:
-    """A sign-in started with an extension's offered way, waiting for the browser to come back."""
+    """A sign-in started at Home Assistant's login page, waiting for the browser to come back."""
 
-    extension_id: str
     method: str
     for_extension: str  # ?for= of the sign-in page ("" = the admin itself)
     next_path: str
@@ -206,7 +190,7 @@ def _hash(token: str) -> str:
 
 
 class SignInCodes:
-    """One-time codes for extensions, and started offered sign-ins. Memory only: both last minutes."""
+    """One-time codes for extensions, and started Home Assistant sign-ins. Memory only: both last minutes."""
 
     def __init__(self) -> None:
         self._codes: dict[str, _Code] = {}
@@ -233,11 +217,11 @@ class SignInCodes:
         del self._codes[_hash(code)]
         return found.person_id
 
-    def start(self, extension_id: str, method: str, for_extension: str, next_path: str) -> str:
+    def start(self, method: str, for_extension: str, next_path: str) -> str:
         now = time.monotonic()
         self._prune(now)
         state = secrets.token_urlsafe(24)
-        self._started[state] = _Started(extension_id, method, for_extension, next_path, now + SIGN_IN_STATE_SECONDS)
+        self._started[state] = _Started(method, for_extension, next_path, now + SIGN_IN_STATE_SECONDS)
         return state
 
     def finish(self, state: str) -> _Started | None:
@@ -266,8 +250,11 @@ async def handle_auth_code(params: dict[str, Any], ctx: RequestContext) -> dict[
     if person is None:
         raise RequestRefused(AUTH_ERROR_INVALID_CODE, "That person is no longer in the family list.")
     role = await asyncio.to_thread(get_role, workspace_path, person.role_id)
+    # Permissions phase 8: the person's proof, for this app alone; its pages send it with what they ask for them
+    token = await asyncio.to_thread(person_tokens.issue, workspace_path, person.person_id, extension_id)
     log.info(f"✅ Signed in through HiroLeague — {person.name} · {sender_label(ctx)}", role=person.role_id)
     return {
+        "token": token,
         "person_id": person.person_id,
         "name": person.name,
         "role_id": person.role_id,  # the first of role_ids: what an app reads until it knows several (phase 5)
@@ -302,7 +289,17 @@ async def handle_sites_list(params: dict[str, Any], ctx: RequestContext) -> dict
     }
 
 
+async def handle_auth_end(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
+    """Permissions phase 8: the person signed out of the app, so the proof the core gave it for them ends."""
+    extension_id = getattr(getattr(ctx.msg, "routing", None), "sender_id", "") or ""
+    token = str(params.get("token") or "")
+    if token:
+        await asyncio.to_thread(person_tokens.end, Path(ctx.server_ctx.workspace_path), token, extension_id)
+    return {}
+
+
 SIGN_IN_REQUEST_HANDLERS: tuple[tuple[str, Any, frozenset[str]], ...] = (
     (METHOD_AUTH_CODE, handle_auth_code, EXTENSIONS_ONLY),
+    (METHOD_AUTH_END, handle_auth_end, EXTENSIONS_ONLY),
     (METHOD_SITES_LIST, handle_sites_list, EXTENSIONS_ONLY),  # the app switcher in every app
 )
