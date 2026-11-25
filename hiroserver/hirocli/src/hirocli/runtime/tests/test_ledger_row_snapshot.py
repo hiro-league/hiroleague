@@ -101,6 +101,8 @@ async def _capture_rows(
         "request_voice_reply": False,
         "voice_input_allowed": True,
         "tools_enabled": True,
+        # The tools the turn offers the model: its person may use them (Permissions phase 4)
+        "tools_offered": ["echo_tool"],
         "knowledge_enabled": True,
         "inbound_envelope": env,
         "routing_metadata": {},

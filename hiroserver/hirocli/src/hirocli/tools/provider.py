@@ -15,6 +15,7 @@ from ..domain.credential_store import CredentialStore
 from ..domain.model_catalog import MODEL_KINDS, ModelKind, get_model_catalog
 from ..domain.workspace import resolve_workspace
 from .base import Tool, ToolParam
+from .rights import ToolRight
 
 log = Logger.get("TOOL.PROVIDER")
 
@@ -306,6 +307,7 @@ class ProviderRemoveTool(Tool):
 
 class ProviderListConfiguredTool(Tool):
     name = "provider_list_configured"
+    right = ToolRight("ai.providers", "see")
     description = (
         "List providers that have credentials configured in this workspace with status summary."
     )
@@ -323,6 +325,7 @@ class ProviderListConfiguredTool(Tool):
 
 class AvailableModelsListTool(Tool):
     name = "available_models_list"
+    right = ToolRight("ai.providers", "see")
     description = (
         "List catalog models the workspace can use (provider must be configured). "
         "Optional filters: model_kind, model_class."

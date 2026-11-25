@@ -15,6 +15,7 @@ from typing import Any
 
 from ..domain.workspace import WorkspaceError, resolve_workspace
 from .base import Tool, ToolParam
+from .rights import ToolRight
 
 
 def _image_workspace_path(workspace: str | None) -> Path:
@@ -54,6 +55,7 @@ class GenerateImageTool(Tool):
     """Generate an image from a text prompt using the configured image-gen provider."""
 
     name = "generate_image"
+    right = ToolRight("ai.images", "run")
     description = (
         "Generate an image from a text prompt using the workspace image-generation "
         "model (e.g. Cloudflare FLUX.1 schnell). Optionally pick a named image profile "

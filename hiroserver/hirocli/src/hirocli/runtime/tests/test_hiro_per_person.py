@@ -382,13 +382,26 @@ def test_with_none_known_on_a_reply_goes_to_every_device_of_the_person(family: S
     assert targeting.for_person(family.misho.person_id) == ["dev-misho"]
 
 
-def test_only_the_owners_turns_get_tools_until_phase_4(family: SimpleNamespace) -> None:
-    from hirocli.runtime.agent_manager import turn_may_use_tools
+def test_each_turn_is_offered_the_tools_its_writer_may_use(family: SimpleNamespace) -> None:
+    """Permissions phase 4 lifts phase 3's rule (only the owner's turns use tools): a turn acts for its writer, and is
+    offered the tools their rights reach."""
+    from hirocli.tools import all_tools
+    from hirocli.tools.registry import ToolRegistry
 
+    registry = ToolRegistry()
+    registry.register_all(all_tools())
     owner = _receive(family.path, _whatsapp(family.misho.whatsapp)).ran[0]
     mona = _receive(family.path, _whatsapp(family.mona.whatsapp)).ran[0]
-    assert turn_may_use_tools(owner.routing.metadata)
-    assert not turn_may_use_tools(mona.routing.metadata)
+    owner_user = get_default_user_id(family.path)
+    mona_user = chat_user_id(family.path, family.mona.person_id, owner=False)
+    as_owner = am.acting_for_turn(family.path, owner.routing.metadata, owner_user)
+    as_mona = am.acting_for_turn(family.path, mona.routing.metadata, mona_user)
+    assert as_mona.person_id == family.mona.person_id and not as_mona.owner and as_owner.owner
+    every = {t.name for t in registry.agent_tools()}
+    assert set(am.tools_offered(registry, as_owner, tools_enabled=True)) == every
+    mona_tools = set(am.tools_offered(registry, as_mona, tools_enabled=True))
+    assert "extension_state" in mona_tools and "message_history" in mona_tools
+    assert "log_tail" not in mona_tools and "people_list" not in mona_tools
 
 
 def test_a_change_to_people_or_roles_pushes_the_list_again(family: SimpleNamespace) -> None:

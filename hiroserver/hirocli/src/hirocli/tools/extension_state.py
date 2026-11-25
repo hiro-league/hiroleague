@@ -19,6 +19,7 @@ from hiro_commons.log import Logger
 
 from ..services.ai_usage.from_ledger import usage_person
 from .base import Tool, ToolParam
+from .rights import ToolRight
 
 log = Logger.get("EXT_STATE")
 
@@ -50,6 +51,7 @@ class ExtensionStateTool(Tool):
     # Live: a read from an earlier turn is shown to Hiro as out of date, so it reads again.
     agent_live = True
     name = "extension_state"
+    right = ToolRight("assistant", "talk")
     description = (
         "Read what the programs connected to Hiro know right now, live. The home (HomeHiro) "
         "tells who is home, who is away and since when, and which room each person is in and "

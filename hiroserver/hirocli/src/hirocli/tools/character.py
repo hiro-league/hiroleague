@@ -18,6 +18,7 @@ from typing import Any
 from ..domain import character as character_domain
 from ..domain.workspace import resolve_workspace, workspace_id_for_path
 from .base import Tool, ToolParam
+from .rights import ToolRight
 
 
 def _resolve_path(workspace: str | None) -> Path:
@@ -151,6 +152,7 @@ class CharacterUploadPhotoResult:
 
 class CharacterListTool(Tool):
     name = "character_list"
+    right = ToolRight("assistant", "talk")
     description = "List all characters in the workspace (id, name, profile fields, default flag)"
     params = {
         "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
@@ -164,6 +166,7 @@ class CharacterListTool(Tool):
 
 class CharacterGetTool(Tool):
     name = "character_get"
+    right = ToolRight("assistant.characters", "see")
     description = "Load full character configuration including prompt and backstory text"
     params = {
         "character_id": ToolParam(str, "Character id (slug, e.g. hiro)"),
@@ -179,6 +182,7 @@ class CharacterGetTool(Tool):
 class CharacterCreateTool(Tool):
     agent_default = False
     name = "character_create"
+    right = ToolRight("assistant.characters", "change")
     description = "Create a new character with its own folder under characters/<id>/"
     params = {
         "character_id": ToolParam(str, "New character id (3-32 char slug: a-z, 0-9, hyphens)"),
@@ -242,6 +246,7 @@ class CharacterCreateTool(Tool):
 class CharacterUpdateTool(Tool):
     agent_default = False
     name = "character_update"
+    right = ToolRight("assistant.characters", "change")
     description = "Update an existing character; only provided fields are changed"
     params = {
         "character_id": ToolParam(str, "Character id to update"),
@@ -297,6 +302,7 @@ class CharacterUpdateTool(Tool):
 class CharacterDeleteTool(Tool):
     agent_default = False
     name = "character_delete"
+    right = ToolRight("assistant.characters", "change")
     description = "Delete a character folder and its workspace.db row (cannot delete the default)"
     params = {
         "character_id": ToolParam(str, "Character id to delete"),

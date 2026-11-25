@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 
+from hiro_commons import log as core_log
 from hiro_commons.constants.storage import CHARACTERS_DIR, DEFAULT_CHARACTER_ID
+from hiro_commons.log import Logger
+from hiro_commons.logging_foundation.line import ATTRIBUTES
 
 import pytest
 
@@ -112,3 +116,24 @@ def test_replace_character_photo(tmp_path) -> None:
     assert name.startswith("photo.")
     d = get_character_detail(tmp_path, DEFAULT_CHARACTER_ID)
     assert d["has_photo"] is True
+
+
+def test_every_change_logs_its_line_with_info_on(tmp_path, caplog, monkeypatch) -> None:
+    # A fixed bug: the module logged keyword fields through a standard logger, which raised a TypeError once INFO was
+    # on for it (the server's level), after the change was written. INFO on for both the old module logger and the
+    # area the lines go to now.
+    Logger.setup(console=False)
+    monkeypatch.setitem(core_log._MODULE_OVERRIDES, "CHARACTER", logging.INFO)
+    caplog.set_level(logging.INFO, logger="hirocli.domain.character")
+    caplog.set_level(logging.INFO, logger="CHARACTER")
+
+    seed_default_characters(tmp_path)
+    create_character(tmp_path, "coach-1", "Coach")
+    update_character(tmp_path, "coach-1", description="Updated")
+    replace_character_photo(tmp_path, "coach-1", character_dir(tmp_path, DEFAULT_CHARACTER_ID) / "photo.png")
+    assert delete_character(tmp_path, "coach-1") is True
+
+    lines = {r.getMessage(): getattr(r, ATTRIBUTES, {}) for r in caplog.records if r.name == "CHARACTER"}
+    assert lines["Seeded default character row in workspace.db"]["character_id"] == DEFAULT_CHARACTER_ID
+    for message in ("Created character", "Updated character", "Updated character photo", "Deleted character"):
+        assert lines[message]["character_id"] == "coach-1"

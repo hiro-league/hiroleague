@@ -39,6 +39,7 @@ from ..domain.workspace import workspace_id_for_path
 from ..domain.config import load_config, master_key_path
 from ..domain.workspace import resolve_workspace
 from .base import Tool, ToolParam
+from .rights import ToolRight
 
 log = Logger.get("CHANNELS")
 
@@ -179,6 +180,7 @@ def _apply_secret_write(
 
 class ChannelListTool(Tool):
     name = "channel_list"
+    right = ToolRight("extensions", "see")
     description = "List all configured channel plugins and their enabled status"
     params = {
         "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
@@ -337,6 +339,7 @@ class ChannelSetupTool(Tool):
 
 class ChannelEnableTool(Tool):
     name = "channel_enable"
+    right = ToolRight("extensions", "change")
     description = "Enable a configured channel plugin"
     params = {
         "channel_name": ToolParam(str, "Channel name to enable"),
@@ -358,6 +361,7 @@ class ChannelEnableTool(Tool):
 
 class ChannelDisableTool(Tool):
     name = "channel_disable"
+    right = ToolRight("extensions", "change")
     description = "Disable a channel plugin without removing its configuration"
     params = {
         "channel_name": ToolParam(str, "Channel name to disable"),

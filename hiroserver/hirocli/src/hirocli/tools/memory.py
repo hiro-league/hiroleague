@@ -12,6 +12,7 @@ from ..domain.preferences import load_preferences
 from ..domain.workspace import resolve_workspace
 from ..services.memory import create_memory_service
 from .base import Tool, ToolParam
+from .rights import THEIRS, Acting, ToolRight
 
 
 def _resolve_path(workspace: str | None) -> Path:
@@ -51,6 +52,7 @@ def _memory_user_id(workspace_path: Path) -> int:
 def _resolve_list_clear_context(
     runtime: Any | None,
     workspace: str | None,
+    acting: Acting | None = None,
 ) -> tuple[Any, int]:
     rt_path = _runtime_workspace(runtime)
     service = _runtime_service(runtime)
@@ -61,7 +63,8 @@ def _resolve_list_clear_context(
         service = _service(rt_path)
     elif rt_path is None:
         rt_path = _resolve_path(workspace)
-    return service, _memory_user_id(rt_path)
+    # Hiro's turn reads and forgets its person's own memory; the command line, the owner's
+    return service, acting.user_id if acting is not None else _memory_user_id(rt_path)
 
 
 @dataclass
@@ -80,6 +83,7 @@ class MemoryListTool(Tool):
     # graphs because they only have a value here. Keep off the agent surface.
     agent_default = False
     name = "memory_list"
+    right = ToolRight("memories", "see", THEIRS)
     description = "List long-term memories for the current user, optionally scoped to a character"
     params = {
         "character_id": ToolParam(str, "Character id to filter by", required=False),
@@ -109,10 +113,12 @@ class MemoryListTool(Tool):
         self,
         character_id: str | None = None,
         workspace: str | None = None,
+        acting: Acting | None = None,
     ) -> MemoryListResult:
         service, user_id = _resolve_list_clear_context(
             getattr(self, "_runtime", None),
             workspace,
+            acting,
         )
         memories = await service.list_all(
             user_id=user_id,
@@ -125,6 +131,7 @@ class MemoryClearTool(Tool):
     runtime = True
     agent_default = False
     name = "memory_clear"
+    right = ToolRight("memories", "change", THEIRS)
     description = "Delete long-term memories for the current user, optionally scoped to a character"
     params = {
         "character_id": ToolParam(str, "Character id to filter by", required=False),
@@ -154,10 +161,12 @@ class MemoryClearTool(Tool):
         self,
         character_id: str | None = None,
         workspace: str | None = None,
+        acting: Acting | None = None,
     ) -> MemoryClearResult:
         service, user_id = _resolve_list_clear_context(
             getattr(self, "_runtime", None),
             workspace,
+            acting,
         )
         deleted = await service.clear_all(
             user_id=user_id,

@@ -61,6 +61,8 @@ def turn_state(
         "request_voice_reply": False,
         "voice_input_allowed": True,
         "tools_enabled": True,
+        # The tools the turn offers the model: its person may use them (Permissions phase 4)
+        "tools_offered": ["echo_tool"],
         "knowledge_enabled": False,
         "inbound_envelope": envelope,
         "routing_metadata": {"source": "test"},
