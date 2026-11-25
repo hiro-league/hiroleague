@@ -46,11 +46,11 @@ async def _secret_history(params: dict[str, Any], ctx: Any) -> dict[str, Any]:
     return {"history": "only for the app"}
 
 
-def _core(workspace: Path, port: int) -> tuple[ExtensionManager, SimpleNamespace]:
+def _core(workspace: Path, port: int, core_name: str = "hiro") -> tuple[ExtensionManager, SimpleNamespace]:
     ctx = SimpleNamespace(
         workspace_path=workspace,
         workspace_name="test",
-        config=Config(extension_host="127.0.0.1", extension_port=port),
+        config=Config(extension_host="127.0.0.1", extension_port=port, core_name=core_name),
         stop_event=asyncio.Event(),
     )
     handler = RequestHandler(ctx)  # type: ignore[arg-type]
@@ -98,6 +98,7 @@ def test_pair_call_both_ways_remove_and_sign_in_again(tmp_path: Path) -> None:
         [paired] = list_paired_extensions(workspace)
         assert paired.name == "home"
         assert client.status_detail["core"]["name"] == "HiroLeague"
+        assert client.status_detail["core"]["domain"] == "hiro.local"  # the default core's
 
         # Test call 1: the extension asks the core.
         core = await client.request("core.info")
@@ -293,5 +294,29 @@ def test_listen_failure_does_not_raise(tmp_path: Path) -> None:
             await asyncio.wait_for(manager.run(), 5)  # returns instead of raising
             state = manager.listen_state()
             assert state["listening"] is False and state["error"]
+
+    asyncio.run(scenario())
+
+
+def test_the_welcome_says_the_cores_own_domain(tmp_path: Path) -> None:
+    """A core the house named testpc tells its apps so: their names are <label>.testpc.local."""
+
+    async def scenario() -> None:
+        workspace = tmp_path / "ws"
+        port = _free_port()
+        manager, ctx = _core(workspace, port, core_name="testpc")
+        server = asyncio.create_task(manager.run())
+        await _wait_for(lambda: manager.listen_state()["listening"])
+        client = _client(port, tmp_path / "home")
+        runner = asyncio.create_task(client.run())
+        await _wait_for(lambda: client.status == STATUS_NOT_PAIRED)
+        client.pair(start_extension_pairing(workspace, code_length=6, ttl_seconds=60).code)
+        await _wait_for(lambda: client.status == STATUS_CONNECTED)
+        assert client.status_detail["core"]["domain"] == "testpc.local"
+
+        await client.stop()
+        await runner
+        ctx.stop_event.set()
+        await asyncio.wait_for(server, 5)
 
     asyncio.run(scenario())

@@ -20,6 +20,7 @@ from hiro_commons.process import read_pid, read_running_pid
 
 from ..domain.config import Config, load_config, load_state, master_key_path, save_config
 from ..domain.crypto import load_or_create_master_key
+from ..domain.site_names import SiteNameError, check_core_name
 from ..domain.workspace import (
     admin_port_for,
     http_port_for,
@@ -28,7 +29,7 @@ from ..domain.workspace import (
     resolve_workspace,
     WorkspaceError,
 )
-from ..constants import PID_FILENAME
+from ..constants import ENV_CORE_NAME, PID_FILENAME
 from .base import Tool, ToolParam
 from . import server_control as ctrl
 from .server_models import (
@@ -68,6 +69,24 @@ def _count_configured_providers(workspace_path: Path, workspace_id: str) -> int:
         return 0
 
 
+def core_name_for(existing: Config, *, is_new: bool, asked: str | None) -> str:
+    """The core's name a setup keeps: the one asked for a new workspace, else the workspace's own. A workspace keeps
+    the name it was set up with (nothing renames a core yet: its apps' names and the paired phones' gateway hang on
+    it), so another name asked for it is refused in words. Raises WorkspaceError."""
+    if asked is None or not asked.strip():
+        return existing.core_name
+    try:
+        name = check_core_name(asked)
+    except SiteNameError as exc:
+        raise WorkspaceError(str(exc)) from exc
+    if not is_new and name != existing.core_name:
+        raise WorkspaceError(
+            f"This workspace's core is named {existing.core_name} (its admin at {existing.site_domain()}): a "
+            "workspace keeps the name it was set up with."
+        )
+    return name
+
+
 # ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
@@ -102,6 +121,11 @@ class SetupTool(Tool):
             "Skip auto-import of API keys from environment (CLI will provision interactively)",
             required=False,
         ),
+        "core_name": ToolParam(
+            str,
+            "The core's name for a new workspace: its admin at <name>.local (default hiro); a workspace keeps its own",
+            required=False,
+        ),
     }
 
     def execute(
@@ -115,9 +139,12 @@ class SetupTool(Tool):
         metrics_enabled: bool | None = None,
         metrics_interval: float | None = None,
         skip_env_import: bool = False,
+        core_name: str | None = None,
     ) -> SetupResult:
         entry, registry, workspace_path = ctrl.resolve_or_create(workspace)
+        is_new = not (workspace_path / "config.json").exists()
         existing = load_config(workspace_path)
+        name = core_name_for(existing, is_new=is_new, asked=core_name)
 
         config = Config(
             device_id=existing.device_id,
@@ -139,6 +166,7 @@ class SetupTool(Tool):
             metrics_enabled=metrics_enabled if metrics_enabled is not None else existing.metrics_enabled,
             metrics_interval=metrics_interval if metrics_interval is not None else existing.metrics_interval,
             metrics_history_size=existing.metrics_history_size,
+            core_name=name,
         )
         save_config(workspace_path, config)
         private_key = load_or_create_master_key(workspace_path, filename=config.master_key_file)
@@ -201,6 +229,7 @@ class SetupTool(Tool):
             autostart_method=autostart_method,
             server_started=start_server,
             providers_imported=providers_imported,
+            core_name=config.core_name,
         )
 
 
@@ -248,17 +277,26 @@ class StartTool(Tool):
         # genuinely fresh workspaces and never stomps an existing config.
         provisioned = False
         providers_configured = 0
+        # A service installed with a name (`hiro service install --name`) makes its workspace here, with that name.
+        asked_name = os.environ.get(ENV_CORE_NAME, "").strip() or None
         if not (workspace_path / "config.json").exists():
             SetupTool().execute(
                 gateway_url=Config.model_fields["gateway_url"].default,
                 workspace=entry.name,
                 skip_autostart=True,
                 skip_env_import=True,
+                core_name=asked_name,
             )
             provisioned = True
             providers_configured = _count_configured_providers(workspace_path, entry.id)
 
         config = load_config(workspace_path)
+        if asked_name and not provisioned and asked_name.lower() != config.core_name:
+            Logger.get("TOOLS.START").warning(
+                f"⚠️ The service asks for the name {asked_name}, but this workspace's core is named "
+                f"{config.core_name}: it keeps its own — HiroServer · start",
+                workspace=entry.name,
+            )
 
         pid = read_running_pid(workspace_path, PID_FILENAME)
         if pid:

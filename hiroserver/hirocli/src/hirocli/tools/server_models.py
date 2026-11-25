@@ -19,6 +19,7 @@ class SetupResult:
     autostart_method: str  # "schtasks" | "registry" | "elevated" | "skipped" | "failed"
     server_started: bool
     providers_imported: int = 0
+    core_name: str = "hiro"  # its admin at <core_name>.local
 
 
 @dataclass

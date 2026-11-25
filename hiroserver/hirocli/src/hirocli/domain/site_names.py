@@ -4,7 +4,8 @@ A name belongs to one of three:
 - **an app:** its main name, claimed by the app itself (``sites.claim {name, port}``), and any extra names the owner
   adds beside it (``hiro sites add <name> --app <key>``); workspace.db ``site_names``, the ``extra`` column marking
   the owner's;
-- **the core:** ``hiro.local`` for its admin and the gateway's name, from its config, never rows;
+- **the core:** ``<core name>.local`` for its admin (``hiro.local`` unless the house named it otherwise at setup) and
+  the gateway's name, from its config, never rows;
 - **an other site:** a name or the machine's address the owner adds that is no app (``hiro sites add``): a target
   on this machine, optionally only some paths, or a name only announced; workspace.db ``other_sites``.
 
@@ -25,11 +26,13 @@ from typing import Any
 
 from .db import db_path, ensure_db
 
-DOMAIN = "hiro.local"  # hiro_channel_sdk.constants.SITES_DOMAIN
 _LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
-_NAME = re.compile(rf"^{_LABEL}(?:\.hiro)?\.local$")
-# Never given to an app or a site: the core's own address.
-RESERVED = frozenset({DOMAIN})
+_CORE_NAME = re.compile(rf"^{_LABEL}$")
+# The core's own name when the house picked none: its admin at hiro.local, its apps at <label>.hiro.local. The kit
+# still writes hiro.local itself (hiro_channel_sdk.constants.SITES_DOMAIN) until it reads the domain from welcome.
+DEFAULT_CORE_NAME = "hiro"
+DEFAULT_DOMAIN = f"{DEFAULT_CORE_NAME}.local"
+GATEWAY_LABEL = "gate"  # the gateway's default name: gate.<core name>.local
 # The id the core's own names are written under (they are never rows of the claims table).
 CORE_ID = "hiroleague"
 # The id an other site is served under: it belongs to no app.
@@ -89,13 +92,31 @@ class Site:
 # ---------------------------------------------------------------------------
 
 
-def check_name(name: str) -> str:
-    """The name as kept (lower case), or SiteNameError("invalid") with the rule in words."""
+def check_core_name(name: str) -> str:
+    """The core's own name as kept (lower case): one word, so its admin is ``<name>.local``; or SiteNameError."""
     clean = (name or "").strip().lower()
-    if not _NAME.match(clean):
+    if not _CORE_NAME.match(clean):
         raise SiteNameError(
             "invalid",
-            f"“{name}” can't be an app's name: use a subdomain like reports.{DOMAIN}, or one word like abc.local "
+            f"“{name}” can't be the core's name: use one word of letters, digits and dashes, like hiro or testpc "
+            "(its admin is then at <name>.local).",
+        )
+    return clean
+
+
+def domain_of(core_name: str) -> str:
+    """The core's domain: ``hiro`` → ``hiro.local``. An app's name is a subdomain of it or a one-word .local name."""
+    return f"{check_core_name(core_name)}.local"
+
+
+def check_name(name: str, domain: str = DEFAULT_DOMAIN) -> str:
+    """The name as kept (lower case), or SiteNameError("invalid") with the rule in words. ``domain`` is the core's
+    (``hiro.local``): a name is ``<label>.<domain>`` or a one-word ``<label>.local``."""
+    clean = (name or "").strip().lower()
+    if not re.match(rf"^{_LABEL}(?:\.{re.escape(domain)}|\.local)$", clean):
+        raise SiteNameError(
+            "invalid",
+            f"“{name}” can't be an app's name: use a subdomain like reports.{domain}, or one word like abc.local "
             "(letters, digits and dashes).",
         )
     return clean
@@ -115,13 +136,13 @@ def is_address(name: str) -> bool:
         return False
 
 
-def check_site_name(name: str) -> str:
+def check_site_name(name: str, domain: str = DEFAULT_DOMAIN) -> str:
     """An other site's name: a .local name as an app's, or this machine's IPv4 address."""
     clean = (name or "").strip().lower()
     if is_address(clean):
         return clean
     try:
-        return check_name(clean)
+        return check_name(clean, domain)
     except SiteNameError as exc:
         raise SiteNameError(
             "invalid", f"“{name}” can't be a site's name: use a .local name like adguard.local, or this machine's "
@@ -156,34 +177,40 @@ def check_paths(paths: list[str] | tuple[str, ...]) -> tuple[str, ...]:
     return tuple(out)
 
 
-def gateway_name(gateway_url: str) -> str | None:
-    """The LAN name devices are given for the gateway (``ws://gate.hiro.local`` → ``gate.hiro.local``), or None when
-    the address isn't a name the core can serve (``localhost``, an IP address, a name outside ``.local``)."""
+def gateway_name(gateway_url: str, domain: str = DEFAULT_DOMAIN) -> str:
+    """The gateway's LAN name: the host of the address devices are given (``ws://gate.hiro.local`` →
+    ``gate.hiro.local``) when it is a name the core can serve, else its default ``gate.<domain>`` (the address is
+    ``localhost``, an IP address or a name outside ``.local``)."""
     host = re.sub(r"^[a-z]+://", "", (gateway_url or "").strip().lower()).split("/")[0].split(":")[0]
+    default = f"{GATEWAY_LABEL}.{domain}"
     try:
-        name = check_name(host)
+        name = check_name(host, domain)
     except SiteNameError:
-        return None
-    return None if name == DOMAIN else name
+        return default
+    return default if name == domain else name
 
 
-def core_names(*, admin_port: int, gateway_url: str, gateway_port: int, gateway_builtin: bool) -> list[SiteName]:
-    """The core's own names, claimed as an app claims its own: ``hiro.local`` for its admin, and the gateway's name
-    when the core runs the gateway itself (a gateway run elsewhere is served there)."""
-    names = [SiteName(DOMAIN, CORE_ID, admin_port)]
-    gate = gateway_name(gateway_url)
-    if gate and gateway_builtin:
-        names.append(SiteName(gate, CORE_ID, gateway_port))
+def core_names(*, domain: str = DEFAULT_DOMAIN, admin_port: int, gateway_url: str, gateway_port: int,
+               gateway_builtin: bool) -> list[SiteName]:
+    """The core's own names, claimed as an app claims its own: ``<domain>`` (``hiro.local``) for its admin, and the
+    gateway's name when the core runs the gateway itself (a gateway run elsewhere is served there)."""
+    names = [SiteName(domain, CORE_ID, admin_port)]
+    if gateway_builtin:
+        names.append(SiteName(gateway_name(gateway_url, domain), CORE_ID, gateway_port))
     return names
+
+
+def core_names_of(config: Any) -> list[SiteName]:
+    """The core's own names, from its config."""
+    return core_names(domain=config.site_domain(), admin_port=config.admin_port, gateway_url=config.gateway_url,
+                      gateway_port=config.gateway_port, gateway_builtin=config.gateway_builtin)
 
 
 def taken_by_core(config: Any) -> set[str]:
     """What no app or site may take: the core's own names, from its config (its gateway's name even when the gateway
     runs elsewhere: devices are given it)."""
-    own = core_names(admin_port=config.admin_port, gateway_url=config.gateway_url, gateway_port=config.gateway_port,
-                     gateway_builtin=config.gateway_builtin)
-    gate = gateway_name(config.gateway_url)
-    return {c.name for c in own} | ({gate} if gate else set())
+    domain = config.site_domain()
+    return {c.name for c in core_names_of(config)} | {gateway_name(config.gateway_url, domain)}
 
 
 @dataclass(frozen=True)
@@ -256,14 +283,15 @@ def _holder(conn: sqlite3.Connection, name: str) -> str | None:
     return None
 
 
-def claim(workspace_path: Path, extension_id: str, name: str, port: int, taken: set[str]) -> tuple[SiteName, str | None]:
+def claim(workspace_path: Path, extension_id: str, name: str, port: int, taken: set[str],
+          domain: str = DEFAULT_DOMAIN) -> tuple[SiteName, str | None]:
     """Give ``name`` to the extension as its main name (dropping its old main one; its extra names follow the new
     port); the claim, and the old name it replaced (or None).
 
     Raises SiteNameError: ``invalid`` (the name or port), ``taken`` (another app's, an other site's, one of this
-    app's extra names, or the core's own: ``taken`` holds the core's names)."""
-    name, port = check_name(name), check_port(port)
-    if name in RESERVED or name in taken:
+    app's extra names, or the core's own: ``taken`` holds the core's names). ``domain`` is the core's."""
+    name, port = check_name(name, domain), check_port(port)
+    if name == domain or name in taken:
         raise SiteNameError("taken", f"{name} is already in use on this server. Pick another name.")
     now = _now()
     with _connect(workspace_path) as conn:
@@ -285,10 +313,11 @@ def claim(workspace_path: Path, extension_id: str, name: str, port: int, taken: 
     return SiteName(name, extension_id, port, now), (old["name"] if old else None)
 
 
-def add_extra(workspace_path: Path, extension_id: str, name: str, taken: set[str]) -> SiteName:
+def add_extra(workspace_path: Path, extension_id: str, name: str, taken: set[str],
+              domain: str = DEFAULT_DOMAIN) -> SiteName:
     """An extra name beside the app's main one, sent to the same port. The app must have claimed its main name."""
-    name = check_name(name)
-    if name in RESERVED or name in taken:
+    name = check_name(name, domain)
+    if name == domain or name in taken:
         raise SiteNameError("taken", f"{name} is already in use on this server.")
     with _connect(workspace_path) as conn:
         main = conn.execute(
@@ -308,15 +337,16 @@ def add_extra(workspace_path: Path, extension_id: str, name: str, taken: set[str
     return SiteName(name, extension_id, int(main["port"]), now, extra=True)
 
 
-def add_other_site(workspace_path: Path, name: str, target: str, paths: list[str], taken: set[str]) -> OtherSite:
+def add_other_site(workspace_path: Path, name: str, target: str, paths: list[str], taken: set[str],
+                   domain: str = DEFAULT_DOMAIN) -> OtherSite:
     """A site that is no app: ``target`` empty = the name is only announced (an address can't be: nothing to say)."""
-    name = check_site_name(name)
+    name = check_site_name(name, domain)
     clean_target = check_target(target) if (target or "").strip() else ""
     clean_paths = check_paths(paths)
     if not clean_target and (clean_paths or is_address(name)):
         raise SiteNameError("invalid", "A site with paths, or on the machine's address, needs a target to send "
                                        "them to.")
-    if name in RESERVED or name in taken:
+    if name == domain or name in taken:
         raise SiteNameError("taken", f"{name} is already in use on this server.")
     now = _now()
     with _connect(workspace_path) as conn:

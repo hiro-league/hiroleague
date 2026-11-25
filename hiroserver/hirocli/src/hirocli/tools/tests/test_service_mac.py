@@ -110,6 +110,11 @@ def test_install_as_root_checks_the_user_then_writes_secrets_then_loads_it(mac_a
     assert result.restart_command == "sudo launchctl kickstart -k system/com.hiroleague.hiro"
 
 
+def test_the_cores_name_reaches_the_service_for_its_new_workspace(mac_as_root) -> None:
+    service_tools.ServiceInstallTool().execute(core_name="testpc")
+    assert mac_as_root[-1][1].environment["HIRO_CORE_NAME"] == "testpc"
+
+
 def test_stop_without_root_says_what_to_run(mac) -> None:
     with pytest.raises(NeedsRootError) as info:
         service_tools.ServiceStopTool().execute()

@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from hiro_commons.constants.domain import (
     DEFAULT_ATTESTATION_EXPIRY_DAYS,
@@ -46,6 +46,7 @@ from hiro_commons.constants.network import (
 from hiro_commons.constants.storage import CONFIG_FILENAME, LOGS_DIR, MASTER_KEY_FILENAME, RUN_DIR
 
 from ..environment import default_workspace_log_level
+from .site_names import DEFAULT_CORE_NAME, check_core_name, domain_of
 from hiro_commons.log import Logger
 
 log = Logger.get("CONFIG")
@@ -75,6 +76,11 @@ class Config(BaseModel):
     # names`. Empty = this machine isn't set up to announce names: claims are kept, nothing is announced. The front
     # door (Caddy) is the core's service's own (HIRO_FRONT_DOOR, set by `hiro service install`), not a setting here.
     site_names_ip: str = ""
+    # The core's own name (docs/site-names-design.md): its admin is served at <core_name>.local, its gateway's
+    # default name is gate.<core_name>.local, and an app's name is <label>.<core_name>.local. Asked at `hiro
+    # workspaces setup` (or `hiro service install --name`) for a new workspace; a workspace set up before keeps
+    # hiro. Nothing renames it yet.
+    core_name: str = DEFAULT_CORE_NAME
     master_key_file: str = MASTER_KEY_FILENAME
     pairing_code_length: int = DEFAULT_PAIRING_CODE_LENGTH
     pairing_code_ttl_seconds: int = DEFAULT_PAIRING_CODE_TTL_SECONDS
@@ -90,6 +96,15 @@ class Config(BaseModel):
     # Set by setup; used by teardown to pick the correct removal path without user input.
     # Values: "elevated" | "schtasks" | "registry" | "skipped" | "failed" | None
     autostart_method: str | None = None
+
+    @field_validator("core_name")
+    @classmethod
+    def _one_word(cls, value: str) -> str:
+        return check_core_name(value)
+
+    def site_domain(self) -> str:
+        """The core's domain: hiro.local, or <core_name>.local."""
+        return domain_of(self.core_name)
 
     def gateway_connect_url(self) -> str:
         """Where the core's devices channel connects: its own gateway when built in, else gateway_url."""

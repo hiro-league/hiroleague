@@ -74,7 +74,9 @@ path = "config.json"
 kind = "file"
 live = "own"
 envs = "copy"
-why = "ports and addresses: hiro-work points each environment's at its own ports, and takes LAN names out"
+# Per place: the core's own name (core_name, its <name>.local) is the place's; live's is Simone's (hiro), and a copy
+# keeps env0's, whose names env1..env5 never announce
+why = "ports, addresses and the core's own name: hiro-work points each environment's at its own ports, and takes LAN names out"
 
 [[item]]
 path = "preferences.json"

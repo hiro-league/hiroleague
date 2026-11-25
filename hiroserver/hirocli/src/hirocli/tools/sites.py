@@ -24,7 +24,7 @@ from ..domain.site_names import (
     SiteNameError,
     add_extra,
     add_other_site,
-    core_names,
+    core_names_of,
     list_claims,
     list_other_sites,
     remove_site,
@@ -88,9 +88,7 @@ class SitesListTool(Tool):
         claims = list_claims(workspace_path)
         apps = {e.extension_id: e.name for e in list_paired_extensions(workspace_path, kind=None)}
         extra = {c.name for c in claims if c.extra}
-        plan = served(claims, core_names(admin_port=config.admin_port, gateway_url=config.gateway_url,
-                                         gateway_port=config.gateway_port, gateway_builtin=config.gateway_builtin),
-                      list_other_sites(workspace_path))
+        plan = served(claims, core_names_of(config), list_other_sites(workspace_path))
         sites = []
         for s in sorted(plan.sites, key=lambda s: s.name):
             kind = "core" if s.owner == CORE_ID else "site" if s.owner == OTHER_ID else "extra" if s.name in extra else "app"
@@ -135,7 +133,8 @@ class SitesAddTool(Tool):
     def _add(
         self, workspace_path: Path, name: str, app: str | None, target: str | None, paths: list[str] | None,
     ) -> SitesChangeResult:
-        taken = taken_by_core(load_config(workspace_path))
+        config = load_config(workspace_path)
+        taken, domain = taken_by_core(config), config.site_domain()
         if app:
             if target or paths:
                 raise SiteNameError("invalid", "An extra name goes where its app's own name goes: give --app, or a "
@@ -143,11 +142,11 @@ class SitesAddTool(Tool):
             ext = next((e for e in list_paired_extensions(workspace_path) if e.name == app), None)
             if ext is None:
                 raise SiteNameError("not_found", f"No app is called {app} (hiro extension list).")
-            kept = add_extra(workspace_path, ext.extension_id, name, taken)
+            kept = add_extra(workspace_path, ext.extension_id, name, taken, domain)
             log.info(f"✅ Extra name added — {kept.name} · {app}", port=kept.port)
             _changed(workspace_path, kept.name, "added")
             return SitesChangeResult(name=kept.name, change="added", kind="extra", target=f"127.0.0.1:{kept.port}")
-        site = add_other_site(workspace_path, name, target or "", list(paths or []), taken)
+        site = add_other_site(workspace_path, name, target or "", list(paths or []), taken, domain)
         log.info(f"✅ Site added — {site.name}", target=site.target or "(announced only)", paths=" ".join(site.paths))
         _changed(workspace_path, site.name, "added")
         return SitesChangeResult(name=site.name, change="added", kind="site", target=site.target,

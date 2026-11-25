@@ -141,18 +141,32 @@ def register(service_app: typer.Typer, console: Console) -> None:
             help="Windows: what to install for the service, a package or a checkout's path "
                  "(default: this version of hiroleague).",
         ),
+        core_name: Optional[str] = typer.Option(
+            None, "--name",
+            help="The core's name, for the service's new workspace: its admin at <name>.local and its apps at "
+                 "<app>.<name>.local (default: hiro). A workspace that exists keeps its own.",
+        ),
         report: Optional[str] = typer.Option(None, "--report", hidden=True, help=_REPORT_HELP),
     ) -> None:
         """Install the Hiro server as a system service: starts at boot, restarts on failure."""
-        log.info("hiro service install", user=user, workspace=workspace, home=home, data_dir=data_dir, source=source)
+        log.info("hiro service install", user=user, workspace=workspace, home=home, data_dir=data_dir, source=source,
+                 core_name=core_name)
+        from ..domain.site_names import SiteNameError, check_core_name
         from ..tools.service import ServiceInstallTool
 
+        if core_name:
+            try:
+                check_core_name(core_name)
+            except SiteNameError as exc:  # said before anything is installed or an admin is asked
+                console.print(f"[red]{exc}[/red]")
+                raise typer.Exit(1) from exc
         result = _run(
             console, "install", report,
             lambda: ServiceInstallTool().execute(
-                user=user, workspace=workspace, home=home, data_dir=data_dir, source=source,
+                user=user, workspace=workspace, home=home, data_dir=data_dir, source=source, core_name=core_name,
             ),
-            _argv("install", user=user, home=home, data_dir=data_dir, **{"from": source}, workspace=workspace),
+            _argv("install", user=user, home=home, data_dir=data_dir, **{"from": source}, workspace=workspace,
+                  name=core_name),
         )
         console.print(
             f"[green]✅ HiroLeague service installed and started:[/green] [bold]{result['service']}[/bold] "
@@ -162,6 +176,9 @@ def register(service_app: typer.Typer, console: Console) -> None:
         console.print(f"  Service: {result['definition_path']}")
         if result.get("data_dir"):
             console.print(f"  Data:    {result['data_dir']}")
+        if core_name:
+            console.print(f"  Name:    {core_name.strip().lower()} [dim](a new workspace's: its admin at "
+                          f"{core_name.strip().lower()}.local; a workspace that exists keeps its own)[/dim]")
         if result["secrets_file_created"]:
             console.print(f"  Secrets: {result['secrets_file']} [dim](new; only the service and administrators can read it)[/dim]")
         else:

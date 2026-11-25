@@ -11,6 +11,7 @@ from __future__ import annotations
 import sys
 from types import ModuleType
 
+from ..domain.site_names import check_core_name
 from .base import Tool, ToolParam
 from .service_models import ServiceControlResult, ServiceInstallResult, ServiceStatusResult, ServiceUninstallResult
 
@@ -56,6 +57,10 @@ class ServiceInstallTool(Tool):
         "source": ToolParam(
             str, "Windows: what to install for the service (default: this version of hiroleague)", required=False,
         ),
+        "core_name": ToolParam(
+            str, "The core's name, for the service's new workspace: its admin at <name>.local (default hiro); a "
+                 "workspace that exists keeps its own", required=False,
+        ),
     }
 
     def execute(
@@ -65,8 +70,13 @@ class ServiceInstallTool(Tool):
         home: str | None = None,
         data_dir: str | None = None,
         source: str | None = None,
+        core_name: str | None = None,
     ) -> ServiceInstallResult:
-        return system_module().install(user=user, workspace=workspace, home=home, data_dir=data_dir, source=source)
+        # Checked before anything is installed or an admin is asked: the service's first start sets its workspace up
+        # with it (ENV_CORE_NAME)
+        name = check_core_name(core_name) if core_name and core_name.strip() else None
+        return system_module().install(user=user, workspace=workspace, home=home, data_dir=data_dir, source=source,
+                                       core_name=name)
 
 
 class ServiceUninstallTool(Tool):

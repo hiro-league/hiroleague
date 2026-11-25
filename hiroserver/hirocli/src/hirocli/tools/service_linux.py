@@ -24,6 +24,7 @@ from hiro_commons.systemd_service import (
 
 from .. import front_door_setup as door
 from .. import linux_service as ls
+from ..constants import ENV_CORE_NAME
 from ..domain.front_door import ENV_FRONT_DOOR
 from .service_models import ServiceControlResult, ServiceInstallResult, ServiceStatusResult, ServiceUninstallResult
 
@@ -34,17 +35,20 @@ def _logs(unit: str) -> str:
     return f"journalctl -u {unit} -f"
 
 
-def install(*, user: str | None = None, workspace: str | None = None, **_: object) -> ServiceInstallResult:
+def install(*, user: str | None = None, workspace: str | None = None, core_name: str | None = None,
+            **_: object) -> ServiceInstallResult:
     require_linux()
     exe = ls.hiro_executable()
     user_name = user or default_service_user()
     if not is_root():
         raise NeedsRootError(
             "Installing the HiroLeague service",
-            ls.sudo_command(exe, "install", user=user_name, workspace=workspace),
+            ls.sudo_command(exe, "install", user=user_name, workspace=workspace, core_name=core_name),
         )
     service_user = resolve_service_user(user_name)
     spec = ls.build_spec(exe=exe, user=service_user.name, group=service_user.group, workspace=workspace)
+    if core_name:
+        spec = dataclasses.replace(spec, environment={**spec.environment, ENV_CORE_NAME: core_name})
     # Fail before writing anything when the service user can't even start `hiro`.
     check_user_can_run(service_user, [exe, "--help"])
     # The machine's front door, set up by the default service only (one per machine), before the core starts: the

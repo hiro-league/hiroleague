@@ -65,7 +65,8 @@ def hiro_executable() -> str:
     )
 
 
-def sudo_command(exe: str, action: str, *, user: str | None, workspace: str | None) -> str:
+def sudo_command(exe: str, action: str, *, user: str | None, workspace: str | None,
+                 core_name: str | None = None) -> str:
     """The exact command to re-run ``hiro service <action>`` as root.
 
     The full path to `hiro` because sudo resets PATH (``~/.local/bin`` is not on it), and
@@ -76,6 +77,8 @@ def sudo_command(exe: str, action: str, *, user: str | None, workspace: str | No
         parts += ["--user", user]
     if workspace:
         parts += ["--workspace", workspace]
+    if core_name:
+        parts += ["--name", core_name]
     return " ".join(shlex.quote(p) for p in parts)
 
 

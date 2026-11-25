@@ -11,6 +11,7 @@ from hiro_commons import systemd_service as sd
 from hirocli import front_door_setup as door
 from hirocli import linux_service as ls
 from hirocli.constants import ENV_SERVICE_MANAGER, SERVICE_RESTART_EXIT_CODE
+from hirocli.domain.site_names import SiteNameError
 from hirocli.tools import service as service_tools
 from hirocli.tools import service_linux
 
@@ -151,6 +152,29 @@ def test_a_named_workspace_leaves_the_machines_front_door_alone(linux_as_root) -
     result = service_tools.ServiceInstallTool().execute(user="michel", workspace="home")
     assert "door" not in linux_as_root and "HIRO_FRONT_DOOR" not in linux_as_root["spec"].environment
     assert result.front_door is None
+
+
+def test_the_cores_name_reaches_the_service_for_its_new_workspace(linux_as_root) -> None:
+    """`hiro service install --name testpc`: the service's first start makes its workspace with that name."""
+    service_tools.ServiceInstallTool().execute(user="michel", core_name="TestPC")
+    assert linux_as_root["spec"].environment["HIRO_CORE_NAME"] == "testpc"
+
+
+def test_without_a_name_the_service_is_given_none(linux_as_root) -> None:
+    """Simone's cut-over runs `hiro service install` again on its existing workspace: nothing names it."""
+    service_tools.ServiceInstallTool().execute(user="michel")
+    assert "HIRO_CORE_NAME" not in linux_as_root["spec"].environment
+
+
+def test_a_name_that_cant_be_the_cores_is_refused_before_anything_is_installed(linux_as_user) -> None:
+    with pytest.raises(SiteNameError):
+        service_tools.ServiceInstallTool().execute(core_name="test pc")
+
+
+def test_install_without_root_keeps_the_name(linux_as_user) -> None:
+    with pytest.raises(sd.NeedsRootError) as info:
+        service_tools.ServiceInstallTool().execute(core_name="testpc")
+    assert info.value.command == f"sudo {EXE} service install --user michel --name testpc"
 
 
 def test_caddys_unit_binds_port_80_by_its_capability_alone_and_resumes_what_it_had() -> None:
