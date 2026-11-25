@@ -318,9 +318,11 @@ def touch_paired_extension(workspace_path: Path, extension_id: str, *, info: dic
             except json.JSONDecodeError:
                 old_ids = []
             new_ids = _use_ids(info)
+            # Fix: the name is fixed at pairing (rights, AI picks, LAN name and asks are keyed by it): what the app
+            # says about itself never renames its record. The callers refuse a declaration under another name.
             conn.execute(
-                f"UPDATE {TABLE} SET last_seen = ?, info = ?, name = ? WHERE extension_id = ?",
-                (utc_iso(datetime.now(UTC)), json.dumps(info), str(info.get("name") or ""), extension_id),
+                f"UPDATE {TABLE} SET last_seen = ?, info = ? WHERE extension_id = ?",
+                (utc_iso(datetime.now(UTC)), json.dumps(info), extension_id),
             )
             if sorted(old_ids) != sorted(new_ids):
                 conn.execute(

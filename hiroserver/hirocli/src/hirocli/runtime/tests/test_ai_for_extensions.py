@@ -163,6 +163,13 @@ def test_uses_are_kept_asks_answer_and_refresh_marks_new_and_removed(tmp_path: P
         assert status == {"home:ask": "ok", "home:wakeword": "new", "home:sites": "removed"}
         assert manager.snapshot()[paired.extension_id]["info"]["uses"][1]["sound"] is True
 
+        # Refresh never renames: the name is fixed at pairing, so a declaration under another name is refused
+        client._info = client._info.model_copy(update={"name": "house"})
+        with pytest.raises(ExtensionRequestError) as caught:
+            await manager.refresh_info(paired.extension_id)
+        assert caught.value.code == "name_fixed" and "paired as “home”" in caught.value.message
+        assert [e.name for e in list_paired_extensions(workspace)] == ["home"]
+
         await client.stop()
         ctx.stop_event.set()
         await asyncio.wait_for(asyncio.gather(server, running, return_exceptions=True), timeout=5)

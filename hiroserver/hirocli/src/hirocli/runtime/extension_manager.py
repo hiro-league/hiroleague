@@ -109,7 +109,6 @@ from ..domain.extensions import (
     ExtensionNameTaken,
     PairedExtension,
     add_paired_extension,
-    check_name_free,
     clear_extension_pairing,
     get_paired_extension,
     load_extension_pairing,
@@ -352,12 +351,16 @@ class ExtensionManager:
             info = ExtensionInfo.model_validate(data)
         except ValidationError as exc:
             raise ExtensionRequestError("bad_answer", f"unreadable extension.info answer: {exc}") from exc
+        conn = self._connections.get(extension_id)
+        if conn is not None and info.name != conn.name:
+            # The name is fixed at pairing, as at sign-in: a declaration under another name is not kept
+            raise ExtensionRequestError(
+                "name_fixed", f"It now calls itself “{info.name}”, but it was paired as “{conn.name}”: an app's name is "
+                "fixed at pairing. Give it its name back, or remove it and pair it anew.")
         dumped = info.model_dump(mode="json", by_alias=True)
         await asyncio.to_thread(touch_paired_extension, self._ctx.workspace_path, extension_id, info=dumped)
-        conn = self._connections.get(extension_id)
         if conn is not None:
             conn.info = dumped
-            conn.name = info.name
         log.info(
             f"✅ Extension info read again — {info.name} {info.version}",
             uses=len(info.uses),
@@ -590,12 +593,14 @@ class ExtensionManager:
             if not _signature_ok(found.public_key, nonce, signature):
                 raise _Denied(EXTENSION_DENIED_BAD_SIGNATURE, "signature doesn't match the paired key")
             if info.name != found.name:
-                # The sign-in renames the app (its declaration's name is stored on every connect): one name is one
-                # app, so a paired app can't take another one's name either (design.md §9).
-                try:
-                    await asyncio.to_thread(check_name_free, workspace, info.name, besides=extension_id)
-                except ExtensionNameTaken as exc:
-                    raise _Denied(EXTENSION_DENIED_NAME_TAKEN, str(exc)) from exc
+                # Fix: a sign-in could rename the app to any free name (its declaration is stored on every connect),
+                # yet its rights, AI picks, LAN name and asks are keyed by that name: the name is fixed at pairing.
+                # name_taken, as Pair again refuses another name: the SDK keeps the app's key and tries again later.
+                raise _Denied(
+                    EXTENSION_DENIED_NAME_TAKEN,
+                    f"This app was paired as “{found.name}” and now calls itself “{info.name}”. An app's name is fixed "
+                    "at pairing: give it its name back, or remove it in HiroLeague's Extensions and pair it anew.",
+                )
             await asyncio.to_thread(
                 touch_paired_extension, workspace, extension_id, info=info.model_dump(mode="json", by_alias=True)
             )
