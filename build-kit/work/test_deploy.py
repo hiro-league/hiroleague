@@ -107,9 +107,10 @@ def test_a_new_apps_empty_github_repo_lacks_every_commit(tmp_path, monkeypatch):
     assert tr.read_facts("evalhiro", {"evalhiro": "none"}).error.startswith("GitHub couldn't be read")
 
 
-def app_repo(tmp_path, monkeypatch, commits=("first", "second")):
-    """env0's homehiro with these commits, GitHub (origin) at its main; returns each commit, oldest first."""
-    repo, origin = tmp_path / "env0" / "homehiro", tmp_path / "origin.git"
+def app_repo(tmp_path, monkeypatch, commits=("first", "second"), name="homehiro"):
+    """env0's repo (homehiro unless named) with these commits, GitHub (origin) at its main; returns each commit, oldest
+    first."""
+    repo, origin = tmp_path / "env0" / name, tmp_path / "origin.git"
     repo.mkdir(parents=True)
     hw.git(tmp_path, "init", "-q", "--bare", "-b", "main", str(origin))
     hw.git(repo, "init", "-q", "-b", "main")
@@ -163,6 +164,58 @@ def test_an_app_whose_container_doesnt_say_what_it_runs_is_deployed_again(tmp_pa
     assert f.live is None and words in f.live_unknown and not f.live_lacks
     plan = tr.make_plan([f])
     assert plan.again == ["homehiro"] and not plan.stops
+
+
+def deploy_events(path, *ends):
+    """events.jsonl with these (task, repo, step, ok) ends, in order, after a task's line that is no deploy's and
+    before a line cut short."""
+    import json
+
+    lines = [json.dumps({"task": "install-x", "repo": "aicam", "step": "verify", "phase": "end", "ok": False})]
+    lines += [json.dumps({"task": task, "repo": repo, "step": step, "phase": "end", "ok": ok})
+              for task, repo, step, ok in ends]
+    lines.append('{"task": "deploy-cut')  # a line cut short
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_a_repo_whose_last_deploy_failed_its_check_is_known_and_a_later_good_deploy_clears_it(tmp_path, monkeypatch):
+    monkeypatch.setattr(hw, "EVENTS", tmp_path / "events.jsonl")
+    deploy_events(hw.EVENTS, ("deploy-1", "aicam", "deploy", True), ("deploy-1", "aicam", "verify", False),
+                  ("deploy-1", "homehiro", "deploy", True), ("deploy-1", "homehiro", "verify", True),
+                  ("deploy-2", "nethiro", "deploy", False), ("deploy-3", "nethiro", "deploy", True),
+                  ("deploy-3", "nethiro", "verify", True))
+    assert tr.last_failed(["aicam", "homehiro", "nethiro"]) == {"aicam"}
+    assert tr.last_failed(["homehiro"]) == set()
+    hw.EVENTS.unlink()
+    assert tr.last_failed(["aicam"]) == set()
+
+
+def test_aicam_that_runs_its_latest_after_a_failed_check_is_deployed_again(tmp_path, monkeypatch):
+    # The Nov 25 deploy: ~/aicam's pull went in, then its check found a file the pull left untracked
+    _, new = app_repo(tmp_path, monkeypatch, name="aicam")
+    simone = {"aicam": new, "aicam-live": new, "aicam-dirty": "0"}
+    assert tr.make_plan([tr.read_facts("aicam", simone)]).empty
+    f = tr.read_facts("aicam", simone, failed=True)
+    assert f.last_failed and not f.live_lacks
+    plan = tr.make_plan([f])
+    assert plan.then == ["aicam"] and plan.again == [] and not plan.stops  # a push that carries nothing, then the pull
+    said = []
+    tr.show(said.append, [f], plan)
+    assert any("its last deploy failed" in line and "deployed again" in line for line in said)
+    assert not any("up to date" in line for line in said)
+
+
+def test_an_app_that_runs_its_latest_after_a_failed_check_runs_its_hook_again(tmp_path, monkeypatch):
+    _, new = app_repo(tmp_path, monkeypatch)
+    f = tr.read_facts("homehiro", {"homehiro": new, "homehiro-runs": new}, failed=True)
+    plan = tr.make_plan([f])
+    assert plan.then == ["homehiro"] and plan.again == ["homehiro"]
+
+
+def test_a_failed_deploy_that_left_the_old_commit_running_is_no_new_case(tmp_path, monkeypatch):
+    old, new = app_repo(tmp_path, monkeypatch)
+    f = tr.read_facts("homehiro", {"homehiro": new, "homehiro-runs": old}, failed=True)
+    assert not f.last_failed and f.live_lacks  # what runs already says it isn't live
 
 
 def test_running_a_commit_this_pc_lacks_stops_the_deploy(tmp_path, monkeypatch):
