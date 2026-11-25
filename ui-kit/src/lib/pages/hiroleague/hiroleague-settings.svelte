@@ -15,7 +15,6 @@
 	import { Resource } from '$kit/state/resource.svelte';
 	import { ask } from '$kit/ui/confirm.svelte';
 	import Feedback from '$kit/ui/feedback.svelte';
-	import MockupBadge from '$kit/ui/mockup-badge.svelte';
 	import Notice from '$kit/ui/notice.svelte';
 	import {
 		forgetHiroLeague,
@@ -26,6 +25,7 @@
 		testHiroLeague,
 		type HiroLeagueStatus
 	} from './api';
+	import { waitingLine } from './approval';
 	import SiteAddress from './site-address.svelte';
 
 	let { after }: { after?: Snippet<[HiroLeagueStatus]> } = $props();
@@ -167,13 +167,16 @@
 			</p>
 		{/if}
 
-		<!-- mockup (Permissions phase 8): what waits for the owner's approval in HiroLeague, told by the core -->
-		{#if current?.status === 'connected'}
+		<!-- Permissions phase 8: what the app asks to do that waits for the owner's yes in HiroLeague, as the core last
+		     said (its welcome, approval.changed) -->
+		{#if current?.waiting?.length}
 			<Notice tone="info" title="Waits for the owner's approval in HiroLeague">
-				<span class="flex flex-wrap items-center gap-1.5">
-					Use the search models. Until the owner says yes, {APP.name} works with what was approved before.
-					<MockupBadge />
-				</span>
+				<ul class="list-disc pl-4">
+					{#each current.waiting as w (`${w.permission} ${w.subject ?? ''}`)}
+						<li>{waitingLine(w)}</li>
+					{/each}
+				</ul>
+				Until the owner says yes, {APP.name} works with what was approved before.
 				{#snippet actions()}
 					{#if current.admin_url}
 						<Button size="sm" variant="outline" href="{current.admin_url.replace(/\/+$/, '')}/extensions?show=approval" target="_blank" rel="noreferrer">

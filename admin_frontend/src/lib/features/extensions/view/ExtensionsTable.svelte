@@ -13,7 +13,6 @@
   import { dateTime } from '$kit/format/time';
   import { hasSettings, statusTime } from '../shared/extension-rows';
   import type { ExtensionsController } from '../state/extensions-controller.svelte';
-  import { approvalMockup } from '$lib/approval-mockup/store.svelte';
 
   let { ctrl }: { ctrl: ExtensionsController } = $props();
 
@@ -91,8 +90,8 @@
                     />
                   {/if}
                 {/if}
-                <!-- mockup (Permissions phase 8): an app that waits for the owner opens on its Permissions -->
-                {#if row.kind === 'app' && approvalMockup.waits(row.name)}
+                <!-- Permissions phase 8: an app that waits for the owner opens on its Permissions -->
+                {#if row.kind === 'app' && row.waits}
                   <Button size="sm" onclick={() => ctrl.openAbout(row)} title="See what {row.label} asks for, and approve it">
                     <ShieldCheck size={13} /> Approve
                   </Button>
@@ -105,7 +104,7 @@
                 <Button
                   size="icon"
                   variant="ghost"
-                  disabled={row.mandatory || ctrl.busy || ctrl.isMockup(row)}
+                  disabled={row.mandatory || ctrl.busy}
                   onclick={() => void ctrl.remove(row)}
                   title={row.mandatory ? "Phones' chat needs it: it can't be removed" : `Remove ${row.label}`}
                   aria-label="Remove {row.label}"

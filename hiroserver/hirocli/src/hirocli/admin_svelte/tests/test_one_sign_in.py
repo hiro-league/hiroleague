@@ -152,6 +152,7 @@ def test_a_signed_in_browser_goes_back_with_a_code_the_extension_redeems_once(fa
         server_ctx=SimpleNamespace(workspace_path=family["path"], extension_manager=None),
     )
     who = _run(sign_in.handle_auth_code({"code": code}, ctx))
+    assert who.pop("token")  # Permissions phase 8: the person's proof, for this app alone
     assert who == {"person_id": family["mark"].person_id, "name": "Mark", "role_id": "kid", "role_ids": ["kid"],
                    "role_name": "Kid"}
     with pytest.raises(RequestRefused):  # one use

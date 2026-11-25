@@ -51,6 +51,8 @@ ADMIN_RULES: tuple[Rule, ...] = (
     R("/api/gateways", "server"),
     R("/api/metrics", "server"),
     # Extensions and the channel plugins
+    # Permissions phase 8: approving an app reaches people and roles: the owner's alone
+    Rule("/api/extensions/{extension_id}/approval", "owner"),
     R("/api/extensions", "extensions"),
     R("/api/channels", "extensions"),
     # Devices: Logs reads their names

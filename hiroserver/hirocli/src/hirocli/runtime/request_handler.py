@@ -26,6 +26,8 @@ from hiro_channel_sdk.constants import CONTENT_TYPE_JSON
 from hiro_channel_sdk.models import UnifiedMessage
 from hiro_commons.log import Logger
 
+from . import app_asks
+from .app_asks import AppAsker
 from .envelope_factory import EnvelopeFactory
 
 if TYPE_CHECKING:
@@ -94,6 +96,8 @@ class RequestContext:
         self.emit_outbound = emit_outbound
         # Set for a device's request (Permissions phase 3): handlers answer for this person only
         self.asker: DeviceAsker | None = None
+        # Set for an app's request (Permissions phase 8): the app on its own, or a person through it (app_asks.py)
+        self.app_asker: AppAsker | None = None
 
     def own_user(self) -> int | None:
         """The chat user a device's request is scoped to; None for an app's (it reads no conversation)."""
@@ -195,10 +199,27 @@ class RequestHandler:
                     device_asker, self._ctx.workspace_path, msg.routing.sender_id or "",
                     self._device_rights.get(method, OWNER_ONLY),
                 )
+            elif caller == CALLER_EXTENSION:
+                # Permissions phase 8: held to what the app is approved for, or to the person its proof names
+                ctx.app_asker = await asyncio.to_thread(
+                    app_asks.check, self._ctx.workspace_path, msg.routing.sender_id or "", method, params,
+                )
             result = await handler(params, ctx)
             if result is None:
                 return None
             return EnvelopeFactory.response(msg, status="ok", payload=result)
+        except app_asks.AppRefused as exc:
+            # Said once per app, item and connect: a worker asking every round doesn't fill the problems list
+            sender = msg.routing.sender_id or ""
+            if app_asks.said_once(sender, exc):
+                log.warning(f"⚠️ App ask refused — {method} · {exc.code}", error=exc.message, extension_id=sender)
+            else:
+                log.debug(f"App ask refused again — {method} · {exc.code}", extension_id=sender)
+            return EnvelopeFactory.response(
+                msg,
+                status="error",
+                payload={"code": exc.code, "message": exc.message, "data": exc.data},
+            )
         except RequestRefused as exc:
             # An expected "no" (e.g. WhatsApp isn't linked): the caller gets the code
             # and message; logged as a warning, not as a crash with a traceback.

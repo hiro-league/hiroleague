@@ -60,8 +60,60 @@ def test_another_extension_answers_while_connected_and_offering():
 
 
 def test_the_family_list_refuses_like_the_core():
+    """Permissions phase 8: no app gives or takes the Owner role, nor adds, renames or removes a role."""
     core = FakeCore()
     only = core.person("Mona", "owner")
-    with pytest.raises(ExtensionRequestError, match="only Owner") as info:
-        asyncio.run(core.request("people.update", {"person_id": only["person_id"], "role_id": "adult"}))
+    mark = core.person("Mark", "adult")
+    for method, params in [("people.update", {"person_id": only["person_id"], "role_id": "adult"}),
+                           ("people.update", {"person_id": mark["person_id"], "role_ids": ["owner", "adult"]}),
+                           ("people.add", {"name": "Lea", "role_ids": ["owner"]}),
+                           ("roles.add", {"name": "Guests"}), ("roles.remove", {"role_id": "kid"})]:
+        with pytest.raises(ExtensionRequestError) as info:
+            asyncio.run(core.request(method, params))
+        assert info.value.code == "not_allowed", (method, params)
+    with pytest.raises(ExtensionRequestError, match="no role 'guest'") as info:
+        asyncio.run(core.request("people.update", {"person_id": mark["person_id"], "role_ids": ["guest"]}))
     assert info.value.code == "invalid_params"
+
+
+def test_the_core_holds_an_app_to_what_it_is_approved_for():
+    """By default an app is approved for everything (as one paired before approvals); a test sets what the owner
+    approved, and a method needing more answers not_approved, as the SDK's table says."""
+    core = FakeCore()
+    core.answers.update({"ai.ask": {"text": "yes"}, "notify": {"results": []}})
+    assert asyncio.run(core.request("ai.ask", {"use": "x"})) == {"text": "yes"}
+    core.approved = ["people.notify", ("apps.ask", "home")]
+    with pytest.raises(ExtensionRequestError, match="isn't approved to ask AI") as info:
+        asyncio.run(core.request("ai.ask", {"use": "x"}))
+    assert info.value.code == "not_approved"
+    assert asyncio.run(core.request("notify", {})) == {"results": []}
+    core.extensions = {"home": {"home.speak": {"ok": True}}, "net": {"net.usage": {}}}
+    assert asyncio.run(core.ask("home", "home.speak")) == {"ok": True}
+    with pytest.raises(ExtensionRequestError) as info:
+        asyncio.run(core.ask("net", "net.usage"))
+    assert info.value.code == "not_approved"
+    with pytest.raises(ExtensionRequestError) as info:
+        asyncio.run(core.request("whatsapp.send", {"to": "20100"}))  # never on its own once it declares what it asks
+    assert info.value.code == "not_allowed"
+
+
+def test_the_persons_proof_comes_from_signing_in_and_is_taken_out_of_the_params():
+    core = FakeCore()
+    owner, adult = core.person("Mona", "owner"), core.person("Mark", "adult")
+    who = asyncio.run(core.request("auth.code", {"code": core.sign_in_code(owner)}))
+    assert who["person_id"] == owner["person_id"] and who["token"]
+    asyncio.run(core.request("people.update", {"person_id": adult["person_id"], "name": "Marc",
+                                               "_signed_in": who["token"]}))
+    assert core.asked[-1] == ("people.update", {"person_id": adult["person_id"], "name": "Marc"})
+    assert core.signed_in == [("people.update", who["token"])]
+    theirs = asyncio.run(core.request("auth.code", {"code": core.sign_in_code(adult)}))["token"]
+    with pytest.raises(ExtensionRequestError, match="only the owner") as info:
+        asyncio.run(core.request("whatsapp.check", {"numbers": [], "_signed_in": theirs}))
+    assert info.value.code == "not_allowed"
+    core.approved = []  # approved for nothing: not even to act for the people signed in to it
+    with pytest.raises(ExtensionRequestError) as info:
+        asyncio.run(core.request("people.update", {"person_id": adult["person_id"], "_signed_in": who["token"]}))
+    assert info.value.code == "not_approved"
+    with pytest.raises(ExtensionRequestError) as info:
+        asyncio.run(core.request("people.update", {"person_id": adult["person_id"]}))  # no proof
+    assert info.value.code == "sign_in_again"

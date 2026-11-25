@@ -28,35 +28,6 @@ import {
   type ExtensionKind,
   type StatusLine
 } from '../shared/extension-rows';
-import { MOCK_NEW_APP } from '$lib/approval-mockup/approval-mockup';
-import { approvalMockup } from '$lib/approval-mockup/store.svelte';
-
-/** mockup: the new app's row, as the list would show a paired app that waits for the owner. */
-function mockNewAppRow(): ExtensionRow {
-  const now = new Date().toISOString();
-  return {
-    ...MOCK_NEW_APP,
-    kind: 'app',
-    version: '0.1.0',
-    paired_at: now,
-    last_seen: now,
-    relays_chat: false,
-    started_by_core: false,
-    enabled: null,
-    mandatory: false,
-    has_settings: false,
-    pairing: '',
-    site: 'http://garden.hiro.local',
-    offers: [],
-    uses: ['plants'],
-    connected: true,
-    connected_at: now,
-    remote: '127.0.0.1',
-    linked: null,
-    account: ''
-  };
-}
-
 export type ExtensionsController = ReturnType<typeof createExtensionsController>;
 
 /**
@@ -67,18 +38,12 @@ export type ExtensionsController = ReturnType<typeof createExtensionsController>
 export function createExtensionsController(notify: Notify) {
   // A channel switched on connects a few seconds later: the list reads again every 5 s while the page is open.
   const list = new Resource(listExtensions, { every: 5000 });
-  // mockup (Permissions phase 8): a new app, paired and waiting for the owner, joins the real list until declined
-  const all = $derived(
-    sortExtensions([
-      ...(list.data?.extensions ?? []),
-      ...(list.data && !approvalMockup.isDeclined(MOCK_NEW_APP.name) ? [mockNewAppRow()] : [])
-    ])
-  );
+  const all = $derived(sortExtensions(list.data?.extensions ?? []));
   let kinds = $state<ExtensionKind[]>([]);
-  // mockup: "Needs approval" shows only the apps that wait for the owner; kept in the address (?show=approval), so
-  // the top bar's button opens the page filtered
+  // Permissions phase 8: "Needs approval" shows only the apps that wait for the owner's yes; kept in the address
+  // (?show=approval), so the top bar's mark opens the page there
   const attention = $derived(page.url.searchParams.get('show') === 'approval');
-  const waiting = $derived(all.filter((row) => row.kind === 'app' && approvalMockup.waits(row.name)));
+  const waiting = $derived(all.filter((row) => row.kind === 'app' && row.waits));
   const rows = $derived(attention ? waiting : ofKinds(all, kinds));
   const counts = $derived(countKinds(all));
   const listen = $derived(list.data?.listen ?? null);
@@ -214,6 +179,27 @@ export function createExtensionsController(notify: Notify) {
     if (removeAction.error) notify('error', removeAction.error);
   }
 
+  /** Permissions phase 8: declining takes the app away (a new app isn't paired; a new version's required ask can't
+   * be left off). The app's own data stays. */
+  async function decline(row: ExtensionRow) {
+    const yes = await ask({
+      title: `Decline ${row.label}?`,
+      description: row.pending
+        ? `${row.label} isn't paired: it gets nothing from HiroLeague. To use it later, pair it again with a new code.`
+        : `${row.label} can't work without what it asks: declining removes it. The app itself and its data stay.`,
+      action: 'Decline',
+      danger: true
+    });
+    if (!yes) return;
+    await removeAction.run(async () => {
+      await removeExtension(row.extension_id);
+      notify('success', `${row.label} declined: it is no longer paired.`);
+      if (pickedId === row.extension_id) pickedId = null;
+      await list.reload();
+    });
+    if (removeAction.error) notify('error', removeAction.error);
+  }
+
   function openInstall() {
     installAction.clear();
     installOpen = true;
@@ -261,24 +247,25 @@ export function createExtensionsController(notify: Notify) {
     get connectedCount() {
       return rows.filter((row) => row.connected).length;
     },
-    /** mockup: the Needs approval filter, and how many apps wait. */
+    /** Permissions phase 8: the Needs approval view, and how many apps wait. */
     get attention() {
       return attention;
     },
     get waitingCount() {
       return waiting.length;
     },
+    decline,
+    /** After the owner's answer: the list reads again (the row's mark and status follow). */
+    reload: () => list.reload(),
     setAttention: (on: boolean) => {
       const url = new URL(page.url);
       if (on) url.searchParams.set('show', 'approval');
       else url.searchParams.delete('show');
       void goto(url, { replaceState: true, keepFocus: true, noScroll: true });
     },
-    /** What the Status column says; mockup: an app never approved isn't working yet, whatever its link. */
+    /** What the Status column says; an app never approved isn't working yet, whatever its link (phase 8). */
     statusOf: (row: ExtensionRow): StatusLine =>
-      row.kind === 'app' && approvalMockup.pending(row.name) ? { tone: 'warn', text: 'Waits for approval' } : statusOf(row),
-    /** mockup: the row stands in for an app the core doesn't know: nothing on it calls the core. */
-    isMockup: (row: ExtensionRow) => row.extension_id === MOCK_NEW_APP.extension_id,
+      row.kind === 'app' && row.pending ? { tone: 'warn', text: 'Waits for approval' } : statusOf(row),
     /** An app's title by its name ("Ask HomeHiro"), else the name. */
     titleOf: (name: string) => all.find((row) => row.name === name)?.label ?? name,
     get listen() {

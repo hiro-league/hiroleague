@@ -126,22 +126,48 @@ def test_notify_names_the_person_by_their_id_in_hiroleague(core):
         run(whatsapp.notify("cp1", "Youssef", "dinner", character=False))
 
 
+def test_notify_carries_a_picture_or_a_voice_note(core):
+    """Permissions phase 8: an app tells people only through notify, so it carries what send() did."""
+    core.answer = {"results": [{"person": "cp1", "name": "Yoyo", "sent": True}]}
+    assert run(whatsapp.notify("cp1", "Youssef", "the door", image=b"\xff\xd8jpeg")) is True
+    assert core.asked[-1][1]["image_b64"] == base64.b64encode(b"\xff\xd8jpeg").decode()
+    assert run(whatsapp.notify("cp1", "Youssef", voice=b"OggS", voice_seconds=2.5, waveform=bytes(range(64)),
+                               transcript="Joe is home")) is True
+    params = core.asked[-1][1]
+    assert (params["voice_b64"], params["voice_seconds"], params["transcript"]) == (
+        base64.b64encode(b"OggS").decode(), 2.5, "Joe is home")
+
+
 def test_check_asks_the_core_and_reads_its_answers(core):
     core.answer = {"answers": [{"query": "201001234567", "on_whatsapp": True, "jid": "201001234567@s.whatsapp.net"}]}
-    assert run(whatsapp.check(["201001234567"])) == [
+    assert run(whatsapp.check(["201001234567"], signed_in="proof")) == [
         {"query": "201001234567", "on_whatsapp": True, "jid": "201001234567@s.whatsapp.net"}]
-    assert core.asked == [(METHOD_WHATSAPP_CHECK, {"numbers": ["201001234567"]}, 30)]
+    # Permissions phase 8: the owner's check, with their proof from the core
+    assert core.asked == [(METHOD_WHATSAPP_CHECK, {"numbers": ["201001234567"], "_signed_in": "proof"}, 30)]
     core.answer = {"answers": [{"query": "2010"}]}  # no on_whatsapp
     with pytest.raises(whatsapp.WhatsAppError, match="check can't be read"):
-        run(whatsapp.check(["2010"]))
+        run(whatsapp.check(["2010"], signed_in=None))
+    assert core.asked[-1][1] == {"numbers": ["2010"]}  # sign-in off: no proof to send
     with pytest.raises(errors.Invalid, match="At most 20"):
-        run(whatsapp.check([str(n) for n in range(21)]))
+        run(whatsapp.check([str(n) for n in range(21)], signed_in=None))
 
 
 def test_a_dropped_connection_while_checking_is_not_connected(core):
     core.answer = ExtensionRequestError("not_connected", "connection closed")  # nothing is sent by a check
     with pytest.raises(whatsapp.WhatsAppNotRunning, match="isn't connected to HiroLeague"):
-        run(whatsapp.check(["201001234567"]))
+        run(whatsapp.check(["201001234567"], signed_in=None))
+
+
+@pytest.mark.parametrize(("code", "error"), [("not_approved", errors.NotApproved), ("not_allowed", errors.NotAllowed),
+                                             ("sign_in_again", errors.NotSignedIn)])
+def test_the_cores_no_to_the_app_or_the_person_is_said_in_its_words_and_sent_nothing(core, code, error):
+    """Permissions phase 8: refused before anything left, so never "it may have gone out", nor a WhatsAppError."""
+    core.answer = ExtensionRequestError(code, "TestApp isn't approved to notify people on WhatsApp yet.")
+    with pytest.raises(error) as info:
+        run(whatsapp.check(["201001234567"], signed_in="proof"))
+    assert str(info.value) == "TestApp isn't approved to notify people on WhatsApp yet."
+    assert not isinstance(info.value, whatsapp.WhatsAppError)
+    assert whatsapp._error(ExtensionRequestError(code, "no"), 60, sends=True).__class__ is error
 
 
 def test_a_number_without_country_code_is_invalid():

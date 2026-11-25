@@ -20,7 +20,7 @@ import asyncio
 import hashlib
 import secrets
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode, urlsplit
@@ -29,12 +29,14 @@ from hiro_channel_sdk.constants import (
     AUTH_CODE_SECONDS,
     AUTH_ERROR_INVALID_CODE,
     METHOD_AUTH_CODE,
+    METHOD_AUTH_END,
     METHOD_SITES_LIST,
     OFFER_KIND_SIGN_IN,
     OFFER_KIND_SITE,
 )
 from hiro_commons.log import Logger
 
+from ..domain import approvals, person_tokens
 from ..domain.extensions import list_paired_extensions
 from ..domain.access import admin_access
 from ..domain.people import get_person, get_role
@@ -114,21 +116,38 @@ def _site_from(extension_id: str, info: dict[str, Any], online: bool) -> Site | 
     return None
 
 
+def _approved_site(workspace_path: Path, site: Site) -> Site | None:
+    """Permissions phase 8: people, sign-in codes and card links go only to the address the owner approved. A new
+    address waits, and the approved one stays in use meanwhile; an app approved for no address shows no card."""
+    from hiro_channel_sdk.approvals import SITE_ADDRESS
+
+    approval = approvals.read(workspace_path, site.extension_id)
+    if approval is None or approval.approved is None:
+        return site
+    addresses = [origin_of(i.subject) for i in approval.approved if i.permission == SITE_ADDRESS]
+    if site.url in addresses:
+        return site
+    kept = next((a for a in reversed(addresses) if a), None)
+    return replace(site, url=kept) if kept else None
+
+
 def list_sites(manager: ExtensionManager | None, workspace_path: Path) -> list[Site]:
-    """Every paired extension's declared site: live info when connected, else what it last declared."""
+    """Every paired extension's declared site: live info when connected, else what it last declared; at the address
+    the owner approved (Permissions phase 8)."""
     live = manager.snapshot() if manager is not None else {}
     sites: list[Site] = []
     seen: set[str] = set()
     for eid, conn in live.items():
         site = _site_from(eid, conn.get("info") or {}, online=True)
         if site is not None:
-            sites.append(site)
             seen.add(eid)
+            if (site := _approved_site(workspace_path, site)) is not None:
+                sites.append(site)
     for paired in list_paired_extensions(workspace_path):
         if paired.extension_id in seen:
             continue
         site = _site_from(paired.extension_id, paired.info or {}, online=False)
-        if site is not None:
+        if site is not None and (site := _approved_site(workspace_path, site)) is not None:
             sites.append(site)
     return sites
 
@@ -266,8 +285,11 @@ async def handle_auth_code(params: dict[str, Any], ctx: RequestContext) -> dict[
     if person is None:
         raise RequestRefused(AUTH_ERROR_INVALID_CODE, "That person is no longer in the family list.")
     role = await asyncio.to_thread(get_role, workspace_path, person.role_id)
+    # Permissions phase 8: the person's proof, for this app alone; its pages send it with what they ask for them
+    token = await asyncio.to_thread(person_tokens.issue, workspace_path, person.person_id, extension_id)
     log.info(f"✅ Signed in through HiroLeague — {person.name} · {sender_label(ctx)}", role=person.role_id)
     return {
+        "token": token,
         "person_id": person.person_id,
         "name": person.name,
         "role_id": person.role_id,  # the first of role_ids: what an app reads until it knows several (phase 5)
@@ -302,7 +324,17 @@ async def handle_sites_list(params: dict[str, Any], ctx: RequestContext) -> dict
     }
 
 
+async def handle_auth_end(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
+    """Permissions phase 8: the person signed out of the app, so the proof the core gave it for them ends."""
+    extension_id = getattr(getattr(ctx.msg, "routing", None), "sender_id", "") or ""
+    token = str(params.get("token") or "")
+    if token:
+        await asyncio.to_thread(person_tokens.end, Path(ctx.server_ctx.workspace_path), token, extension_id)
+    return {}
+
+
 SIGN_IN_REQUEST_HANDLERS: tuple[tuple[str, Any, frozenset[str]], ...] = (
     (METHOD_AUTH_CODE, handle_auth_code, EXTENSIONS_ONLY),
+    (METHOD_AUTH_END, handle_auth_end, EXTENSIONS_ONLY),
     (METHOD_SITES_LIST, handle_sites_list, EXTENSIONS_ONLY),  # the app switcher in every app
 )

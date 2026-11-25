@@ -1,20 +1,19 @@
 <script lang="ts">
   // About one extension, read only, drawn from its description. One shape for a channel and an app; what only one
   // kind has (a linked account, a site, offers, AI uses) shows when it has it. Its settings are a panel of their own.
-  // mockup (Permissions phase 8): an app's sheet has two tabs, Info and Permissions; an app that waits for the owner
-  // opens on Permissions, with Approve and Decline in the footer.
+  // Permissions phase 8: an app's sheet has two tabs, Info and Permissions; an app that waits for the owner opens on
+  // Permissions, with Approve and Decline in the footer.
   import { ExternalLink, KeyRound, Link2Off, PlugZap, ShieldCheck } from '@lucide/svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
-  import { ask } from '$kit/ui/confirm.svelte';
   import DetailSheet from '$kit/ui/detail-sheet.svelte';
   import PageTabs, { type PageTab } from '$kit/ui/page-tabs.svelte';
   import StatusDot from '$kit/ui/status-dot.svelte';
   import { dateTime } from '$kit/format/time';
   import type { ExtensionRow } from '$lib/api/extensions';
-  import { approvalMockup } from '$lib/approval-mockup/store.svelte';
   import { statusTime } from '../shared/extension-rows';
   import ExtensionApproval from './ExtensionApproval.svelte';
+  import { createApprovalSheet } from '../state/approval-sheet.svelte';
   import type { ExtensionsController } from '../state/extensions-controller.svelte';
 
   let { ctrl }: { ctrl: ExtensionsController } = $props();
@@ -30,13 +29,15 @@
 
   // The tab picked for this row; a row picked anew opens on Permissions when its app waits, else on Info.
   let chosen = $state<{ id: string; tab: SheetTab } | null>(null);
-  const waits = $derived(!!row && row.kind === 'app' && approvalMockup.waits(row.name));
+  const waits = $derived(!!row && row.kind === 'app' && row.waits);
+  // What the picked app asks (read only for an app: a channel asks for nothing)
+  const sheet = createApprovalSheet(() => (row && row.kind === 'app' ? row.extension_id : ''), () => ctrl.reload());
   const tab = $derived<SheetTab>(
     row && chosen?.id === row.extension_id ? chosen.tab : waits ? 'permissions' : 'info'
   );
   const tabs = $derived<PageTab<SheetTab>[]>([
     { id: 'info', label: 'Info' },
-    { id: 'permissions', label: 'Permissions', ...(waits ? { count: approvalMockup.askedCount(row?.name ?? ''), countTone: 'primary' as const } : {}) }
+    { id: 'permissions', label: 'Permissions', ...(waits ? { count: row?.waiting_count ?? 0, countTone: 'primary' as const } : {}) }
   ]);
   const pick = (next: SheetTab) => {
     if (row) chosen = { id: row.extension_id, tab: next };
@@ -44,8 +45,6 @@
 
   // One row of the Details list: its name, then its value
   const ROW = 'grid grid-cols-[160px_1fr] items-start gap-3 px-3 py-2 text-sm';
-  // mockup: the network name the app claimed, from its approval
-  const identity = $derived(row ? (approvalMockup.of(row.name)?.identity ?? null) : null);
 
   function facts(r: ExtensionRow): [string, string][] {
     const out: [string, string][] = [
@@ -60,20 +59,6 @@
     return out;
   }
 
-  // mockup: Decline takes the app away: a new app is not paired, a new version's required ask declined removes it.
-  async function decline(r: ExtensionRow) {
-    const yes = await ask({
-      title: `Decline ${r.label}?`,
-      description: approvalMockup.pending(r.name)
-        ? `${r.label} is not paired: it gets nothing from HiroLeague. To use it later, pair it again.`
-        : `${r.label} needs what it asks to work: declining removes it. Its own data stays.`,
-      action: 'Decline',
-      danger: true
-    });
-    if (!yes) return;
-    approvalMockup.decline(r.name);
-    ctrl.closePanel();
-  }
 </script>
 
 <DetailSheet
@@ -96,7 +81,7 @@
     {/if}
 
     {#if row.kind === 'app' && tab === 'permissions'}
-      <ExtensionApproval name={row.name} label={row.label} titleOf={ctrl.titleOf} />
+      <ExtensionApproval {sheet} label={row.label} titleOf={ctrl.titleOf} />
     {:else}
       <!-- The app's details as one list; what other apps and Hiro may ask it, and its AI tasks, after it. -->
       <section class="grid gap-2">
@@ -117,10 +102,10 @@
               </dd>
             </div>
           {/if}
-          {#if identity}
+          {#if sheet.networkName}
             <div class={ROW}>
               <dt class="text-muted-foreground">Network name</dt>
-              <dd class="min-w-0 truncate">{identity.lanName} → port {identity.port}</dd>
+              <dd class="min-w-0 truncate">{sheet.networkName}</dd>
             </div>
           {/if}
           {#each facts(row) as [key, value] (key)}
@@ -165,30 +150,30 @@
 
   {#snippet actions()}
     {#if row}
-      {#if waits}
-        <!-- mockup: the owner's answer, in reach without scrolling -->
-        {#if approvalMockup.declinable(row.name)}
-          <Button variant="outline" onclick={() => void decline(row)}>Decline</Button>
+      {#if waits || (tab === 'permissions' && sheet.dirty)}
+        <!-- The owner's answer, in reach without scrolling -->
+        {#if waits && sheet.declinable}
+          <Button variant="outline" disabled={ctrl.busy || sheet.saving.busy} onclick={() => void ctrl.decline(row)}>Decline</Button>
         {/if}
-        <Button onclick={() => approvalMockup.approve(row.name)}>
+        <Button disabled={sheet.saving.busy || !sheet.approval} onclick={() => void sheet.approve()}>
           <ShieldCheck size={15} />
-          {approvalMockup.pending(row.name) ? `Approve ${row.label}` : 'Approve what is new'}
+          {!waits ? 'Save' : row.pending ? `Approve ${row.label}` : 'Approve what is new'}
         </Button>
       {:else}
-        <Button variant="outline" disabled={!row.connected || ctrl.testing || ctrl.isMockup(row)} onclick={() => void ctrl.testCall(row)}>
+        <Button variant="outline" disabled={!row.connected || ctrl.testing} onclick={() => void ctrl.testCall(row)}>
           <PlugZap size={15} /> Test call
         </Button>
         {#if row.kind === 'app'}
           <Button
             variant="outline"
-            disabled={ctrl.busy || ctrl.isMockup(row)}
+            disabled={ctrl.busy}
             title="For this app after it lost its key: it keeps its rights, AI picks and name"
             onclick={() => void ctrl.pairAgain(row)}
           >
             <KeyRound size={15} /> Pair again
           </Button>
         {/if}
-        <Button variant="destructive" disabled={row.mandatory || ctrl.busy || ctrl.isMockup(row)} onclick={() => void ctrl.remove(row)}>
+        <Button variant="destructive" disabled={row.mandatory || ctrl.busy} onclick={() => void ctrl.remove(row)}>
           <Link2Off size={15} /> Remove
         </Button>
       {/if}

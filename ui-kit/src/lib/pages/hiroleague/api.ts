@@ -4,6 +4,15 @@ import { api } from '$kit/api/client';
 
 export type CoreInfo = { name: string; version: string; workspace?: string; admin_port?: number | null };
 export type SiteKind = 'subdomain' | 'local';
+/** Something the app asks to do that waits for the owner's yes in HiroLeague (its Extensions page). */
+export type WaitingItem = {
+	/** The SDK's id, e.g. "ai.search". */
+	permission: string;
+	/** What it names, where it has one: the app asked, the address, "<name>:<port>". */
+	subject?: string;
+	/** What it is, for people: "use the search models: turn texts into vectors and rank them". */
+	words: string;
+};
 export type HiroLeagueStatus = {
 	url: string;
 	/** no_address | not_paired | connecting | connected | disconnected | stopped */
@@ -16,6 +25,8 @@ export type HiroLeagueStatus = {
 	site_url?: string;
 	site_label?: string | null;
 	site_kind?: SiteKind | null;
+	/** What waits for the owner's approval in HiroLeague, as the core last said ([]: nothing). */
+	waiting?: WaitingItem[];
 };
 export type HiroLeagueTest = { core: CoreInfo; elapsed_ms: number };
 export type SiteNameOut = { name: string; url: string; published: boolean; proxied: boolean; note?: string; status: HiroLeagueStatus };

@@ -54,6 +54,19 @@ async def _caller_name(ctx: RequestContext) -> str:
     return paired.name
 
 
+async def refuse_undeclared(ctx: RequestContext, name: str, kind: str, use: str) -> None:
+    """Permissions phase 8: an AI, voice or search ask that names a use names one the app declares (``kind``: uses,
+    voice_uses, embed_uses, rerank_uses); else it is refused in words. Its profile is the owner's pick for it."""
+    if not use:
+        return
+    paired = await asyncio.to_thread(get_paired_extension, ctx.workspace_path, ctx.msg.routing.sender_id)
+    if paired is None:  # the request's check already refuses an app the core doesn't know (app_asks.py)
+        return
+    declared = {str(u.get("id")) for u in (paired.info.get(kind) or []) if isinstance(u, dict)}
+    if use not in declared:
+        raise RequestRefused(AI_ERROR_INVALID, f"{use!r} isn't one of the uses {name} declares.")
+
+
 async def _checked_folder(folder: str, name: str, use: str, ctx: RequestContext) -> Path:
     """The folder an ask names, if this extension's use declares it and the admin allowed it (ai_ask/folders.py)."""
     paired = await asyncio.to_thread(get_paired_extension, ctx.workspace_path, ctx.msg.routing.sender_id)
@@ -88,6 +101,7 @@ async def handle_ai_ask(params: dict[str, Any], ctx: RequestContext) -> dict[str
     use = params.get("use")
     if not isinstance(use, str) or not use.strip():
         raise RequestRefused(AI_ERROR_INVALID, "use is required (one of the extension's declared uses).")
+    await refuse_undeclared(ctx, name, "uses", use.strip())
     use_key = f"{name}:{use.strip()}"
     try:
         request = ask_request_from_params(params, use_key=use_key, who=name)
@@ -110,6 +124,7 @@ async def handle_ai_chat(params: dict[str, Any], ctx: RequestContext) -> dict[st
     use = params.get("use")
     if not isinstance(use, str) or not use.strip():
         raise RequestRefused(AI_ERROR_INVALID, "use is required (one of the extension's declared uses).")
+    await refuse_undeclared(ctx, name, "uses", use.strip())
     try:
         request = chat_request_from_params(params, use_key=f"{name}:{use.strip()}", who=name)
         if mode == FAKE:

@@ -194,6 +194,19 @@ _DDL = [
         expires_at  TEXT NOT NULL
     )
     """,
+    # Permissions phase 8: a person's proof, given to one app at a sign-in (person_tokens.py); only its hash is kept.
+    # Kept while used (90 days unused ends it), until the person signs out of the app, is removed or changes their
+    # password; ended ones are dropped at each new one.
+    """
+    CREATE TABLE IF NOT EXISTS person_tokens (
+        token_hash    TEXT PRIMARY KEY,
+        person_id     TEXT NOT NULL,
+        extension_id  TEXT NOT NULL,
+        created_at    TEXT NOT NULL,
+        last_used     TEXT NOT NULL,
+        expires_at    TEXT NOT NULL
+    )
+    """,
 ]
 
 # ---------------------------------------------------------------------------
@@ -238,6 +251,13 @@ _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
     ("extension_records", "last_seen",       "TEXT"),
     ("extension_records", "info",            "TEXT NOT NULL DEFAULT '{}'"),
     ("extension_records", "uses_before",     "TEXT NOT NULL DEFAULT '[]'"),
+    # Permissions phase 8: the items the owner approved (JSON list of {permission, subject}); NULL = an app paired
+    # before approvals, approved for everything until it first declares what it asks (approvals.py)
+    ("extension_records", "approved",        "TEXT"),
+    # ... and the LAN name and port it last asked for and wasn't approved for ("name:port"; "" = none)
+    ("extension_records", "asked_claim",     "TEXT NOT NULL DEFAULT ''"),
+    # ... and the optional items the owner left off (JSON list of {permission, subject}): they wait no more
+    ("extension_records", "declined",        "TEXT NOT NULL DEFAULT '[]'"),
     ("extension_records", "relays_chat",     "INTEGER NOT NULL DEFAULT 0"),
     ("extension_records", "started_by_core", "INTEGER NOT NULL DEFAULT 0"),
     ("extension_records", "enabled",         "INTEGER NOT NULL DEFAULT 1"),

@@ -4,7 +4,8 @@
   // AdminShell; the menu's collapse button, light/dark and Sign out are the shared menu's now.
   import { base } from '$app/paths';
   import { BookOpen, ExternalLink, MessagesSquare, Puzzle, Settings } from '@lucide/svelte';
-  import { approvalMockup } from '$lib/approval-mockup/store.svelte';
+  import { listExtensions } from '$lib/api/extensions';
+  import { Resource } from '$kit/state/resource.svelte';
   import { onMount } from 'svelte';
   import { DEFAULT_ADMIN_CONFIG, docsUrl, getAdminConfig, type AdminConfig } from '$lib/api/config';
   import { chatOverlay } from '$lib/features/chat-channels/overlay/chat-overlay-store.svelte';
@@ -22,6 +23,13 @@
   // Settings needs its feature
   const showChat = $derived(!!who.me?.owner);
   const showSettings = $derived(can(who.me, 'settings'));
+  // Permissions phase 8: how many apps wait for the owner's approval (the owner's alone), read every 30 s
+  const waiting = new Resource(
+    async (signal) =>
+      who.me?.owner ? (await listExtensions(signal)).extensions.filter((e) => e.kind === 'app' && e.waits).length : 0,
+    { every: 30000 }
+  );
+  const waitingCount = $derived(waiting.data ?? 0);
   let adminConfig = $state<AdminConfig>(DEFAULT_ADMIN_CONFIG);
   const adminDocsUrl = $derived(docsUrl(adminConfig, '/'));
   const status = $derived<WorkspaceStatusState>(liveStatus.payload?.workspace_status ?? 'stopped');
@@ -74,19 +82,19 @@
     {/if}
   </Button>
   {/if}
-  <!-- mockup (Permissions phase 8): apps wait for the owner's approval; it opens Extensions showing only those. -->
-  {#if showChat && approvalMockup.waitingCount > 0}
+  <!-- Permissions phase 8: apps wait for the owner's approval; it opens Extensions showing only those. -->
+  {#if showChat && waitingCount > 0}
     <Button
       variant="outline"
       size="icon-lg"
       class="relative"
       href={`${base}/extensions?show=approval`}
-      aria-label="{approvalMockup.waitingCount} app{approvalMockup.waitingCount === 1 ? '' : 's'} wait for your approval"
-      title="Mockup: {approvalMockup.waitingCount} app{approvalMockup.waitingCount === 1 ? '' : 's'} wait for your approval"
+      aria-label="{waitingCount} app{waitingCount === 1 ? '' : 's'} wait for your approval"
+      title="{waitingCount} app{waitingCount === 1 ? '' : 's'} wait for your approval"
     >
       <Puzzle />
       <span class="absolute -top-1 -right-1 grid size-4 place-items-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
-        {approvalMockup.waitingCount}
+        {waitingCount}
       </span>
     </Button>
   {/if}

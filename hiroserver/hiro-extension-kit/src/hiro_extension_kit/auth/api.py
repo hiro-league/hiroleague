@@ -3,10 +3,13 @@ Settings → Roles.
 
 A user is a person in HiroLeague's family list (`AppUser.id` is the core's person id). A signed-out browser is sent to
 the core's sign-in page (`/api/auth/start`), which sends it back with a one-time code (`/api/auth/hiro`); the app asks
-the core whose code it is (`auth.code`) and keeps its own 90-day session (sessions.py).
+the core whose code it is (`auth.code`) and keeps its own 90-day session (sessions.py), with the person's proof the
+core gave (Permissions phase 8: `core_token`, on `request.state.core_token` for the routes that ask the core for them,
+ended in the core at sign-out).
 
 A user's roles are their core person's roles (family.py): one or several, and their rights add up. Picking them for a
-user changes them in the core (people.update). The roles themselves (new, renamed, removed), their lines and what each
+user changes them in the core (people.update), for the owner signed in; no app gives or takes the Owner role. The
+roles themselves (new, renamed, removed), their lines and what each
 may do in the app are set in HiroLeague's People → Roles; Settings → Roles here shows them. No access stays the app's
 own. The app's features and actions are its `Extension.features` (access.py); every route's check is guard.py.
 """
@@ -25,9 +28,10 @@ from .. import family, identity, switchboard
 from ..db import get_session, run_db
 from ..errors import Invalid, AppError, NotAllowed, NotFound, NotSignedIn, failed
 from ..extension import ext
-from ..hiroleague import link
+from ..hiroleague import core_token, link
 from .models import AppUser, CorePerson, Role
 from . import sessions
+from . import one_sign_in
 from .one_sign_in import after_core_sign_out, local_path, redeem, sign_in_url, sign_out_url
 from .access import OWNER, levels, of_user, rights_of
 from .identity import Caller, caller_of, device_of
@@ -36,6 +40,7 @@ log = identity.logger("auth")
 router = APIRouter(prefix="/api")
 
 SEEN_EVERY = timedelta(minutes=5)  # how often "last here" is written for someone who keeps using the app
+OWNER_IN_HIROLEAGUE = "The Owner role is given in HiroLeague's admin."  # no app gives or takes it (Permissions phase 8)
 
 
 def _now() -> datetime:
@@ -46,9 +51,10 @@ def _title() -> str:
     return identity.app().title  # "NetHiro", in messages
 
 
-def _signed_in_user(session: Session, token: str) -> AppUser | None:
-    uid = sessions.user_of(session, token)
-    return session.get(AppUser, uid) if uid else None
+def _signed_in_user(session: Session, token: str) -> tuple[AppUser | None, str | None]:
+    """The user a cookie signs in, and the person's proof the core gave at sign-in (None: none)."""
+    s = sessions.of(session, token)
+    return (session.get(AppUser, s.user_id), s.core_token) if s else (None, None)
 
 
 def not_linked(name: str) -> str:
@@ -61,7 +67,9 @@ async def caller(request: Request) -> Caller:
     """Who sent this request: signed in here (the session cookie), the app's other way in (HomeHiro: HA's add-on,
     mapped to the core person through its links; user_id "" when not linked), or sign-in off. In a test environment
     whose switchboard turns the sign-in screen off, everyone is the owner, or the one person it names (with their
-    role, from the family list, as if they had signed in)."""
+    role, from the family list, as if they had signed in). A session's proof from the core goes on
+    `request.state.core_token` (`core_token`)."""
+    request.state.core_token = None
     quick = switchboard.sign_in()
     if quick.mode == "as":
         return Caller(quick.person, quick.name or quick.person, "web", device_of(request.headers.get("user-agent", "")))
@@ -74,8 +82,9 @@ async def caller(request: Request) -> Caller:
         return await run_db(lambda s: dataclasses.replace(named, user_id=other.person_of(s, named.other_id)))
     token = request.cookies.get(sessions.COOKIE, "")
     if token:
-        user = await run_db(_signed_in_user, token)
+        user, proof = await run_db(_signed_in_user, token)
         if user:
+            request.state.core_token = proof
             return Caller(user.id, user.name, "web", device_of(request.headers.get("user-agent", "")))
     raise NotSignedIn(f"Sign in at HiroLeague to use {_title()}.")
 
@@ -204,16 +213,17 @@ async def sign_in(next: str = "/") -> RedirectResponse:
     return RedirectResponse(url, 303)
 
 
-def _start_session(session: Session, c: Caller) -> str:
+def _start_session(session: Session, c: Caller, proof: str | None) -> str:
     sessions.purge(session)
     seen(session, c)
-    return sessions.start(session, c.user_id, c.device)
+    return sessions.start(session, c.user_id, c.device, proof)
 
 
 @router.get("/auth/hiro")
 async def signed_in_at_hiroleague(request: Request, code: str = "", next: str = "/") -> RedirectResponse:
     """HiroLeague sent the browser back with a one-time code: ask the core whose it is, start the app's own session
-    (90 days), go where they were going. A failure goes back to the app's first page, which says why."""
+    (90 days) with the person's proof the core gave, go where they were going. A failure goes back to the app's first
+    page, which says why."""
     try:
         who = await redeem(link, code)
     except AppError as exc:
@@ -223,7 +233,7 @@ async def signed_in_at_hiroleague(request: Request, code: str = "", next: str = 
     if not await run_db(lambda s: s.get(CorePerson, person_id) is not None):
         await family.sync_soon()  # someone new in the family list: their role is in the copy once it is read again
     c = Caller(person_id, str(who.get("name") or person_id), "web", device_of(request.headers.get("user-agent", "")))
-    token = await run_db(_start_session, c)
+    token = await run_db(_start_session, c, str(who.get("token") or "") or None)
     log.info("Users: %s signed in through HiroLeague (%s)", c.name, c.device)
     r = RedirectResponse(local_path(next), 303)
     r.set_cookie(sessions.COOKIE, token, max_age=sessions.SESSION_DAYS * 86400, httponly=True, samesite="lax", path="/")
@@ -235,8 +245,10 @@ class SignedOut(BaseModel):
 
 
 async def _end_this_session(request: Request) -> None:
+    """The app's session in this browser ends, and the person's proof the core gave it with it."""
     token = request.cookies.get(sessions.COOKIE, "")
-    await run_db(lambda s: sessions.end(s, token))
+    proof = await run_db(lambda s: sessions.end(s, token))
+    await one_sign_in.end(link, proof)
 
 
 @router.post("/auth/logout")
@@ -313,6 +325,10 @@ def _checked_user(session: Session, user_id: str, body: UserIn) -> tuple[AppUser
              if r.id in wanted]
     if len(roles) < len(wanted):
         raise Invalid("A role picked isn't in HiroLeague's family list any more.")
+    core = session.get(CorePerson, user_id)  # the user is this core person
+    held = core.role_ids if core is not None else u.role_ids
+    if body.role_ids is not None and (OWNER in wanted) != (OWNER in held):  # the core refuses it too (not_allowed)
+        raise Invalid(OWNER_IN_HIROLEAGUE)
     denied = u.denied if body.denied is None else body.denied
     if not denied and not roles:
         raise Invalid("Pick a role, or No access.")
@@ -323,7 +339,6 @@ def _checked_user(session: Session, user_id: str, body: UserIn) -> tuple[AppUser
     scope = ext().users_scope
     if scope is not None:
         scope.check(session, u, body.areas or [], body.things or [])
-    core = session.get(CorePerson, user_id)  # the user is this core person
     if body.role_ids is not None and {r.id for r in roles} != set(u.role_ids) and core is None:
         raise Invalid(f"{u.name} isn't in HiroLeague's family list any more, so their roles can't be set here.")
     return u, roles, core
@@ -346,13 +361,14 @@ def _write_user(session: Session, user_id: str, body: UserIn) -> list[UserOut]:
 
 
 @router.put("/users/{user_id}")
-async def put_user(user_id: str, body: UserIn, c: Caller = Depends(owner)) -> list[UserOut]:
-    """A user's roles (asked of HiroLeague: their core person's roles; it refuses taking the only Owner's away and says
-    why), No access, and with a users scope what is picked there (both the app's own)."""
+async def put_user(request: Request, user_id: str, body: UserIn, c: Caller = Depends(owner)) -> list[UserOut]:
+    """A user's roles (asked of HiroLeague for the owner signed in: their core person's roles; it refuses taking the
+    only Owner's away and says why), No access, and with a users scope what is picked there (both the app's own). The
+    Owner role is never given or taken here: only in HiroLeague's admin."""
     u, roles, core = await run_db(_checked_user, user_id, body)
     ids = [r.id for r in roles]
     if body.role_ids is not None and core is not None and set(ids) != set(core.role_ids):  # the core orders them
-        await family.update_person(core.id, role_ids=ids)
+        await family.update_person(core.id, signed_in=core_token(request), role_ids=ids)
     out = await run_db(_write_user, user_id, body)
     if body.denied:
         log.info("Users: %s gave %s No access", c.name, u.name)

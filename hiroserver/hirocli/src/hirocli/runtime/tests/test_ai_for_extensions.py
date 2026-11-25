@@ -8,6 +8,8 @@ uses so the Uses list marks the new and the removed ones.
 
 from __future__ import annotations
 
+from hirocli.runtime.tests.approved import approve_every_app
+
 import asyncio
 import json
 import socket
@@ -123,6 +125,7 @@ def test_uses_are_kept_asks_answer_and_refresh_marks_new_and_removed(tmp_path: P
         await _wait_for(lambda: client.status == STATUS_NOT_PAIRED)
         client.pair(start_extension_pairing(workspace, code_length=6, ttl_seconds=60).code)
         await _wait_for(lambda: client.status == STATUS_CONNECTED)
+        approve_every_app(workspace)  # Permissions phase 8: not what this test is about
 
         # The declared uses are kept with the paired extension ("json" on the wire).
         [paired] = list_paired_extensions(workspace)

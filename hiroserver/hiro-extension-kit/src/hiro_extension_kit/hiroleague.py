@@ -20,6 +20,10 @@ address is a LAN name the core sets up (`sites.claim`, hiroleague docs/site-name
 proxy there, and the app then declares `http://<name>` as its site. Until a name is set, the app claims
 `<Extension.name>.hiro.local` by itself once connected.
 
+What the owner approved the app for (Permissions phase 8) comes with the core's welcome and with each
+`approval.changed`: the link keeps it (`link.approval`, `link.approved_for`), and Settings → HiroLeague lists what still
+waits for the owner. What the app asks for is its declaration's `asks` (`info_for`).
+
 Backend kit, step 3: NetHiro's and TrainHiro's own copies, the same but for the values now in `Extension`.
 """
 
@@ -29,6 +33,8 @@ from collections.abc import Callable
 from typing import Any, Protocol
 
 from hiro_channel_sdk import ExtensionClient, ExtensionCredentials, ExtensionInfo, ExtensionOffers, ExtensionRequestError
+from hiro_channel_sdk.approvals import (AI_SEARCH, AI_USE, EVENT_APPROVAL_CHANGED, PARAM_SIGNED_IN, VOICE_SPEAK, WORDS,
+                                        AppAsk, Approval)
 from hiro_channel_sdk.constants import (CORE_REPO, EVENT_TYPE_RESOURCE_CHANGED, METHOD_CORE_INFO, METHOD_SITES_CLAIM,
                                         METHOD_SITES_LIST, OFFER_KIND_SITE, SITES_DOMAIN, SITES_ERROR_INVALID,
                                         SITES_ERROR_TAKEN)
@@ -40,7 +46,7 @@ from sqlmodel import Session
 
 from . import calls, identity, settings
 from .auth.identity import DEV
-from .errors import AppError, Invalid, OutsideError, Unavailable, failed, translate
+from .errors import AppError, Invalid, OutsideError, Unavailable, failed, refusal, translate
 from .events import bus
 from .extension import ext
 from .follow import Follower, Refresh
@@ -59,6 +65,7 @@ DEFAULT_KIND = "subdomain"  # the name the app claims by itself while none is se
 # A claim may reload the core's proxy (the core waits up to 60 s for it).
 SITES_TIMEOUT = 75.0
 APPS_TIMEOUT = 5.0  # the app switcher's list of apps (sites.list): someone is waiting with the grid open
+APPS_ASK_TIMEOUT = 15.0  # an ask to another app (extensions.ask), as the SDK's own default
 CORE_NAME = CORE_REPO  # "hiroleague": the core's tile in the app switcher (its icon is the core's own logo)
 HOME = "home"  # HomeHiro's name in the core
 CONNECTED = "hiroleague connected"  # published on the bus each time the link is connected (signed in)
@@ -75,9 +82,30 @@ def site_url_default() -> str:
     return ext().site_default or site_name(ext().name, DEFAULT_KIND).url
 
 
+def _derived(uses: Any, permission: str, words: str) -> AppAsk:
+    """An ask the kit adds for the uses the app declares, why from their names ("Its AI uses: Sorting sites")."""
+    return AppAsk(permission=permission, why=f"{words}: {', '.join(u.name for u in uses)}")
+
+
+def asks_for() -> list[AppAsk] | None:
+    """What the app asks to do on its own (Permissions phase 8): its `Extension.asks`, and those its declared uses
+    need that it didn't list (ai.use for AI uses, voice.speak for voice uses, ai.search for embed or rerank uses).
+    None while the app sets none, so the core changes nothing for an app not updated yet."""
+    e = ext()
+    if e.asks is None:
+        return None
+    asks = list(e.asks)
+    listed = {a.permission for a in asks}
+    derived = [(AI_USE, e.uses, "Its AI uses"), (VOICE_SPEAK, e.voice_uses, "Its voice uses"),
+               (AI_SEARCH, [*e.embed_uses, *e.rerank_uses], "Its search uses")]
+    asks += [_derived(uses, permission, words) for permission, uses, words in derived if uses and permission not in listed]
+    return asks
+
+
 def info_for(site_url: str) -> ExtensionInfo:
-    """What the app declares to the core: its questions, its site at `site_url` for every role, its AI uses and its
-    features and rights. Built at connect time and again when the address changes (Settings → HiroLeague)."""
+    """What the app declares to the core: its questions, its site at `site_url` for every role, its AI uses, its
+    features and rights, and what it asks to do on its own. Built at connect time and again when the address changes
+    (Settings → HiroLeague)."""
     e = ext()
     offers = ExtensionOffers(
         knows=list(e.knows),
@@ -90,7 +118,41 @@ def info_for(site_url: str) -> ExtensionInfo:
                          embed_uses=list(e.embed_uses), rerank_uses=list(e.rerank_uses),
                          repo=e.repo,  # its repo: CodeHiro keeps a report for it (HiroLeague's extensions.list)
                          features=list(e.features),  # its features and rights, granted per role in HiroLeague
-                         areas=dict(e.areas))  # the areas that group them (Permissions phase 6)
+                         areas=dict(e.areas),  # the areas that group them (Permissions phase 6)
+                         asks=asks_for())  # what it asks to do on its own (Permissions phase 8)
+
+
+def as_person(params: dict[str, Any], signed_in: str | None) -> dict[str, Any]:
+    """An ask made for a person signed in to the app (Permissions phase 8): `params` with their proof, the token the
+    core gave at sign-in (`request.state.core_token`), which the core answers by their own rights. Always passed by the
+    caller, never read from the request's context, so work a page starts and that runs on never carries it. None (sign-in
+    off): sent without, and a test environment's core answers for its stand-in person."""
+    return {**params, PARAM_SIGNED_IN: signed_in} if signed_in else params
+
+
+def core_token(request: Any) -> str | None:
+    """The proof of the person signed in, for what a route asks the core for them (Permissions phase 8: family's
+    update_person, core_ai's set_use, voices' set_default, whatsapp's check), as the kit's sign-in keeps it on
+    `request.state.core_token` (auth/api.py `caller`): None with sign-in off, through the app's other way in, or in an
+    app with sign-in of its own. Passed on by hand (`as_person`), never kept in a context variable, so work a page starts
+    that runs on after the answer never acts for the person."""
+    return getattr(request.state, "core_token", None)
+
+
+def covers(approval: Approval | None, permission: str, subject: str = "") -> bool:
+    """Whether an approval lets the app do this on its own: True while the core said nothing, or approved everything (an
+    app paired before approvals). For a page to show what can't work yet; the core decides. Pure."""
+    if approval is None or approval.approved is None:
+        return True
+    return any(i.permission == permission and i.subject == subject for i in approval.approved)
+
+
+def waiting_items(approval: Approval | None) -> list[dict[str, str]]:
+    """What waits for the owner's approval in HiroLeague, in words (Settings → HiroLeague): pure."""
+    if approval is None:
+        return []
+    return [{"permission": i.permission, "subject": i.subject, "words": WORDS.get(i.permission, i.permission)}
+            for i in approval.waiting]
 
 
 class LinkSettings(Protocol):
@@ -164,6 +226,8 @@ def _no_core_for_name() -> str:
 
 def _claim_error(exc: ExtensionRequestError) -> Exception:
     """The core's no to sites.claim as the app's error."""
+    if (refused := refusal(exc)) is not None:  # not approved for that name yet: the core's words say where
+        return refused
     if exc.code in (SITES_ERROR_TAKEN, SITES_ERROR_INVALID):  # the core's reason, written for people
         return Invalid(exc.message)
     if exc.code == "not_connected":  # the connection dropped on the way
@@ -192,15 +256,41 @@ class HiroLeagueLink(Worker):
         # The app's copies of what the core keeps (family, AI and voice profiles), kept fresh in one place (follow.py)
         self.follower = Follower(lambda: self.client.connected, log)
         self.client.on_event(EVENT_TYPE_RESOURCE_CHANGED, self.follower.changed)
+        # What the owner approved it for and what waits (Permissions phase 8): None until the core says (a core from
+        # before approvals never does). Kept across a dropped connection: it is still what the core last said.
+        self.approval: Approval | None = None
+        self.client.on_event(EVENT_APPROVAL_CHANGED, self._approval_changed)
+
+    def approved_for(self, permission: str, subject: str = "") -> bool:
+        """Whether the app may do this on its own, as the core last said (`covers`)."""
+        return covers(self.approval, permission, subject)
+
+    def _take_approval(self, raw: Any) -> None:
+        try:
+            approval = Approval.model_validate(raw)
+        except ValueError as exc:  # pydantic's ValidationError: the core's words can't be read, the last ones stay
+            failed(log, "HiroLeague: reading what the app is approved for", exc)
+            return
+        if approval != self.approval:
+            waits = ", ".join(i["words"] for i in waiting_items(approval))
+            log.info("HiroLeague: %s is approved for %s%s", _title(),
+                     "everything" if approval.approved is None else f"{len(approval.approved)} things",
+                     f"; waiting for the owner: {waits}" if waits else "")
+        self.approval = approval
+
+    async def _approval_changed(self, _event: str, data: dict[str, Any]) -> None:
+        self._take_approval(data)
 
     def follow(self, resource: str, refresh: Refresh) -> Callable[[], None]:
         """Keep a copy of `resource` fresh with `refresh()` (follow.py). Returns the function that stops it."""
         return self.follower.follow(resource, refresh)
 
-    def _status(self, status: str, _detail: dict[str, Any]) -> None:
+    def _status(self, status: str, detail: dict[str, Any]) -> None:
         # The SDK awaits this before it reads the connection's frames: never ask the core from here. The bus runs its
         # subscribers on the loop, so they start their requests on their own (family.py).
         if status == STATUS_CONNECTED:
+            if detail.get("approval") is not None:  # the welcome's: what it is approved for (Permissions phase 8)
+                self._take_approval(detail["approval"])
             bus.publish(CONNECTED)
             self.follower.connected()
             # no name yet and no default address: claim <name>.hiro.local (not awaited here, see above)
@@ -260,6 +350,7 @@ class HiroLeagueLink(Worker):
             "site_url_set": self.site_url_set,
             "site_url": self.site_url(),
             **self._site_form(),
+            "waiting": waiting_items(self.approval),
         }
 
     def _site_form(self) -> dict[str, Any]:
@@ -317,6 +408,8 @@ class HiroLeagueLink(Worker):
     async def set_url(self, url: str) -> dict[str, Any]:
         url = check_url(url)
         await self._write(URL_KEY, url)
+        if url != self.client.url:
+            self.approval = None  # another core: what it approves is its own to say, at the welcome
         self.client.set_url(url)
         return self.status()
 
@@ -326,10 +419,12 @@ class HiroLeagueLink(Worker):
             raise Invalid("Type the pairing code from the core's admin (Extensions, Add an extension).")
         if not self.client.url:
             raise Invalid("Set the core's address first.")
+        self.approval = None  # a new pairing: the core says at its welcome what this one is approved for
         self.client.pair(code)
         return self.status()
 
     def forget(self) -> dict[str, Any]:
+        self.approval = None  # unpaired: approved for nothing the core still knows
         self.client.forget()
         return self.status()
 
@@ -346,6 +441,8 @@ class HiroLeagueLink(Worker):
         try:
             answer = await self.client.request(METHOD_SITES_LIST, {"person_id": person_id}, timeout=APPS_TIMEOUT)
         except ExtensionRequestError as exc:
+            if (refused := refusal(exc)) is not None:
+                raise refused from exc
             if exc.code in ("not_connected", "timeout"):
                 raise Unavailable(f"HiroLeague didn't answer, so {_title()} can't list your other apps.") from exc
             raise AppsListError(f"HiroLeague couldn't list your apps ({exc.code}): {exc.message}") from exc
@@ -363,6 +460,11 @@ class HiroLeagueLink(Worker):
                             "online": True, "here": False})
         return apps
 
+    async def ask(self, to: str, method: str, params: dict[str, Any] | None = None, *,
+                  timeout: float = APPS_ASK_TIMEOUT) -> dict[str, Any]:
+        """Ask another app through the core (`extensions.ask`): `ask_app` on this link's client."""
+        return await ask_app(self.client, to, method, params, timeout=timeout)
+
     async def test(self) -> dict[str, Any]:
         """The app's test call: ask the core its name and version."""
         started = time.perf_counter()
@@ -374,6 +476,20 @@ class HiroLeagueLink(Worker):
 
 
 link = HiroLeagueLink()
+
+
+async def ask_app(client: Any, to: str, method: str, params: dict[str, Any] | None = None, *,
+                  timeout: float = APPS_ASK_TIMEOUT) -> dict[str, Any]:
+    """Ask another app through the core (`extensions.ask`, `link.ask`): its answer, or ExtensionRequestError for the
+    app's own no, not being connected and the rest, for the app's asks module to say in words. The core's refusals
+    (Permissions phase 8: not approved to ask that app) come as the kit's errors, in its words (errors.refusal):
+    never asked again."""
+    try:
+        return await client.ask(to, method, params, timeout=timeout)
+    except ExtensionRequestError as exc:
+        if (refused := refusal(exc)) is not None:
+            raise refused from exc
+        raise
 
 
 async def tell_changed(resource: str, ids: list[str] | None = None) -> bool:

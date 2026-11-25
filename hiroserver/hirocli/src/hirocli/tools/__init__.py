@@ -109,6 +109,8 @@ _LAZY_EXPORTS: dict[str, str] = {
     "ExtensionNamesTool": ".extension",
     "ExtensionListTool": ".extension",
     "ExtensionRemoveTool": ".extension",
+    "ExtensionApprovalTool": ".extension",
+    "ExtensionApproveTool": ".extension",
     "ExtensionPairAgainTool": ".extension",
     "ExtensionStateTool": ".extension_state",
     # notify (Phase 5)
@@ -275,6 +277,8 @@ def all_tools() -> list[Tool]:
         ExtensionAddTool,
         ExtensionListTool,
         ExtensionNamesTool,
+        ExtensionApprovalTool,
+        ExtensionApproveTool,
         ExtensionPairAgainTool,
         ExtensionRemoveTool,
     )
@@ -380,6 +384,8 @@ def all_tools() -> list[Tool]:
         ExtensionPairAgainTool(),
         ExtensionAddressTool(),
         ExtensionNamesTool(),
+        ExtensionApprovalTool(),
+        ExtensionApproveTool(),
         ExtensionStateTool(),
         AiProfilesListTool(),
         AiProfileRestoreDefaultTool(),
@@ -541,6 +547,8 @@ if TYPE_CHECKING:  # pragma: no cover
         ExtensionAddTool,
         ExtensionListTool,
         ExtensionNamesTool,
+        ExtensionApprovalTool,
+        ExtensionApproveTool,
         ExtensionPairAgainTool,
         ExtensionRemoveTool,
     )

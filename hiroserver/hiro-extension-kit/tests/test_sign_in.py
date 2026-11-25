@@ -11,14 +11,14 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import pytest
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 from hiro_channel_sdk import ExtensionRequestError
 from sqlmodel import Session, select
 
-from hiro_extension_kit import family
+from hiro_extension_kit import family, hiroleague
 from hiro_extension_kit.auth import access, api, sessions
-from hiro_extension_kit.auth.identity import caller_of, device_of
+from hiro_extension_kit.auth.identity import Caller, caller_of, device_of
 from hiro_extension_kit import errors
 from hiro_extension_kit.db import engine
 from hiro_extension_kit.auth.models import CorePerson, WebSession
@@ -45,32 +45,26 @@ class Link:
 
 @pytest.fixture
 def core(fake_core, monkeypatch):
-    """The fake core, which also answers `auth.code` like HiroLeague's: a code it handed out is good once."""
-    codes: dict[str, dict[str, Any]] = {}
-
-    def redeem(params: dict[str, Any]) -> dict[str, Any]:
-        who = codes.pop(params.get("code", ""), None)
-        if who is None:
-            return ExtensionRequestError("invalid_code", "That code is unknown, used or expired.")  # type: ignore[return-value]
-        return who
-
-    fake_core.codes = codes
-    fake_core.answers["auth.code"] = redeem
+    """The fake core, which answers `auth.code` like HiroLeague's: a code it handed out is good once, and comes with the
+    person's proof for the app (Permissions phase 8)."""
     monkeypatch.setattr(api, "link", Link(fake_core))
     return fake_core
 
 
 def code_for(core: FakeCore, person: dict[str, Any], code: str = "one-time") -> str:
     """The core signs `person` in and hands the browser a code for the app."""
-    role = next(r for r in core.roles if r["role_id"] == person["role_id"])
-    core.codes[code] = {"person_id": person["person_id"], "name": person["name"], "role_id": role["role_id"],  # type: ignore[attr-defined]
-                        "role_name": role["name"]}
-    return code
+    return core.sign_in_code(person, code)
+
+
+async def _proof(request: Request, _c: Caller = Depends(api.caller)) -> dict[str, str | None]:
+    """What a route reads of the person's proof from the core (Permissions phase 8)."""
+    return {"proof": hiroleague.core_token(request)}
 
 
 def _app(lifespan=None) -> FastAPI:
     app = FastAPI(lifespan=lifespan)
     app.include_router(api.router)
+    app.add_api_route("/api/proof", _proof)
     errors.install(app)
     return app
 
@@ -169,11 +163,41 @@ def test_coming_back_with_a_code_signs_in_as_the_core_person(client, core):
     me = client.get("/api/me").json()
     assert (me["id"], me["name"], me["way"], me["owner"]) == (michel["person_id"], "Michel Habib", "web", True)
 
+    # Permissions phase 8: the session keeps the person's proof the core gave, and routes read it
+    proof = client.get("/api/proof").json()["proof"]
+    assert proof and core.tokens[proof] == michel["person_id"]
+    with Session(engine) as s:
+        assert [w.core_token for w in s.exec(select(WebSession))] == [proof]
+
     out = client.post("/api/auth/logout")  # signs out of HiroLeague too, next
     assert out.status_code == 200 and out.json() == {"then": f"{ADMIN}/api/auth/sign-out?for=test"}
+    assert ("auth.end", {"token": proof}) in core.asked  # the proof ends in the core with the session
     assert client.get("/api/me").status_code == 401
     with Session(engine) as s:
         assert s.exec(select(WebSession)).all() == []
+
+
+def test_signing_out_ends_the_app_session_even_when_the_core_cant_end_the_proof(client, core, caplog):
+    come_back(client, code_for(core, join_family(core, "Mark", "kid")))
+    proof = client.get("/api/proof").json()["proof"]
+    core.answers["auth.end"] = ExtensionRequestError("timeout", "no answer to auth.end in 5s")
+    with caplog.at_level("WARNING", logger="testapp.auth"):
+        assert client.post("/api/auth/logout").status_code == 200
+    assert client.get("/api/me").status_code == 401
+    assert "didn't end the proof of someone who signed out (timeout" in caplog.text
+    assert proof and proof not in caplog.text  # the proof itself is never logged
+
+
+def test_hiroleagues_sign_out_ends_the_proof_too(client, core):
+    come_back(client, code_for(core, join_family(core, "Mark", "kid")))
+    proof = client.get("/api/proof").json()["proof"]
+    client.get("/api/auth/signout", params={"next": f"{ADMIN}/sign-in"})
+    assert ("auth.end", {"token": proof}) in core.asked
+
+
+def test_with_sign_in_off_there_is_no_proof(client, monkeypatch):
+    testing.auth(monkeypatch, False)
+    assert client.get("/api/proof").json() == {"proof": None}
 
 
 def test_a_code_is_good_once(client, core):
@@ -263,6 +287,8 @@ def test_the_owner_gives_roles_and_they_apply_at_once(client, core):
     assert them.get("/api/me").json()["role_names"] == ["Adult"]
     assert owner.put(f"/api/users/{mid}", json={"role_ids": ["kid"]}).status_code == 200
     assert ("people.update", {"person_id": mid, "role_ids": ["kid"]}) in core.asked
+    proof = owner.get("/api/proof").json()["proof"]
+    assert ("people.update", proof) in core.signed_in  # asked for the owner signed in, with their proof
     assert them.get("/api/me").json()["role_names"] == ["Kid"]
     users = owner.put(f"/api/users/{mid}", json={"role_ids": ["kid", "adult"]}).json()
     assert next(u for u in users if u["id"] == mid)["role_ids"] == ["adult", "kid"]  # in the roles' order
@@ -280,18 +306,35 @@ def test_the_owner_gives_roles_and_they_apply_at_once(client, core):
     assert owner.put(f"/api/users/{mid}", json={"role_ids": []}).status_code == 400  # neither a role nor No access
 
 
-def test_the_only_owner_stays_one(client, core):
-    """HiroLeague refuses taking the only Owner's role away, and the app passes its words on."""
+def test_no_app_gives_or_takes_the_owner_role(client, core):
+    """Permissions phase 8: the Owner role is given in HiroLeague's admin only (the core refuses it too). The page
+    sends every role a user holds, so an owner keeping it is no change."""
     michel, mark = join_family(core, "Michel Habib", "owner"), join_family(core, "Mark", "adult")
     owner = signed_in(core, michel)
     signed_in(core, mark)
-    r = owner.put(f"/api/users/{michel['person_id']}", json={"role_ids": ["adult"]})
-    assert r.status_code == 400 and r.json()["detail"] == "Michel Habib is the only Owner; make someone else Owner first."
-    r = owner.put(f"/api/users/{michel['person_id']}", json={"denied": True})  # nor No access
+    asked = len(core.asked)
+    for who, roles in [(michel, ["adult"]), (mark, ["owner"]), (mark, ["owner", "adult"])]:
+        r = owner.put(f"/api/users/{who['person_id']}", json={"role_ids": roles})
+        assert r.status_code == 400 and r.json()["detail"] == "The Owner role is given in HiroLeague's admin.", roles
+    assert len(core.asked) == asked  # nothing was asked of HiroLeague
+    assert owner.put(f"/api/users/{michel['person_id']}", json={"role_ids": ["owner", "kid"]}).status_code == 200
+    r = owner.put(f"/api/users/{michel['person_id']}", json={"denied": True})  # the only owner keeps their access
     assert r.status_code == 400 and "only owner" in r.json()["detail"]
-    # with a second owner, the first may step down (HomeHiro's test_auth checked this too)
-    assert owner.put(f"/api/users/{mark['person_id']}", json={"role_ids": ["owner"]}).status_code == 200
-    assert owner.put(f"/api/users/{michel['person_id']}", json={"role_ids": ["adult"]}).status_code == 200
+
+
+def test_the_cores_no_for_the_person_is_passed_on_in_its_words(client, core):
+    """The core answers a change by the person signed in: a proof it no longer knows asks them to sign in again (401),
+    an app the owner didn't approve to act for people is refused (403), in the core's words."""
+    michel, mark = join_family(core, "Michel Habib", "owner"), join_family(core, "Mark", "adult")
+    owner = signed_in(core, michel)
+    signed_in(core, mark)
+    core.approved = ["people.see"]  # approved for less than to act for the people signed in to it
+    r = owner.put(f"/api/users/{mark['person_id']}", json={"role_ids": ["kid"]})
+    assert r.status_code == 403 and "isn't approved to act for the people signed in to it" in r.json()["detail"]
+    core.approved = None
+    core.tokens.clear()  # the core ended the proof (a new password, say)
+    r = owner.put(f"/api/users/{mark['person_id']}", json={"role_ids": ["kid"]})
+    assert (r.status_code, r.json()["detail"]) == (401, "Sign in again to do this.")
 
 
 def test_someone_gone_from_the_family_list_cant_be_given_a_role(client, core):

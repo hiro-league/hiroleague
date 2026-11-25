@@ -12,7 +12,13 @@ describe('users', () => {
 		const order = ['owner', 'adult', 'kid'];
 		expect(toggleRole(['kid'], 'adult', order)).toEqual(['adult', 'kid']);
 		expect(toggleRole(['adult', 'kid'], 'adult', order)).toEqual(['kid']);
-		expect(toggleRole([], 'owner', order)).toEqual(['owner']);
+		expect(toggleRole([], 'kid', order)).toEqual(['kid']);
+	});
+
+	it('never gives or takes the Owner role: that is done in HiroLeague', () => {
+		const order = ['owner', 'adult', 'kid'];
+		expect(toggleRole([], 'owner', order)).toEqual([]);
+		expect(toggleRole(['owner', 'kid'], 'owner', order)).toEqual(['owner', 'kid']);
 	});
 
 	it('sends the roles and No access, and the scope only where the app has one', () => {

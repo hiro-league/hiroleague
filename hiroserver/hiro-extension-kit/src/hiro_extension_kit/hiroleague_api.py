@@ -1,5 +1,6 @@
 """Settings → HiroLeague: the core's address, the app's own address (Phase 8; a name the core sets up since the site
-names change), pairing, and the test call (hiroleague.py keeps the connection)."""
+names change), pairing, the test call (hiroleague.py keeps the connection), and what waits for the owner's approval in
+HiroLeague (Permissions phase 8)."""
 
 from typing import Literal
 
@@ -19,6 +20,14 @@ class CoreInfo(BaseModel):
     admin_port: int | None = None  # Phase 7b: the core's admin web port
 
 
+class WaitingItem(BaseModel):
+    """Something the app asks to do that waits for the owner's yes in HiroLeague (its Extensions page)."""
+
+    permission: str  # the SDK's id ("ai.search")
+    subject: str = ""  # what it names, where it has one: the app asked, the address, "<name>:<port>"
+    words: str  # what it is, for people: "use the search models: turn texts into vectors and rank them"
+
+
 class HiroLeagueStatus(BaseModel):
     url: str  # the core's extension address, e.g. ws://127.0.0.1:18082; "" when not set
     status: str  # no_address | not_paired | connecting | connected | disconnected | stopped
@@ -30,6 +39,8 @@ class HiroLeagueStatus(BaseModel):
     site_url: str = ""  # Phase 8: the app's address declared to the core (its Apps card, where sign-in comes back)
     site_label: str | None = None  # site_url's name for the form: home (home.hiro.local), nethiro (nethiro.local)
     site_kind: Literal["subdomain", "local"] | None = None  # None: site_url isn't one of the two names
+    # Permissions phase 8: what waits for the owner's approval in HiroLeague, as the core last said ([]: nothing)
+    waiting: list[WaitingItem] = []
 
 
 class HiroLeagueTest(BaseModel):
