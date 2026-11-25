@@ -89,8 +89,8 @@
       size="icon-lg"
       class="relative"
       href={`${base}/extensions?show=approval`}
-      aria-label="{waitingCount} app{waitingCount === 1 ? '' : 's'} wait for your approval"
-      title="{waitingCount} app{waitingCount === 1 ? '' : 's'} wait for your approval"
+      aria-label="{waitingCount} {waitingCount === 1 ? 'app waits' : 'apps wait'} for your approval"
+      title="{waitingCount} {waitingCount === 1 ? 'app waits' : 'apps wait'} for your approval"
     >
       <Puzzle />
       <span class="absolute -top-1 -right-1 grid size-4 place-items-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">

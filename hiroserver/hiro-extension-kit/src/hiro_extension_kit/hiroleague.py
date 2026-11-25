@@ -280,6 +280,9 @@ class HiroLeagueLink(Worker):
 
     async def _approval_changed(self, _event: str, data: dict[str, Any]) -> None:
         self._take_approval(data)
+        # Fix: a copy the core refused while the app waited (the family list) stayed empty until the 30-minute round;
+        # the owner's yes reads every copy again now.
+        self.follower.all_again()
 
     def follow(self, resource: str, refresh: Refresh) -> Callable[[], None]:
         """Keep a copy of `resource` fresh with `refresh()` (follow.py). Returns the function that stops it."""

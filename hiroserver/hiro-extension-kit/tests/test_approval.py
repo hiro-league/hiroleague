@@ -24,7 +24,7 @@ from hiro_extension_kit.llm import ai_api, core_ai, profiles, recorder, search
 from hiro_extension_kit.llm.models import LlmRequest
 from hiro_extension_kit.testing import FakeCore, FakeLink
 
-SAID = "Test isn't approved to read the people list: names, WhatsApp numbers, roles yet: it waits for the owner's yes."
+SAID = "Test isn't approved yet to read the people list: names, WhatsApp numbers, roles. It waits for the owner's yes."
 
 
 def run(coro):
@@ -110,6 +110,14 @@ def test_the_owners_answer_arrives_as_approval_changed(link, caplog):
     assert "TestApp is approved for everything" in caplog.text
     run(link._approval_changed("approval.changed", {"approved": "nonsense"}))  # unreadable: the last word stays
     assert link.approval == Approval(approved=None, waiting=[])
+
+
+def test_the_owners_answer_reads_every_copy_again(link, monkeypatch):
+    # A copy the core refused while the app waited (the family list) is read at once, not at the 30-minute round
+    again: list[str] = []
+    monkeypatch.setattr(link.follower, "all_again", lambda: again.append("all"))
+    run(link._approval_changed("approval.changed", WIRE))
+    assert again == ["all"]
 
 
 def test_a_new_pairing_or_another_core_forgets_what_the_last_one_said(link, monkeypatch):

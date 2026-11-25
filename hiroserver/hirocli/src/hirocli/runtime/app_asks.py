@@ -158,7 +158,8 @@ def _not_approved(label: str, permission: str, subject: str, approval: approvals
     waits = any(a.permission == permission and a.subject == subject for a in approvals.waiting(asked, approval.approved, approval.declined))
     words = WORDS.get(permission, permission)
     if waits:
-        message = f"{label} isn't approved to {words} yet: it waits for the owner's yes on HiroLeague's Extensions page."
+        # "yet" before the words: they may hold a list of their own ("the people list: names, numbers, roles")
+        message = f"{label} isn't approved yet to {words}. It waits for the owner's yes on HiroLeague's Extensions page."
     else:
         message = f"{label} isn't approved to {words}. The owner approves it on HiroLeague's Extensions page."
     return AppRefused(NOT_APPROVED, message, {"permission": permission, "subject": subject, "waiting": waits})
