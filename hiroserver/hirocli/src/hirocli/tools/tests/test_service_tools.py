@@ -1,4 +1,4 @@
-"""`hiro service` (Linux systemd): unit/env generation and argument handling, without systemd."""
+"""`hiro service` on Linux (systemd): unit/env generation and argument handling, without systemd."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from hiro_commons import systemd_service as sd
 from hirocli import linux_service as ls
 from hirocli.constants import ENV_SERVICE_MANAGER, SERVICE_RESTART_EXIT_CODE
 from hirocli.tools import service as service_tools
+from hirocli.tools import service_linux
 
 EXE = "/opt/hiroleague/current/bin/hiro"
 
@@ -18,29 +19,30 @@ EXE = "/opt/hiroleague/current/bin/hiro"
 @pytest.fixture
 def linux_as_user(monkeypatch):
     """Pretend to be a non-root user on Linux with `hiro` at EXE."""
-    monkeypatch.setattr(service_tools, "require_linux", lambda: None)
-    monkeypatch.setattr(service_tools, "is_root", lambda: False)
-    monkeypatch.setattr(service_tools, "default_service_user", lambda: "michel")
+    monkeypatch.setattr(service_tools, "current_system", lambda: "linux")
+    monkeypatch.setattr(service_linux, "require_linux", lambda: None)
+    monkeypatch.setattr(service_linux, "is_root", lambda: False)
+    monkeypatch.setattr(service_linux, "default_service_user", lambda: "michel")
     monkeypatch.setattr(ls, "hiro_executable", lambda: EXE)
 
 
 @pytest.fixture
 def linux_as_root(monkeypatch, linux_as_user):
     """Pretend to be root on Linux; record what would be installed instead of touching /etc."""
-    monkeypatch.setattr(service_tools, "is_root", lambda: True)
+    monkeypatch.setattr(service_linux, "is_root", lambda: True)
     monkeypatch.setattr(
-        service_tools,
+        service_linux,
         "resolve_service_user",
         lambda name: sd.ServiceUser(name=name, uid=1001, gid=1001, group=name, home=Path(f"/var/lib/{name}")),
     )
     calls: dict = {}
-    monkeypatch.setattr(service_tools, "check_user_can_run", lambda user, args: calls.setdefault("checked", (user.name, args)))
+    monkeypatch.setattr(service_linux, "check_user_can_run", lambda user, args: calls.setdefault("checked", (user.name, args)))
 
     def fake_install(spec, user, env_content, *, start=True):
         calls.update(spec=spec, user=user.name, env=env_content, start=start)
         return True
 
-    monkeypatch.setattr(service_tools, "install_service", fake_install)
+    monkeypatch.setattr(service_linux, "install_service", fake_install)
     return calls
 
 
@@ -118,7 +120,10 @@ def test_install_as_root_runs_as_the_chosen_user(linux_as_root, user) -> None:
     assert "# OPENAI_API_KEY=" in linux_as_root["env"]
     assert result.user == user
     assert result.service == "hiro.service"
-    assert result.env_file_created is True
+    assert result.manager == "systemd"
+    assert result.secrets_file_created is True
+    assert result.restart_command == "sudo systemctl restart hiro.service"
+    assert result.logs == "journalctl -u hiro.service -f"
 
 
 def test_install_as_root_defaults_to_the_installing_user(linux_as_root) -> None:
@@ -127,7 +132,10 @@ def test_install_as_root_defaults_to_the_installing_user(linux_as_root) -> None:
 
 
 def test_service_tools_are_cli_only() -> None:
-    for tool in (service_tools.ServiceInstallTool, service_tools.ServiceUninstallTool, service_tools.ServiceStatusTool):
+    for tool in (
+        service_tools.ServiceInstallTool, service_tools.ServiceUninstallTool, service_tools.ServiceStatusTool,
+        service_tools.ServiceStartTool, service_tools.ServiceStopTool,
+    ):
         assert tool.surfaces == frozenset({"cli"})
 
 
@@ -143,20 +151,28 @@ def test_cli_install_without_root_prints_sudo_command(linux_as_user) -> None:
 def test_cli_status_when_not_installed(monkeypatch, linux_as_user) -> None:
     from hirocli.commands.app import app
 
-    monkeypatch.setattr(service_tools, "service_state", lambda name: sd.ServiceState(name=name, installed=False))
+    monkeypatch.setattr(service_linux, "service_state", lambda name: sd.ServiceState(name=name, installed=False))
     result = CliRunner().invoke(app, ["service", "status"])
     assert result.exit_code == 1
     assert "hiro.service is not installed" in result.output
     assert f"sudo {EXE} service install" in result.output
 
 
-def test_cli_service_on_windows_explains_it_is_linux_only(monkeypatch) -> None:
+def test_cli_start_without_root_prints_sudo_command(linux_as_user) -> None:
     from hirocli.commands.app import app
 
-    monkeypatch.setattr(sd.sys, "platform", "win32")
+    result = CliRunner().invoke(app, ["service", "stop"])
+    assert result.exit_code == 1
+    assert f"sudo {EXE} service stop" in result.output
+
+
+def test_unsupported_system_says_so(monkeypatch) -> None:
+    from hirocli.commands.app import app
+
+    monkeypatch.setattr(service_tools, "current_system", lambda: "freebsd14")
     result = CliRunner().invoke(app, ["service", "status"])
     assert result.exit_code == 1
-    assert "only available on Linux" in result.output
+    assert "not supported" in result.output
 
 
 def test_foreground_start_when_already_running_fails(monkeypatch) -> None:

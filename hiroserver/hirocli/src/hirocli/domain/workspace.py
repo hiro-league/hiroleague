@@ -37,7 +37,7 @@ from pydantic import BaseModel, Field
 from hiro_commons.constants.network import PORT_OFFSET_ADMIN, PORT_OFFSET_EXTENSION, PORT_RANGE_START, PORTS_PER_SLOT
 from hiro_commons.constants.storage import REGISTRY_FILENAME
 
-from ..constants import APP_NAME, ENV_WORKSPACE
+from ..constants import APP_NAME, ENV_DATA_DIR, ENV_WORKSPACE
 from hiro_commons.log import Logger
 
 log = Logger.get("WORKSPACE")
@@ -65,6 +65,11 @@ class WorkspaceRegistry(BaseModel):
 # ---------------------------------------------------------------------------
 
 def _app_data_dir() -> Path:
+    # A Windows service runs as its own account, whose data folder no `hiro` command could reach: the service names
+    # a machine-wide folder instead (constants.ENV_DATA_DIR).
+    override = os.environ.get(ENV_DATA_DIR, "").strip()
+    if override:
+        return Path(override)
     return Path(user_data_dir(APP_NAME, appauthor=False))
 
 

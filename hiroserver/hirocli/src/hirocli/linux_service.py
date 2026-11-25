@@ -52,8 +52,10 @@ def hiro_executable() -> str:
     Under ``sudo`` the PATH is reset, so the running program's own path is preferred.
     """
     argv0 = sys.argv[0] if sys.argv else ""
-    if argv0 and Path(argv0).name == "hiro" and os.path.isfile(argv0):
-        return os.path.abspath(argv0)
+    # On Windows the program is hiro.exe, and its launcher may pass the path without the suffix.
+    for candidate in (argv0, f"{argv0}.exe"):
+        if argv0 and Path(candidate).name.lower() in ("hiro", "hiro.exe") and os.path.isfile(candidate):
+            return os.path.abspath(candidate)
     found = shutil.which("hiro")
     if found:
         return os.path.abspath(found)

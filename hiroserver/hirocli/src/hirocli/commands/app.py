@@ -143,7 +143,7 @@ provider_app = typer.Typer(
 )
 service_app = typer.Typer(
     name="service",
-    help="Run the Hiro server as a Linux system service (starts at boot, restarts on failure).",
+    help="Run the Hiro server as a system service: systemd, a Windows service or a Mac LaunchDaemon (starts at boot, restarts on failure).",
     add_completion=False,
 )
 message_app = typer.Typer(

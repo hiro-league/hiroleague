@@ -141,7 +141,7 @@ def test_parse_show_output_unknown_unit_is_not_installed() -> None:
 
 def test_system_operations_refuse_non_linux(monkeypatch) -> None:
     monkeypatch.setattr(sys, "platform", "win32")
-    with pytest.raises(sd.ServiceError, match="only available on Linux"):
+    with pytest.raises(sd.ServiceError, match="systemd services are Linux's"):
         sd.require_linux()
 
 
