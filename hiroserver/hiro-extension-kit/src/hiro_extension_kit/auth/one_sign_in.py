@@ -10,6 +10,7 @@ keeps it with its session (the kit's `WebSession.core_token`) and sends it with 
 (hiroleague.as_person); signing out ends it in the core (`end`).
 """
 
+import logging
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode, urlsplit
 
@@ -26,7 +27,12 @@ if TYPE_CHECKING:
 REDEEM_TIMEOUT = 10.0  # seconds: asking the core whose sign-in code it is
 END_TIMEOUT = 5.0  # seconds: telling the core someone signed out (someone waits on the Sign out button)
 
-log = identity.logger("auth")
+
+
+def _log() -> logging.Logger:
+    """The kit's auth area logger, made when first used: an app with its own sign-in (CodeHiro) imports this module
+    before the kit is set up."""
+    return identity.logger("auth")
 
 
 def _title() -> str:
@@ -93,10 +99,10 @@ async def end(link: "HiroLeagueLink", token: str | None) -> None:
         return
     client = link.client
     if not client.connected:
-        log.info("Users: signed out while HiroLeague is away; their proof there lapses by itself")
+        _log().info("Users: signed out while HiroLeague is away; their proof there lapses by itself")
         return
     try:
         await client.request(METHOD_AUTH_END, {"token": token}, timeout=END_TIMEOUT)
     except ExtensionRequestError as exc:  # said once, here: the sign-out itself went through
-        log.warning("Users: HiroLeague didn't end the proof of someone who signed out (%s: %s); it lapses by itself",
+        _log().warning("Users: HiroLeague didn't end the proof of someone who signed out (%s: %s); it lapses by itself",
                     exc.code, exc.message)
