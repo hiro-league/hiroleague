@@ -45,6 +45,18 @@ class UsersScope:
     write: Callable[[Any, Any, list[str], list[str]], None]
 
 
+@dataclass(frozen=True)
+class SetupStep:
+    """One thing the owner still has to set in the app after it is installed (`Extension.setup`), which the core's
+    Extensions page shows (`extension.setup`): its id, what it is in words, the app's page that sets it (`/settings`),
+    and `done()`, the check that says whether it is set. `done` runs in a worker thread: it may read the database."""
+
+    id: str
+    title: str
+    path: str
+    done: Callable[[], bool]
+
+
 def ask(permission: str, why: str, *, required: bool = True, to: str | None = None) -> AppAsk:
     """One thing the app asks to do on its own (`Extension.asks`): a permission of the SDK's (approvals.py:
     `PEOPLE_SEE`, `PEOPLE_NOTIFY`, `APPS_ASK` with `to` the app asked...), why in one line for the owner, and whether
@@ -111,6 +123,9 @@ class Extension:
     # it declares (hiroleague.py `info_for`). None: not updated yet, so the core changes nothing for it; () asks
     # nothing beyond those.
     asks: Sequence[AppAsk] | None = None
+    # Installing apps, phase 5: what the owner still has to set once it is installed (its HA address, a token), each
+    # with the check that says whether it is set; the core's Extensions page asks (`extension.setup`). () = nothing.
+    setup: Sequence[SetupStep] = ()
     by_id: dict[str, ExtensionFeature] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:

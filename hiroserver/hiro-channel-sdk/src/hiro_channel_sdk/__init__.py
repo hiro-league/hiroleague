@@ -41,7 +41,7 @@ from .extension import (
     ExtensionVoiceUse,
     ExtensionRequestError,
 )
-from .offers import ExtensionOffers, MethodEntry, PageLink, SiteEntry, TellsEntry
+from .offers import ExtensionOffers, MethodEntry, PageLink, SetupItem, SiteEntry, TellsEntry
 from .models import ChannelInfo, ContentItem, EventPayload, MessageRouting, UnifiedMessage
 from .runner import PluginRunner
 
@@ -85,5 +85,6 @@ __all__ = [
     "TellsEntry",
     "SiteEntry",
     "PageLink",
+    "SetupItem",
     "ExtensionRequestError",
 ]

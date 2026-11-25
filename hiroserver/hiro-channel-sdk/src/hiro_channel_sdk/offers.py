@@ -84,3 +84,15 @@ class PageLink(BaseModel):
         if not path.startswith("/") or path.startswith(("//", "/\\")):
             raise ValueError("a page's path starts with one / (/streams?cam=cam3)")
         return path
+
+
+class SetupItem(BaseModel):
+    """One thing the owner still has to set in an app (``extension.setup``): its id in the app, what it is in words, whether
+    it is done, and the page that sets it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    title: str
+    done: bool
+    link: PageLink

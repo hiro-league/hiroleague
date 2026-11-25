@@ -25,6 +25,8 @@ export type HiroLeagueStatus = {
 	site_url?: string;
 	site_label?: string | null;
 	site_kind?: SiteKind | null;
+	/** The core's own name, a subdomain's suffix: hiro.local, or <name>.local when the house named its core. */
+	domain?: string;
 	/** What waits for the owner's approval in HiroLeague, as the core last said ([]: nothing). */
 	waiting?: WaitingItem[];
 };
@@ -39,6 +41,6 @@ export const testHiroLeague = () => api<HiroLeagueTest>('hiroleague/test', { met
 /** Where people open the core's admin (its Edit links), e.g. http://hiro.local; "" derives it. */
 export const setHiroLeagueAdminUrl = (url: string) => api<HiroLeagueStatus>('hiroleague/admin-url', { method: 'PUT', body: { url } });
 /** The app's own address (its Apps card, where sign-in comes back), a name the core sets up on the LAN:
- * `net` + subdomain → net.hiro.local, `abc` + local → abc.local. Refused (taken, wrong, not connected): nothing changes. */
+ * `net` + subdomain → net.<the core's domain>, `abc` + local → abc.local. Refused (taken, wrong, not connected): nothing changes. */
 export const claimSiteName = (label: string, kind: SiteKind) =>
 	api<SiteNameOut>('hiroleague/site-name', { method: 'PUT', body: { label, kind } });

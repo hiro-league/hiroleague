@@ -5,7 +5,8 @@ Since the site-names change (hiroleague docs/site-names-design.md) the address i
 the LAN (it publishes the name and points its web proxy at the app), not a URL typed by hand. A person types a label
 and picks one of two kinds:
 
-- `subdomain`: `home` → `home.hiro.local` (SITES_DOMAIN, the core's own name);
+- `subdomain`: `home` → `home.hiro.local`, under the core's own name (its welcome's `domain`: `hiro.local`, or
+  `<name>.local` when the house named its core; SITES_DOMAIN until the core said);
 - `local`: a one-word `.local` name, `abc` → `abc.local`.
 
 A label is letters, digits and dashes (not at either end), up to 63 of them: the core checks the same rule
@@ -34,11 +35,12 @@ class BadLabel(ValueError):
 class SiteName:
     label: str
     kind: Kind
+    domain: str = SITES_DOMAIN  # the core's own name, a subdomain's suffix
 
     @property
     def name(self) -> str:
-        """The full name: `<label>.hiro.local` or `<label>.local`."""
-        return f"{self.label}.{SITES_DOMAIN}" if self.kind == "subdomain" else f"{self.label}.local"
+        """The full name: `<label>.<the core's domain>` or `<label>.local`."""
+        return f"{self.label}.{self.domain}" if self.kind == "subdomain" else f"{self.label}.local"
 
     @property
     def url(self) -> str:
@@ -46,13 +48,13 @@ class SiteName:
         return f"http://{self.name}"
 
 
-def site_name(label: str, kind: str) -> SiteName:
-    """The name for a label as typed: trimmed, lower case, and the kind's own suffix dropped when typed too (people
-    paste the whole name). Raises BadLabel with the rule in words."""
+def site_name(label: str, kind: str, domain: str = SITES_DOMAIN) -> SiteName:
+    """The name for a label as typed, under the core's `domain`: trimmed, lower case, and the kind's own suffix dropped
+    when typed too (people paste the whole name). Raises BadLabel with the rule in words."""
     if kind not in KINDS:
-        raise BadLabel("Pick a subdomain of hiro.local or a one-word .local name.")
+        raise BadLabel(f"Pick a subdomain of {domain} or a one-word .local name.")
     clean = label.strip().lower()
-    suffix = f".{SITES_DOMAIN}" if kind == "subdomain" else ".local"
+    suffix = f".{domain}" if kind == "subdomain" else ".local"
     if clean.endswith(suffix):
         clean = clean[: -len(suffix)]
     if not clean:
@@ -60,10 +62,10 @@ def site_name(label: str, kind: str) -> SiteName:
     if not _LABEL.match(clean):
         raise BadLabel(f"“{label.strip()}” can't be a name: use letters, digits and dashes (not at the start or end), "
                        "one word.")
-    return SiteName(label=clean, kind=kind)  # type: ignore[arg-type]  # kind checked against KINDS above
+    return SiteName(label=clean, kind=kind, domain=domain)  # type: ignore[arg-type]  # kind checked against KINDS
 
 
-def name_of(url: str) -> SiteName | None:
+def name_of(url: str, domain: str = SITES_DOMAIN) -> SiteName | None:
     """The label and kind of a site address, for the form: `http://home.hiro.local` → (home, subdomain),
     `http://nethiro.local` → (nethiro, local); None for an address that isn't one of the two shapes (a port, an IP,
     https, a deeper name)."""
@@ -71,10 +73,10 @@ def name_of(url: str) -> SiteName | None:
     host = parts.netloc.lower()
     if parts.scheme != "http" or not host or ":" in host or parts.path not in ("", "/"):
         return None
-    if host.endswith(f".{SITES_DOMAIN}"):
-        label, kind = host[: -len(SITES_DOMAIN) - 1], "subdomain"
+    if host.endswith(f".{domain}"):
+        label, kind = host[: -len(domain) - 1], "subdomain"
     elif host.endswith(".local"):
         label, kind = host[: -len(".local")], "local"
     else:
         return None
-    return SiteName(label=label, kind=kind) if _LABEL.match(label) else None  # type: ignore[arg-type]
+    return SiteName(label=label, kind=kind, domain=domain) if _LABEL.match(label) else None  # type: ignore[arg-type]

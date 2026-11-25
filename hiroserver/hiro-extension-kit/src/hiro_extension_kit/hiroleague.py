@@ -16,9 +16,14 @@ Settings → HiroLeague sets the core's address (key `hiroleague_url`), the app'
 `nethiro_url`) and pairs. The keys live in the app's database (`settings`), or in a store the app hands the link
 (`LinkSettings`, `link.use_settings`): CodeHiro, which keeps its own SQLite store, not the kit's database. The app's
 address is a LAN name the core sets up (`sites.claim`, hiroleague docs/site-names-design.md): the app claims
-`<label>.hiro.local` or `<label>.local` with the port it listens on, the core publishes the name and points its web
-proxy there, and the app then declares `http://<name>` as its site. Until a name is set, the app claims
-`<Extension.name>.hiro.local` by itself once connected.
+`<label>.<the core's domain>` or `<label>.local` with the port it listens on, the core publishes the name and points
+its web proxy there, and the app then declares `http://<name>` as its site. Until a name is set, the app claims
+`<its key, dashed>.<the core's domain>` by itself once connected (`acme-weather.hiro.local`): the domain is the core's
+own name, from its welcome (`hiro.local`, or `<name>.local` when the house named its core).
+
+An app the core installed (Installing apps, phase 5) pairs by itself: its service's environment holds the core's
+address (HIRO_CORE_URL), taken while none is set, and the install's pairing code (HIRO_PAIRING_CODE), used while the
+app has no key. The code is never logged.
 
 What the owner approved the app for (Permissions phase 8) comes with the core's welcome and with each
 `approval.changed`: the link keeps it (`link.approval`, `link.approved_for`), and Settings → HiroLeague lists what still
@@ -28,17 +33,20 @@ Backend kit, step 3: NetHiro's and TrainHiro's own copies, the same but for the 
 """
 
 import asyncio
+import os
 import time
 from collections.abc import Callable
 from typing import Any, Protocol
 
-from hiro_channel_sdk import ExtensionClient, ExtensionCredentials, ExtensionInfo, ExtensionOffers, ExtensionRequestError
+from hiro_channel_sdk import (ExtensionClient, ExtensionCredentials, ExtensionInfo, ExtensionOffers, ExtensionRequestError,
+                              PageLink, SetupItem)
 from hiro_channel_sdk.approvals import (AI_SEARCH, AI_USE, EVENT_APPROVAL_CHANGED, PARAM_SIGNED_IN, VOICE_SPEAK, WORDS,
                                         AppAsk, Approval)
-from hiro_channel_sdk.constants import (CORE_REPO, EVENT_TYPE_RESOURCE_CHANGED, METHOD_CORE_INFO, METHOD_SITES_CLAIM,
-                                        METHOD_SITES_LIST, OFFER_KIND_SITE, SITES_DOMAIN, SITES_ERROR_INVALID,
-                                        SITES_ERROR_TAKEN)
+from hiro_channel_sdk.constants import (CORE_REPO, ENV_CORE_URL, ENV_PAIRING_CODE, EVENT_TYPE_RESOURCE_CHANGED,
+                                        METHOD_CORE_INFO, METHOD_EXTENSION_SETUP, METHOD_SITES_CLAIM, METHOD_SITES_LIST,
+                                        OFFER_KIND_SITE, SITES_DOMAIN, SITES_ERROR_INVALID, SITES_ERROR_TAKEN)
 from hiro_channel_sdk.extension import STATUS_CONNECTED
+from hiro_channel_sdk.manifest import dashed
 from hiro_channel_sdk.log_sender import LogSender
 from hiro_channel_sdk.workers import Worker
 from hiro_commons import logging_foundation
@@ -61,7 +69,8 @@ ADMIN_URL_KEY = "hiroleague_admin_url"
 # The app's own address, the site it declares to the core (its Apps card opens it; the core sends people back only
 # there after signing them in): `http://<the name the core set up>` (claim_site_name); "" = none claimed yet.
 SITE_URL_KEY = f"{identity.app().name}_url"  # nethiro_url
-DEFAULT_KIND = "subdomain"  # the name the app claims by itself while none is set: <Extension.name>.hiro.local
+DEFAULT_KIND = "subdomain"  # the name the app claims by itself while none is set: <its key, dashed>.<the core's domain>
+PORT_ENV = "PORT"  # the port the app listens on, in its environment (an install's app.env, hiro-work's servers)
 # A claim may reload the core's proxy (the core waits up to 60 s for it).
 SITES_TIMEOUT = 75.0
 APPS_TIMEOUT = 5.0  # the app switcher's list of apps (sites.list): someone is waiting with the grid open
@@ -76,10 +85,26 @@ def _title() -> str:
     return identity.app().title
 
 
-def site_url_default() -> str:
+def site_url_default(domain: str = SITES_DOMAIN) -> str:
     """The app's address while none is set: `Extension.site_default` (HomeHiro's http://homehiro.local), else the name
-    it claims by itself, http://<Extension.name>.hiro.local."""
-    return ext().site_default or site_name(ext().name, DEFAULT_KIND).url
+    it claims by itself under the core's `domain`, http://<its key, dashed>.<domain> (a key's dot can't be in a label:
+    acme.weather → acme-weather)."""
+    return ext().site_default or site_name(dashed(ext().name), DEFAULT_KIND, domain).url
+
+
+def listen_port() -> int:
+    """The port the app listens on, sent with its name's claim so the core's proxy reaches it: PORT in its environment,
+    else the port it declares (`Extension.port`, its port on Simone). Fix: an environment's app claimed its live port
+    (NetHiro 8130 while it ran on 7305), and its name answered 502."""
+    raw = os.environ.get(PORT_ENV, "").strip()
+    return int(raw) if raw.isdigit() else ext().port
+
+
+def core_domain(core: Any) -> str:
+    """The core's domain from its welcome (`core.domain`: hiro.local, or <name>.local), else SITES_DOMAIN (a core from
+    before it said)."""
+    domain = core.get("domain") if isinstance(core, dict) else None
+    return domain if isinstance(domain, str) and domain.endswith(".local") else SITES_DOMAIN
 
 
 def _derived(uses: Any, permission: str, words: str) -> AppAsk:
@@ -191,15 +216,17 @@ def check_admin_url(url: str) -> str:
     return url
 
 
-def derived_admin_url(ws_url: str, admin_port: Any) -> str:
-    """http://<the core's host>:<admin port>, from the extension address and the port the core says; "" unknown."""
+def derived_admin_url(ws_url: str, admin_port: Any, domain: str = SITES_DOMAIN) -> str:
+    """http://<the core's host>:<admin port>, from the extension address and the port the core says; "" unknown. On
+    the core's own machine, its LAN name: http://<its domain>."""
     if not ws_url or not isinstance(admin_port, int):
         return ""
     host = ws_url.split("://", 1)[-1].split("/", 1)[0].rsplit(":", 1)[0]
     if host in LOOPBACK:
         # Phase 9b fix: the app reaches the core on the same machine (127.0.0.1), but people's browsers can't: the
-        # core's admin is at its LAN name then (http://hiro.local, the core's Caddy); sign-in sent them nowhere
-        return f"http://{SITES_DOMAIN}"
+        # core's admin is at its LAN name then (http://hiro.local, the core's Caddy); sign-in sent them nowhere. Its name
+        # is the core's own (a core named testpc is http://testpc.local), from its welcome.
+        return f"http://{domain}"
     return f"http://{host}:{admin_port}" if host else ""
 
 
@@ -250,6 +277,7 @@ class HiroLeagueLink(Worker):
         self.settings: LinkSettings = AppDatabase()  # where its settings live (use_settings for another store)
         self.admin_url_set = ""  # Settings → HiroLeague's admin address ("" = derived); read when the link starts
         self.site_url_set = ""  # the app's address ("" = none claimed yet: the default); read when the link starts
+        self.domain = SITES_DOMAIN  # the core's own name, from its welcome (core_domain): a subdomain's suffix
         # (the real info is set at connect time, from the app's Extension: _connect)
         self.client = ExtensionClient("", ExtensionInfo(name=identity.app().name, version="0"),
                                       ExtensionCredentials(identity.app().data_dir / "hiroleague"), on_status=self._status)
@@ -260,6 +288,21 @@ class HiroLeagueLink(Worker):
         # before approvals never does). Kept across a dropped connection: it is still what the core last said.
         self.approval: Approval | None = None
         self.client.on_event(EVENT_APPROVAL_CHANGED, self._approval_changed)
+        self.client.register_request(METHOD_EXTENSION_SETUP, self._setup)
+
+    async def _setup(self, _params: dict[str, Any]) -> dict[str, Any]:
+        """What the owner still has to set (`extension.setup`): each of `Extension.setup` with its check run now. A
+        check that fails says not done, and is logged: the page still shows the rest."""
+        items = []
+        for step in ext().setup:
+            try:
+                done = bool(await asyncio.to_thread(step.done))
+            except Exception as exc:  # one check's failure doesn't hide the other items
+                failed(log, f"HiroLeague: checking whether {step.title!r} is set", exc)
+                done = False
+            items.append(SetupItem(id=step.id, title=step.title, done=done,
+                                   link=PageLink(app=ext().name, path=step.path)).model_dump())
+        return {"items": items}
 
     def approved_for(self, permission: str, subject: str = "") -> bool:
         """Whether the app may do this on its own, as the core last said (`covers`)."""
@@ -292,11 +335,12 @@ class HiroLeagueLink(Worker):
         # The SDK awaits this before it reads the connection's frames: never ask the core from here. The bus runs its
         # subscribers on the loop, so they start their requests on their own (family.py).
         if status == STATUS_CONNECTED:
+            self.domain = core_domain(detail.get("core"))
             if detail.get("approval") is not None:  # the welcome's: what it is approved for (Permissions phase 8)
                 self._take_approval(detail["approval"])
             bus.publish(CONNECTED)
             self.follower.connected()
-            # no name yet and no default address: claim <name>.hiro.local (not awaited here, see above)
+            # no name yet and no default address: claim <key, dashed>.<domain> (not awaited here, see above)
             if not self.site_url_set and not ext().site_default:
                 self.spawn(self._claim_default(), "claim the default name")
 
@@ -310,8 +354,31 @@ class HiroLeagueLink(Worker):
             self.spawn(LogSender(self.client, *files).run(), "send logs")
 
     async def _connect(self) -> None:
-        self._took(await self._read(URL_KEY), await self._read(ADMIN_URL_KEY), await self._read(SITE_URL_KEY))
+        url = await self._read(URL_KEY)
+        if not url and (installed := os.environ.get(ENV_CORE_URL, "").strip()):
+            # An app the core installed: its core's address comes in its environment (kept, so Settings shows it)
+            try:
+                url = check_url(installed)
+            except Invalid as exc:  # a broken install: said once, and the app waits for an address in Settings
+                failed(log, f"HiroLeague: taking {ENV_CORE_URL} from {_title()}'s install", exc)
+            else:
+                await self._write(URL_KEY, url)
+                log.info("HiroLeague: %s takes its core's address from its install: %s", _title(), url)
+        self._took(url, await self._read(ADMIN_URL_KEY), await self._read(SITE_URL_KEY))
+        self._pair_from_install()
         await self.client.run()
+
+    def _pair_from_install(self) -> None:
+        """An app the core installed pairs with its install's code (HIRO_PAIRING_CODE) while it has no key: no shell,
+        no code typed. A paired app never uses it (the core takes it out of the environment once used)."""
+        code = os.environ.get(ENV_PAIRING_CODE, "").strip()
+        if not code or not self.client.url:
+            return
+        if ExtensionCredentials(identity.app().data_dir / "hiroleague").extension_id() is not None:
+            return
+        log.info("HiroLeague: %s pairs with the code its install gave it", _title())
+        self.approval = None  # a new pairing: the core says at its welcome what this one is approved for
+        self.client.pair(code)
 
     def use_settings(self, store: LinkSettings) -> None:
         """Keep the link's settings in `store`, not the app's database (CodeHiro: its own SQLite store), and read them
@@ -331,12 +398,12 @@ class HiroLeagueLink(Worker):
         await asyncio.to_thread(self.settings.put, key, value)
 
     async def _claim_default(self) -> None:
-        """The app's first connection claims <name>.hiro.local, so its Apps card and sign-in work without a visit to
-        Settings. Refused or failed: logged, and tried again at the next connection."""
+        """The app's first connection claims <key, dashed>.<the core's domain>, so its Apps card and sign-in work without
+        a visit to Settings. Refused or failed: logged, and tried again at the next connection."""
         try:
-            await self.claim_site_name(ext().name, DEFAULT_KIND)
+            await self.claim_site_name(dashed(ext().name), DEFAULT_KIND)
         except AppError as exc:
-            failed(log, f"HiroLeague: claiming {_title()}'s default name {site_url_default()}", exc)
+            failed(log, f"HiroLeague: claiming {_title()}'s default name {site_url_default(self.domain)}", exc)
 
     # --- what Settings → HiroLeague reads and does ---
 
@@ -353,31 +420,32 @@ class HiroLeagueLink(Worker):
             "site_url_set": self.site_url_set,
             "site_url": self.site_url(),
             **self._site_form(),
+            "domain": self.domain,
             "waiting": waiting_items(self.approval),
         }
 
     def _site_form(self) -> dict[str, Any]:
         """The address as the form shows it: its label and kind (None for an address that isn't one of the names)."""
-        name = name_of(self.site_url())
+        name = name_of(self.site_url(), self.domain)
         return {"site_label": name.label if name else None, "site_kind": name.kind if name else None}
 
     def site_url(self) -> str:
         """The app's address: the one set, else the default it claims."""
-        return self.site_url_set or site_url_default()
+        return self.site_url_set or site_url_default(self.domain)
 
     async def claim_site_name(self, label: str, kind: str) -> dict[str, Any]:
         """A new name for the app (`net` → net.hiro.local, or `abc` → abc.local), set up by the core: it publishes the
         name on the LAN and points its proxy at the app's port. Only when the core says yes is `http://<name>` saved
         and declared (the link reconnects, so the core reads the new info); a refusal saves nothing."""
         try:
-            wanted = site_name(label, kind)
+            wanted = site_name(label, kind, self.domain)
         except BadLabel as exc:
             raise Invalid(str(exc)) from exc
         if not self.client.connected:
             raise Unavailable(_no_core_for_name())
         started = calls.start()
         try:
-            answer = await self.client.request(METHOD_SITES_CLAIM, {"name": wanted.name, "port": ext().port},
+            answer = await self.client.request(METHOD_SITES_CLAIM, {"name": wanted.name, "port": listen_port()},
                                                timeout=SITES_TIMEOUT)
         except ExtensionRequestError as exc:
             raise _claim_error(exc) from exc
@@ -400,7 +468,7 @@ class HiroLeagueLink(Worker):
     def admin_url(self) -> str:
         """Where the core's admin opens (Edit links): the address set, else derived from the core's host and port."""
         core = self.client.status_detail.get("core") or {}
-        return self.admin_url_set or derived_admin_url(self.client.url, core.get("admin_port"))
+        return self.admin_url_set or derived_admin_url(self.client.url, core.get("admin_port"), self.domain)
 
     async def set_admin_url(self, url: str) -> dict[str, Any]:
         url = check_admin_url(url)

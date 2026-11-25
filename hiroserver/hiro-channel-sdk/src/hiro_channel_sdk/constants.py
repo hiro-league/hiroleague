@@ -24,9 +24,12 @@ METHOD_EXTENSION_STOP: str = "extension.stop"
 WHATSAPP_CALL_SEND: str = "send"    # {to, text?, image_b64?, voice_b64?, voice_seconds?, waveform_b64?} → {"sent": true}
 WHATSAPP_CALL_CHECK: str = "check"  # {numbers: [...]} → {"answers": [{query, on_whatsapp, jid}]}
 
-# The pairing code the core makes for an extension it starts, in the process's environment (never on its command
-# line): used once, the first time, or when its key is lost.
+# The pairing code the core makes for an extension it starts, or for an app it installs (the service's environment,
+# apps/<key>/app.env), in the process's environment, never on its command line: used once, the first time, or when its
+# key is lost. Beside it for an installed app, the core's extension socket (ws://127.0.0.1:18082): the app takes it as
+# its core's address while none is set (the kit's link).
 ENV_PAIRING_CODE: str = "HIRO_PAIRING_CODE"
+ENV_CORE_URL: str = "HIRO_CORE_URL"
 
 # ---------------------------------------------------------------------------
 # WebSocket close codes (Hiro application range 4000–4999)
@@ -116,6 +119,13 @@ WHATSAPP_ERROR_FAILED: str = "whatsapp_failed"                # WhatsApp refused
 #                    an app tells people only through notify, so it also takes a picture (image_b64) or a voice
 #                    note (voice_b64, voice_seconds, waveform_b64, transcript), with or without text.
 METHOD_EXTENSION_STATE: str = "extension.state"
+# Installing apps, phase 5:
+#   extension.setup  core → app, {} → {"items": [{id, title, done, link}]} (offers.SetupItem): what the owner still has
+#                    to set in the app (its own settings: an address, a token), each with whether it is done and the
+#                    page that sets it (link, a PageLink). Asked live when the core's Extensions page opens, never
+#                    kept. An app with nothing to set answers no items; one from before it answers method_not_found,
+#                    and the core shows nothing left.
+METHOD_EXTENSION_SETUP: str = "extension.setup"
 METHOD_NOTIFY: str = "notify"
 NOTIFY_MEDIUM_WHATSAPP: str = "whatsapp"
 NOTIFY_STYLE_EXACT: str = "exact"

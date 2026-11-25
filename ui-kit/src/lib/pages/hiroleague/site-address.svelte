@@ -13,7 +13,7 @@
 	import Feedback from '$kit/ui/feedback.svelte';
 	import Segmented from '$kit/ui/segmented.svelte';
 	import { claimSiteName, type HiroLeagueStatus, type SiteKind, type SiteNameOut } from './api';
-	import { addressFor, claimSaid, examplePlaceholder, KIND_OPTIONS, SUFFIX } from './site-name';
+	import { addressFor, claimSaid, DEFAULT_DOMAIN, examplePlaceholder, kindOptions, suffixFor } from './site-name';
 
 	interface Props {
 		current: HiroLeagueStatus | null;
@@ -42,7 +42,9 @@
 		untrack(() => form.load(fresh));
 	});
 
-	const address = $derived(addressFor(form.value.label, form.value.kind));
+	// The core's own name, as it last said: a subdomain's suffix
+	const domain = $derived(current?.domain ?? DEFAULT_DOMAIN);
+	const address = $derived(addressFor(form.value.label, form.value.kind, domain));
 	// Save stays available for the address already shown: it may be saved but not yet claimed in HiroLeague (an address
 	// set before names were claimed), and claiming the same name again changes nothing (2026-11-10).
 	const changed = $derived(address !== '');
@@ -52,12 +54,12 @@
 <div class="grid gap-2">
 	<Label for="hl-site">{APP.name}'s address</Label>
 	<div class="w-fit">
-		<Segmented options={KIND_OPTIONS} value={form.value.kind} onchange={(v) => (form.value.kind = v)} label="Kind of name" />
+		<Segmented options={kindOptions(domain)} value={form.value.kind} onchange={(v) => (form.value.kind = v)} label="Kind of name" />
 	</div>
 	<div class="flex gap-2">
 		<div class="flex flex-1 items-center gap-1">
 			<Input id="hl-site" bind:value={form.value.label} placeholder={examplePlaceholder(form.value.kind)} spellcheck="false" autocomplete="off" />
-			<span class="text-sm whitespace-nowrap text-muted-foreground">{SUFFIX[form.value.kind]}</span>
+			<span class="text-sm whitespace-nowrap text-muted-foreground">{suffixFor(form.value.kind, domain)}</span>
 		</div>
 		<Button variant="outline" onclick={form.save} disabled={disabled || form.action.busy || !changed}>Save</Button>
 	</div>

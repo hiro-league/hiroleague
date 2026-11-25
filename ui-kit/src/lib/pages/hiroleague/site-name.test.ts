@@ -10,6 +10,12 @@ describe('addressFor', () => {
 		expect(addressFor('net.hiro.local', 'subdomain')).toBe('http://net.hiro.local'); // the whole name pasted
 		expect(addressFor('  ', 'local')).toBe('');
 	});
+
+	it("puts a subdomain under the core's own name when the house named it", () => {
+		expect(addressFor('net', 'subdomain', 'testpc.local')).toBe('http://net.testpc.local');
+		expect(addressFor('net.testpc.local', 'subdomain', 'testpc.local')).toBe('http://net.testpc.local');
+		expect(addressFor('abc', 'local', 'testpc.local')).toBe('http://abc.local');
+	});
 });
 
 describe('claimSaid', () => {

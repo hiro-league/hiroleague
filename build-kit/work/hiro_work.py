@@ -1833,7 +1833,10 @@ def servers(env: int) -> dict[str, Server]:
         fill = {"port": str(api), "data": str(app_data(env, a)), "repo": "{repo}"}  # {repo} stays for the app
         out[f"{a.repo}-api"] = Server(
             f"{a.repo}-api", repo / a.backend, a.api.format(**fill), api,
-            {"PYTHONUTF8": "1", **{k: v.format(**fill) for k, v in a.api_env.items()}}, repo / ".env.dev")
+            # PORT: the kit claims the app's name on the port it really runs on here (hiroleague.listen_port), not its
+            # live one, which made an environment's name answer 502
+            {"PYTHONUTF8": "1", "PORT": str(api), **{k: v.format(**fill) for k, v in a.api_env.items()}},
+            repo / ".env.dev")
         # --host: 127.0.0.1 only, as every app (Vite's default "localhost" is IPv6-only on this PC)
         out[f"{a.repo}-ui"] = Server(f"{a.repo}-ui", repo / a.frontend,
                                      f"npm.cmd run dev -- --port {ui} --strictPort --host 127.0.0.1", ui,

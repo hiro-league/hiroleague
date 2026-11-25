@@ -39,6 +39,7 @@ class HiroLeagueStatus(BaseModel):
     site_url: str = ""  # Phase 8: the app's address declared to the core (its Apps card, where sign-in comes back)
     site_label: str | None = None  # site_url's name for the form: home (home.hiro.local), nethiro (nethiro.local)
     site_kind: Literal["subdomain", "local"] | None = None  # None: site_url isn't one of the two names
+    domain: str = "hiro.local"  # the core's own name, a subdomain's suffix (its welcome's domain; hiro.local by default)
     # Permissions phase 8: what waits for the owner's approval in HiroLeague, as the core last said ([]: nothing)
     waiting: list[WaitingItem] = []
 
