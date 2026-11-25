@@ -12,8 +12,8 @@ export type SignedInPerson = {
   role_ids: string[];
 };
 
-/** A way to sign in that a connected extension offers (Phase 8: HomeHiro offers Home Assistant's login). */
-export type SignInOffer = { id: string; label: string; extension: string };
+/** Another way to sign in the core runs: Home Assistant's login, while the owner has it on (People → Sign-in). */
+export type SignInOffer = { id: string; label: string };
 
 export type AuthMe = {
   signed_in: boolean;

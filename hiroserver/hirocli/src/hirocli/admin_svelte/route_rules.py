@@ -114,6 +114,8 @@ ADMIN_RULES: tuple[Rule, ...] = (
     # People and roles are the owner's
     Rule("/api/people", "owner"),
     Rule("/api/roles", "owner"),
+    # The ways into HiroLeague (People → Sign-in): the owner's
+    Rule("/api/sign-in", "owner"),
 )
 
 

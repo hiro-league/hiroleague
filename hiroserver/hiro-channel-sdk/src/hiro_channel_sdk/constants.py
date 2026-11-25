@@ -240,21 +240,11 @@ VOICE_ERROR_FAILED: str = "failed"          # the provider failed (the message s
 #   auth.code        extension → core, {code} → {person_id, name, role_id, role_ids, role_name}: role_ids every
 #                    role they hold, role_id the first (role_name its name). One use, 60 s, only by the
 #                    extension the code was made for. Error: invalid_code.
-#   sign_in.start    core → extension, {method, client_id, redirect_uri, state} → {url}: where to send the browser
-#                    to sign in (e.g. Home Assistant's login page). `method` is the id the extension offered.
-#   sign_in.finish   core → extension, {method, code, client_id, redirect_uri} → {person_id}: who signed in, as a
-#                    core person. Errors: not_linked (signed in, but not a person in the family list; the message
-#                    says why, for people), failed.
-# An extension offers a sign-in in offers.can_do: {"kind": "sign_in", "id": "home_assistant", "label": "Home
-# Assistant"}; and its site in offers.shows: {"kind": "site", "title": "Home", "icon": "house",
-# "url": "http://homehiro.local", "roles": []} (roles [] = every role).
+# An extension declares its site in offers.shows: {"kind": "site", "title": "Home", "icon": "house",
+# "url": "http://homehiro.local", "roles": []} (roles [] = every role). No extension offers a way to sign in: the core
+# runs every sign-in, "Sign in with Home Assistant" included, and only tells an app who signed in (auth.code).
 METHOD_AUTH_CODE: str = "auth.code"
-METHOD_SIGN_IN_START: str = "sign_in.start"
-METHOD_SIGN_IN_FINISH: str = "sign_in.finish"
 AUTH_ERROR_INVALID_CODE: str = "invalid_code"
-SIGN_IN_ERROR_NOT_LINKED: str = "not_linked"
-SIGN_IN_ERROR_FAILED: str = "failed"
-OFFER_KIND_SIGN_IN: str = "sign_in"
 OFFER_KIND_SITE: str = "site"
 AUTH_CODE_SECONDS: int = 60
 

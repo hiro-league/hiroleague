@@ -10,7 +10,6 @@ Slot       Entry                                                         Fields
 =========  ============================================================  =====================================
 knows      A method other extensions may ask (a question)                method, name, says
 can_do     A method other extensions may ask (an action)                 method, name, says
-can_do     An offered sign-in (HomeHiro: Home Assistant)                 kind "sign_in", id, label
 tells      Something it sends ``resource.changed`` for                   resource, name, says
 shows      Its site: the app switcher, the Apps card, the one sign-in   kind "site", title, icon, url, roles
 =========  ============================================================  =====================================
@@ -40,15 +39,6 @@ class MethodEntry(_Entry):
     says: str = ""
 
 
-class SignInEntry(_Entry):
-    """Another way to sign in, shown on the core's sign-in page while the extension is connected (constants:
-    ``OFFER_KIND_SIGN_IN``); the core calls the extension's ``sign_in.start`` / ``sign_in.finish``."""
-
-    kind: Literal["sign_in"]
-    id: str = Field(min_length=1)
-    label: str = Field(min_length=1)
-
-
 class TellsEntry(_Entry):
     """Something the extension says changed with ``resource.changed {resource, ids?}``: a hint, never the data. The
     core drops a ``resource.changed`` for a resource no entry names, with a warning."""
@@ -73,7 +63,7 @@ class ExtensionOffers(BaseModel):
     """What the extension offers: four slots of typed entries."""
 
     knows: list[MethodEntry] = Field(default_factory=list)  # questions it answers
-    can_do: list[SignInEntry | MethodEntry] = Field(default_factory=list)  # actions it takes, sign-ins it offers
+    can_do: list[MethodEntry] = Field(default_factory=list)  # actions it takes (no app offers a sign-in: the core's)
     tells: list[TellsEntry] = Field(default_factory=list)  # what it says changed
     shows: list[SiteEntry] = Field(default_factory=list)  # its site
 

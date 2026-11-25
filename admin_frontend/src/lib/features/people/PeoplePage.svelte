@@ -26,7 +26,6 @@
   import { Resource } from '$kit/state/resource.svelte';
   import { listDevices } from '$lib/api/devices';
   import { devicesOf } from '../devices/shared/device-people';
-  import MockupBadge from '$kit/ui/mockup-badge.svelte';
   import SignInWaysView from './view/SignInWaysView.svelte';
   import { createHomeAssistantSignIn } from './state/home-assistant-sign-in.svelte';
 
@@ -38,8 +37,8 @@
   // Permissions phase 3: each person's devices, beside their WhatsApp address
   const devices = new Resource(listDevices);
 
-  // mockup: the Sign-in tab (trust fixes: the core runs "Sign in with Home Assistant", an option the owner adds)
-  const ha = createHomeAssistantSignIn(() => ctrl.people);
+  // The Sign-in tab (trust fixes): the core runs "Sign in with Home Assistant", an option the owner adds
+  const ha = createHomeAssistantSignIn();
 
   type Tab = 'people' | 'roles' | 'compare' | 'sign-in';
   const TABS: Tab[] = ['people', 'roles', 'compare', 'sign-in'];
@@ -80,8 +79,6 @@
         <Button variant="outline" disabled={roles.busy} onclick={() => (roles.newName = '')}>
           <Plus size={15} /> New role
         </Button>
-      {:else if tab === 'sign-in'}
-        <MockupBadge title="A mockup: the core runs Sign in with Home Assistant; nothing here is saved yet" />
       {/if}
     {/snippet}
     {#if tab === 'roles' || tab === 'compare'}

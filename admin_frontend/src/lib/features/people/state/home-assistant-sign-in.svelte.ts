@@ -1,94 +1,74 @@
-// mockup — People → Sign-in (trust fixes, fix 2, option A): the core runs "Sign in with Home Assistant" itself, an
-// option the owner adds. The switch that shows it on the sign-in page stays off until the core reaches Home Assistant;
-// who is who (a Home Assistant person → a person in the family list) is kept in the core. Mock data only: nothing
-// here calls the backend yet.
+// People → Sign-in (trust fixes): "Sign in with Home Assistant", run by the core, an option the owner adds. The core
+// keeps its own connection to Home Assistant (the address here; the token kept by the core, never sent back) and who
+// each Home Assistant login is in the family list; the switch that shows it on the sign-in page stays locked until
+// the connection works.
 import { Action } from '$kit/state/action.svelte';
-
-/** A person in Home Assistant, as the core would read them once connected. */
-export type HaPerson = { ha_user_id: string; name: string; login: string };
-
-/** What the connection test answers. */
-export type HaConnection = { version: string; people: HaPerson[] };
-
-// mockup: the answer a working connection would give
-const MOCK_ANSWER: HaConnection = {
-  version: '2026.11.2',
-  people: [
-    { ha_user_id: 'u1', name: 'Michel', login: 'michel' },
-    { ha_user_id: 'u2', name: 'Mona', login: 'mona' },
-    { ha_user_id: 'u3', name: 'Mark', login: 'mark' },
-    { ha_user_id: 'u4', name: 'Joe', login: 'joe' },
-    { ha_user_id: 'u5', name: 'Guest', login: 'guest' }
-  ]
-};
+import { KeyedAction } from '$kit/state/keyed-action.svelte';
+import { Draft } from '$kit/state/draft.svelte';
+import { Resource } from '$kit/state/resource.svelte';
+import { connectHa, disconnectHa, getHaSignIn, linkHaLogin, setHaSignIn, type HaSignIn } from '$lib/api/sign-in-ways';
 
 export type HomeAssistantSignIn = ReturnType<typeof createHomeAssistantSignIn>;
 
-/** `family` is the family list as the People tab has it: a Home Assistant person is linked to one of them. */
-export function createHomeAssistantSignIn(family: () => { person_id: string; name: string }[]) {
-  let address = $state('');
-  let token = $state('');
-  let connection = $state<HaConnection | null>(null);
-  let on = $state(false);
-  // ha_user_id → person_id; '' = nobody (that login can't sign in)
-  let links = $state<Record<string, string>>({});
-  const connecting = new Action();
+type Connection = { address: string; token: string };
 
-  // mockup: a first connection suggests the family person of the same name; the owner confirms each
-  function suggest(people: HaPerson[]) {
-    const byName = new Map(family().map((p) => [p.name.toLowerCase(), p.person_id]));
-    links = Object.fromEntries(people.map((p) => [p.ha_user_id, links[p.ha_user_id] ?? byName.get(p.name.toLowerCase()) ?? '']));
-  }
+export function createHomeAssistantSignIn() {
+  const data = new Resource<HaSignIn>(async (signal) => {
+    const answer = await getHaSignIn(signal);
+    form.load({ address: answer.address, token: '' });
+    return answer;
+  });
+  // The address as typed, and a new token ('' = keep the one the core has)
+  const form = new Draft<Connection>(
+    { address: '', token: '' },
+    {
+      done: () => `Connected: Home Assistant ${data.data?.version ?? ''}, ${data.data?.logins.length ?? 0} logins.`,
+      save: async (c) => {
+        data.set(await connectHa(c.address.trim(), c.token.trim()));
+        return { address: data.data?.address ?? c.address, token: '' };
+      }
+    }
+  );
+  const switching = new Action();
+  const disconnecting = new Action();
+  const linking = new KeyedAction();
 
   return {
-    get address() {
-      return address;
+    get data() {
+      return data.data;
     },
-    set address(v: string) {
-      address = v;
+    get error() {
+      return data.error;
     },
-    get token() {
-      return token;
-    },
-    set token(v: string) {
-      token = v;
-    },
-    get connection() {
-      return connection;
-    },
-    get on() {
-      return on;
-    },
-    get links() {
-      return links;
-    },
-    connecting,
+    form,
+    switching,
+    disconnecting,
+    linking,
     /** The switch can be turned on only while the core reaches Home Assistant. */
     get canTurnOn() {
-      return connection !== null;
+      return !!data.data?.connected;
     },
     get linkedCount() {
-      return Object.values(links).filter(Boolean).length;
+      return (data.data?.logins ?? []).filter((l) => l.person_id).length;
     },
-    connect: () =>
-      connecting.run(async () => {
-        // mockup: a pause, then the answer a working connection would give (an address and a token are needed)
-        await new Promise((r) => setTimeout(r, 600));
-        if (!address.trim() || !token.trim()) throw new Error("Type Home Assistant's address and an access token.");
-        connection = MOCK_ANSWER;
-        suggest(MOCK_ANSWER.people);
-        return `Connected: Home Assistant ${MOCK_ANSWER.version}, ${MOCK_ANSWER.people.length} people.`;
+    /** Connect (or test again with the token kept): needs an address, and a token unless one is kept. */
+    get canConnect() {
+      const c = form.value;
+      return !!c.address.trim() && (!!c.token.trim() || !!data.data?.token_set) && !form.action.busy;
+    },
+    connect: () => form.save(),
+    disconnect: () =>
+      disconnecting.run(async () => {
+        data.set(await disconnectHa());
+        form.load({ address: '', token: '' }, true);
       }),
-    disconnect: () => {
-      connection = null;
-      on = false;
-      token = '';
-    },
-    setOn: (next: boolean) => {
-      on = next && connection !== null;
-    },
-    link: (haUserId: string, personId: string) => {
-      links = { ...links, [haUserId]: personId };
-    }
+    setOn: (on: boolean) =>
+      switching.run(async () => {
+        data.set(await setHaSignIn(on));
+      }),
+    link: (haUserId: string, personId: string) =>
+      linking.run(haUserId, async () => {
+        data.set(await linkHaLogin(haUserId, personId));
+      })
   };
 }

@@ -1,8 +1,9 @@
 <script lang="ts">
-  // mockup — People → Sign-in: the ways into HiroLeague and its apps. Name and password always work; "Sign in with
-  // Home Assistant" is an option the owner adds, run by the core itself: it can be turned on only once the core
+  // People → Sign-in: the ways into HiroLeague and its apps (trust fixes). Name and password always work; "Sign in
+  // with Home Assistant" is an option the owner adds, run by the core itself: it can be turned on only once the core
   // reaches Home Assistant, and only a Home Assistant login linked to someone in the family list signs in.
-  // Pieces: the kit's Panel, Field, Feedback, StatusDot, PickSelect; shadcn-svelte's Switch, Input, Table, Badge.
+  // Pieces: the kit's Panel, Field, Feedback, StatusDot, PickSelect, ResourceView; shadcn-svelte's Switch, Input,
+  // Table, Badge.
   import { House, KeyRound, PlugZap, Unplug } from '@lucide/svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
@@ -14,6 +15,7 @@
   import Panel from '$kit/ui/panel.svelte';
   import PickSelect from '$kit/ui/pick-select.svelte';
   import StatusDot from '$kit/ui/status-dot.svelte';
+  import { dateTime } from '$kit/format/time';
   import type { HomeAssistantSignIn } from '../state/home-assistant-sign-in.svelte';
 
   interface Props {
@@ -26,9 +28,11 @@
 
   const ROW = 'flex items-center justify-between gap-4 px-3 py-3';
   const options = $derived([{ value: '', label: 'Nobody' }, ...family.map((p) => ({ value: p.person_id, label: p.name }))]);
+  const state = $derived(ha.data);
 </script>
 
 <div class="grid gap-4">
+  <Feedback error={ha.error ?? ''} />
   <Panel title="Ways to sign in">
     <ul class="divide-y rounded-md border">
       <li class={ROW}>
@@ -41,7 +45,7 @@
           <span class="text-xs text-muted-foreground">
             {#if !ha.canTurnOn}
               Connect Home Assistant below first
-            {:else if ha.on}
+            {:else if state?.enabled}
               On the sign-in page, for the {ha.linkedCount} linked {ha.linkedCount === 1 ? 'login' : 'logins'}
             {:else}
               Off
@@ -49,21 +53,22 @@
           </span>
         </span>
         <Switch
-          checked={ha.on}
-          disabled={!ha.canTurnOn}
-          onCheckedChange={(next) => ha.setOn(next)}
-          aria-label="Sign in with Home Assistant: {ha.on ? 'on' : 'off'}"
+          checked={!!state?.enabled}
+          disabled={!ha.canTurnOn || ha.switching.busy}
+          onCheckedChange={(next) => void ha.setOn(next)}
+          aria-label="Sign in with Home Assistant: {state?.enabled ? 'on' : 'off'}"
           title={ha.canTurnOn ? '' : 'Connect Home Assistant first'}
         />
       </li>
     </ul>
+    <Feedback action={ha.switching} />
   </Panel>
 
   <Panel title="Home Assistant">
     {#snippet actions()}
-      {#if ha.connection}
-        <span class="flex items-center gap-2 text-sm">
-          <StatusDot tone="ok" /> Connected, Home Assistant {ha.connection.version}
+      {#if state?.connected}
+        <span class="flex items-center gap-2 text-sm" title={state.checked_at ? `Tested ${dateTime(state.checked_at)}` : ''}>
+          <StatusDot tone="ok" /> Connected, Home Assistant {state.version}
         </span>
       {:else}
         <span class="flex items-center gap-2 text-sm text-muted-foreground"><StatusDot tone="off" /> Not connected</span>
@@ -71,24 +76,31 @@
     {/snippet}
     <div class="grid max-w-xl gap-4">
       <Field label="Address" for="{uid}-address">
-        <Input id="{uid}-address" bind:value={ha.address} placeholder="http://homeassistant.local" spellcheck="false" />
+        <Input id="{uid}-address" bind:value={ha.form.value.address} placeholder="http://homeassistant.local" spellcheck="false" />
       </Field>
-      <Field label="Access token" for="{uid}-token" hint="A long-lived token, made in your Home Assistant profile">
-        <Input id="{uid}-token" bind:value={ha.token} type="password" autocomplete="off" />
+      <Field
+        label="Access token"
+        for="{uid}-token"
+        hint={state?.token_set ? 'Kept. Type a new one to replace it.' : 'A long-lived token, made in your Home Assistant profile'}
+      >
+        <Input id="{uid}-token" bind:value={ha.form.value.token} type="password" autocomplete="off" />
       </Field>
       <div class="flex gap-2">
-        <Button disabled={ha.connecting.busy} onclick={() => void ha.connect()}>
-          <PlugZap size={15} /> {ha.connection ? 'Test again' : 'Connect'}
+        <Button disabled={!ha.canConnect} onclick={() => void ha.connect()}>
+          <PlugZap size={15} /> {state?.connected ? 'Test again' : 'Connect'}
         </Button>
-        {#if ha.connection}
-          <Button variant="ghost" onclick={() => ha.disconnect()}><Unplug size={15} /> Disconnect</Button>
+        {#if state?.connected || state?.token_set}
+          <Button variant="ghost" disabled={ha.disconnecting.busy} onclick={() => void ha.disconnect()}>
+            <Unplug size={15} /> Disconnect
+          </Button>
         {/if}
       </div>
-      <Feedback action={ha.connecting} />
+      <Feedback action={ha.form.action} />
+      <Feedback action={ha.disconnecting} />
     </div>
   </Panel>
 
-  {#if ha.connection}
+  {#if state?.connected && state.logins.length}
     <Panel title="Who is who">
       <Table.Root>
         <Table.Header>
@@ -99,17 +111,21 @@
           </Table.Row>
         </Table.Header>
         <Table.Body>
-          {#each ha.connection.people as p (p.ha_user_id)}
+          {#each state.logins as login (login.ha_user_id)}
             <Table.Row>
-              <Table.Cell>{p.name}</Table.Cell>
-              <Table.Cell class="font-mono text-xs text-muted-foreground">{p.login}</Table.Cell>
+              <Table.Cell>{login.name}</Table.Cell>
+              <Table.Cell class="font-mono text-xs text-muted-foreground">{login.login || '—'}</Table.Cell>
               <Table.Cell>
                 <PickSelect
-                  value={ha.links[p.ha_user_id] ?? ''}
+                  value={login.person_id}
                   {options}
-                  onchange={(v) => ha.link(p.ha_user_id, v)}
-                  label="Who {p.name} is in the family list"
+                  disabled={ha.linking.busy(login.ha_user_id)}
+                  onchange={(v) => void ha.link(login.ha_user_id, v)}
+                  label="Who {login.name} is in the family list"
                 />
+                {#if ha.linking.error(login.ha_user_id)}
+                  <p class="mt-1 text-xs text-destructive">{ha.linking.error(login.ha_user_id)}</p>
+                {/if}
               </Table.Cell>
             </Table.Row>
           {/each}

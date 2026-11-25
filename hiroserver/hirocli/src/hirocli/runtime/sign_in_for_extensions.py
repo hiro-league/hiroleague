@@ -6,12 +6,11 @@ declared, with a one-time code; the extension redeems the code over its paired c
 (``auth.code``) and keeps its own sign-in. Contract: hiro_channel_sdk.constants (Phase 8 block) and
 docs/phase8-one-sign-in-design.md.
 
-An extension may also offer a way to sign in (HomeHiro: Home Assistant's login). The core shows the
-button and asks the extension to start (``sign_in.start``) and finish (``sign_in.finish``) it; the
-extension answers which person signed in. The core keeps nothing about how they did.
+No extension offers a way to sign in: "Sign in with Home Assistant" is the core's own (domain/home_assistant_sign_in.py),
+so no app ever says who signed in.
 
-What lives here: the one-time codes (memory only: they last a minute and die with the process), the
-``auth.code`` handler, and reading what extensions declare (their sites and offered sign-ins).
+What lives here: the one-time codes and the started Home Assistant sign-ins (memory only: they last minutes and die
+with the process), the ``auth.code`` handler, and reading the sites extensions declare.
 """
 
 from __future__ import annotations
@@ -30,7 +29,6 @@ from hiro_channel_sdk.constants import (
     AUTH_ERROR_INVALID_CODE,
     METHOD_AUTH_CODE,
     METHOD_SITES_LIST,
-    OFFER_KIND_SIGN_IN,
     OFFER_KIND_SITE,
 )
 from hiro_commons.log import Logger
@@ -46,8 +44,7 @@ if TYPE_CHECKING:
 
 log = Logger.get("SIGN_IN")
 
-# A sign-in started with an extension's offered way (Home Assistant's login page) must come back
-# within this long.
+# A sign-in started at Home Assistant's login page must come back within this long.
 SIGN_IN_STATE_SECONDS = 600
 
 
@@ -67,16 +64,6 @@ class Site:
     url: str  # its origin, e.g. http://homehiro.local
     roles: tuple[str, ...]  # () = every role
     online: bool
-
-
-@dataclass(frozen=True)
-class SignInOffer:
-    """A way to sign in that a connected extension offers (offers.can_do, kind "sign_in")."""
-
-    extension_id: str
-    extension: str
-    id: str  # e.g. "home_assistant"
-    label: str  # e.g. "Home Assistant"
 
 
 def origin_of(url: str) -> str | None:
@@ -146,27 +133,6 @@ def find_site(manager: ExtensionManager | None, workspace_path: Path, extension:
     return None
 
 
-def list_sign_in_offers(manager: ExtensionManager | None) -> list[SignInOffer]:
-    """The ways to sign in that connected extensions offer (shown only while they're connected)."""
-    if manager is None:
-        return []
-    offers: list[SignInOffer] = []
-    for eid, conn in manager.snapshot().items():
-        info = conn.get("info") or {}
-        for item in _offers(info, "can_do", OFFER_KIND_SIGN_IN):
-            offer_id = str(item.get("id") or "").strip()
-            if offer_id:
-                offers.append(
-                    SignInOffer(
-                        extension_id=eid,
-                        extension=str(info.get("name") or conn.get("name") or eid),
-                        id=offer_id,
-                        label=str(item.get("label") or offer_id),
-                    )
-                )
-    return offers
-
-
 def back_url(site: Site, code: str, next_path: str) -> str:
     """Where the browser goes back to: the extension's own route that redeems the code."""
     return f"{site.url}/api/auth/hiro?{urlencode({'code': code, 'next': local_path(next_path)})}"
@@ -192,9 +158,8 @@ class _Code:
 
 @dataclass
 class _Started:
-    """A sign-in started with an extension's offered way, waiting for the browser to come back."""
+    """A sign-in started at Home Assistant's login page, waiting for the browser to come back."""
 
-    extension_id: str
     method: str
     for_extension: str  # ?for= of the sign-in page ("" = the admin itself)
     next_path: str
@@ -206,7 +171,7 @@ def _hash(token: str) -> str:
 
 
 class SignInCodes:
-    """One-time codes for extensions, and started offered sign-ins. Memory only: both last minutes."""
+    """One-time codes for extensions, and started Home Assistant sign-ins. Memory only: both last minutes."""
 
     def __init__(self) -> None:
         self._codes: dict[str, _Code] = {}
@@ -233,11 +198,11 @@ class SignInCodes:
         del self._codes[_hash(code)]
         return found.person_id
 
-    def start(self, extension_id: str, method: str, for_extension: str, next_path: str) -> str:
+    def start(self, method: str, for_extension: str, next_path: str) -> str:
         now = time.monotonic()
         self._prune(now)
         state = secrets.token_urlsafe(24)
-        self._started[state] = _Started(extension_id, method, for_extension, next_path, now + SIGN_IN_STATE_SECONDS)
+        self._started[state] = _Started(method, for_extension, next_path, now + SIGN_IN_STATE_SECONDS)
         return state
 
     def finish(self, state: str) -> _Started | None:

@@ -1,8 +1,8 @@
 """Phase 8: one sign-in for HiroLeague and its extensions' sites.
 
 A role that doesn't open HiroLeague's settings signs in for the apps only; an extension's site gets
-signed-in browsers back with a one-time code it redeems over its connection (auth.code); an offered
-sign-in (Home Assistant's login) is started and finished by the extension that offers it.
+signed-in browsers back with a one-time code it redeems over its connection (auth.code). Signing in with Home
+Assistant is the core's own: test_home_assistant_sign_in.py.
 """
 
 from __future__ import annotations
@@ -15,8 +15,6 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from fastapi import APIRouter, Depends, FastAPI
 from fastapi.testclient import TestClient
-from hiro_channel_sdk.constants import METHOD_SIGN_IN_FINISH, METHOD_SIGN_IN_START
-from hiro_channel_sdk.extension import ExtensionRequestError
 
 from hirocli.admin_svelte.route_rules import require_rule
 from hirocli.admin_svelte.routes import auth as auth_routes
@@ -31,7 +29,6 @@ from hirocli.runtime.request_handler import RequestRefused
 HOME_INFO = {
     "name": "home",
     "offers": {
-        "can_do": [{"kind": "sign_in", "id": "home_assistant", "label": "Home Assistant"}],
         "shows": [{"kind": "site", "title": "Home", "icon": "house", "url": "http://homehiro.local/x", "roles": []}],
     },
 }
@@ -40,22 +37,8 @@ HOME_INFO = {
 class FakeExtensions:
     """The running server's ExtensionManager, as far as the sign-in routes use it."""
 
-    def __init__(self) -> None:
-        self.asked: list[tuple[str, str, dict[str, Any]]] = []
-        self.finish_answer: dict[str, Any] | Exception = {}
-
     def snapshot(self) -> dict[str, dict[str, Any]]:
         return {"ext-home": {"name": "home", "info": HOME_INFO}}
-
-    async def request(self, extension_id: str, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        self.asked.append((extension_id, method, dict(params or {})))
-        if method == METHOD_SIGN_IN_START:
-            return {"url": f"http://ha.local/auth/authorize?state={params['state']}"}
-        if method == METHOD_SIGN_IN_FINISH:
-            if isinstance(self.finish_answer, Exception):
-                raise self.finish_answer
-            return self.finish_answer
-        raise AssertionError(method)
 
 
 def _app(workspace: Path, extensions: FakeExtensions) -> FastAPI:
@@ -120,11 +103,6 @@ def test_a_kid_signs_in_for_the_apps_only(family: dict[str, Any]) -> None:
     assert client.get("/api/secret").status_code == 403
 
 
-def test_the_sign_in_page_lists_the_offered_sign_ins(family: dict[str, Any]) -> None:
-    me = family["client"].get("/api/auth/me").json()
-    assert me["sign_in_offers"] == [{"id": "home_assistant", "label": "Home Assistant", "extension": "home"}]
-
-
 def test_a_signed_out_browser_goes_to_the_sign_in_page(family: dict[str, Any]) -> None:
     r = family["client"].get("/api/auth/for/home", params={"next": "/people"})
     assert r.status_code == 303 and r.headers["location"] == "/sign-in?for=home&next=%2Fpeople"
@@ -178,36 +156,6 @@ def test_a_next_off_the_site_goes_to_its_start(family: dict[str, Any]) -> None:
     _sign_in(client, "michel", "correct horse")
     r = client.get("/api/auth/for/home", params={"next": "//evil.example/x"})
     assert parse_qs(urlsplit(r.headers["location"]).query)["next"] == ["/"]
-
-
-def test_signing_in_with_home_assistant_through_the_extension(family: dict[str, Any]) -> None:
-    client, ext = family["client"], family["ext"]
-    start = client.get("/api/auth/with/home_assistant", params={"for": "home", "next": "/people"})
-    assert start.status_code == 303 and start.headers["location"].startswith("http://ha.local/auth/authorize")
-    _, method, params = ext.asked[-1]
-    assert method == METHOD_SIGN_IN_START
-    assert params["client_id"] == "http://testserver/" and params["redirect_uri"] == "http://testserver/api/auth/with/callback"
-
-    ext.finish_answer = {"person_id": family["mark"].person_id}
-    done = client.get("/api/auth/with/callback", params={"code": "ha-code", "state": params["state"]})
-    assert done.status_code == 303 and done.headers["location"] == "/api/auth/for/home?next=%2Fpeople"
-    assert ext.asked[-1][1] == METHOD_SIGN_IN_FINISH and ext.asked[-1][2]["code"] == "ha-code"
-    assert client.get("/api/auth/me").json()["person"]["name"] == "Mark"
-
-    again = client.get("/api/auth/with/callback", params={"code": "ha-code", "state": params["state"]})
-    assert "signin_error" in again.headers["location"]  # a state works once
-
-
-def test_an_unlinked_home_assistant_user_is_told_why(family: dict[str, Any]) -> None:
-    client, ext = family["client"], family["ext"]
-    client.get("/api/auth/with/home_assistant", params={"next": "/"})
-    state = ext.asked[-1][2]["state"]
-    ext.finish_answer = ExtensionRequestError("not_linked", "Your Home Assistant user isn't linked to anyone.")
-    r = client.get("/api/auth/with/callback", params={"code": "c", "state": state})
-    assert parse_qs(urlsplit(r.headers["location"]).query)["signin_error"] == [
-        "Your Home Assistant user isn't linked to anyone."
-    ]
-    assert client.get("/api/auth/me").json()["signed_in"] is False
 
 
 def _run(coro: Any) -> Any:

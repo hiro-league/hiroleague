@@ -4,8 +4,8 @@
    * address and without internet. Shown instead of the whole admin until someone signs in.
    *
    * Phase 8: one sign-in for HiroLeague and its apps. An app's site (HomeHiro) sends people here with
-   * ?for=<app>&next=<path>; once signed in they go back there. A connected extension may offer another
-   * way in ("Sign in with Home Assistant"): its button starts that sign-in on the extension's side.
+   * ?for=<app>&next=<path>; once signed in they go back there. "Sign in with Home Assistant" shows while the
+   * owner has it on (People → Sign-in): the core runs it, at Home Assistant's own login page.
    * ?signin_error= says why the last try didn't work.
    */
   import { base } from '$app/paths';
