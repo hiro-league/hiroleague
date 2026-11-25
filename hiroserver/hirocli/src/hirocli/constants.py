@@ -17,10 +17,18 @@ ENV_WORKSPACE_PATH: str = "HIRO_WORKSPACE_PATH"
 ENV_ADMIN_UI: str = "HIRO_ADMIN_UI"
 ENV_METRICS: str = "HIRO_METRICS"
 ENV_HIRO_ENV: str = "HIRO_ENV"
-# Set to "systemd" by the Linux service unit (`hiro service install`). Under a service manager the
-# server must not spawn its own successor on restart: systemd would kill it with the old process.
+# Set by `hiro service install` to the service manager that runs the server: "systemd" (Linux), "winsw" (Windows),
+# "launchd" (Mac). Under any of them the server must not spawn its own successor on restart: the manager would not
+# hold it (systemd and WinSW would even kill it with the old process).
 ENV_SERVICE_MANAGER: str = "HIRO_SERVICE_MANAGER"
-# Exit status meaning "start me again" (EX_TEMPFAIL); the unit's RestartForceExitStatus= matches it.
+# Exit status meaning "start me again" (EX_TEMPFAIL): systemd's RestartForceExitStatus= matches it; WinSW and launchd
+# restart on any exit but 0.
 SERVICE_RESTART_EXIT_CODE: int = 75
+# The service's secrets file (NAME=value lines), set where the server reads it itself (Windows and Mac; on Linux
+# systemd loads it into the environment).
+ENV_SECRETS_FILE: str = "HIRO_SECRETS_FILE"
+# Where the workspace registry and the default workspaces live, instead of the account's own data folder. A Windows
+# service sets it to its machine-wide data folder, so an administrator's `hiro` with the same setting reaches it.
+ENV_DATA_DIR: str = "HIRO_DATA_DIR"
 DEVICE_ID_PREFIX: str = "mobile-"
 DEVICE_ID_SUFFIX_LENGTH: int = 12

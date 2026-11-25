@@ -56,13 +56,14 @@ class ServiceError(RuntimeError):
 class NeedsRootError(ServiceError):
     """The operation writes system files and must run as root; ``command`` is what to run."""
 
-    def __init__(self, action: str, command: str) -> None:
+    def __init__(self, action: str, command: str, *, why: str | None = None) -> None:
         self.action = action
         self.command = command
-        super().__init__(
-            f"{action} needs root: it writes the service under {SYSTEMD_UNIT_DIR} and "
-            f"{ENV_FILE_DIR}, and asks systemd to load it. Run:\n  {command}"
+        # Why root: the Mac's LaunchDaemon passes its own words.
+        self.why = why or (
+            f"It writes the service under {SYSTEMD_UNIT_DIR} and {ENV_FILE_DIR}, and asks systemd to load it."
         )
+        super().__init__(f"{action} needs root. {self.why} Run:\n  {command}")
 
 
 @dataclass(frozen=True)
@@ -225,16 +226,19 @@ def render_env_file(
     user: str,
     restart_command: str,
     sections: list[tuple[str, list[str]]],
+    reader_line: str | None = None,
+    access_line: str | None = None,
 ) -> str:
     """Return the first version of a service's environment file.
 
     ``sections`` is a list of ``(heading, variable names)``; every variable is written commented
     out, ready to be filled in. The file is only written when missing, so the user's values are
-    never overwritten.
+    never overwritten. ``reader_line`` and ``access_line`` replace the first two lines where the
+    file is read by the program itself and locked another way (Windows, Mac); the format is the same.
     """
     lines = [
-        f"# Environment for {unit_file_name(service_name)}: systemd reads it each time the service starts.",
-        f"# Only {user} (the service's user) and root can read it (mode 0600). Keep it that way.",
+        reader_line or f"# Environment for {unit_file_name(service_name)}: systemd reads it each time the service starts.",
+        access_line or f"# Only {user} (the service's user) and root can read it (mode 0600). Keep it that way.",
         "# One VARIABLE=value per line; no quotes, no spaces around '='. Lines starting with # are ignored.",
         f"# After a change, restart the service: {restart_command}",
         "",
@@ -256,8 +260,8 @@ def render_env_file(
 def require_linux() -> None:
     if not sys.platform.startswith("linux"):
         raise ServiceError(
-            "System services are only available on Linux (systemd). "
-            "On Windows, Hiro starts at sign-in through auto-start instead."
+            "systemd services are Linux's; on Windows and Mac, `hiro service install` uses that system's own "
+            "service manager (WinSW, launchd)."
         )
 
 
@@ -277,8 +281,9 @@ def default_service_user() -> str:
 
 
 def resolve_service_user(name: str) -> ServiceUser:
-    """Look ``name`` up in the user database; refuse root and unknown users."""
-    require_linux()
+    """Look ``name`` up in the user database; refuse root and unknown users (Linux and Mac)."""
+    if sys.platform == "win32":
+        raise ServiceError("Service users are looked up on Linux and Mac only.")
     import grp
     import pwd
 
@@ -428,6 +433,21 @@ def uninstall_service(name: str) -> bool:
     _systemctl_ok("daemon-reload")
     log.info("✅ Service removed — HiroServer · service", service=unit_file_name(name))
     return True
+
+
+def start_service(name: str) -> None:
+    require_linux()
+    if not is_root():
+        raise ServiceError("Starting a system service must run as root.")
+    _systemctl_ok("start", unit_file_name(name))
+
+
+def stop_service(name: str) -> None:
+    """Stop the service until its next start (or the next boot); it stays enabled."""
+    require_linux()
+    if not is_root():
+        raise ServiceError("Stopping a system service must run as root.")
+    _systemctl_ok("stop", unit_file_name(name))
 
 
 def parse_show_output(name: str, text: str) -> ServiceState:

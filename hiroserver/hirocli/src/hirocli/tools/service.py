@@ -1,171 +1,109 @@
-"""Linux service tools: install, remove and inspect the Hiro server as a systemd service.
+"""Service tools: install, remove, start, stop and inspect the Hiro server as a system service.
 
-CLI-only (``hiro service ...``): installing a system service needs root, so neither the agent nor
-the HTTP surface (both run inside the unprivileged server) can do it. The Hiro-specific unit is
-built by ``hirocli.linux_service``; the system work is ``hiro_commons.systemd_service``.
+The same five operations on each system, one module each: Linux runs it under systemd (``service_linux``), Windows
+under WinSW (``service_windows``), Mac under launchd (``service_mac``). CLI-only (``hiro service ...``): installing a
+system service needs root or an administrator, so neither the agent nor the HTTP surface (both run inside the
+unprivileged server) can do it.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import sys
+from types import ModuleType
 
-from hiro_commons.log import Logger
-from hiro_commons.systemd_service import (
-    NeedsRootError,
-    check_user_can_run,
-    default_service_user,
-    env_file_path,
-    install_service,
-    is_root,
-    require_linux,
-    resolve_service_user,
-    service_state,
-    uninstall_service,
-    unit_file_name,
-    unit_path,
-)
-
-from .. import linux_service as ls
 from .base import Tool, ToolParam
+from .service_models import ServiceControlResult, ServiceInstallResult, ServiceStatusResult, ServiceUninstallResult
 
-log = Logger.get("TOOLS.SERVICE")
-
-
-@dataclass
-class ServiceInstallResult:
-    service: str  # unit file name, e.g. "hiro.service"
-    user: str
-    unit_path: str
-    env_file: str
-    env_file_created: bool  # False: an existing secrets file was kept as it was
-    exec_start: str
-    started: bool
+_SYSTEMS = {"linux": "service_linux", "win32": "service_windows", "darwin": "service_mac"}
 
 
-@dataclass
-class ServiceUninstallResult:
-    service: str
-    removed: bool  # False: it was not installed
-    env_file: str | None  # secrets file left in place, if any
+def current_system() -> str:
+    return "linux" if sys.platform.startswith("linux") else sys.platform
 
 
-@dataclass
-class ServiceStatusResult:
-    service: str
-    installed: bool
-    active_state: str
-    sub_state: str
-    enabled_state: str
-    main_pid: int | None
-    active_since_iso: str | None
-    user: str
-    restarts: int | None
-    unit_path: str | None
-    env_file: str | None
-    hiro_executable: str | None
+def system_module() -> ModuleType:
+    """This system's service operations (imported on first use: each pulls in its own system's helpers)."""
+    import importlib
+
+    name = _SYSTEMS.get(current_system())
+    if name is None:
+        from hiro_commons.systemd_service import ServiceError
+
+        raise ServiceError(f"Running Hiro League as a service is not supported on {sys.platform}.")
+    return importlib.import_module(f".{name}", __package__)
+
+
+_WORKSPACE = ToolParam(str, "Workspace the service runs (default: the service's default workspace)", required=False)
 
 
 class ServiceInstallTool(Tool):
     surfaces = frozenset({"cli"})
     name = "service_install"
     description = (
-        "Linux: install the Hiro server as a systemd service that starts at boot and restarts "
-        "on failure (needs root)"
+        "Install the Hiro server as a system service that starts at boot and restarts on failure "
+        "(systemd, a Windows service or a Mac LaunchDaemon; needs root or an administrator)"
     )
     params = {
         "user": ToolParam(
-            str,
-            "User the service runs as (default: the user running the install)",
+            str, "Linux and Mac: the account the service runs as (default: the one installing it)", required=False,
+        ),
+        "workspace": _WORKSPACE,
+        "home": ToolParam(
+            str, "Windows: the folder for the program and its Python (default: %ProgramData%\\HiroLeague)",
             required=False,
         ),
-        "workspace": ToolParam(
-            str,
-            "Workspace the service runs (default: the service user's default workspace)",
-            required=False,
+        "data_dir": ToolParam(str, "Windows: the folder for the workspace (default: <home>\\data)", required=False),
+        "source": ToolParam(
+            str, "Windows: what to install for the service (default: this version of hiroleague)", required=False,
         ),
     }
 
-    def execute(self, user: str | None = None, workspace: str | None = None) -> ServiceInstallResult:
-        require_linux()
-        exe = ls.hiro_executable()
-        user_name = user or default_service_user()
-        if not is_root():
-            raise NeedsRootError(
-                "Installing the HiroLeague service",
-                ls.sudo_command(exe, "install", user=user_name, workspace=workspace),
-            )
-        service_user = resolve_service_user(user_name)
-        spec = ls.build_spec(exe=exe, user=service_user.name, group=service_user.group, workspace=workspace)
-        # Fail before writing anything when the service user can't even start `hiro`.
-        check_user_can_run(service_user, [exe, "--help"])
-        env_created = install_service(
-            spec, service_user, ls.env_file_content(spec.name, service_user.name), start=True,
-        )
-        return ServiceInstallResult(
-            service=unit_file_name(spec.name),
-            user=service_user.name,
-            unit_path=str(unit_path(spec.name)),
-            env_file=str(spec.env_file),
-            env_file_created=env_created,
-            exec_start=" ".join(spec.exec_args),
-            started=True,
-        )
+    def execute(
+        self,
+        user: str | None = None,
+        workspace: str | None = None,
+        home: str | None = None,
+        data_dir: str | None = None,
+        source: str | None = None,
+    ) -> ServiceInstallResult:
+        return system_module().install(user=user, workspace=workspace, home=home, data_dir=data_dir, source=source)
 
 
 class ServiceUninstallTool(Tool):
     surfaces = frozenset({"cli"})
     name = "service_uninstall"
-    description = "Linux: stop and remove the Hiro systemd service (needs root; keeps data and secrets)"
-    params = {
-        "workspace": ToolParam(str, "Workspace whose service to remove (default: the default service)", required=False),
-    }
+    description = "Stop and remove the Hiro service (needs root or an administrator; keeps data and secrets)"
+    params = {"workspace": _WORKSPACE}
 
     def execute(self, workspace: str | None = None) -> ServiceUninstallResult:
-        require_linux()
-        name = ls.service_name(workspace)
-        if not is_root():
-            raise NeedsRootError(
-                "Removing the HiroLeague service",
-                ls.sudo_command(ls.hiro_executable(), "uninstall", user=None, workspace=workspace),
-            )
-        removed = uninstall_service(name)
-        env_file = env_file_path(name)
-        return ServiceUninstallResult(
-            service=unit_file_name(name),
-            removed=removed,
-            env_file=str(env_file) if env_file.exists() else None,
-        )
+        return system_module().uninstall(workspace=workspace)
 
 
 class ServiceStatusTool(Tool):
     surfaces = frozenset({"cli"})
     name = "service_status"
-    description = "Linux: show the state of the Hiro systemd service"
-    params = {
-        "workspace": ToolParam(str, "Workspace whose service to show (default: the default service)", required=False),
-    }
+    description = "Show the state of the Hiro service"
+    params = {"workspace": _WORKSPACE}
 
     def execute(self, workspace: str | None = None) -> ServiceStatusResult:
-        require_linux()
-        name = ls.service_name(workspace)
-        state = service_state(name)
-        try:
-            exe: str | None = ls.hiro_executable()
-        except Exception:
-            # Only used to print the exact install command; status itself doesn't need it.
-            log.debug("hiro executable not found for the status hint — HiroServer · service", exc_info=True)
-            exe = None
-        return ServiceStatusResult(
-            service=unit_file_name(name),
-            installed=state.installed,
-            active_state=state.active_state,
-            sub_state=state.sub_state,
-            enabled_state=state.enabled_state,
-            main_pid=state.main_pid,
-            active_since_iso=state.active_since.isoformat() if state.active_since else None,
-            user=state.user,
-            restarts=state.restarts,
-            unit_path=str(state.unit_path) if state.unit_path else None,
-            env_file=str(state.env_file) if state.env_file else None,
-            hiro_executable=exe,
-        )
+        return system_module().status(workspace=workspace)
+
+
+class ServiceStartTool(Tool):
+    surfaces = frozenset({"cli"})
+    name = "service_start"
+    description = "Start the installed Hiro service (needs root or an administrator)"
+    params = {"workspace": _WORKSPACE}
+
+    def execute(self, workspace: str | None = None) -> ServiceControlResult:
+        return system_module().start(workspace=workspace)
+
+
+class ServiceStopTool(Tool):
+    surfaces = frozenset({"cli"})
+    name = "service_stop"
+    description = "Stop the Hiro service until its next start or the next boot (needs root or an administrator)"
+    params = {"workspace": _WORKSPACE}
+
+    def execute(self, workspace: str | None = None) -> ServiceControlResult:
+        return system_module().stop(workspace=workspace)

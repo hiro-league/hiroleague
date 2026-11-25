@@ -23,12 +23,14 @@ import sys
 from pathlib import Path
 
 from hiro_commons import logging_foundation
+from hiro_commons.env_file import EnvFileError, load_env_file
 from hiro_commons.log import Logger
 from hiro_commons.process import remove_pid, spawn_detached, uv_python_cmd, write_pid
 
 from hirocli.constants import (
     ENV_ADMIN_UI,
     ENV_METRICS,
+    ENV_SECRETS_FILE,
     ENV_SERVICE_MANAGER,
     ENV_WORKSPACE,
     ENV_WORKSPACE_PATH,
@@ -133,6 +135,23 @@ def _wire_runtime(
     return comm_manager, resource_change_broadcaster, extension_manager
 
 
+def _load_service_secrets() -> None:
+    """Load the service's secrets file into the environment, where the service names one (Windows and Mac).
+
+    On Linux systemd has already loaded it. A missing or unreadable file stops the start, as a missing
+    ``EnvironmentFile=`` does under systemd: a server that runs without its keys looks fine and answers nothing.
+    """
+    path = os.environ.get(ENV_SECRETS_FILE, "").strip()
+    if not path:
+        return
+    try:
+        names = load_env_file(Path(path))
+    except EnvFileError as exc:
+        log.error("❌ The service's secrets file can't be read — the server stops", path=path, reason=str(exc))
+        raise SystemExit(1) from exc
+    log.info("🔑 Service secrets loaded", path=path, count=len(names), names=sorted(names))
+
+
 def _register_signal_handlers(stop_event: asyncio.Event) -> None:
     """Wire OS signals to trigger graceful shutdown."""
     def _on_signal(*_: object) -> None:
@@ -202,6 +221,8 @@ async def _main(
     log_store.start(ctx.log_dir)
 
     log.info("🚀 Hiro Server starting...", workspace=workspace_name, foreground=foreground, admin=admin)
+    # Before anything reads a provider key: they come from the environment when the keyring is off (a service).
+    _load_service_secrets()
     log.info(
         f"✅ Loaded workspace '{workspace_name}' config",
         http_port=ctx.config.http_port,
@@ -350,20 +371,30 @@ async def _main(
         log_store.stop()
 
     if ctx.restart_requested:
-        if os.environ.get(ENV_SERVICE_MANAGER) == "systemd":
-            # Under systemd a detached successor would be killed with this process's service,
-            # so exit with the status the unit restarts on (RestartForceExitStatus=).
-            mark_disconnected(workspace_path)
-            log.info(
-                "Restart requested — exiting so systemd starts a fresh server",
-                exit_code=SERVICE_RESTART_EXIT_CODE,
-            )
-            raise SystemExit(SERVICE_RESTART_EXIT_CODE)
+        _exit_for_service_restart(workspace_path)
         log.info("Restart requested — spawning new server process")
         _spawn_server(workspace_path, admin=ctx.restart_admin)
 
     mark_disconnected(workspace_path)
     log.info("hiro server exited")
+
+
+def _exit_for_service_restart(workspace_path: Path) -> None:
+    """Under a service manager, end with the status it restarts on; elsewhere, return (the caller spawns a successor).
+
+    A detached successor is held by no service manager, and systemd and WinSW would kill it with this process's
+    service. systemd restarts on 75 (RestartForceExitStatus=); WinSW and launchd restart on any exit but 0.
+    """
+    manager = os.environ.get(ENV_SERVICE_MANAGER)
+    if not manager:
+        return
+    mark_disconnected(workspace_path)
+    log.info(
+        "Restart requested — exiting so the service manager starts a fresh server",
+        manager=manager,
+        exit_code=SERVICE_RESTART_EXIT_CODE,
+    )
+    raise SystemExit(SERVICE_RESTART_EXIT_CODE)
 
 
 def _spawn_server(workspace_path: Path, admin: bool = False) -> None:
