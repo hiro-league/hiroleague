@@ -477,6 +477,25 @@ def test_a_named_core_serves_its_own_names_and_takes_claims_under_its_domain(tmp
     asyncio.run(go())
 
 
+def test_on_a_named_core_an_app_takes_a_one_word_name_and_the_owner_adds_one_beside_it(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The PC's phone test before the kit claims under the core's domain: the app's own address setting takes a
+    one-word name, then `hiro sites add <word>.local --app <key>` adds an extra name beside it."""
+    monkeypatch.setattr(sites_tools, "_path", lambda _ws: tmp_path)
+    monkeypatch.setattr(sites_tools, "load_config", lambda _p: _ctx(tmp_path, core_name="testpc").config)
+    monkeypatch.setattr(sites_tools, "get_domain_event_bus", lambda: SimpleNamespace(publish=lambda _e: None))
+    net = add_paired_extension(tmp_path, name="net", public_key="pk-net", info={"name": "net"})
+    claim(tmp_path, net.extension_id, "nettest.local", 8130, set(), "testpc.local")
+
+    extra = sites_tools.SitesAddTool().execute("netphone.local", app="net")
+    assert (extra.change, extra.kind, extra.target) == ("added", "extra", "127.0.0.1:8130")
+    assert sites_tools.SitesAddTool().execute("net.hiro.local", app="net").code == "invalid"  # not this core's
+    listed = {s["name"]: s["kind"] for s in sites_tools.SitesListTool().execute().sites}
+    assert listed == {"nettest.local": "app", "netphone.local": "extra", "testpc.local": "core",
+                      "gate.testpc.local": "core"}
+
+
 def test_a_removed_apps_names_and_a_changed_site_are_served_at_once(tmp_path: Path, caddy) -> None:
     async def go() -> None:
         names = _names(tmp_path, caddy)

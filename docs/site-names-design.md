@@ -39,7 +39,8 @@ A name nobody serves gets a page saying no app answers to it, with a link to the
 - Nothing renames a core yet: no command, no admin setting, no old names kept served.
 - `welcome`'s `core` block carries `domain`, so an app can claim under it. Today's backend kit still claims
   `<app>.hiro.local` (the SDK's `SITES_DOMAIN`): on a core named otherwise that claim is refused as `invalid`, and
-  the app's own address setting takes a one-word `<label>.local` name.
+  the app's own address setting takes a one-word `<label>.local` name. Its sign-in, with the core on the same
+  machine, also goes to `http://hiro.local` until its admin address is set to `http://<domain>`.
 
 ## Rules (decided)
 
