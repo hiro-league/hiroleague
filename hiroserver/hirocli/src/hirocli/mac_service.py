@@ -43,12 +43,15 @@ def log_file(workspace: str | None) -> Path:
     return HOME / "logs" / f"{service_name(workspace)}.log"
 
 
-def sudo_command(exe: str, action: str, *, user: str | None, workspace: str | None) -> str:
+def sudo_command(exe: str, action: str, *, user: str | None, workspace: str | None,
+                 core_name: str | None = None) -> str:
     parts = ["sudo", exe, "service", action]
     if user:
         parts += ["--user", user]
     if workspace:
         parts += ["--workspace", workspace]
+    if core_name:
+        parts += ["--name", core_name]
     return " ".join(shlex.quote(p) for p in parts)
 
 

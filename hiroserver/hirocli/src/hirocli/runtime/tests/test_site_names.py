@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from hirocli.domain.config import Config
 from hirocli.domain.events import DomainEvent, DomainEventType
 from hirocli.domain.extensions import add_paired_extension
 from hirocli.domain.front_door import FrontDoorAddressError, initial_config, parse_admin, render
@@ -26,18 +27,21 @@ from hirocli.domain.site_names import (
     SiteNameError,
     add_extra,
     add_other_site,
+    check_core_name,
     check_name,
     check_paths,
     check_site_name,
     check_target,
     claim,
     core_names,
+    core_names_of,
     gateway_name,
     list_claims,
     list_other_sites,
     release,
     remove_site,
     served,
+    taken_by_core,
 )
 from hirocli.runtime import site_names as runtime
 from hirocli.runtime.front_door import FrontDoor
@@ -80,12 +84,47 @@ def test_a_site_is_a_local_name_or_the_machines_address_sent_to_a_port_here() ->
 def test_the_core_names_its_admin_and_the_gateway_it_runs() -> None:
     assert gateway_name("ws://gate.hiro.local") == "gate.hiro.local"
     assert gateway_name("WS://Gate.Hiro.Local:80/") == "gate.hiro.local"
+    # An address that is no name the core serves: the gateway's default name, gate.<the core's domain>
     for not_a_name in ("ws://localhost:8765", "ws://192.168.1.10:8765", "wss://gate.example.com", "ws://hiro.local", ""):
-        assert gateway_name(not_a_name) is None, not_a_name
+        assert gateway_name(not_a_name) == "gate.hiro.local", not_a_name
     both = core_names(admin_port=18083, gateway_url="ws://gate.hiro.local", gateway_port=8765, gateway_builtin=True)
     assert both == CORE
     elsewhere = core_names(admin_port=18083, gateway_url="ws://gate.hiro.local", gateway_port=8765, gateway_builtin=False)
     assert [c.name for c in elsewhere] == ["hiro.local"]
+
+
+def test_a_core_the_house_named_serves_its_own_names_and_its_apps_under_it() -> None:
+    """Installing apps, phase 5: a core named testpc is testpc.local, its gateway gate.testpc.local, and an app's name
+    <label>.testpc.local; the default core's names aren't its."""
+    assert check_core_name(" TestPC ") == "testpc"
+    for bad in ("", "test pc", "testpc.local", "a.b", "-x", "x" * 64):
+        with pytest.raises(SiteNameError) as caught:
+            check_core_name(bad)
+        assert caught.value.code == "invalid", bad
+
+    assert check_name("Home.TestPC.local", "testpc.local") == "home.testpc.local"
+    assert check_name("abc.local", "testpc.local") == "abc.local"
+    with pytest.raises(SiteNameError) as caught:
+        check_name("home.hiro.local", "testpc.local")  # the default core's subdomain: not this core's
+    assert "reports.testpc.local" in str(caught.value)
+    assert gateway_name("ws://localhost:8765", "testpc.local") == "gate.testpc.local"  # the gateway's default name
+    assert gateway_name("ws://hub.testpc.local", "testpc.local") == "hub.testpc.local"  # the owner's own
+
+    config = Config(core_name="testpc")  # a new workspace's defaults: the gateway at ws://localhost:8765
+    assert config.site_domain() == "testpc.local"
+    assert core_names_of(config) == [SiteName("testpc.local", CORE_ID, config.admin_port),
+                                     SiteName("gate.testpc.local", CORE_ID, config.gateway_port)]
+    assert taken_by_core(config) == {"testpc.local", "gate.testpc.local"}
+
+
+def test_a_workspace_set_up_before_the_setting_is_the_hiro_core() -> None:
+    """Simone's config.json has no core_name: it loads as hiro, and its names are what they were."""
+    old = Config.model_validate_json('{"admin_port": 18083, "gateway_url": "ws://gate.hiro.local", '
+                                     '"gateway_port": 8765, "site_names_ip": "192.168.1.10"}')
+    assert (old.core_name, old.site_domain()) == ("hiro", "hiro.local")
+    assert core_names_of(old) == CORE
+    with pytest.raises(ValueError):
+        Config(core_name="two words")
 
 
 # ---------------------------------------------------------------------------
@@ -203,6 +242,13 @@ def test_the_admin_address_is_a_socket_or_a_loopback_port() -> None:
     assert json.loads(initial_config(sock)) == {"admin": {"listen": "unix//run/hiro-caddy/admin.sock|0660"}}
 
 
+def test_the_page_for_an_unknown_name_links_the_cores_own_admin() -> None:
+    admin = parse_admin("127.0.0.1:18079")
+    assert '<a href="http://hiro.local">' in render([], admin)
+    named = render([], admin, domain="testpc.local")
+    assert '<a href="http://testpc.local">' in named and "hiro.local" not in named
+
+
 def test_every_load_is_the_whole_configuration_with_its_admin_block() -> None:
     sites = [
         Site("home.hiro.local", "e1", "127.0.0.1:8100"),
@@ -304,12 +350,13 @@ class _Names(runtime.SiteNames):
 
 
 def _ctx(tmp_path: Path, **cfg: Any) -> Any:
-    config = SimpleNamespace(
+    config = Config(
         site_names_ip=cfg.get("ip", "192.168.1.10"),
         admin_port=18083,
         gateway_url=cfg.get("gateway_url", "ws://gate.hiro.local"),
         gateway_port=8765,
         gateway_builtin=cfg.get("gateway_builtin", True),
+        core_name=cfg.get("core_name", "hiro"),
     )
     return SimpleNamespace(workspace_path=tmp_path, config=config)
 
@@ -411,6 +458,42 @@ def test_no_app_may_claim_the_cores_names(tmp_path: Path) -> None:
         with pytest.raises(SiteNameError) as caught:
             asyncio.run(names.claim("ext-home", taken, 8100))
         assert caught.value.code == "taken", taken
+
+
+def test_a_named_core_serves_its_own_names_and_takes_claims_under_its_domain(tmp_path: Path, caddy) -> None:
+    async def go() -> None:
+        names = _names(tmp_path, caddy, core_name="testpc", gateway_url="ws://localhost:8765")
+        answer = await names.claim("ext-home", "home.testpc.local", 8100)
+        assert (answer["url"], answer["proxied"]) == ("http://home.testpc.local", True)
+        assert names._publisher.announced == {"testpc.local", "gate.testpc.local", "home.testpc.local"}
+        assert "http://testpc.local {" in caddy.loads[-1][1] and "http://gate.testpc.local {" in caddy.loads[-1][1]
+        # Today's kit still claims under hiro.local: a named core refuses it in words (the kit reads the domain
+        # from welcome later); its own names are taken
+        for name, code in (("home.hiro.local", "invalid"), ("testpc.local", "taken"), ("gate.testpc.local", "taken")):
+            with pytest.raises(SiteNameError) as caught:
+                await names.claim("ext-net", name, 8130)
+            assert caught.value.code == code, name
+
+    asyncio.run(go())
+
+
+def test_on_a_named_core_an_app_takes_a_one_word_name_and_the_owner_adds_one_beside_it(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The PC's phone test before the kit claims under the core's domain: the app's own address setting takes a
+    one-word name, then `hiro sites add <word>.local --app <key>` adds an extra name beside it."""
+    monkeypatch.setattr(sites_tools, "_path", lambda _ws: tmp_path)
+    monkeypatch.setattr(sites_tools, "load_config", lambda _p: _ctx(tmp_path, core_name="testpc").config)
+    monkeypatch.setattr(sites_tools, "get_domain_event_bus", lambda: SimpleNamespace(publish=lambda _e: None))
+    net = add_paired_extension(tmp_path, name="net", public_key="pk-net", info={"name": "net"})
+    claim(tmp_path, net.extension_id, "nettest.local", 8130, set(), "testpc.local")
+
+    extra = sites_tools.SitesAddTool().execute("netphone.local", app="net")
+    assert (extra.change, extra.kind, extra.target) == ("added", "extra", "127.0.0.1:8130")
+    assert sites_tools.SitesAddTool().execute("net.hiro.local", app="net").code == "invalid"  # not this core's
+    listed = {s["name"]: s["kind"] for s in sites_tools.SitesListTool().execute().sites}
+    assert listed == {"nettest.local": "app", "netphone.local": "extra", "testpc.local": "core",
+                      "gate.testpc.local": "core"}
 
 
 def test_a_removed_apps_names_and_a_changed_site_are_served_at_once(tmp_path: Path, caddy) -> None:

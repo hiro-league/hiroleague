@@ -98,6 +98,21 @@ def test_a_paired_app_from_before_keeps_everything_until_its_first_declaration(t
         (PEOPLE_SEE, ""), (SITE_ADDRESS, "http://home.hiro.local")}
 
 
+def test_an_extra_name_the_owner_gives_never_waits_for_the_owner(tmp_path: Path) -> None:
+    from hirocli.domain.site_names import add_extra, claim
+
+    info = _info({"permission": PEOPLE_SEE})
+    home = add_paired_extension(tmp_path, name="home", public_key="k", info=info)
+    claim(tmp_path, home.extension_id, "home.hiro.local", 8100, set())
+    approvals.keep(tmp_path, home.extension_id, info, new=True)
+    approvals.approve_app(tmp_path, home.extension_id)
+    add_extra(tmp_path, home.extension_id, "homehiro.local", set())  # the owner's own act, through the core
+    approvals.keep(tmp_path, home.extension_id, info)  # the app connects again
+    view = approvals.view(tmp_path, home.extension_id)
+    assert view is not None and not view.waits
+    assert [i.subject for i in view.items if i.permission == SITE_NAME] == ["home.hiro.local:8100"]
+
+
 def test_a_lan_name_asked_for_waits_and_is_claimed_once_approved(tmp_path: Path) -> None:
     info = _info({"permission": PEOPLE_SEE})
     home = add_paired_extension(tmp_path, name="home", public_key="k", info=info)

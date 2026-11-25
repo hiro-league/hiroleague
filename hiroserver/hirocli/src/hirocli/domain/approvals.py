@@ -220,10 +220,13 @@ def set_asked_claim(workspace_path: Path, extension_id: str, claim: str) -> None
 
 
 def claims_of(workspace_path: Path, extension_id: str) -> list[str]:
-    """The LAN names the app holds, as "name:port"."""
+    """The LAN name the app claimed itself, as "name:port". Not its extra names: the owner gives those through the
+    core (tools/sites.py), so they are never the app's to ask."""
     from .site_names import list_claims
 
-    return [f"{c.name}:{c.port}" for c in list_claims(workspace_path) if c.extension_id == extension_id]
+    # Fix: an extra name the owner added (homehiro.local, reports.local) counted as a new ask, and waited for the
+    # owner's approval of a name the owner had just given
+    return [f"{c.name}:{c.port}" for c in list_claims(workspace_path) if c.extension_id == extension_id and not c.extra]
 
 
 def asked_now(workspace_path: Path, extension_id: str, info: dict[str, Any], approval: Approval) -> list[Asked] | None:

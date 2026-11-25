@@ -9,7 +9,7 @@ the one way in. The design behind it: the Claude Doc "Design: the front door and
 In an app's address setting (HomeHiro: Settings → HiroLeague → HomeHiro's address; CodeHiro: HiroLeague settings →
 its own address) the person types either:
 
-- a **subdomain**: `reports` → `reports.hiro.local` (the field shows `.hiro.local` after it), or
+- a **subdomain** of the core's domain: `reports` → `reports.hiro.local` (the field shows `.hiro.local` after it), or
 - a **one-word name**: `abc` → `abc.local`.
 
 Save. If the name is free, the core serves it at once and the app declares `http://<name>` as its site (the Apps card
@@ -24,21 +24,38 @@ The owner adds the rest with `hiro sites`:
 - `hiro sites add frigate.local`: a name **only announced**, for a program that listens on the LAN itself;
 - `hiro sites list`, `hiro sites remove <name>`.
 
-A name nobody serves gets a page saying no app answers to it, with a link to the core's admin.
+A name nobody serves gets a page saying no app answers to it, with a link to the core's admin (`http://<domain>`).
+
+## The core's name
+
+- The core has one name, `core_name` in its `config.json` (`hiro` by default): one word of letters, digits and
+  dashes. Its **domain** is `<core_name>.local` (`hiro.local`); its admin is served there, its gateway's default name
+  is `gate.<domain>`, and an app's subdomain is `<label>.<domain>`.
+- It is picked when a workspace is set up: `hiro workspaces setup --name testpc`, or setup's question for a new
+  workspace; `hiro service install --name testpc` gives it to the service (`HIRO_CORE_NAME`), whose first start makes
+  its workspace with it. A workspace keeps the name it was set up with: setup refuses another one in words, a
+  service given another one keeps the workspace's own and says so at start, and a `config.json` without the key
+  (Simone's) is `hiro`.
+- Nothing renames a core yet: no command, no admin setting, no old names kept served.
+- `welcome`'s `core` block carries `domain`, so an app can claim under it. Today's backend kit still claims
+  `<app>.hiro.local` (the SDK's `SITES_DOMAIN`): on a core named otherwise that claim is refused as `invalid`, and
+  the app's own address setting takes a one-word `<label>.local` name. Its sign-in, with the core on the same
+  machine, also goes to `http://hiro.local` until its admin address is set to `http://<domain>`.
 
 ## Rules (decided)
 
-- An app's name is `<label>.hiro.local` or `<label>.local`; a label is letters, digits and dashes. An other site is
-  such a name or the machine's IPv4 address.
+- An app's name is `<label>.<domain>` (`<label>.hiro.local`) or `<label>.local`; a label is letters, digits and
+  dashes. An other site is such a name or the machine's IPv4 address.
 - A name belongs to one of an app, the core or an other site, never two: each table's key is the name, and adding
   refuses a taken one.
 - One main name per app: a new claim drops the app's old main one; its extra names stay and follow its new port.
 - An app's main name is the app's: only extra names and other sites are the owner's to remove. Removing an app gives
   back all its names at once when the core runs, else at its next start.
-- The core serves its own two names from its config: `hiro.local` (its admin, `admin_port`) and the gateway's (the
-  host of `gateway_url`, e.g. `gate.hiro.local`, at `gateway_port`) while the core runs the gateway itself
-  (`gateway_builtin`). Taken: those two (the gateway's even when it runs elsewhere). A name an app claimed before the
-  core took its own stays the app's.
+- The core serves its own two names from its config: its domain (`hiro.local`: its admin, `admin_port`) and the
+  gateway's at `gateway_port` while the core runs the gateway itself (`gateway_builtin`). The gateway's name is the
+  host of `gateway_url` when that is a name the core serves (`ws://gate.hiro.local` → `gate.hiro.local`), else its
+  default `gate.<domain>` (`gateway_url` is `localhost` or an address). Taken: those two (the gateway's even when it
+  runs elsewhere). A name an app claimed before the core took its own stays the app's.
 - No approval step for an app's claim: pairing the app with HiroLeague is the owner's approval.
 
 ## Contract (hiro_channel_sdk.constants)

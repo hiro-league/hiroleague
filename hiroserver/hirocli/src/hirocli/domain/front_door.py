@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from .site_names import DOMAIN, Site
+from .site_names import DEFAULT_DOMAIN, Site
 
 # What `hiro service install` gives the core's service (HIRO_FRONT_DOOR): Caddy's admin address as Caddy writes it.
 # Linux and Mac: a unix socket only Caddy's and the core's accounts open; Windows: loopback (Caddy takes no socket
@@ -57,13 +57,13 @@ def parse_admin(text: str) -> AdminAddress:
 
 
 # The page for a name nobody serves (Caddy answered an empty 200 without one: phase 1, Nov 24, 2026).
-_UNKNOWN_PAGE = f"""<!doctype html>
+_UNKNOWN_PAGE = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>No app here</title></head>
 <body style="font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 1rem">
 <h1 style="font-size: 1.4rem">No app answers to this name</h1>
 <p>This server runs Hiro League, but no app uses this name. The apps and their names are in
-<a href="http://{DOMAIN}">Hiro League's admin</a>.</p>
+<a href="http://{domain}">Hiro League's admin</a>.</p>
 </body></html>"""
 
 
@@ -75,11 +75,12 @@ def _proxy(upstream: str, indent: str) -> list[str]:
     ]
 
 
-def render(sites: list[Site], admin: AdminAddress, *, http_port: int = 80, bind: str = "") -> str:
+def render(sites: list[Site], admin: AdminAddress, *, http_port: int = 80, bind: str = "",
+           domain: str = DEFAULT_DOMAIN) -> str:
     """Caddy's whole configuration, as a Caddyfile: the admin block, one block per proxied name (an announced-only
     name has none), and the page for any other name. Names are sorted, so the same names give the same text (the
     core loads only what changed). ``http_port`` and ``bind`` change where it listens: port 80 on every address
-    unless a test or an environment on the PC asks for another."""
+    unless a test or an environment on the PC asks for another. ``domain`` is the core's: the page links its admin."""
     lines = [
         "# Loaded by Hiro League through Caddy's admin API (docs/site-names-design.md): the whole configuration, built",
         "# from the names the core serves. Change names with `hiro sites`; the core loads this again on each change.",
@@ -109,7 +110,7 @@ def render(sites: list[Site], admin: AdminAddress, *, http_port: int = 80, bind:
         "http:// {",
         '\theader Content-Type "text/html; charset=utf-8"',
         "\trespond <<PAGE",
-        *[f"\t\t{line}" for line in _UNKNOWN_PAGE.splitlines()],
+        *[f"\t\t{line}" for line in _UNKNOWN_PAGE.format(domain=domain).splitlines()],
         "\t\tPAGE 404",
         "}",
     ]

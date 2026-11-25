@@ -637,6 +637,9 @@ class ExtensionManager:
                         # Phase 7b: the admin's web port, for an extension's links into the core's admin.
                         "admin_port": self._ctx.config.admin_port,
                         "repo": CORE_REPO,  # as core.info answers
+                        # The core's domain: hiro.local, or <name>.local when the house named it at setup. An app's
+                        # name is <label>.<domain> (docs/site-names-design.md).
+                        "domain": self._ctx.config.site_domain(),
                     },
                     # Permissions phase 8: what it is approved for, and what waits for the owner
                     **({"approval": approval} if approval is not None else {}),

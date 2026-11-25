@@ -39,7 +39,7 @@ export type AiProfileBudget = {
   costPerDay: number | null;
   /** Plan tools and local: questions an hour (null = no limit). */
   perHour: number | null;
-  /** Questions worked on together, 1–4. */
+  /** Questions worked on together, 1 or more. */
   atOnce: number;
 };
 

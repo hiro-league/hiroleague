@@ -15,7 +15,7 @@
   import SingleModelPicker from '$lib/features/preferences/SingleModelPicker.svelte';
   import AiProfileTryIt from './AiProfileTryIt.svelte';
   import type { AiController } from './ai-controller.svelte';
-  import { AT_ONCE_OPTIONS, chainLabel, MAX_FALLBACKS, THINKING_LABELS } from './ai-profile-rules';
+  import { chainLabel, MAX_FALLBACKS, THINKING_LABELS } from './ai-profile-rules';
 
   let { ai }: { ai: AiController } = $props();
   const uid = $props.id();
@@ -142,14 +142,7 @@
               </Field>
             {/if}
             <Field label="At once" for="{uid}-at-once" hint="Questions it works on together; past it they wait their turn.">
-              <PickSelect
-                id="{uid}-at-once"
-                value={String(ai.draft.budget.atOnce)}
-                options={AT_ONCE_OPTIONS.map((n) => ({ value: String(n), label: String(n) }))}
-                onchange={(v) => (ai.draft.budget.atOnce = Number(v) as typeof ai.draft.budget.atOnce)}
-                label="At once"
-                class="h-8 w-full text-sm"
-              />
+              <Input id="{uid}-at-once" type="number" min="1" step="1" bind:value={ai.draft.budget.atOnce} />
             </Field>
           </div>
         </Section>

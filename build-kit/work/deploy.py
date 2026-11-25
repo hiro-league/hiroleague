@@ -16,8 +16,11 @@ One run, started when Michel says, ships everything committed since the last one
 4. Deploy: the core first when live lacks something (its own hook: `git push server dev:main`), then the apps and aicam
    side by side (`git push server main`; aicam: then `git -C ~/aicam pull --ff-only` on Simone, and which service may
    need a restart: the deploy never restarts one). A repo whose bare repo already has the commit but doesn't run it
-   (its last deploy failed) is deployed again by running its post-receive hook on Simone, as the push would have. Each deploy's own safety (database copies, migration trials, going
-   back by itself) is the hook's, untouched here. A failed core deploy stops the apps.
+   (its last deploy failed) is deployed again by running its post-receive hook on Simone, as the push would have. A
+   repo that runs its latest but whose last deploy failed (aicam's pull went in, then its check said no) is deployed
+   again too, so its check runs again: the deploys' own events say how each repo's last deploy ended. Each deploy's
+   own safety (database copies, migration trials, going back by itself) is the hook's, untouched here. A failed core
+   deploy stops the apps.
 5. Verify each (it answers; no new errors in its log since its deploy started), then one report.
 
 Without --dry-run, it runs in a tab of the one Windows Terminal window "hiro-deploy", which Michel watches; the call
@@ -106,6 +109,7 @@ class Facts:
     live_ahead: bool = False                    # the server has commits dev/main lacks
     server_ahead: bool = False                  # aicam: Simone's bare repo has commits dev/main lacks
     live_dirty: int = 0                         # aicam: uncommitted files in ~/aicam
+    last_failed: bool = False                   # it runs dev/main, but its last deploy failed: deployed again
     error: str = ""                             # couldn't be read
 
 
@@ -158,7 +162,7 @@ def make_plan(facts: list[Facts]) -> Plan:
     then the other deploys side by side."""
     stops = {f.repo: p for f in facts if (p := problems(f))}
     push = [f.repo for f in facts if f.github_lacks]
-    moves = [f for f in facts if (f.live_lacks or f.live_unknown) and f.repo in DEPLOY]
+    moves = [f for f in facts if (f.live_lacks or f.live_unknown or f.last_failed) and f.repo in DEPLOY]
     live = [f.repo for f in moves]
     again = [f.repo for f in moves if DEPLOY[f.repo] in BUILT and f.server == f.head]
     return Plan(push=push, first=[r for r in live if DEPLOY[r] == CORE],
@@ -306,8 +310,9 @@ def empty_github(d: Path) -> bool:
     return heads.returncode == 0 and not heads.stdout.strip()
 
 
-def read_facts(repo: str, server: dict[str, str]) -> Facts:
-    """A repo's facts: GitHub fetched again (the standard: fetch before deploying), the server as read."""
+def read_facts(repo: str, server: dict[str, str], failed: bool = False) -> Facts:
+    """A repo's facts: GitHub fetched again (the standard: fetch before deploying), the server as read; ``failed``:
+    its last deploy failed (last_failed)."""
     d, main = hw.repo_dir(0, repo), hw.main_of(repo)
     head = hw.git(d, "rev-parse", main)
     f = Facts(repo=repo, head=head)
@@ -348,13 +353,40 @@ def read_facts(repo: str, server: dict[str, str]) -> Facts:
         f.live_ahead = True
     elif not f.live_ahead:
         f.live_lacks = lacks(d, f.live, head)
+    # Why: a deploy can fail after what runs moved (aicam's pull went in, then its check found a file left over), so
+    # what runs looks up to date and nothing would ever check it again; it isn't live until a deploy ends well
+    f.last_failed = failed and f.live == head
     return f
+
+
+def last_failed(repos: list[str]) -> set[str]:
+    """The repos whose last deploy failed (its deploy or its check said no), from the deploys' own events: CodeHiro
+    counts a repo live only once a deploy of it ends well, so the next deploy deploys these again."""
+    import json
+
+    last: dict[str, str] = {}          # repo -> its last deploy's task
+    bad: set[tuple[str, str]] = set()  # (task, repo) whose deploy or check failed
+    if hw.EVENTS.exists():
+        with open(hw.EVENTS, encoding="utf-8") as f:
+            for line in f:
+                if '"deploy-' not in line:
+                    continue
+                with contextlib.suppress(ValueError):  # a line cut short by a crash is no deploy's word
+                    e = json.loads(line)
+                    task, repo = str(e.get("task") or ""), e.get("repo")
+                    if (task.startswith("deploy-") and repo in repos and e.get("phase") == "end"
+                            and e.get("step") in ("deploy", "verify")):
+                        last[repo] = task
+                        if e.get("ok") is False:
+                            bad.add((task, repo))
+    return {repo for repo, task in last.items() if (task, repo) in bad}
 
 
 def gather(repos: list[str]) -> list[Facts]:
     server = read_server(repos)
+    failed = last_failed(repos)
     with ThreadPoolExecutor(max_workers=len(repos)) as pool:
-        return list(pool.map(lambda r: read_facts(r, server), repos))
+        return list(pool.map(lambda r: read_facts(r, server, r in failed), repos))
 
 
 # --------------------------------------------------------------------------------------------- showing the plan
@@ -371,6 +403,8 @@ def show(out: Out, facts: list[Facts], plan: Plan) -> None:
             out(f"  x {why}")
         if f.live_unknown:
             out(f"  ! {f.live_unknown}: deployed again")
+        elif f.last_failed:
+            out("  ! it runs its latest, but its last deploy failed (its deploy or its check): deployed again")
         elif f.repo in plan.again:
             out(f"  ! its last deploy didn't go live (Simone's repo has {f.server[:8]}, it runs "
                 f"{f.live[:8] if f.live else 'nothing'}): deployed again")
@@ -382,7 +416,7 @@ def show(out: Out, facts: list[Facts], plan: Plan) -> None:
             out("\n".join(f"    {c}" for c in f.live_lacks[:15]))
         if len(f.live_lacks) > 15 or len(f.github_lacks) > 15:
             out("    ...")
-        if not (f.github_lacks or f.live_lacks or f.live_unknown or plan.stops.get(f.repo)):
+        if not (f.github_lacks or f.live_lacks or f.live_unknown or f.last_failed or plan.stops.get(f.repo)):
             out("  up to date")
         for line in copy_list_changes(f):
             out(line)

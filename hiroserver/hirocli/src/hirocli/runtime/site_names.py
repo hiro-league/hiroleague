@@ -1,7 +1,7 @@
 """Every name on the LAN, served by the core (docs/site-names-design.md): announced, and loaded into the front door.
 
 An app's address setting claims its main name (``sites.claim {name, port}``); the owner adds extra names and other
-sites (``hiro sites``); the core serves its own two (``hiro.local``, the gateway's). At start, and on every change
+sites (``hiro sites``); the core serves its own two (``<core name>.local``, the gateway's). At start, and on every change
 (a claim, a removed app, ``hiro sites``), the core:
 
 - announces each served name on the LAN (runtime/name_publisher.py: avahi on Linux, zeroconf on Windows and Mac), on
@@ -28,7 +28,7 @@ from ..domain.site_names import (
     Site,
     SiteNameError,
     claim,
-    core_names,
+    core_names_of,
     list_claims,
     list_other_sites,
     served,
@@ -72,9 +72,7 @@ class SiteNames:
         return (self._cfg.site_names_ip or "").strip()
 
     def _core_names(self) -> list[Any]:
-        cfg = self._cfg
-        return core_names(admin_port=cfg.admin_port, gateway_url=cfg.gateway_url, gateway_port=cfg.gateway_port,
-                          gateway_builtin=cfg.gateway_builtin)
+        return core_names_of(self._cfg)
 
     def taken(self) -> set[str]:
         """What no app or site may take: the core's own names. The tables refuse the rest."""
@@ -128,7 +126,7 @@ class SiteNames:
         """Give the extension its main name, announce it and proxy it; raises SiteNameError."""
         async with self._lock:
             kept, old = await asyncio.to_thread(claim, Path(self._ctx.workspace_path), extension_id, name, port,
-                                                self.taken())
+                                                self.taken(), self._cfg.site_domain())
             _, (proxied, note) = await self._apply()
         if old:
             log.info(f"Site name dropped — {old} · replaced by {kept.name}", extension_id=extension_id)
@@ -169,7 +167,8 @@ class SiteNames:
         """Load the front door's whole configuration when it changed; (Caddy has it, a note when not)."""
         if self._door is None:
             return False, self._door_note
-        text = render(sites, self._door.admin, http_port=self._door.http_port, bind=self._door.bind)
+        text = render(sites, self._door.admin, http_port=self._door.http_port, bind=self._door.bind,
+                      domain=self._cfg.site_domain())
         if text == self._loaded:
             return True, ""
         try:

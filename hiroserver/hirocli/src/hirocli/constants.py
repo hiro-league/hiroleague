@@ -30,5 +30,8 @@ ENV_SECRETS_FILE: str = "HIRO_SECRETS_FILE"
 # Where the workspace registry and the default workspaces live, instead of the account's own data folder. A Windows
 # service sets it to its machine-wide data folder, so an administrator's `hiro` with the same setting reaches it.
 ENV_DATA_DIR: str = "HIRO_DATA_DIR"
+# The core's name for a new workspace (`hiro service install --name`): the service's first start sets the workspace up
+# with it, since the workspace is made there, under the service's account. An existing workspace keeps its own.
+ENV_CORE_NAME: str = "HIRO_CORE_NAME"
 DEVICE_ID_PREFIX: str = "mobile-"
 DEVICE_ID_SUFFIX_LENGTH: int = 12

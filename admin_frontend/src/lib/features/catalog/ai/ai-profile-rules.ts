@@ -25,8 +25,6 @@ export const LOCAL_SERVER_IDS = ['lm_studio', 'ollama'] as const;
 /** Longest fallback chain: a profile may hand off to at most this many others in a row. */
 export const MAX_FALLBACKS = 3;
 
-export const AT_ONCE_OPTIONS = [1, 2, 3, 4] as const;
-
 export const THINKING_LABELS: Record<AiThinking, string> = {
   off: 'Off',
   minimal: 'Minimal',

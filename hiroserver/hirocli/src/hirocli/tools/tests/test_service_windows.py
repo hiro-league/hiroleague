@@ -145,6 +145,18 @@ def test_install_without_an_administrator_says_exactly_what_to_run(windows) -> N
     )
 
 
+def test_install_without_an_administrator_keeps_the_name(windows) -> None:
+    with pytest.raises(w.NeedsAdminError) as info:
+        service_tools.ServiceInstallTool().execute(core_name="testpc")
+    assert info.value.command == subprocess.list2cmdline([EXE, "service", "install", "--name", "testpc"])
+
+
+def test_the_cores_name_reaches_the_service_for_its_new_workspace(elevated) -> None:
+    service_tools.ServiceInstallTool().execute(home=str(HOME), core_name="testpc")
+    spec = next(c[1] for c in elevated if c[0] == "register")
+    assert spec.environment["HIRO_CORE_NAME"] == "testpc"
+
+
 def test_install_registers_then_locks_the_data_then_starts(elevated) -> None:
     result = service_tools.ServiceInstallTool().execute(home=str(HOME), source=r"C:\hiro\env4\hiroleague\hiroserver\hiroleague")
 

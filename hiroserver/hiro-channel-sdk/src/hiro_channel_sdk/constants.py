@@ -50,6 +50,8 @@ WS_CLOSE_EXTENSION_REMOVED: int = 4013   # the extension was removed in the core
 #                         {"type": "auth", "extension_id", "signature", "info"}          after that
 #      ``signature`` = the nonce signed with the extension's own Ed25519 key.
 #   3. core → extension   {"type": "welcome", "extension_id", "core": {...}}
+#      ``core`` holds what core.info answers, and ``domain``: the core's own domain, "hiro.local" or "<name>.local"
+#      when the house named the core at setup; an app's site name is "<label>.<domain>" (sites.claim, below).
 #                      or {"type": "denied", "reason", "message"} and the socket closes
 # After the welcome both sides exchange UnifiedMessage frames: requests, responses
 # and events (the device language), on routing.channel EXTENSION_CHANNEL. A channel
@@ -282,14 +284,15 @@ ASK_TIMEOUT_MAX_SECONDS: float = 60.0
 # An app's LAN name, set up by the core (docs/site-names-design.md in hiroleague). The extension's address setting
 # claims a name; the core checks it is free, publishes it on the LAN (mDNS) and points the web proxy at the port the
 # extension listens on, then the extension declares http://<name> as its site (offers.shows).
-#   sites.claim   extension -> core, {name, port} -> {name, url, published, proxied, note}. name: "<label>.hiro.local"
+#   sites.claim   extension -> core, {name, port} -> {name, url, published, proxied, note}. name: "<label>.<domain>"
 #                 or "<label>.local" (letters, digits, dashes). One name per extension: a new claim drops its old one.
 #                 published / proxied say whether the mDNS name and the proxy entry are live (False on a core whose
 #                 machine isn't set up for names: the claim is kept, note says why). Errors: invalid, taken.
 METHOD_SITES_CLAIM: str = "sites.claim"
 SITES_ERROR_INVALID: str = "invalid"
 SITES_ERROR_TAKEN: str = "taken"
-SITES_DOMAIN: str = "hiro.local"  # an app's name is <label>.hiro.local, or a one-word <label>.local
+# The default core's domain (a core named hiro). A core the house named otherwise sends its own in welcome's domain.
+SITES_DOMAIN: str = "hiro.local"  # an app's name is <label>.<domain>, or a one-word <label>.local
 # The app switcher (the grid of apps in every app's menu head) lists the apps one person may open.
 #   sites.list    extension -> core, {person_id} -> {"apps": [{extension, title, icon, url, online}],
 #                 "opens_settings": bool}: every paired extension's site this person's role sees (the core's Apps card),

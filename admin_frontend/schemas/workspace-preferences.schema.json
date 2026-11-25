@@ -167,7 +167,6 @@
         },
         "at_once": {
           "default": 1,
-          "maximum": 4,
           "minimum": 1,
           "title": "At Once",
           "type": "integer"

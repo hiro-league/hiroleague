@@ -21,6 +21,7 @@ from hiro_commons.systemd_service import NeedsRootError, default_service_user, r
 from .. import front_door_setup as door
 from .. import linux_service as ls
 from .. import mac_service as ms
+from ..constants import ENV_CORE_NAME
 from ..domain.front_door import ENV_FRONT_DOOR
 from .service_models import ServiceControlResult, ServiceInstallResult, ServiceStatusResult, ServiceUninstallResult
 
@@ -36,20 +37,22 @@ def _is_root() -> bool:
     return os.geteuid() == 0
 
 
-def _needs_root(action: str, verb: str, *, user: str | None, workspace: str | None) -> NeedsRootError:
+def _needs_root(action: str, verb: str, *, user: str | None, workspace: str | None,
+                core_name: str | None = None) -> NeedsRootError:
     return NeedsRootError(
         f"{verb} the HiroLeague service",
-        ms.sudo_command(ls.hiro_executable(), action, user=user, workspace=workspace),
+        ms.sudo_command(ls.hiro_executable(), action, user=user, workspace=workspace, core_name=core_name),
         why=_WHY_ROOT,
     )
 
 
-def install(*, user: str | None = None, workspace: str | None = None, **_: object) -> ServiceInstallResult:
+def install(*, user: str | None = None, workspace: str | None = None, core_name: str | None = None,
+            **_: object) -> ServiceInstallResult:
     require_mac()
     exe = ls.hiro_executable()
     user_name = user or default_service_user()
     if not _is_root():
-        raise _needs_root("install", "Installing", user=user_name, workspace=workspace)
+        raise _needs_root("install", "Installing", user=user_name, workspace=workspace, core_name=core_name)
     service_user = resolve_service_user(user_name)
     # Fail before writing anything when the service's account can't even start `hiro`.
     ms.check_user_can_run(service_user, exe)
@@ -58,6 +61,8 @@ def install(*, user: str | None = None, workspace: str | None = None, **_: objec
     secrets = ms.secrets_file(workspace)
     created = write_env_file(secrets, ms.env_file_content(name, service_user.name, workspace), service_user)
     spec = ms.build_spec(exe=exe, user=service_user, workspace=workspace)
+    if core_name:
+        spec = dataclasses.replace(spec, environment={**spec.environment, ENV_CORE_NAME: core_name})
     # The machine's front door, set up by the default service only (one per machine).
     front = door.install_mac(service_user, ms.HOME) if not workspace else None
     if front is not None:

@@ -33,7 +33,7 @@ from hiro_commons.winsw_service import (
 from .. import front_door_setup as door
 from .. import linux_service as ls
 from .. import windows_service as ws
-from ..constants import ENV_DATA_DIR, ENV_SECRETS_FILE
+from ..constants import ENV_CORE_NAME, ENV_DATA_DIR, ENV_SECRETS_FILE
 from ..domain.front_door import ENV_FRONT_DOOR
 from .service_models import ServiceControlResult, ServiceInstallResult, ServiceStatusResult, ServiceUninstallResult
 
@@ -81,6 +81,7 @@ def install(
     home: str | None = None,
     data_dir: str | None = None,
     source: str | None = None,
+    core_name: str | None = None,
     **_: object,
 ) -> ServiceInstallResult:
     require_windows()
@@ -89,7 +90,7 @@ def install(
     if not is_admin():
         raise NeedsAdminError(
             "Installing the HiroLeague service",
-            command_line("install", *_options(workspace, home=home, data_dir=data_dir, source=source)),
+            command_line("install", *_options(workspace, home=home, data_dir=data_dir, source=source, name=core_name)),
         )
     require_permissions_disk(lay.home, "The Hiro home")
     require_permissions_disk(lay.data_dir, "The data folder")
@@ -97,6 +98,8 @@ def install(
     lock_program_folder(lay.home)
     exe = ws.install_release(lay, source or ws.installed_package_spec())
     spec = ws.build_spec(exe=exe, lay=lay, workspace=workspace)
+    if core_name:
+        spec = dataclasses.replace(spec, environment={**spec.environment, ENV_CORE_NAME: core_name})
     # The machine's front door, set up by the default service only (one per machine); its firewall rule for names
     # follows this release's Python.
     front = door.install_windows(lay.home, door.which_python(exe.parent.parent)) if not workspace else None

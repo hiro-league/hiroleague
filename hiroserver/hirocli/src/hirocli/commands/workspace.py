@@ -138,6 +138,11 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
             None, "--gateway-url", "-g",
             help="WebSocket gateway URL (e.g. ws://myhost:8765)",
         ),
+        core_name: Optional[str] = typer.Option(
+            None, "--name",
+            help="The core's name, for a new workspace: its admin at <name>.local and its apps at "
+                 "<app>.<name>.local (default: hiro). A workspace keeps the name it was set up with.",
+        ),
         http_port: Optional[int] = typer.Option(
             None, "--port", "-p", help="Local HTTP server port (default: from workspace slot)"
         ),
@@ -173,13 +178,19 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
 
         from ..domain.config import load_config as _load_config
 
+        is_new = True
         try:
             entry, _ = resolve_workspace(workspace)
+            is_new = not (Path(entry.path) / "config.json").exists()
             existing = _load_config(Path(entry.path))
             default_gw = existing.gateway_url
         except (WorkspaceError, Exception) as exc:  # no workspace yet: the default gateway is offered
             log.debug("No workspace config to take the gateway from", error=str(exc))
             default_gw = "ws://localhost:8765"
+
+        # The core's name is asked once, for a new workspace: a workspace keeps the name it was set up with.
+        if core_name is None and is_new and not non_interactive:
+            core_name = typer.prompt("The core's name (its admin at <name>.local)", default="hiro")
 
         effective_gateway_url = gateway_url
         if effective_gateway_url is None:
@@ -203,6 +214,7 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
                 metrics_enabled=metrics,
                 metrics_interval=metrics_interval,
                 skip_env_import=use_interactive_credentials,
+                core_name=core_name,
             )
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
@@ -227,10 +239,12 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
             start_server=start_server,
             device_id=result.device_id,
             autostart=result.autostart_method,
+            core_name=result.core_name,
         )
 
         console.print(f"[green]Config saved to[/green] {result.workspace_path}/config.json")
         console.print(f"  workspace  : [bold]{result.workspace}[/bold]")
+        console.print(f"  core name  : [bold]{result.core_name}[/bold] (its admin at {result.core_name}.local)")
         console.print(f"  device_id  : [bold]{result.device_id}[/bold]")
         console.print(f"  gateway_url: [bold]{result.gateway_url}[/bold]")
         console.print(f"  http_port  : [bold]{result.http_port}[/bold]")
