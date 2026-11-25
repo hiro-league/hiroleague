@@ -18,7 +18,44 @@ import { KeyedAction } from '$kit/state/keyed-action.svelte';
 import { Resource } from '$kit/state/resource.svelte';
 import { ask } from '$kit/ui/confirm.svelte';
 import type { Notify } from '$kit/ui/toast.svelte';
-import { countKinds, ofKinds, sortExtensions, type ExtensionKind } from '../shared/extension-rows';
+import { goto } from '$app/navigation';
+import { page } from '$app/state';
+import {
+  countKinds,
+  ofKinds,
+  sortExtensions,
+  statusOf,
+  type ExtensionKind,
+  type StatusLine
+} from '../shared/extension-rows';
+import { MOCK_NEW_APP } from '$lib/approval-mockup/approval-mockup';
+import { approvalMockup } from '$lib/approval-mockup/store.svelte';
+
+/** mockup: the new app's row, as the list would show a paired app that waits for the owner. */
+function mockNewAppRow(): ExtensionRow {
+  const now = new Date().toISOString();
+  return {
+    ...MOCK_NEW_APP,
+    kind: 'app',
+    version: '0.1.0',
+    paired_at: now,
+    last_seen: now,
+    relays_chat: false,
+    started_by_core: false,
+    enabled: null,
+    mandatory: false,
+    has_settings: false,
+    pairing: '',
+    site: 'http://garden.hiro.local',
+    offers: [],
+    uses: ['plants'],
+    connected: true,
+    connected_at: now,
+    remote: '127.0.0.1',
+    linked: null,
+    account: ''
+  };
+}
 
 export type ExtensionsController = ReturnType<typeof createExtensionsController>;
 
@@ -30,9 +67,19 @@ export type ExtensionsController = ReturnType<typeof createExtensionsController>
 export function createExtensionsController(notify: Notify) {
   // A channel switched on connects a few seconds later: the list reads again every 5 s while the page is open.
   const list = new Resource(listExtensions, { every: 5000 });
-  const all = $derived(sortExtensions(list.data?.extensions ?? []));
+  // mockup (Permissions phase 8): a new app, paired and waiting for the owner, joins the real list until declined
+  const all = $derived(
+    sortExtensions([
+      ...(list.data?.extensions ?? []),
+      ...(list.data && !approvalMockup.isDeclined(MOCK_NEW_APP.name) ? [mockNewAppRow()] : [])
+    ])
+  );
   let kinds = $state<ExtensionKind[]>([]);
-  const rows = $derived(ofKinds(all, kinds));
+  // mockup: "Needs approval" shows only the apps that wait for the owner; kept in the address (?show=approval), so
+  // the top bar's button opens the page filtered
+  const attention = $derived(page.url.searchParams.get('show') === 'approval');
+  const waiting = $derived(all.filter((row) => row.kind === 'app' && approvalMockup.waits(row.name)));
+  const rows = $derived(attention ? waiting : ofKinds(all, kinds));
   const counts = $derived(countKinds(all));
   const listen = $derived(list.data?.listen ?? null);
 
@@ -214,6 +261,26 @@ export function createExtensionsController(notify: Notify) {
     get connectedCount() {
       return rows.filter((row) => row.connected).length;
     },
+    /** mockup: the Needs approval filter, and how many apps wait. */
+    get attention() {
+      return attention;
+    },
+    get waitingCount() {
+      return waiting.length;
+    },
+    setAttention: (on: boolean) => {
+      const url = new URL(page.url);
+      if (on) url.searchParams.set('show', 'approval');
+      else url.searchParams.delete('show');
+      void goto(url, { replaceState: true, keepFocus: true, noScroll: true });
+    },
+    /** What the Status column says; mockup: an app never approved isn't working yet, whatever its link. */
+    statusOf: (row: ExtensionRow): StatusLine =>
+      row.kind === 'app' && approvalMockup.pending(row.name) ? { tone: 'warn', text: 'Waits for approval' } : statusOf(row),
+    /** mockup: the row stands in for an app the core doesn't know: nothing on it calls the core. */
+    isMockup: (row: ExtensionRow) => row.extension_id === MOCK_NEW_APP.extension_id,
+    /** An app's title by its name ("Ask HomeHiro"), else the name. */
+    titleOf: (name: string) => all.find((row) => row.name === name)?.label ?? name,
     get listen() {
       return listen;
     },

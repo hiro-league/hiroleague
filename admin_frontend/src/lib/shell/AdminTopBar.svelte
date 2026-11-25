@@ -3,7 +3,8 @@
   // `topBar`): the workspace's state, the chat, Settings and the docs. UI kit step 2b: this was the header of
   // AdminShell; the menu's collapse button, light/dark and Sign out are the shared menu's now.
   import { base } from '$app/paths';
-  import { BookOpen, ExternalLink, MessagesSquare, Settings } from '@lucide/svelte';
+  import { BookOpen, ExternalLink, MessagesSquare, Puzzle, Settings } from '@lucide/svelte';
+  import { approvalMockup } from '$lib/approval-mockup/store.svelte';
   import { onMount } from 'svelte';
   import { DEFAULT_ADMIN_CONFIG, docsUrl, getAdminConfig, type AdminConfig } from '$lib/api/config';
   import { chatOverlay } from '$lib/features/chat-channels/overlay/chat-overlay-store.svelte';
@@ -72,6 +73,22 @@
       <StatusDot size="md" pulse class="absolute -top-0.5 -right-0.5 rounded-full ring-2 ring-background" />
     {/if}
   </Button>
+  {/if}
+  <!-- mockup (Permissions phase 8): apps wait for the owner's approval; it opens Extensions showing only those. -->
+  {#if showChat && approvalMockup.waitingCount > 0}
+    <Button
+      variant="outline"
+      size="icon-lg"
+      class="relative"
+      href={`${base}/extensions?show=approval`}
+      aria-label="{approvalMockup.waitingCount} app{approvalMockup.waitingCount === 1 ? '' : 's'} wait for your approval"
+      title="Mockup: {approvalMockup.waitingCount} app{approvalMockup.waitingCount === 1 ? '' : 's'} wait for your approval"
+    >
+      <Puzzle />
+      <span class="absolute -top-1 -right-1 grid size-4 place-items-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
+        {approvalMockup.waitingCount}
+      </span>
+    </Button>
   {/if}
   <!-- Quick access to workspace Settings, mirroring the menu's entry. -->
   {#if showSettings}

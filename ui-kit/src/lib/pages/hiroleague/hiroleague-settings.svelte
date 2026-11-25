@@ -15,6 +15,8 @@
 	import { Resource } from '$kit/state/resource.svelte';
 	import { ask } from '$kit/ui/confirm.svelte';
 	import Feedback from '$kit/ui/feedback.svelte';
+	import MockupBadge from '$kit/ui/mockup-badge.svelte';
+	import Notice from '$kit/ui/notice.svelte';
 	import {
 		forgetHiroLeague,
 		getHiroLeague,
@@ -163,6 +165,23 @@
 					{current.error}
 				{/if}
 			</p>
+		{/if}
+
+		<!-- mockup (Permissions phase 8): what waits for the owner's approval in HiroLeague, told by the core -->
+		{#if current?.status === 'connected'}
+			<Notice tone="info" title="Waits for the owner's approval in HiroLeague">
+				<span class="flex flex-wrap items-center gap-1.5">
+					Use the search models. Until the owner says yes, {APP.name} works with what was approved before.
+					<MockupBadge />
+				</span>
+				{#snippet actions()}
+					{#if current.admin_url}
+						<Button size="sm" variant="outline" href="{current.admin_url.replace(/\/+$/, '')}/extensions?show=approval" target="_blank" rel="noreferrer">
+							Open in HiroLeague <ExternalLink class="size-3" />
+						</Button>
+					{/if}
+				{/snippet}
+			</Notice>
 		{/if}
 
 		{#if current && current.status !== 'no_address'}

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Download, Link2 } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
+  import PageTabs, { type PageTab } from '$kit/ui/page-tabs.svelte';
   import PageHeader from '$kit/ui/page-header.svelte';
   import { ADMIN_PAGE_MAX_W } from '$lib/styling/admin-tokens';
   import { toast } from '$kit/ui/toast.svelte';
@@ -16,6 +17,11 @@
   // The one list of everything plugged into the core: its channel plugins and its apps (Unified communication).
   const ctrl = createExtensionsController(toast.show);
   const settingsRow = $derived(ctrl.panel === 'settings' ? ctrl.picked : null);
+  // mockup (Permissions phase 8)
+  const VIEWS = $derived<PageTab<'all' | 'approval'>[]>([
+    { id: 'all', label: 'All' },
+    { id: 'approval', label: 'Needs approval', count: ctrl.waitingCount, countTone: ctrl.waitingCount ? 'primary' : 'neutral' }
+  ]);
 </script>
 
 <section class={ADMIN_PAGE_MAX_W}>
@@ -29,7 +35,14 @@
         <Link2 size={15} /> Add an app
       </Button>
     {/snippet}
-    <KindFilter picked={ctrl.kinds} counts={ctrl.counts} onchange={ctrl.setKinds} />
+    <!-- mockup (Permissions phase 8): All, or only the apps that wait for the owner's approval; the kind filter
+         belongs to All alone, so the two never combine -->
+    {#snippet tabs()}
+      <PageTabs tabs={VIEWS} value={ctrl.attention ? 'approval' : 'all'} onchange={(v) => ctrl.setAttention(v === 'approval')} label="Which extensions" />
+    {/snippet}
+    {#if !ctrl.attention}
+      <KindFilter picked={ctrl.kinds} counts={ctrl.counts} onchange={ctrl.setKinds} />
+    {/if}
   </PageHeader>
   <!-- grid-cols-1 (minmax(0,1fr)): a wide table scrolls inside its card instead of widening the page on a phone. -->
   <section class="grid grid-cols-1 gap-4">

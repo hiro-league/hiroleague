@@ -1,7 +1,7 @@
 <script lang="ts">
   // The one list: every extension, channels and apps alike. A row's name opens About; Settings shows only where
   // the core keeps its settings or it links an account.
-  import { Link2Off, Lock, Settings2 } from '@lucide/svelte';
+  import { Link2Off, Lock, Settings2, ShieldCheck } from '@lucide/svelte';
   import { Badge } from '$kit/components/ui/badge/index.js';
   import { Button } from '$kit/components/ui/button/index.js';
   import { Switch } from '$kit/components/ui/switch/index.js';
@@ -11,8 +11,9 @@
   import TableShell from '$kit/ui/table-shell.svelte';
   import { TABLE_GRID_ROW } from '$kit/ui/table-grid';
   import { dateTime } from '$kit/format/time';
-  import { hasSettings, statusOf, statusTime } from '../shared/extension-rows';
+  import { hasSettings, statusTime } from '../shared/extension-rows';
   import type { ExtensionsController } from '../state/extensions-controller.svelte';
+  import { approvalMockup } from '$lib/approval-mockup/store.svelte';
 
   let { ctrl }: { ctrl: ExtensionsController } = $props();
 
@@ -48,7 +49,7 @@
         {/snippet}
         {#snippet body()}
           {#each ctrl.rows as row (row.extension_id)}
-            {@const status = statusOf(row)}
+            {@const status = ctrl.statusOf(row)}
             {@const time = statusTime(row)}
             <div class={TABLE_GRID_ROW} style:grid-template-columns={GRID}>
               <button type="button" class="group grid min-w-0 text-left" onclick={() => ctrl.openAbout(row)} title="About {row.label}">
@@ -90,6 +91,12 @@
                     />
                   {/if}
                 {/if}
+                <!-- mockup (Permissions phase 8): an app that waits for the owner opens on its Permissions -->
+                {#if row.kind === 'app' && approvalMockup.waits(row.name)}
+                  <Button size="sm" onclick={() => ctrl.openAbout(row)} title="See what {row.label} asks for, and approve it">
+                    <ShieldCheck size={13} /> Approve
+                  </Button>
+                {/if}
                 {#if hasSettings(row)}
                   <Button size="sm" variant="outline" onclick={() => ctrl.openSettings(row)} title="{row.label}'s settings">
                     <Settings2 size={13} /> Settings
@@ -98,7 +105,7 @@
                 <Button
                   size="icon"
                   variant="ghost"
-                  disabled={row.mandatory || ctrl.busy}
+                  disabled={row.mandatory || ctrl.busy || ctrl.isMockup(row)}
                   onclick={() => void ctrl.remove(row)}
                   title={row.mandatory ? "Phones' chat needs it: it can't be removed" : `Remove ${row.label}`}
                   aria-label="Remove {row.label}"
