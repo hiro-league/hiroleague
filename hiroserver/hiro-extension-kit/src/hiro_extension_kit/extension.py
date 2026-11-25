@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from hiro_channel_sdk import ExtensionFeature, ExtensionSearchUse, ExtensionUse, ExtensionVoiceUse
+from hiro_channel_sdk.approvals import AppAsk
 from hiro_commons.logging_foundation.story import Declared
 from hiro_commons.rules import Rule
 
@@ -42,6 +43,13 @@ class UsersScope:
     read: Callable[[Any, Any], dict[str, Any]]
     check: Callable[[Any, Any, list[str], list[str]], None]
     write: Callable[[Any, Any, list[str], list[str]], None]
+
+
+def ask(permission: str, why: str, *, required: bool = True, to: str | None = None) -> AppAsk:
+    """One thing the app asks to do on its own (`Extension.asks`): a permission of the SDK's (approvals.py:
+    `PEOPLE_SEE`, `PEOPLE_NOTIFY`, `APPS_ASK` with `to` the app asked...), why in one line for the owner, and whether
+    the app can't work without it (`required`: declining it declines the app)."""
+    return AppAsk(permission=permission, why=why, required=required, to=to)
 
 
 @dataclass(frozen=True)
@@ -98,6 +106,11 @@ class Extension:
     # page; and the permissions it renamed ({old key: [new keys]}), moved once in each role by the core (family.py).
     areas: Mapping[str, str] = field(default_factory=dict)
     renamed_rights: Mapping[str, Sequence[str]] = field(default_factory=dict)
+    # Permissions phase 8: what it asks to do on its own (an automation at night, an alert), each with why, written
+    # with `ask(...)`; the owner approves them at pairing. The kit adds ai.use, voice.speak and ai.search for the uses
+    # it declares (hiroleague.py `info_for`). None: not updated yet, so the core changes nothing for it; () asks
+    # nothing beyond those.
+    asks: Sequence[AppAsk] | None = None
     by_id: dict[str, ExtensionFeature] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:

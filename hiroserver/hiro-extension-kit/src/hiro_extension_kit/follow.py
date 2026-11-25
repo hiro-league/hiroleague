@@ -49,6 +49,11 @@ class Follower:
 
     def connected(self) -> None:
         """The link connected: every copy is read again (what changed while away sent no note we heard)."""
+        self.all_again()
+
+    def all_again(self) -> None:
+        """Every copy is read again: the link connected, or the owner changed what the app is approved for (a read
+        the core refused before may be answered now)."""
         self._mark(set(self._refresh))
 
     async def changed(self, _event: str, data: dict[str, Any]) -> None:

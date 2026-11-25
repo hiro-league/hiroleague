@@ -24,8 +24,10 @@ GRAPH_INGEST = Declared("core.graph_ingest", "job", "Knowledge graph ingest")
 TRY_PROFILE = Declared("core.try_profile", "action", "Try an AI profile")
 TRY_VOICE = Declared("core.try_voice", "action", "Try a voice")
 GENERATE_IMAGE = Declared("core.generate_image", "action", "Generate an image")
+EXTENSION_APPROVED = Declared("core.extension_approved", "action", "Approve an app")  # Permissions phase 8
 
-STORIES = (CHAT_TURN, MEMORY_SWEEP, KNOWLEDGE_INGEST, GRAPH_INGEST, TRY_PROFILE, TRY_VOICE, GENERATE_IMAGE)
+STORIES = (CHAT_TURN, MEMORY_SWEEP, KNOWLEDGE_INGEST, GRAPH_INGEST, TRY_PROFILE, TRY_VOICE, GENERATE_IMAGE,
+           EXTENSION_APPROVED)
 story.declare(*STORIES)
 
 

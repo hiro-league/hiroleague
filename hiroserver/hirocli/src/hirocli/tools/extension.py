@@ -9,10 +9,11 @@ ExtensionManager, read by the admin route directly.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shlex
 import socket
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -37,7 +38,9 @@ from ..domain.extensions import (
     start_extension_pairing,
 )
 from ..domain.people import drop_source_rights
+from ..domain import approvals, person_tokens
 from ..domain.site_names import list_claims, release
+from ..runtime import stories
 from ..domain.workspace import resolve_workspace
 from .base import Tool, ToolParam
 from .channel import ChannelRemoveTool, ChannelUninstallTool, mandatory_channel
@@ -280,6 +283,103 @@ class ExtensionListTool(Tool):
         )
 
 
+@dataclass
+class ExtensionApprovalResult:
+    """An app's approval as the owner sees it (Permissions phase 8)."""
+
+    extension_id: str
+    name: str
+    approved_for_everything: bool
+    pending: bool
+    waits: bool
+    items: list[dict[str, Any]] = field(default_factory=list)
+    claimed: list[str] = field(default_factory=list)  # LAN names the approval let the core claim for it
+
+
+def _approval_result(found: Any, claimed: list[str] | None = None) -> ExtensionApprovalResult:
+    return ExtensionApprovalResult(
+        extension_id=found.extension_id, name=found.name, approved_for_everything=found.approved_for_everything,
+        pending=found.pending, waits=found.waits, items=[asdict(i) for i in found.items], claimed=claimed or [],
+    )
+
+
+def _find_app(workspace_path: Path, extension: str) -> PairedExtension:
+    """An app by its id or its name; raises ValueError when none."""
+    for e in list_paired_extensions(workspace_path):
+        if extension in (e.extension_id, e.name):
+            return e
+    raise ValueError(f"No paired app is called {extension!r}.")
+
+
+class ExtensionApprovalTool(Tool):
+    surfaces = frozenset({"cli", "http"})
+    name = "extension_approval"
+    description = "What a paired app asks to do on its own, what the owner approved and what waits for a yes"
+    params = {
+        "extension": ToolParam(str, "The app's name or id"),
+        "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
+    }
+
+    def execute(self, extension: str, workspace: str | None = None) -> ExtensionApprovalResult:
+        workspace_path = _resolve_path(workspace)
+        app = _find_app(workspace_path, extension)
+        found = approvals.view(workspace_path, app.extension_id)
+        if found is None:
+            raise ValueError(f"No paired app is called {extension!r}.")
+        return _approval_result(found)
+
+
+class ExtensionApproveTool(Tool):
+    """The owner's yes to what an app asks (Permissions phase 8): every required item, and the optional ones named
+    (or all of them). In the running server the LAN name it was approved for is claimed and the app is told."""
+
+    surfaces = frozenset({"cli", "http"})
+    runtime = True
+    name = "extension_approve"
+    description = (
+        "Approve what a paired app asks to do on its own: every required item, and the optional ones named "
+        "(`permission` or `permission:subject`), or every one with all"
+    )
+    params = {
+        "extension": ToolParam(str, "The app's name or id"),
+        "optional": ToolParam(list, "Optional items to approve (permission or permission:subject)", required=False),
+        "all": ToolParam(bool, "Approve every optional item too", required=False),
+        "workspace": ToolParam(str, "Workspace name (default: registry default)", required=False),
+    }
+
+    def attach_runtime(self, ctx: Any) -> None:
+        self._runtime = ctx
+
+    def execute(self, extension: str, optional: list[str] | None = None, all: bool = False,  # noqa: A002
+                workspace: str | None = None) -> ExtensionApprovalResult:
+        workspace_path = _resolve_path(workspace)
+        app = _find_app(workspace_path, extension)
+        chosen = None if all else {_item_key(x) for x in (optional or [])}
+        with stories.started(stories.EXTENSION_APPROVED, "extensions.approve", area="EXTENSIONS",
+                             title=f"{app.name} approved"):
+            approved, claims = approvals.approve_app(workspace_path, app.extension_id, chosen)
+            log.info(f"✅ App approved — {app.name}: {len(approved)} item(s)", extension_id=app.extension_id,
+                     items=", ".join(f"{i.permission}{':' + i.subject if i.subject else ''}" for i in approved))
+        found = approvals.view(workspace_path, app.extension_id)
+        assert found is not None  # approve_app raised for an app gone meanwhile
+        return _approval_result(found, claims)
+
+    async def execute_async(self, extension: str, optional: list[str] | None = None, all: bool = False,  # noqa: A002
+                            workspace: str | None = None) -> ExtensionApprovalResult:
+        result = await asyncio.to_thread(self.execute, extension, optional, all, workspace)
+        rt = getattr(self, "_runtime", None)
+        if rt is not None:
+            from ..runtime.approval_effects import after_approval
+
+            await after_approval(rt.comm_manager.ctx, result.extension_id, result.claimed)
+        return result
+
+
+def _item_key(text: str) -> tuple[str, str]:
+    permission, _, subject = text.strip().partition(":")
+    return (permission, subject)
+
+
 class ExtensionRemoveTool(Tool):
     surfaces = frozenset({"cli", "http"})
     name = "extension_remove"
@@ -345,6 +445,7 @@ def _remove_app(workspace_path: Path, ext: PairedExtension) -> ExtensionRemoveRe
 
     if not remove_paired_extension(workspace_path, ext.extension_id):
         return ExtensionRemoveResult(removed=False, extension_id=ext.extension_id, kind=ext.kind, name=ext.name)
+    person_tokens.end_for_app(workspace_path, ext.extension_id)  # Permissions phase 8: the proofs it held end
     site_name = release(workspace_path, ext.extension_id) or ""
     rights: dict[str, list[str]] = {}
     picks: list[str] = []

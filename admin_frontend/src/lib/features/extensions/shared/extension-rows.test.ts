@@ -26,6 +26,9 @@ function row(over: Partial<ExtensionRow>): ExtensionRow {
     remote: null,
     linked: null,
     account: '',
+    pending: false,
+    waits: false,
+    waiting_count: 0,
     ...over
   };
 }

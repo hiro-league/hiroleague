@@ -4,13 +4,18 @@ sent, whose one-time code it came back with (`auth.code`), and where signing out
 The kit's sign-in (api.py) is built on it, with its users, sessions and family copy. CodeHiro uses it alone: it
 keeps its own sessions and lets the owner only in, in its own SQLite store (it isn't on the kit's database), and
 talks to the core about signing in this way. So nothing here reads a database: it takes the link it asks through.
+
+Permissions phase 8: the core's answer to the code also carries `token`, the person's proof for this app alone. The app
+keeps it with its session (the kit's `WebSession.core_token`) and sends it with what it asks the core for that person
+(hiroleague.as_person); signing out ends it in the core (`end`).
 """
 
+import logging
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode, urlsplit
 
 from hiro_channel_sdk import ExtensionRequestError
-from hiro_channel_sdk.constants import AUTH_ERROR_INVALID_CODE, METHOD_AUTH_CODE
+from hiro_channel_sdk.constants import AUTH_ERROR_INVALID_CODE, METHOD_AUTH_CODE, METHOD_AUTH_END
 
 from .. import identity
 from ..errors import Invalid, OutsideError, Unavailable
@@ -20,6 +25,14 @@ if TYPE_CHECKING:
     from ..hiroleague import HiroLeagueLink
 
 REDEEM_TIMEOUT = 10.0  # seconds: asking the core whose sign-in code it is
+END_TIMEOUT = 5.0  # seconds: telling the core someone signed out (someone waits on the Sign out button)
+
+
+
+def _log() -> logging.Logger:
+    """The kit's auth area logger, made when first used: an app with its own sign-in (CodeHiro) imports this module
+    before the kit is set up."""
+    return identity.logger("auth")
 
 
 def _title() -> str:
@@ -57,7 +70,8 @@ def after_core_sign_out(link: "HiroLeagueLink", next: str) -> str:
 
 
 async def redeem(link: "HiroLeagueLink", code: str) -> dict[str, Any]:
-    """Whose one-time code this is, asked of the core (`auth.code`): {person_id, name, role_id, role_name}."""
+    """Whose one-time code this is, asked of the core (`auth.code`): {person_id, name, role_id, role_name, token}.
+    `token` is their proof for this app (a core from before approvals sends none)."""
     if not code:
         raise Invalid("The sign-in came back without its code. Sign in again.")
     client = link.client
@@ -76,3 +90,19 @@ async def redeem(link: "HiroLeagueLink", code: str) -> dict[str, Any]:
     if not isinstance(answer.get("person_id"), str) or not answer["person_id"]:
         raise OutsideError("HiroLeague's answer about who signed in can't be read")
     return answer
+
+
+async def end(link: "HiroLeagueLink", token: str | None) -> None:
+    """Someone signed out of the app: the proof the core gave it for them ends there too (`auth.end`). Best effort:
+    the app's own session ends either way, and a proof nobody uses lapses in the core by itself; a failure is logged."""
+    if not token:
+        return
+    client = link.client
+    if not client.connected:
+        _log().info("Users: signed out while HiroLeague is away; their proof there lapses by itself")
+        return
+    try:
+        await client.request(METHOD_AUTH_END, {"token": token}, timeout=END_TIMEOUT)
+    except ExtensionRequestError as exc:  # said once, here: the sign-out itself went through
+        _log().warning("Users: HiroLeague didn't end the proof of someone who signed out (%s: %s); it lapses by itself",
+                    exc.code, exc.message)

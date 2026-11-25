@@ -12,7 +12,8 @@ core takes the profile its Uses page gives the task's use (`<extension>:<use>`, 
 - maps the core's refusals to the errors callers handle: `LimitReached` (429) when every profile in the chain is over
   its budget (a copy waits, then asks again), `Busy` (409) for an app's question at a busy tool, `Unavailable` (503)
   when the app isn't connected to the core or no profile is set for the use, `LLMError` (502) when the core tried
-  and every profile failed (its message says why) or didn't answer in time.
+  and every profile failed (its message says why) or didn't answer in time, and the core's no to the app (Permissions
+  phase 8: `NotApproved` (403) until the owner approves it for AI) in the core's words, never asked again.
 
 `chat()` is `ask()` for a conversation (`ai.chat`): the messages, the tools the model may call, or a schema; it answers
 the next message (its words or its tool calls), kept in the same log and failing the same ways.
@@ -28,7 +29,7 @@ from hiro_channel_sdk.constants import METHOD_AI_ASK, METHOD_AI_CHAT
 
 from .. import identity
 from .. import calls
-from ..errors import Busy, AppError, Unavailable
+from ..errors import Busy, AppError, Unavailable, refusal
 from ..hiroleague import link
 from ..extension import ext
 from . import Detail, LLMError, core_ai, recorder
@@ -124,6 +125,8 @@ def _record(a: Asked, tries: Any, prompt: str, pictures: list[bytes], schema: di
 
 def _refused(exc: ExtensionRequestError, use: str, timeout: float) -> AppError:
     """The core's error as the one callers handle (the module's notes)."""
+    if (refused := refusal(exc)) is not None:  # not approved for AI (Permissions phase 8): nothing was asked
+        return refused
     code, said = exc.code, exc.message
     if code == "not_connected":
         return Unavailable(f"Not asked: {core_ai._no_core()}")

@@ -110,7 +110,9 @@ WHATSAPP_ERROR_FAILED: str = "whatsapp_failed"                # WhatsApp refused
 #                    in its own voice from `text`. Hiro's own preferences decide text or a voice
 #                    note. medium: NOTIFY_MEDIUM_WHATSAPP only for now. Since Phase 6 `person` is a
 #                    person id from the core's family list (people.list); the core finds their
-#                    number. Extensions only; a failed person doesn't stop the others.
+#                    number. Extensions only; a failed person doesn't stop the others. Permissions phase 8:
+#                    an app tells people only through notify, so it also takes a picture (image_b64) or a voice
+#                    note (voice_b64, voice_seconds, waveform_b64, transcript), with or without text.
 METHOD_EXTENSION_STATE: str = "extension.state"
 METHOD_NOTIFY: str = "notify"
 NOTIFY_MEDIUM_WHATSAPP: str = "whatsapp"
@@ -243,7 +245,11 @@ VOICE_ERROR_FAILED: str = "failed"          # the provider failed (the message s
 # An extension declares its site in offers.shows: {"kind": "site", "title": "Home", "icon": "house",
 # "url": "http://homehiro.local", "roles": []} (roles [] = every role). No extension offers a way to sign in: the core
 # runs every sign-in, "Sign in with Home Assistant" included, and only tells an app who signed in (auth.code).
+#   auth.code also answers {token}: the person's proof for this app alone (Permissions phase 8). The app sends it as
+#                    `_signed_in` with each ask a page makes for that person; it lasts while it is used (90 days).
+#   auth.end         extension → core, {token} → {}: the person signed out of the app; their proof ends.
 METHOD_AUTH_CODE: str = "auth.code"
+METHOD_AUTH_END: str = "auth.end"
 AUTH_ERROR_INVALID_CODE: str = "invalid_code"
 OFFER_KIND_SITE: str = "site"
 AUTH_CODE_SECONDS: int = 60

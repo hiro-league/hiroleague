@@ -6,7 +6,8 @@
 - `CleanDatabases`: every test starts from empty, migrated databases.
 - `wait_until()`: poll until something is true.
 - `FakeCore` and `FakeLink`: the HiroLeague core as an app asks it (the family list, roles, `answers` for anything else,
-  and other extensions' answers to `ask()`).
+  and other extensions' answers to `ask()`), held to what the app is approved for and to the person signed in, by the
+  SDK's table (Permissions phase 8).
 - `join_family()`, `ai_answer()`, `ai_profiles()`: someone added to the fake core's family list and synced; the core's AI
   answers (shared-code plan, step 1).
 
@@ -33,9 +34,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from hiro_channel_sdk.constants import (METHOD_EXTENSIONS_ASK, METHOD_PEOPLE_ADD, METHOD_PEOPLE_LIST,
-                                        METHOD_PEOPLE_UPDATE, METHOD_ROLES_ADD, METHOD_ROLES_IMPORT_RIGHTS,
-                                        METHOD_ROLES_REMOVE, METHOD_ROLES_RENAME)
+from hiro_channel_sdk.approvals import (ALWAYS, APP_METHODS, APPS_ASK, NEVER, NOT_ALLOWED, NOT_APPROVED,
+                                        NOT_ON_ITS_OWN, OWNER_ONLY, PARAM_SIGNED_IN, PEOPLE_ACT, SIGN_IN_AGAIN,
+                                        SITE_NAME, WORDS)
+from hiro_channel_sdk.constants import (METHOD_AUTH_CODE, METHOD_AUTH_END, METHOD_EXTENSIONS_ASK, METHOD_PEOPLE_ADD, METHOD_PEOPLE_LIST,
+                                        METHOD_PEOPLE_UPDATE, METHOD_ROLES_IMPORT_RIGHTS)
 
 from .db import Database
 
@@ -270,13 +273,27 @@ def _answer(answer: Any, params: dict[str, Any]) -> Any:
     return copy.deepcopy(answer)
 
 
+def _refused(code: str, message: str) -> Exception:
+    from hiro_channel_sdk import ExtensionRequestError
+
+    return ExtensionRequestError(code, message)
+
+
 class FakeCore:
     """The HiroLeague core as an app asks it: the SDK client's `connected`, `request()` and `ask()`.
 
-    `request()` answers people.* and roles.* like the core's contract (hiro_channel_sdk.constants), refusals as
-    ExtensionRequestError("invalid_params", reason). Other methods answer from `answers` (a dict, an exception to raise,
-    or a function of the params that returns or raises one). Every request is kept in `asked`, with its timeout in
-    `timeouts`.
+    `request()` answers people.* like the core's contract (hiro_channel_sdk.constants), refusals as
+    ExtensionRequestError("invalid_params", reason), and `auth.code` for a code `sign_in_code()` handed out, with the
+    person's proof (`token`). Other methods answer from `answers` (a dict, an exception to raise, or a function of the
+    params that returns or raises one). Every request is kept in `asked`, with its timeout in `timeouts`, without the
+    person's proof (`_signed_in`), which is kept in `signed_in` as (method, token).
+
+    Permissions phase 8: every request and ask is first held to the SDK's table (approvals.APP_METHODS), as the core
+    holds it: no app adds, renames or removes a role, nor gives or takes the Owner role (`not_allowed`); a method that
+    needs a person (people.add, ai.uses.set...) answers by the person whose proof it carries (`sign_in_again` for a
+    proof it never gave). `approved` is what the owner approved the app for: None (the default) is everything, as an
+    app paired before approvals; a test sets a list of permissions (or (permission, subject) pairs: ("apps.ask",
+    "home")), and a method needing one that isn't in it answers `not_approved`.
 
     `ask(to, method, params)` answers what another extension offers, from `extensions[to][method]` the same way; an
     extension in `away` (or not in `extensions`) is not connected, as the core answers. Kept in `asked` as
@@ -300,6 +317,12 @@ class FakeCore:
         self.handlers: dict[str, Any] = {}  # the core's events the app listens to (the SDK's on_event)
         self.events: list[tuple[str, dict[str, Any]]] = []  # the events the app sent the core (send_event)
         self.frames: list[Any] = []  # each request as the SDK builds it (hiro_channel_sdk.extension.build_request)
+        # Permissions phase 8: what the app is approved for (None: everything), the proofs given at sign-in (token ->
+        # person id), the codes handed out (code -> person id), and each request's proof as (method, token)
+        self.approved: list[str | tuple[str, str]] | None = None
+        self.tokens: dict[str, str] = {}
+        self.codes: dict[str, str] = {}
+        self.signed_in: list[tuple[str, str]] = []
         self._n = 0
 
     def on_event(self, event_type: str, handler: Any) -> None:
@@ -334,9 +357,68 @@ class FakeCore:
         person["role_ids"], person["role_id"] = held, held[0]
 
     def _refuse(self, reason: str):
-        from hiro_channel_sdk import ExtensionRequestError
+        raise _refused("invalid_params", reason)
 
-        raise ExtensionRequestError("invalid_params", reason)
+    def sign_in_code(self, person: dict[str, Any], code: str = "") -> str:
+        """The core signs `person` in and hands the browser a one-time code for the app (`auth.code` redeems it)."""
+        self._n += 1
+        code = code or f"code{self._n}"
+        self.codes[code] = person["person_id"]
+        return code
+
+    def _covers(self, permission: str, subject: str = "") -> bool:
+        if self.approved is None:
+            return True
+        return permission in self.approved if not subject else (permission, subject) in self.approved
+
+    def _not_approved(self, permission: str, subject: str = "") -> Exception:
+        words = WORDS.get(permission, permission)
+        return _refused(NOT_APPROVED, f"This app isn't approved to {words}. The owner approves it on HiroLeague's "
+                                      "Extensions page.")
+
+    def _hold(self, method: str, params: dict[str, Any], token: str) -> None:
+        """The core's check of an app's ask (hirocli runtime/app_asks.py), on the SDK's table; methods the table
+        doesn't name (an app's own test answers) pass."""
+        need = APP_METHODS.get(method)
+        if need is None or need.app == ALWAYS:
+            return
+        if need.app == NEVER:
+            raise _refused(NOT_ALLOWED, "No app may do this: it is done in HiroLeague's admin.")
+        if need.person is not None:
+            person_id = self.tokens.get(token) if token else None
+            if token and person_id is None:
+                raise _refused(SIGN_IN_AGAIN, "Sign in again to do this.")
+            if person_id is None:
+                if self.approved is None:  # an app from before approvals, with no proof: as before
+                    return
+                raise _refused(SIGN_IN_AGAIN, "Sign in again to do this.")
+            if not self._covers(PEOPLE_ACT):
+                raise self._not_approved(PEOPLE_ACT)
+            person = self._find(person_id)
+            if "owner" in person["role_ids"]:
+                return
+            if need.person == OWNER_ONLY:
+                raise _refused(NOT_ALLOWED, f"{person['name']} may not do this: only the owner can.")
+            key = ".".join(need.person)
+            if not any(key in (r.get("rights") or []) for r in self.roles if r["role_id"] in person["role_ids"]):
+                raise _refused(NOT_ALLOWED, f"{person['name']} may not do this: their roles don't include it.")
+            return
+        if need.app == NOT_ON_ITS_OWN:
+            if self.approved is not None:
+                raise _refused(NOT_ALLOWED, "This app can't do this on its own: it notifies people through HiroLeague.")
+            return
+        subject = (str(params.get("to") or "").strip() if need.app == APPS_ASK
+                   else f"{str(params.get('name') or '').strip().lower()}:{params.get('port')}" if need.app == SITE_NAME
+                   else "")
+        if not self._covers(need.app, subject):
+            raise self._not_approved(need.app, subject)
+
+    def _gives_or_takes_owner(self, person_id: str | None, params: dict[str, Any]) -> bool:
+        new = params.get("role_ids") or ([params["role_id"]] if params.get("role_id") else None)
+        if new is None:
+            return False
+        old = next((p for p in self.people if p["person_id"] == person_id), None) if person_id else None
+        return ("owner" in new) != (old is not None and "owner" in old["role_ids"])
 
     def _find(self, person_id: str) -> dict[str, Any]:
         p = next((p for p in self.people if p["person_id"] == person_id), None)
@@ -360,6 +442,7 @@ class FakeCore:
         self.timeouts.append(timeout)
         if not self.connected:
             raise ExtensionRequestError("not_connected", "not connected to the core")
+        self._hold(METHOD_EXTENSIONS_ASK, {"to": to}, "")
         offers = self.extensions.get(to)
         if offers is None or to in self.away:
             raise ExtensionRequestError("not_connected", f"{to} isn't connected")
@@ -370,14 +453,30 @@ class FakeCore:
     async def request(self, method: str, params: dict[str, Any] | None = None, *, timeout: float = 15.0) -> dict[str, Any]:
         params = dict(params or {})
         self._frame(method, params)
+        token = str(params.pop(PARAM_SIGNED_IN, "") or "")  # the core takes the proof out before the method runs
+        if token:
+            self.signed_in.append((method, token))
         self.asked.append((method, params))
         self.timeouts.append(timeout)
         if not self.connected:
-            from hiro_channel_sdk import ExtensionRequestError
-
-            raise ExtensionRequestError("not_connected", "not connected to the core")
+            raise _refused("not_connected", "not connected to the core")
+        self._hold(method, params, token)
         if method in self.answers:
             return _answer(self.answers[method], params)
+        if method == METHOD_AUTH_CODE:
+            person_id = self.codes.pop(str(params.get("code") or ""), None)
+            if person_id is None:
+                raise _refused("invalid_code", "That code is unknown, used or expired.")
+            p = self._find(person_id)
+            role = next(r for r in self.roles if r["role_id"] == p["role_id"])
+            self._n += 1
+            proof = f"proof{self._n}"
+            self.tokens[proof] = person_id
+            return {"token": proof, "person_id": person_id, "name": p["name"], "role_id": p["role_id"],
+                    "role_ids": list(p["role_ids"]), "role_name": role["name"]}
+        if method == METHOD_AUTH_END:  # the person signed out of the app: their proof ends
+            self.tokens.pop(str(params.get("token") or ""), None)
+            return {}
         if method == METHOD_PEOPLE_LIST:
             # Phase 9a: each role with its line and its rights here (none until granted or imported)
             roles = [{"says": "", "rights": [], **r} for r in self.roles]
@@ -406,6 +505,9 @@ class FakeCore:
                     r["rights"] = list(entry.get("rights") or [])
                     imported.append(role_id)
             return {"imported": imported}
+        if method in (METHOD_PEOPLE_ADD, METHOD_PEOPLE_UPDATE) and self._gives_or_takes_owner(
+                params.get("person_id") if method == METHOD_PEOPLE_UPDATE else None, params):
+            raise _refused(NOT_ALLOWED, "No app gives or takes the Owner role: that is done in HiroLeague's admin.")
         if method == METHOD_PEOPLE_ADD:
             if not str(params.get("name") or "").strip():
                 self._refuse("Name is empty.")
@@ -418,36 +520,12 @@ class FakeCore:
             p = self._find(params["person_id"])
             role_ids = params.get("role_ids") or ([params["role_id"]] if params.get("role_id") is not None else None)
             self._check(role_ids, params.get("whatsapp"), p["person_id"])
-            if role_ids is not None and "owner" in p["role_ids"] and "owner" not in role_ids:
-                if sum("owner" in x["role_ids"] for x in self.people) <= 1:
-                    self._refuse(f"{p['name']} is the only Owner; make someone else Owner first.")
             for k in ("name", "calls_them", "whatsapp"):
                 if params.get(k) is not None:
                     p[k] = params[k]
             if role_ids is not None:
                 self.give(p, role_ids)
             return {"person": dict(p)}
-        if method == METHOD_ROLES_ADD:
-            name = str(params.get("name") or "").strip()
-            if any(r["name"].lower() == name.lower() for r in self.roles):
-                self._refuse(f"There is already a role called {name}.")
-            r = {"role_id": name.lower().replace(" ", "-"), "name": name, "built_in": False}
-            self.roles.append(r)
-            return {"role": dict(r)}
-        if method == METHOD_ROLES_RENAME:
-            r = next((r for r in self.roles if r["role_id"] == params.get("role_id")), None)
-            if r is None:
-                self._refuse("That role doesn't exist.")
-            r["name"] = params["name"]  # type: ignore[index]
-            return {"role": dict(r)}  # type: ignore[arg-type]
-        if method == METHOD_ROLES_REMOVE:
-            r = next((r for r in self.roles if r["role_id"] == params.get("role_id")), None)
-            if r is None:
-                self._refuse("That role doesn't exist.")
-            if users := [p["name"] for p in self.people if params["role_id"] in p["role_ids"]]:
-                self._refuse(f"{r['name']} is still given to {', '.join(users)}; give them another role first.")  # type: ignore[index]
-            self.roles.remove(r)  # type: ignore[arg-type]
-            return {}
         raise AssertionError(f"FakeCore: nothing answers {method}")
 
 
@@ -467,8 +545,24 @@ class FakeLink:
         return lambda: self.followed.pop(resource, None)
 
     def status(self) -> dict[str, Any]:
+        from .hiroleague import waiting_items
+
         return {"url": "ws://127.0.0.1:18082", "status": "connected" if self.client.connected else "disconnected",
-                "error": None, "core": self.client.status_detail.get("core") if self.client.connected else None}
+                "error": None, "core": self.client.status_detail.get("core") if self.client.connected else None,
+                "waiting": waiting_items(self.approval)}
+
+    # What the owner approved the app for, as the link keeps it (Permissions phase 8): None, the core said nothing
+    approval: Any = None
+
+    def approved_for(self, permission: str, subject: str = "") -> bool:
+        from .hiroleague import covers
+
+        return covers(self.approval, permission, subject)
+
+    async def ask(self, to: str, method: str, params: dict[str, Any] | None = None, *, timeout: float = 15.0) -> dict[str, Any]:
+        from .hiroleague import ask_app
+
+        return await ask_app(self.client, to, method, params, timeout=timeout)
 
 
 class DictSettings:

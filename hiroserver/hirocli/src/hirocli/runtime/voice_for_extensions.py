@@ -30,7 +30,7 @@ from ..domain.people import get_person
 from ..services import fakes, voice
 from ..services.voice.engine import encode
 from ..services.voice.kit import MAX_CHARS, Speech
-from .ai_for_extensions import _caller_name
+from .ai_for_extensions import _caller_name, refuse_undeclared
 from .request_handler import EXTENSIONS_ONLY, RequestContext, RequestRefused, gate
 
 log = Logger.get("VOICE")
@@ -42,6 +42,7 @@ async def handle_voice_speak(params: dict[str, Any], ctx: RequestContext) -> dic
     mode = gate("voices", VOICE_ERROR_FAILED, fakes=True)  # a test environment's switchboard
     name = await _caller_name(ctx)
     text, use, profile_id, person_id, label = _params(params)
+    await refuse_undeclared(ctx, name, "voice_uses", use)  # Permissions phase 8
     if person_id and await asyncio.to_thread(get_person, ctx.workspace_path, person_id) is None:
         raise RequestRefused(VOICE_ERROR_INVALID, f"There's no person {person_id!r} in the family list.")
     if mode == "fake":

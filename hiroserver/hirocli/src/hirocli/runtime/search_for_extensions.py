@@ -34,7 +34,7 @@ from ..domain.preferences import (
 )
 from ..services import fakes
 from ..services import search_profiles as search
-from .ai_for_extensions import _caller_name
+from .ai_for_extensions import _caller_name, refuse_undeclared
 from .request_handler import EXTENSIONS_ONLY, RequestContext, RequestRefused, gate
 
 log = Logger.get("AI.SEARCH")
@@ -78,6 +78,7 @@ async def handle_ai_embed(params: dict[str, Any], ctx: RequestContext) -> dict[s
     mode = gate("ai", AI_ERROR_FAILED, fakes=True)
     name = await _caller_name(ctx)
     use_key, profile_id = _use_and_profile(params, name)
+    await refuse_undeclared(ctx, name, "embed_uses", _text(params, "use", required=False).strip())  # phase 8
     texts = _texts(params, "texts", search.MAX_TEXTS)
     if mode == "fake":
         # The stand-in (services/fakes.py): each text's own repeatable vector, sized as the picked profile's model
@@ -103,6 +104,7 @@ async def handle_ai_rerank(params: dict[str, Any], ctx: RequestContext) -> dict[
     mode = gate("ai", AI_ERROR_FAILED, fakes=True)
     name = await _caller_name(ctx)
     use_key, profile_id = _use_and_profile(params, name)
+    await refuse_undeclared(ctx, name, "rerank_uses", _text(params, "use", required=False).strip())  # phase 8
     query = _text(params, "query", required=True)
     documents = _texts(params, "documents", search.MAX_DOCUMENTS)
     top_n = params.get("top_n")

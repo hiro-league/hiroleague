@@ -14,7 +14,7 @@ from sqlmodel import Session
 
 from hiro_extension_kit import voices
 from hiro_extension_kit.db import engine
-from hiro_extension_kit.errors import Invalid, Unavailable
+from hiro_extension_kit.errors import Invalid, NotAllowed, NotApproved, NotSignedIn, Unavailable
 from hiro_extension_kit.hiroleague import check_admin_url, derived_admin_url
 from hiro_extension_kit.testing import FakeCore, FakeLink
 
@@ -86,8 +86,28 @@ def test_without_the_core_nothing_is_said_and_the_last_list_stays(core):
 
 
 def test_the_speak_default_is_saved_in_the_core(core):
-    asyncio.run(voices.set_default("hh-abc123"))
+    asyncio.run(voices.set_default("hh-abc123", signed_in=None))
     assert ("voice.uses.set", {"use": "speak", "profile": "hh-abc123"}) in core.asked
+
+
+def test_the_speak_default_is_picked_for_the_person_signed_in(core):
+    """Permissions phase 8: their proof goes with it, and the core answers by their rights: an owner may, an adult
+    whose roles lack Profiles: change may not, in the core's words."""
+    owner, adult = core.person("Michel", "owner"), core.person("Mark", "adult")
+    core.tokens.update({"p-owner": owner["person_id"], "p-adult": adult["person_id"]})
+    asyncio.run(voices.set_default("hh-abc123", signed_in="p-owner"))
+    assert ("voice.uses.set", "p-owner") in core.signed_in
+    with pytest.raises(NotAllowed, match="Mark may not do this"):
+        asyncio.run(voices.set_default("hh-abc123", signed_in="p-adult"))
+    with pytest.raises(NotSignedIn, match="Sign in again"):
+        asyncio.run(voices.set_default("hh-abc123", signed_in="p-forgotten"))
+
+
+def test_an_app_not_approved_to_speak_says_so_in_the_cores_words(core):
+    core.approved = ["people.see"]  # the owner approved it for less than it asks
+    with pytest.raises(NotApproved, match="isn't approved to make spoken clips") as info:
+        asyncio.run(voices.speak(None, "Someone is at the door"))
+    assert info.value.status == 403
 
 
 def test_the_admin_address_is_set_or_derived_from_the_cores_host_and_port():

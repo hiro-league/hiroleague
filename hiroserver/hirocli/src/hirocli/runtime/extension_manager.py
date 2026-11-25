@@ -103,6 +103,8 @@ from hiro_commons.signing import verify_signature
 
 from ..domain.channel_config import list_enabled_channels, load_channel_config
 from ..domain.talkers import talking_numbers
+from ..domain import approvals
+from . import app_asks
 from ..domain.extensions import (
     KIND_APP,
     KIND_CHANNEL,
@@ -359,6 +361,7 @@ class ExtensionManager:
                 "fixed at pairing. Give it its name back, or remove it and pair it anew.")
         dumped = info.model_dump(mode="json", by_alias=True)
         await asyncio.to_thread(touch_paired_extension, self._ctx.workspace_path, extension_id, info=dumped)
+        await asyncio.to_thread(approvals.keep, self._ctx.workspace_path, extension_id, dumped)  # Permissions phase 8
         if conn is not None:
             conn.info = dumped
         log.info(
@@ -608,6 +611,15 @@ class ExtensionManager:
         else:
             raise _Denied(EXTENSION_DENIED_BAD_FRAME, f"expected pair or auth, got {kind!r}")
 
+        approval: dict[str, Any] | None = None
+        if extension.kind == KIND_APP:
+            # Permissions phase 8: the approval follows the declaration just kept; the app is told what it has
+            dumped_info = info.model_dump(mode="json", by_alias=True)
+            if kind == EXTENSION_FRAME_AUTH:
+                await asyncio.to_thread(approvals.keep, workspace, extension.extension_id, dumped_info)
+            approval = await asyncio.to_thread(approvals.on_the_wire, workspace, extension.extension_id, dumped_info)
+            app_asks.forget(extension.extension_id)
+
         if extension.started_by_core and (info.config_schema is not None or info.capabilities is not None):
             await asyncio.to_thread(self._save_descriptor, extension.name, info)
 
@@ -626,6 +638,8 @@ class ExtensionManager:
                         "admin_port": self._ctx.config.admin_port,
                         "repo": CORE_REPO,  # as core.info answers
                     },
+                    # Permissions phase 8: what it is approved for, and what waits for the owner
+                    **({"approval": approval} if approval is not None else {}),
                 }
             )
         )
@@ -679,6 +693,8 @@ class ExtensionManager:
             # Checked after the code, so a guess learns nothing; the code stays for the app it was made for.
             raise _Denied(EXTENSION_DENIED_NAME_TAKEN, str(exc)) from exc
         await asyncio.to_thread(clear_extension_pairing, workspace)  # one code, one extension
+        # Permissions phase 8: a new app is approved for nothing until the owner answers on the Extensions page
+        await asyncio.to_thread(approvals.keep, workspace, extension.extension_id, dumped, new=True)
         self._wrong_codes = 0
         log.info(f"✅ Extension paired — {info.name}", kind=extension.kind, extension_id=extension.extension_id)
         return extension
@@ -703,6 +719,7 @@ class ExtensionManager:
         await asyncio.to_thread(clear_extension_pairing, workspace)  # one code, one pairing
         if extension is None:
             raise _Denied(EXTENSION_DENIED_NOT_PAIRED, "the app this code pairs again was removed meanwhile")
+        await asyncio.to_thread(approvals.keep, workspace, extension_id, dumped)  # its approval follows it
         self._wrong_codes = 0
         log.info(f"✅ Extension paired again — {found.name}: its rights, AI picks and name kept",
                  extension_id=extension_id)

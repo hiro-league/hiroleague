@@ -4,6 +4,8 @@ story into the core (the frame's traceparent), the core's handler runs in it, an
 
 from __future__ import annotations
 
+from hirocli.runtime.tests.approved import approve_every_app
+
 import asyncio
 import socket
 from pathlib import Path
@@ -50,6 +52,7 @@ async def _connect(workspace: Path, port: int, folder: Path, info: ExtensionInfo
     await _wait_for(lambda: client.status == STATUS_NOT_PAIRED)
     client.pair(start_extension_pairing(workspace, code_length=6, ttl_seconds=60).code)
     await _wait_for(lambda: client.status == STATUS_CONNECTED)
+    approve_every_app(workspace)  # Permissions phase 8: not what this test is about
     return client, running
 
 

@@ -79,7 +79,12 @@ class ExtensionStateTool(Tool):
             return ExtensionStateResult(note="Extensions aren't running in this Hiro")
         live = manager.snapshot()
         wanted = (extension or "").strip().lower()
-        targets = {eid: s for eid, s in live.items() if not wanted or str(s.get("name") or "").lower() == wanted}
+        # Permissions phase 8: Hiro reads only the apps the owner approved to tell it (their text enters its context)
+        told = await asyncio.to_thread(_approved_to_tell, getattr(rt.comm_manager.ctx, "workspace_path", None), list(live))
+        targets = {
+            eid: s for eid, s in live.items()
+            if eid in told and (not wanted or str(s.get("name") or "").lower() == wanted)
+        }
         if not targets:
             note = f"No extension named {extension!r} is connected" if wanted else "No extension is connected now"
             return ExtensionStateResult(note=note)
@@ -102,3 +107,18 @@ class ExtensionStateTool(Tool):
             log.warning(f"⚠️ Extension state not read — {name}", error=exc.message, code=exc.code)
             return {"extension": name, "error": f"{name} didn't answer: {exc.message}"}
         return {"extension": name, "description": str(info.get("description") or ""), "state": answer.get("state")}
+
+
+def _approved_to_tell(workspace_path: Any, extension_ids: list[str]) -> set[str]:
+    """The connected apps approved for hiro.tell (an app from before approvals, approved for everything, too)."""
+    from hiro_channel_sdk.approvals import CORE_ASKS
+
+    from ..domain import approvals
+
+    permission = CORE_ASKS[METHOD_EXTENSION_STATE]
+    told: set[str] = set()
+    for eid in extension_ids:
+        approval = approvals.read(workspace_path, eid)
+        if approval is not None and approvals.covers(approval.approved, permission):
+            told.add(eid)
+    return told

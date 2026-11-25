@@ -12,7 +12,10 @@ several roles, and their rights add up (Permissions phase 5).
 The copy is read from the core (`people.list`, through `hiroleague.link`) when the core says `resource.changed` for
 `people`, when the link connects, and in the link's slow round (follow.py): the `FamilySync` worker follows it. With
 the core down, the app keeps its last copy, so nobody is locked out. A change made here (a user's roles) is asked of
-the core first (`people.update`); the core's refusals ("the only Owner") come back as `Invalid`, in its words. Open pages hear the notice "family".
+the core first (`people.update`), for the person signed in who makes it (their proof, `signed_in`: the core answers by
+their rights, Permissions phase 8); the core's refusals ("the only Owner") come back as `Invalid`, in its words, and its
+no to the app or the person as the kit's `NotApproved`, `NotAllowed` or `NotSignedIn` (errors.refusal). No app gives or
+takes the Owner role. Open pages hear the notice "family".
 
 An app that took a feature over from another (`Extension.rights_from`: NetHiro and TrainHiro, from HomeHiro) asks the
 core once, on its first connection, to copy each role's rights there into the app's features
@@ -31,16 +34,17 @@ from datetime import UTC, datetime
 from typing import Any
 
 from hiro_channel_sdk import ExtensionRequestError
-from hiro_channel_sdk.constants import METHOD_PEOPLE_LIST, METHOD_PEOPLE_UPDATE, METHOD_ROLES_IMPORT_RIGHTS, RESOURCE_PEOPLE
+from hiro_channel_sdk.constants import (METHOD_PEOPLE_ADD, METHOD_PEOPLE_LIST, METHOD_PEOPLE_UPDATE,
+                                        METHOD_ROLES_IMPORT_RIGHTS, RESOURCE_PEOPLE)
 from hiro_channel_sdk.workers import Worker
 from sqlmodel import Session, select
 
 from . import calls, identity, settings
 from .db import run_db
-from .errors import AppError, Invalid, OutsideError, Unavailable, failed, translate
+from .errors import AppError, Invalid, OutsideError, Unavailable, failed, refusal, translate
 from .events import bus
 from .extension import ext
-from .hiroleague import link
+from .hiroleague import as_person, link
 from .auth.models import AppUser, CorePerson, Role
 
 log = identity.logger("family")
@@ -90,16 +94,19 @@ def _no_core() -> str:
 # --- asking the core -----------------------------------------------------------------------------------------------
 
 
-async def ask(method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-    """One request to the core's family list, timed; a refusal is `Invalid` in the core's words, not being connected
-    `Unavailable`, anything else a `FamilyError`."""
+async def ask(method: str, params: dict[str, Any] | None = None, *, signed_in: str | None = None) -> dict[str, Any]:
+    """One request to the core's family list, timed; a refusal is `Invalid` in the core's words, the core's no to the
+    app or the person the kit's error for it (errors.refusal), not being connected `Unavailable`, anything else a
+    `FamilyError`. `signed_in`: the proof of the person a change is made for (people.add, people.update), else none."""
     client = link.client
     if not client.connected:
         raise Unavailable(f"{_no_core()}: the family list can't be read or changed now")
     started = calls.start()
     try:
-        answer = await client.request(method, params or {}, timeout=TIMEOUT)
+        answer = await client.request(method, as_person(params or {}, signed_in), timeout=TIMEOUT)
     except ExtensionRequestError as exc:
+        if (refused := refusal(exc)) is not None:
+            raise refused from exc
         if exc.code == "invalid_params":  # the core's reason, written for people ("Mona is the only Owner…")
             raise Invalid(exc.message) from exc
         if exc.code == "not_connected":
@@ -366,15 +373,26 @@ def _store_and_recompute(session: Session, p: FamilyPerson, calls_them: str) -> 
     session.commit()
 
 
-async def update_person(core_person_id: str, **fields: str | list[str]) -> FamilyPerson:
-    """Change a core person (name, role_ids, calls_them, whatsapp): asked of the core, then written to the copy."""
-    answer = await ask(METHOD_PEOPLE_UPDATE, {"person_id": core_person_id, **fields})
+async def _keep_person(answer: dict[str, Any]) -> FamilyPerson:
     raw = answer.get("person")
     p = _person(raw)
     async with lock:  # a sync started by the core's "people changed" may be writing the same row
         await run_db(_store_and_recompute, p, _calls_them(raw))
     bus.publish("family")
     return p
+
+
+async def update_person(core_person_id: str, *, signed_in: str | None, **fields: str | list[str]) -> FamilyPerson:
+    """Change a core person (name, role_ids, calls_them, whatsapp) for the person signed in (`signed_in`: their proof,
+    `request.state.core_token`; only the owner may): asked of the core, then written to the copy."""
+    return await _keep_person(await ask(METHOD_PEOPLE_UPDATE, {"person_id": core_person_id, **fields},
+                                        signed_in=signed_in))
+
+
+async def add_person(name: str, *, signed_in: str | None, **fields: str | list[str]) -> FamilyPerson:
+    """Add someone to the family list (role_ids, calls_them, whatsapp) for the person signed in (`signed_in`, as
+    `update_person`): asked of the core, then written to the copy. Never as an Owner: that is given in HiroLeague."""
+    return await _keep_person(await ask(METHOD_PEOPLE_ADD, {"name": name, **fields}, signed_in=signed_in))
 
 
 def reachable(session: Session, core_person_id: str) -> CorePerson:

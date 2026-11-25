@@ -511,6 +511,8 @@ def remove_person(workspace_path: Path, person_id: str) -> Person:
         if person.sign_in is not None:
             _check_not_last_sign_in(conn, person)
         conn.execute("DELETE FROM admin_sessions WHERE person_id = ?", (person_id,))
+        # Permissions phase 8: their proofs given to apps end with their sessions here
+        conn.execute("DELETE FROM person_tokens WHERE person_id = ?", (person_id,))
         conn.execute("DELETE FROM person_roles WHERE person_id = ?", (person_id,))
         conn.execute("DELETE FROM people WHERE person_id = ?", (person_id,))
         conn.commit()
@@ -549,6 +551,8 @@ def set_sign_in(workspace_path: Path, person_id: str, *, sign_in: str, password_
             (sign_in, password_hash, _now(), person_id),
         )
         conn.execute("DELETE FROM admin_sessions WHERE person_id = ?", (person_id,))
+        # Permissions phase 8: their proofs given to apps end with their sessions here
+        conn.execute("DELETE FROM person_tokens WHERE person_id = ?", (person_id,))
         conn.commit()
     _changed(workspace_path, "sign_in_set", person_id=person_id)
     return person.model_copy(update={"sign_in": sign_in})
@@ -568,6 +572,8 @@ def clear_sign_in(workspace_path: Path, person_id: str) -> Person:
             (_now(), person_id),
         )
         conn.execute("DELETE FROM admin_sessions WHERE person_id = ?", (person_id,))
+        # Permissions phase 8: their proofs given to apps end with their sessions here
+        conn.execute("DELETE FROM person_tokens WHERE person_id = ?", (person_id,))
         conn.commit()
     _changed(workspace_path, "sign_in_cleared", person_id=person_id)
     return person.model_copy(update={"sign_in": None})

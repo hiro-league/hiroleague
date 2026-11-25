@@ -1,8 +1,9 @@
 // Settings → Users: everyone who has opened the app, with their roles. A user is a person in HiroLeague's family list
 // (signed in at HiroLeague). The owner gives them one or several roles (their rights add up), or No access; where the
 // app has a scope (UsersApp.scope: HomeHiro's My room), also its areas and things when a role uses it. The roles are
-// HiroLeague's family list's: picking them changes that person's roles there, and HiroLeague refuses taking the only
-// Owner's away (its words are shown). No access is the app's own: the panel sets it, and so does each row's button.
+// HiroLeague's family list's: picking them changes that person's roles there (its refusals' words are shown). The Owner
+// role shows, but is given or taken only in HiroLeague's admin (toggleRole leaves it). No access is the app's own: the
+// panel sets it, and so does each row's button.
 import { USERS } from '$hiro-app/users';
 import { Draft } from '$kit/state/draft.svelte';
 import { KeyedAction } from '$kit/state/keyed-action.svelte';

@@ -29,10 +29,12 @@ from hiro_commons.log import Logger
 
 from ..domain.access import copy_rights, import_rights, rename_rights, roles_for_extension
 from ..domain.people import (
+    OWNER_ROLE,
     PeopleError,
     Person,
     add_person,
     add_role,
+    get_person,
     list_people,
     remove_role,
     rename_role,
@@ -93,8 +95,23 @@ def _role_ids(params: dict[str, Any]) -> list[str] | None:
     return [str(r) for r in value]
 
 
+_NO_OWNER = "No app gives or takes the Owner role: that is done in HiroLeague's admin."
+
+
+def _gives_or_takes_owner(workspace_path: Path, person_id: str, role_id: str | None, role_ids: list[str] | None) -> bool:
+    """Permissions phase 8: whether a change through an app would give or take the Owner role (it never may, whoever
+    is signed in). One ``role_id`` alone makes it their only role."""
+    new = role_ids if role_ids is not None else ([role_id] if role_id else None)
+    if new is None:
+        return False
+    old = get_person(workspace_path, person_id) if person_id else None
+    return (OWNER_ROLE in new) != (old is not None and OWNER_ROLE in old.role_ids)
+
+
 async def handle_people_add(params: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
     role_ids = _role_ids(params)
+    if await asyncio.to_thread(_gives_or_takes_owner, _workspace(ctx), "", _str(params, "role_id"), role_ids):
+        raise RequestRefused("not_allowed", _NO_OWNER)
     person = await _change(
         ctx,
         "person added",
@@ -115,6 +132,8 @@ async def handle_people_update(params: dict[str, Any], ctx: RequestContext) -> d
     if not person_id:
         raise RequestRefused("invalid_params", "person_id is missing")
     role_ids = _role_ids(params)
+    if await asyncio.to_thread(_gives_or_takes_owner, _workspace(ctx), person_id, _str(params, "role_id"), role_ids):
+        raise RequestRefused("not_allowed", _NO_OWNER)
     person = await _change(
         ctx,
         "person updated",

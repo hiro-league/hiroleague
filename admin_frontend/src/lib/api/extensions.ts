@@ -36,6 +36,11 @@ export type ExtensionRow = {
   /** A channel with an account: whether it is linked now (null when it has none, or the server isn't here). */
   linked: boolean | null;
   account: string;
+  /** Permissions phase 8: an app never answered (it gets nothing it asks for). */
+  pending: boolean;
+  /** An app with something that waits for the owner's yes, and how many items. */
+  waits: boolean;
+  waiting_count: number;
 };
 
 /** Where extensions connect: the configured address plus what the running server does. */
@@ -107,6 +112,42 @@ export async function setExtensionAddress(host: string) {
 export async function askExtensionInfo(extensionId: string) {
   return apiRequest<ExtensionInfoData>(`/extensions/${encodeURIComponent(extensionId)}/info`, {
     method: 'POST'
+  });
+}
+
+// --- Permissions phase 8: what an app is approved for (the route's AppApproval) ---
+
+/** One thing an app asks: a permission, its subject (the app asked, the address, "name:port"), in the owner's words. */
+export type ApprovalItem = {
+  permission: string;
+  subject: string;
+  words: string;
+  required: boolean;
+  why: string;
+  approved: boolean;
+  waiting: boolean;
+  understood: boolean;
+};
+
+export type AppApproval = {
+  extension_id: string;
+  name: string;
+  approved_for_everything: boolean;
+  pending: boolean;
+  waits: boolean;
+  items: ApprovalItem[];
+  claimed: string[];
+};
+
+export async function getExtensionApproval(extensionId: string, signal?: AbortSignal) {
+  return apiRequest<AppApproval>(`/extensions/${encodeURIComponent(extensionId)}/approval`, { signal });
+}
+
+/** The owner's yes: every required item, and the optional ones switched on ("permission" or "permission:subject"). */
+export async function approveExtension(extensionId: string, optional: string[]) {
+  return apiRequest<AppApproval>(`/extensions/${encodeURIComponent(extensionId)}/approval`, {
+    method: 'PUT',
+    body: { optional }
   });
 }
 

@@ -169,6 +169,47 @@ def register(extension_app: typer.Typer, console: Console) -> None:
             console.print("[dim]Its own data stays where it is. Caddy's file is written again at the core's next "
                           "start.[/dim]")
 
+    @extension_app.command("approve")
+    def extension_approve(
+        extension: str = typer.Argument(..., help="The app's name or id (see `hiro extension list`)."),
+        optional: Optional[list[str]] = typer.Option(
+            None, "--optional", help="An optional item to approve too (permission, or permission:subject); repeat it."
+        ),
+        all_: bool = typer.Option(False, "--all", help="Approve every optional item too."),
+        workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help=_WORKSPACE_HELP),
+    ) -> None:
+        """Approve what a paired app asks to do on its own (Permissions phase 8): every required item, and the
+        optional ones named. In the running core its LAN name is claimed and the app is told at once."""
+        from pathlib import Path
+
+        import httpx
+        from hiro_commons.process import is_running, read_pid
+
+        from ..constants import PID_FILENAME
+        from ..domain.workspace import resolve_workspace
+        from ..domain.workspace_server_client import post_invoke_sync
+        from ..tools.extension import ExtensionApprovalResult, ExtensionApproveTool
+
+        log.info("hiro extension approve", extension=extension, all=all_)
+        params = {"extension": extension, "optional": optional or [], "all": all_}
+        try:
+            entry, _ = resolve_workspace(workspace)
+            workspace_path = Path(entry.path)
+            if is_running(read_pid(workspace_path, PID_FILENAME)):
+                result = ExtensionApprovalResult(**post_invoke_sync(workspace_path, "extension_approve",
+                                                                    {**params, "workspace": entry.id}))
+            else:
+                result = ExtensionApproveTool().execute(**params, workspace=workspace)
+        except (WorkspaceError, RuntimeError, OSError, ValueError, LookupError, httpx.HTTPError) as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+        approved = [i for i in result.items if i["approved"]]
+        console.print(f"[green]Approved[/green] [bold]{result.name}[/bold]: {len(approved)} item(s).")
+        for item in result.items:
+            mark = "[green]yes[/green]" if item["approved"] else "[yellow]no[/yellow]"
+            subject = f" ({item['subject']})" if item["subject"] else ""
+            console.print(f"  {mark}  {item['words']}{subject}")
+
     @extension_app.command("address")
     def extension_address(
         host: Optional[str] = typer.Argument(

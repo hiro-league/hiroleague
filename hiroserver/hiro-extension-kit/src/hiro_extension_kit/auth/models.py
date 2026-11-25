@@ -59,7 +59,9 @@ class AppUser(SQLModel, table=True):
 class WebSession(SQLModel, table=True):
     """A browser signed in at the app's address, through HiroLeague's sign-in (auth/sessions.py, Phase 8). Only the
     token's hash is kept; the token itself is in the browser's cookie. Kept until it goes unused for SESSION_DAYS or
-    the user signs out; expired ones are deleted at the next sign-in."""
+    the user signs out; expired ones are deleted at the next sign-in. `core_token` is the person's proof the core gave
+    at sign-in (Permissions phase 8): the app sends it with what it asks the core for them (auth/guard.py puts it on
+    `request.state.core_token`); a secret, like the cookie's own, and never logged."""
 
     id: str = Field(primary_key=True)  # sha256 of the token
     user_id: str = Field(foreign_key="appuser.id", index=True)
@@ -67,3 +69,4 @@ class WebSession(SQLModel, table=True):
     created_at: datetime
     last_used: datetime
     expires_at: datetime
+    core_token: str | None = None  # None: signed in through a core from before approvals (it gave none)

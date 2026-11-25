@@ -7,6 +7,9 @@ Every expected error is an `AppError`: its message is for the user, its `status`
 |-------------------------------|--------|-------------------------------------------------------------|
 | `Invalid`                     | 400    | the request breaks one of the app's rules                   |
 | `NotFound`                    | 404    | what it names doesn't exist                                 |
+| `NotSignedIn`                 | 401    | nobody signed in, or the core asks them to sign in again    |
+| `NotAllowed`                  | 403    | the user's roles (here or in the core) don't allow it       |
+| `NotApproved`                 | 403    | the owner hasn't approved the app for this in HiroLeague    |
 | `Busy`                        | 409    | something that needs the same thing is running already      |
 | `Unavailable`                 | 503    | not possible right now (not set up, the database is busy)   |
 | `OutsideError`                | 502    | an outside system failed; one subclass per system, defined  |
@@ -14,6 +17,10 @@ Every expected error is an `AppError`: its message is for the user, its `status`
 
 Anything else is unexpected: a 500 whose traceback is logged. Every answer is
 `{"detail": "<what went wrong, in words>"}`, like FastAPI's own HTTPException.
+
+The core's refusals of an app's ask (Permissions phase 8: not approved, not allowed, sign in again) become these errors
+in one place, `refusal()`, which every helper that asks the core calls first: they carry the core's words, and are
+never retried nor wrapped into the helper's own `OutsideError`.
 """
 
 import functools
@@ -26,6 +33,8 @@ from typing import Any, TypeVar
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from hiro_channel_sdk import ExtensionRequestError
+from hiro_channel_sdk.approvals import NOT_ALLOWED, NOT_APPROVED, SIGN_IN_AGAIN
 from sqlalchemy.exc import OperationalError
 
 from . import identity, page_problems, stories
@@ -69,6 +78,13 @@ class NotAllowed(AppError):
     status = 403
 
 
+class NotApproved(AppError):
+    """The owner hasn't approved the app for this in HiroLeague (its Extensions page), or it still waits there (403).
+    Permissions phase 8: the core's words say which, and where to approve it."""
+
+    status = 403
+
+
 class Busy(AppError):
     """Something that needs the same thing is running already (409)."""
 
@@ -91,6 +107,17 @@ class OutsideError(AppError):
     """An outside system failed (502). Each system has its own subclass, raised only by its client."""
 
     status = 502
+
+
+# The core's refusals of an app's ask (the SDK's approvals.py), as the kit's errors
+_REFUSALS: dict[str, type[AppError]] = {NOT_APPROVED: NotApproved, NOT_ALLOWED: NotAllowed, SIGN_IN_AGAIN: NotSignedIn}
+
+
+def refusal(exc: ExtensionRequestError) -> AppError | None:
+    """The core's refusal of an app's ask as the kit's error, in the core's words (written for people); None for any
+    other answer, which the helper that asked maps as before. A refusal is an answer, not a failure: never retried."""
+    error = _REFUSALS.get(exc.code)
+    return error(exc.message) if error is not None else None
 
 
 def database_busy(exc: BaseException) -> bool:

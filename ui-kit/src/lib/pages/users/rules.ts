@@ -1,11 +1,17 @@
 // Settings → Users and Roles: the small rules both tabs share. Pure, with tests (rules.test.ts).
 import type { AppUser, Feature, Role, UserChange } from './types';
 
+/** The Owner role: shown, but no app gives or takes it (Permissions phase 8; the backend and the core refuse it too). */
+export const OWNER = 'owner';
+export const OWNER_IN_HIROLEAGUE = "The Owner role is given in HiroLeague's admin.";
+
 /** A new user waits until the owner gives them a role or No access. */
 export const isWaiting = (u: Pick<AppUser, 'role_ids' | 'denied'>) => u.role_ids.length === 0 && !u.denied;
 
-/** Hold a role or let it go, in the roles' order (`order`: every role's id, as the Roles tab lists them). */
+/** Hold a role or let it go, in the roles' order (`order`: every role's id, as the Roles tab lists them). The Owner
+ * role stays as it is: it is given in HiroLeague's admin. */
 export function toggleRole(held: readonly string[], id: string, order: readonly string[]): string[] {
+	if (id === OWNER) return [...held];
 	const next = held.includes(id) ? held.filter((x) => x !== id) : [...held, id];
 	return next.sort((a, b) => order.indexOf(a) - order.indexOf(b));
 }

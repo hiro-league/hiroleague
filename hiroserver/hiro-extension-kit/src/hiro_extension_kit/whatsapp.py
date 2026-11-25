@@ -9,6 +9,10 @@ honours OUTPUTS=off (`Extension.outputs`).
 `notify()` asks Hiro to tell someone (the core's `notify`): Hiro sends it on WhatsApp, as given or written by its
 character, and names the person by their id in the family list.
 
+The core's no to the app (Permissions phase 8: not approved to notify people, a send it may not make on its own) or to
+the person signed in (`check` is the owner's) is the kit's error for it, in the core's words (errors.refusal), never a
+`WhatsAppError`: nothing was sent.
+
 Backend kit, step 4: HomeHiro's and NetHiro's copies; HomeHiro's had all of it, NetHiro's the status and text sends.
 """
 
@@ -34,9 +38,9 @@ from pydantic import BaseModel, ConfigDict
 from . import identity
 from . import calls
 from . import switchboard
-from .errors import Invalid, OutsideError, translate
+from .errors import AppError, Invalid, OutsideError, refusal, translate
 from .extension import ext
-from .hiroleague import link
+from .hiroleague import as_person, link
 
 log = identity.logger("whatsapp")
 
@@ -104,7 +108,8 @@ def describe(running: bool, state: str, detail: dict[str, Any], waiting_for_link
 
 
 async def _ask(method: str, params: dict[str, Any], timeout: float, *, sends: bool = False) -> dict[str, Any]:
-    """One request to the core, timed; every failure as a WhatsAppError in words.
+    """One request to the core, timed; every failure as a WhatsAppError in words, the core's refusals of the app or the
+    person as the kit's errors (nothing was sent).
 
     sends: the request sends a message, so a failure after it left may still have sent it: say so."""
     client = link.client
@@ -119,7 +124,9 @@ async def _ask(method: str, params: dict[str, Any], timeout: float, *, sends: bo
     return answer
 
 
-def _error(exc: ExtensionRequestError, timeout: float, sends: bool) -> WhatsAppError:
+def _error(exc: ExtensionRequestError, timeout: float, sends: bool) -> AppError:
+    if (refused := refusal(exc)) is not None:  # refused before anything left: never "it may have gone out"
+        return refused
     maybe = "; it may have gone out already (check before sending again)" if sends else ""
     code = exc.code
     if code == "not_connected":  # it was connected when it asked: the connection dropped on the way
@@ -158,11 +165,12 @@ def _held() -> str:
     return "" if mode == switchboard.REAL else f"WhatsApp is {mode} here (the switchboard)"
 
 
-async def check(numbers: list[str]) -> list[dict[str, Any]]:
-    """Which numbers have WhatsApp: [{"query", "on_whatsapp", "jid"}], in the order asked."""
+async def check(numbers: list[str], *, signed_in: str | None) -> list[dict[str, Any]]:
+    """Which numbers have WhatsApp: [{"query", "on_whatsapp", "jid"}], in the order asked. Asked for the person signed
+    in (`signed_in`: their proof, `request.state.core_token`): only the owner may."""
     if len(numbers) > WHATSAPP_CHECK_MAX:
         raise Invalid(f"At most {WHATSAPP_CHECK_MAX} numbers can be checked at once")
-    answer = await _ask(METHOD_WHATSAPP_CHECK, {"numbers": numbers}, CHECK_TIMEOUT)
+    answer = await _ask(METHOD_WHATSAPP_CHECK, as_person({"numbers": numbers}, signed_in), CHECK_TIMEOUT)
     with translate(WhatsAppError, "HiroLeague's WhatsApp check can't be read"):
         return [{"query": str(a["query"]), "on_whatsapp": bool(a["on_whatsapp"]), "jid": str(a["jid"])}
                 for a in answer["answers"]]
@@ -196,16 +204,27 @@ async def send(to: str, text: str | None = None, *, image: bytes | None = None,
 NOTIFY_TIMEOUT = 120.0  # seconds: Hiro may write the message and make a voice note before WhatsApp sends it
 
 
-async def notify(core_person_id: str, name: str, text: str, *, character: bool) -> bool:
+async def notify(core_person_id: str, name: str, text: str = "", *, character: bool = False,
+                 image: bytes | None = None, voice: bytes | None = None, voice_seconds: float = 0,
+                 waveform: bytes = b"", transcript: str = "") -> bool:
     """Ask Hiro to tell one person of HiroLeague's family list (Phase 6: by their core person id; the core finds their
     number and the name it uses). `name` is for the app's own log. Returns False when OUTPUTS=off.
 
-    character: Hiro's character writes it in its own words from `text`; else `text` goes as it is."""
+    character: Hiro's character writes it in its own words from `text`; else `text` goes as it is. Permissions phase
+    8: an app tells people only this way, so it carries what send() did: a picture (a JPEG, `text` its caption) or a
+    voice note (an OGG/Opus clip, its length and waveform, and its transcript for the owner's conversation)."""
     style = NOTIFY_STYLE_CHARACTER if character else NOTIFY_STYLE_EXACT
     if why := _held():
-        log.info("%s, not asking Hiro to tell %s (%s): %s", why, name, style, text)
+        log.info("%s, not asking Hiro to tell %s (%s): %s%s", why, name, style, text,
+                 " [+image]" if image else f" [+voice note {voice_seconds:.1f} s]" if voice else "")
         return False
-    params = {"to": [{"person": core_person_id}], "medium": NOTIFY_MEDIUM_WHATSAPP, "text": text, "style": style}
+    params: dict[str, Any] = {"to": [{"person": core_person_id}], "medium": NOTIFY_MEDIUM_WHATSAPP, "text": text,
+                              "style": style}
+    if image:
+        params["image_b64"] = base64.b64encode(image).decode()
+    if voice:
+        params |= {"voice_b64": base64.b64encode(voice).decode(), "voice_seconds": voice_seconds,
+                   "waveform_b64": base64.b64encode(waveform).decode(), **({"transcript": transcript} if transcript else {})}
     answer = await _ask(METHOD_NOTIFY, params, NOTIFY_TIMEOUT, sends=True)
     with translate(WhatsAppError, "Hiro's answer can't be read"):
         result = answer["results"][0]
