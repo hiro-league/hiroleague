@@ -655,3 +655,34 @@ def test_other_commands_keep_ctrl_c(monkeypatch):
     finally:
         signal.signal(signal.SIGINT, before)
     assert seen["handler"] == signal.default_int_handler
+
+
+def test_a_piped_run_writes_a_commit_subject_with_an_arrow_as_utf8_instead_of_crashing(monkeypatch):
+    import io
+    import sys
+
+    import deploy
+
+    subject = "Apps pair from Settings → HiroLeague"
+    cp1252 = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")  # Python's stdout on Windows when piped
+    monkeypatch.setattr(sys, "stdout", cp1252)
+    with pytest.raises(UnicodeEncodeError):
+        deploy.Out(None)(subject)
+    for name in ("stdout", "stderr"):
+        monkeypatch.setattr(sys, name, io.TextIOWrapper(io.BytesIO(), encoding="cp1252"))
+    hw.utf8_output()
+    deploy.Out(None)(subject)
+    hw.say(subject)
+    print("lone \udc80 surrogate", file=sys.stderr, flush=True)
+    assert sys.stdout.buffer.getvalue().decode("utf-8").splitlines() == [subject, subject]
+    assert sys.stderr.buffer.getvalue().decode("utf-8").splitlines() == ["lone ? surrogate"]
+
+
+def test_output_that_cant_be_reconfigured_is_left_as_it_is(monkeypatch):
+    import io
+    import sys
+
+    monkeypatch.setattr(sys, "stdout", io.StringIO())
+    hw.utf8_output()
+    hw.say("→")
+    assert sys.stdout.getvalue() == "→\n"

@@ -136,6 +136,16 @@ def say(msg: str) -> None:
     print(msg, flush=True)
 
 
+def utf8_output() -> None:
+    """stdout and stderr write UTF-8, a character they can't write as "?" (once, at the start).
+
+    Piped (a session's Bash), Python's stdout on Windows is cp1252: a commit subject with "→" made
+    ``deploy --dry-run`` crash (UnicodeEncodeError). A console prints Unicode, so only a piped run broke."""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 _shipping = False  # this process has started the sender (ship.py) once
 _event_lock = threading.Lock()
 
@@ -1943,7 +1953,9 @@ def pair_apps(env: int, apps: list[appfile.App]) -> None:
     args = [f"{x.name}={app_data(env, x) / 'hiroleague'}" for x in apps]
     out = subprocess.run(["uv", "run", "python", str(Path(__file__).with_name("pair_apps.py")),
                           str(core_workspace(env)), url, *args],
-                         cwd=repo_dir(env, "hiroleague") / "hiroserver", capture_output=True, text=True)
+                         cwd=repo_dir(env, "hiroleague") / "hiroserver", capture_output=True, text=True,
+                         # its lines may hold the core's words ("Settings → HiroLeague"): piped, cp1252 can't write them
+                         encoding="utf-8", errors="replace", env={**os.environ, "PYTHONIOENCODING": "utf-8:replace"})
     for line in (out.stdout or "").splitlines():
         say(f"  pairing: {line}")
     if out.returncode:
@@ -2183,6 +2195,7 @@ def ignore_console_interrupt() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    utf8_output()
     p = argparse.ArgumentParser(prog="hiro-work", description=__doc__.split("\n\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("start")

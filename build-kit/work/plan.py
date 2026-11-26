@@ -50,7 +50,6 @@ import argparse
 import json
 import re
 import subprocess
-import sys
 from pathlib import Path
 
 import hiro_work as hw
@@ -505,9 +504,6 @@ def cmd_show(a) -> None:
 
 
 def cmd_plan(a) -> None:
-    # A plan's words hold › and —: a Windows console's own code page would print them as ?
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
     if a.what == "send":
         cmd_send(a)
     elif a.what in ("list", "show"):

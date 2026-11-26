@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -170,9 +169,6 @@ def cmd_show(a) -> None:
 
 
 def cmd_audit(a) -> None:
-    # Reports and messages hold › and —: a Windows console's own code page would print them as ?
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
     if a.what == "start":
         cmd_start(a)
     elif a.what == "report":
