@@ -253,3 +253,66 @@ def test_with_no_one_to_ask_only_approve_says_yes(monkeypatch) -> None:
     with pytest.raises(cli._Stop, match="--approve"):
         cli._consent(Console(), approve=False)
     cli._consent(Console(), approve=True)  # consent given in advance
+
+
+def test_an_install_stopped_after_its_service_was_made_stays_failed_to_remove(workspace: Path, monkeypatch) -> None:
+    _System(monkeypatch, made=True)
+    (row, _), package_id = _prepared(workspace)
+    assert app_install.cancel(workspace, row.key) is False
+    kept = installs.get_install(workspace, row.key)
+    assert kept.state == installs.FAILED and "remove it" in kept.step
+    stored_package(workspace, package_id)  # kept with the row until it is removed
+
+
+# ---------------------------------------------------------------------------
+# Its stories and lines (logs.md: a named story is tested with its title; a failure's line with its level)
+# ---------------------------------------------------------------------------
+
+
+def _lines(caplog) -> list[tuple[int, str, dict]]:
+    from hiro_commons.logging_foundation.line import ATTRIBUTES
+
+    return [(r.levelno, r.getMessage(), getattr(r, ATTRIBUTES, {}) or {}) for r in caplog.records]
+
+
+def test_the_finish_is_the_install_story_and_says_the_yes_and_how(workspace: Path, monkeypatch, caplog) -> None:
+    import logging
+
+    from hirocli.tools import extension_install as tools
+
+    caplog.set_level(logging.DEBUG)
+    monkeypatch.setattr(tools, "_resolve_path", lambda workspace: workspace_path)
+    workspace_path = workspace
+    _System(monkeypatch)
+    package_id = keep_package(workspace, [package_bytes(manifest())])
+    tools.ExtensionInstallPrepareTool().execute(package=package_id, in_advance=True)
+    result = tools.ExtensionInstallFinishTool().execute(key="example.hello")
+    assert result.state == installs.WAITING
+    lines = _lines(caplog)
+    named = [a for _, _, a in lines if a.get("story.name") == "core.extension_install"]
+    assert named and named[0]["story.title"] == "Hello installed"
+    said = [m for _, m, _ in lines if m.startswith("Install: Hello 0.1.0, approved in advance (--approve): people.see")]
+    assert said
+
+
+def test_a_failed_finish_is_a_warning_with_its_key_and_the_remove_is_its_own_story(workspace: Path, monkeypatch,
+                                                                                    caplog) -> None:
+    import logging
+
+    from hirocli.tools import extension_install as tools
+
+    caplog.set_level(logging.DEBUG)
+    monkeypatch.setattr(tools, "_resolve_path", lambda workspace: workspace_path)
+    workspace_path = workspace
+    _System(monkeypatch, uv_fails=True)
+    (row, _), _ = _prepared(workspace)
+    result = tools.ExtensionInstallFinishTool().execute(key=row.key)
+    assert result.refused == "failed" and "no network" in result.words
+    [warning] = [(level, a) for level, m, a in _lines(caplog) if m.startswith("⚠️ Install failed — Hello")]
+    assert warning[0] == logging.WARNING and warning[1]["key"] == "example.hello"
+
+    caplog.clear()
+    forgotten = tools.ExtensionInstallForgetTool().execute(key=row.key)
+    assert forgotten.forgotten is True
+    named = [a for _, _, a in _lines(caplog) if a.get("story.name") == "core.extension_remove"]
+    assert named and named[0]["story.title"] == "Hello removed"

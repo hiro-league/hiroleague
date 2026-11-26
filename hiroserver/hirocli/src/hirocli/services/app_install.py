@@ -142,10 +142,15 @@ def system_job(manifest: Manifest) -> SystemJob:
     return SystemJob(action=INSTALL, key=manifest.key, command=manifest.command)
 
 
-def prepare(workspace_path: Path, package_id: str, chosen: set[tuple[str, str]] | None) -> tuple[installs.Install,
-                                                                                                   SystemJob]:
-    """The person said yes: the row (``approving``) with what they approved, and the system part's job. The sheet
-    is read again from the same package, so what is kept is what was shown."""
+APPROVED_WHEN_ASKED = "approved when asked"
+APPROVED_IN_ADVANCE = "approved in advance (--approve)"
+
+
+def prepare(workspace_path: Path, package_id: str, chosen: set[tuple[str, str]] | None, *,
+            in_advance: bool = False) -> tuple[installs.Install, SystemJob]:
+    """The person said yes: the row (``approving``) with what they approved, how they said it (asked, or in
+    advance), and the system part's job. The sheet is read again from the same package, so what is kept is what was
+    shown."""
     found = read_sheet(workspace_path, package_id)
     manifest = found.package.manifest
     agreed = consent(found.items, chosen)
@@ -158,16 +163,29 @@ def prepare(workspace_path: Path, package_id: str, chosen: set[tuple[str, str]] 
         )
     except installs.InstallExists as exc:
         raise PackageRefused(NAME_TAKEN, str(exc)) from exc
-    log.info(f"📦 Install approved — {manifest.title} {manifest.version}: {len(agreed)} item(s), the admin step next",
-             key=manifest.key, port=found.port, items=", ".join(_item(i) for i in agreed))
+    how = APPROVED_IN_ADVANCE if in_advance else APPROVED_WHEN_ASKED
+    installs.set_state(workspace_path, manifest.key, installs.APPROVING, step=how)
+    row = installs.get_install(workspace_path, manifest.key) or row
+    log.info(f"📦 Install approved — {manifest.title} {manifest.version}: {len(agreed)} item(s), {how}; the admin "
+             "step next", key=manifest.key, port=found.port, items=", ".join(_item(i) for i in agreed))
     return row, system_job(manifest)
 
 
 def cancel(workspace_path: Path, key: str) -> bool:
-    """The admin step was declined (or never ran): the row and its package go. Only an install still ``approving``:
-    nothing outside the core was made for it."""
+    """The install stopped before it finished (its admin step declined or failed, the CLI stopped). Decided by what
+    the system has, not by what the CLI heard: with no service made, the row and its package go (nothing outside the
+    core was made); once the service exists, the row stays ``failed`` so ``hiro extension remove`` takes it all away.
+    Returns whether the row went."""
+    from .. import app_system
+
     row = installs.get_install(workspace_path, key)
     if row is None or row.state != installs.APPROVING:
+        return False
+    if app_system.is_running(row.service) is not None:
+        words = "The install stopped after its account and service were made: remove it, then install it again."
+        installs.set_state(workspace_path, key, installs.FAILED, step=words)
+        log.warning(f"⚠️ Install stopped partway — {row.title}: its service exists, the row is kept to remove it",
+                    key=key, service=row.service)
         return False
     installs.remove_install(workspace_path, key)
     drop_package(workspace_path, row.package)
@@ -316,6 +334,9 @@ def finish(workspace_path: Path, key: str) -> installs.Install:
         raise InstallFailed(f"“{key}” isn't an install waiting to finish.")
     if app_system.is_running(row.service) is None:
         raise InstallFailed(f"{row.title}'s service isn't made yet: its admin step didn't run, or was declined.")
+    # The person's yes, said in this story: what they approved and how (asked, or in advance with --approve)
+    log.info(f"Install: {row.title} {row.version}, {row.step or APPROVED_WHEN_ASKED}: "
+             f"{', '.join(_item(i) for i in row.consent) or 'nothing'}", key=key)
     try:
         package = open_package(stored_package(workspace_path, row.package))
         if package.manifest.key != key:  # the row names the package it was approved from

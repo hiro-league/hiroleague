@@ -108,15 +108,16 @@ class ExtensionInstallPrepareTool(Tool):
         "package": ToolParam(str, "The package's id (from PUT /packages)"),
         "optional": ToolParam(list, "Optional items approved too (permission or permission:subject)", required=False),
         "all": ToolParam(bool, "Every optional item approved too", required=False),
+        "in_advance": ToolParam(bool, "The yes was given in advance (--approve), not when asked", required=False),
         "workspace": _WORKSPACE,
     }
 
     def execute(self, package: str, optional: list[str] | None = None, all: bool = False,  # noqa: A002
-                workspace: str | None = None) -> InstallStepResult:
+                in_advance: bool = False, workspace: str | None = None) -> InstallStepResult:
         workspace_path = _resolve_path(workspace)
         chosen = None if all else {_item_key(x) for x in (optional or [])}
         try:
-            row, job = app_install.prepare(workspace_path, package, chosen)
+            row, job = app_install.prepare(workspace_path, package, chosen, in_advance=in_advance)
         except PackageRefused as exc:
             return InstallStepResult(key="", refused=exc.code, words=str(exc))
         return InstallStepResult(key=row.key, state=row.state, job=job.model_dump())
@@ -125,7 +126,8 @@ class ExtensionInstallPrepareTool(Tool):
 class ExtensionInstallCancelTool(Tool):
     surfaces = frozenset({"cli", "http"})
     name = "extension_install_cancel"
-    description = "The admin step of an install was declined: forget the install (nothing outside the core was made)"
+    description = ("An install stopped before it finished: forget it when nothing outside the core was made, else keep "
+                   "it failed for removing")
     params = {"key": ToolParam(str, "The app's key"), "workspace": _WORKSPACE}
 
     def execute(self, key: str, workspace: str | None = None) -> InstallStepResult:

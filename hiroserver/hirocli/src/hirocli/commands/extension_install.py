@@ -156,14 +156,15 @@ def install(console: Console, package: Path, *, approve: bool, all_optional: boo
     print_sheet(console, sheet, all_optional=all_optional)
     _consent(console, approve)
     prepared = _invoke(workspace_path, "extension_install_prepare",
-                       {"package": package_id, "all": all_optional, "workspace": workspace_id})
+                       {"package": package_id, "all": all_optional, "in_advance": approve, "workspace": workspace_id})
     if prepared["refused"]:
         raise _Stop(prepared["words"])
     key = prepared["key"]
     log.info("hiro extension install: approved", key=key, approve=approve, all=all_optional)
     try:
         done = run_system_step(console, prepared["job"])
-    except _Stop:
+    except BaseException:
+        # Declined, failed, or stopped (Ctrl-C): the core keeps the row only if its service was made (to remove it)
         _invoke(workspace_path, "extension_install_cancel", {"key": key, "workspace": workspace_id})
         raise
     console.print(f"[green]Made[/green] its account and service ({done['service']}).")
@@ -171,8 +172,8 @@ def install(console: Console, package: Path, *, approve: bool, all_optional: boo
     finished = _invoke(workspace_path, "extension_install_finish", {"key": key, "workspace": workspace_id},
                        timeout=1800.0)
     if finished["refused"]:
-        raise _Stop(f"{finished['words']}\nTry again with `hiro extension install` once it is fixed, or remove it: "
-                    f"`hiro extension remove {key}`.")
+        raise _Stop(f"{finished['words']}\nRemove it (`hiro extension remove {key}`), then install it again once "
+                    "it is fixed.")
     row = _wait_paired(workspace_path, workspace_id, key)
     if row is None or row["state"] != "running":
         console.print(f"[yellow]{sheet['title']} runs but hasn't paired yet.[/yellow] See its log in "
