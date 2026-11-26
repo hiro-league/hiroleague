@@ -7,7 +7,10 @@ copy of its database at head and lose nothing needs the app's migrations: the co
 tests."""
 
 import sqlite3
+import sys
 from pathlib import Path
+
+import pytest
 
 from hiro_extension_kit import predeploy
 
@@ -76,6 +79,18 @@ def test_restore_puts_it_back_and_drops_the_new_versions_wal(tmp_path):
     assert predeploy.counts(tmp_path / predeploy.DB) == {"person": 2}
     assert (tmp_path / predeploy.BACKUPS / f"{STAMP}.db").exists()  # the copy stays with the others
     assert predeploy.restore(tmp_path, "pre-deploy-none") == ["No copy to put back"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Linux's case: a database its folder's owner may not write over")
+def test_restore_needs_only_the_folder_and_leaves_the_database_writable_by_its_group(tmp_path):
+    """An app the core installs: the core puts the data back, the database being the app's, made 0644 by SQLite."""
+    _db(tmp_path / predeploy.DB, 2).close()
+    predeploy.snapshot(tmp_path, STAMP)
+    (tmp_path / predeploy.DB).chmod(0o444)  # nobody may write it; its folder may change
+    predeploy.restore(tmp_path, STAMP)
+    assert predeploy.counts(tmp_path / predeploy.DB) == {"person": 2}
+    assert (tmp_path / predeploy.DB).stat().st_mode & 0o060 == 0o060
+    assert not list(tmp_path.glob(".*.restore"))
 
 
 def test_settled_is_a_step_that_tidies_nothing(capsys):

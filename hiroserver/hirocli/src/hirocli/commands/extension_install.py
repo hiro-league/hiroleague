@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -97,10 +98,10 @@ def run_system_step(console: Console, job: dict[str, Any]) -> dict[str, Any]:
 
     from ..linux_service import hiro_executable
 
-    fd, job_path = tempfile.mkstemp(prefix="hiro-app-job-", suffix=".json")
-    os.close(fd)
-    report_fd, report_path = tempfile.mkstemp(prefix="hiro-app-done-", suffix=".json")
-    os.close(report_fd)
+    # Fix: the job and the report sit in a folder of this person's, not in /tmp itself: Ubuntu keeps root from writing
+    # a file another user made in a sticky folder (fs.protected_regular), so the report was refused (Simone, Nov 26)
+    work = Path(tempfile.mkdtemp(prefix="hiro-app-"))
+    job_path, report_path = str(work / "job.json"), str(work / "done.json")
     try:
         Path(job_path).write_text(json.dumps(job), encoding="utf-8")
         args = [hiro_executable(), "extension", "system", job_path, "--report", report_path]
@@ -123,8 +124,7 @@ def run_system_step(console: Console, job: dict[str, Any]) -> dict[str, Any]:
         except (OSError, ValueError):
             payload = {}
     finally:
-        Path(job_path).unlink(missing_ok=True)
-        Path(report_path).unlink(missing_ok=True)
+        shutil.rmtree(work, ignore_errors=True)
     if payload.get("ok"):
         return payload["result"]
     raise _Stop(payload.get("error") or f"The administrator step ended (exit code {code}) and changed nothing it said.")
