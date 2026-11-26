@@ -259,3 +259,13 @@ def test_while_it_upgrades_it_isnt_started_stopped_or_upgraded_again(workspace: 
     assert tools.ExtensionStopTool().execute(key=KEY).refused == "upgrading"
     with pytest.raises(PackageRefused, match="upgrading already"):
         app_upgrade.upgrade(workspace, KEY, package(workspace, manifest("0.1.2")))
+
+
+def test_only_what_the_new_version_newly_asks_waits(workspace: Path, monkeypatch) -> None:
+    from hiro_channel_sdk.approvals import PEOPLE_NOTIFY, PEOPLE_SEE, AppAsk
+
+    optional = AppAsk(permission=PEOPLE_NOTIFY, required=False)
+    before = manifest("0.1.0", asks=(optional,))  # left off at install: asked before, so not "more"
+    after = manifest("0.1.1", asks=(optional, AppAsk(permission=PEOPLE_SEE)))
+    row = installs.get_install(workspace, KEY)
+    assert app_upgrade.new_asks(workspace, row, after, before) == ["read the people list: names, WhatsApp numbers, roles"]

@@ -231,16 +231,19 @@ def _points_at(folder: AppFolder, release: Path) -> bool:
     return os.path.lexists(folder.current) and Path(os.path.realpath(folder.current)) == Path(os.path.realpath(release))
 
 
-def new_asks(workspace_path: Path, row: installs.Install, manifest: Manifest) -> list[str]:
-    """What the new version asks to do on its own beyond what the app is approved for, in words: it waits on the
-    Extensions page (Permissions phase 8: a new version that asks for more waits for the owner)."""
+def new_asks(workspace_path: Path, row: installs.Install, manifest: Manifest, before: Manifest | None) -> list[str]:
+    """What the new version asks to do on its own that the version before didn't ask and isn't approved, in words:
+    it waits on the Extensions page (Permissions phase 8: a new version that asks for more waits for the owner).
+    Fix: an optional ask the owner left off at install was listed as asked for more at every upgrade (seen on the
+    PC, Nov 26, 2026)."""
     record = app_install.paired_id(workspace_path, row.key)
     approval = approvals.read(workspace_path, record) if record else None
     approved = approval.approved if approval else []
-    items = sheet(manifest, load_config(workspace_path).site_domain(), row.port or 0)
-    return [a.words for a in items
-            if a.understood and a.permission not in approvals.IDENTITY and not approvals.covers(approved, a.permission,
-                                                                                                    a.subject)]
+    domain, port = load_config(workspace_path).site_domain(), row.port or 0
+    asked_before = {a.key for a in sheet(before, domain, port)} if before is not None else set()
+    return [a.words for a in sheet(manifest, domain, port)
+            if a.understood and a.permission not in approvals.IDENTITY and a.key not in asked_before
+            and not approvals.covers(approved, a.permission, a.subject)]
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +264,7 @@ def upgrade(workspace_path: Path, key: str, package_id: str, allowed: list[str] 
     folder = app_folder(key, Path(row.home))
     old = folder.release(row.version)
     old_manifest = release_manifest(old) or manifest
-    asks = new_asks(workspace_path, row, manifest)
+    asks = new_asks(workspace_path, row, manifest, release_manifest(old))
     result = Outcome(key, row.title, row.version, manifest.version, "", "", asks)
     story.retitle(f"{row.title} {row.version} → {manifest.version}")
     first = stamp()
