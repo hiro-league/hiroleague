@@ -132,8 +132,23 @@ def restore(data_dir: Path, stamp: str) -> list[str]:
     # The WAL file goes first: SQLite would otherwise apply the new version's writes to the copy put back
     for extra in (live.with_name(live.name + "-wal"), live.with_name(live.name + "-shm")):
         extra.unlink(missing_ok=True)
-    shutil.copyfile(copy, live)  # the copy stays, with the others
+    put_back(copy, live)  # the copy stays, with the others
     return [f"Put {live.name} back from {copy.name}"]
+
+
+def put_back(copy: Path, live: Path) -> None:
+    """Put `copy` in `live`'s place: written beside it, then renamed over it, so writing needs the folder only.
+    Fix: an app the core installs on Linux runs as its own account and the core as another; SQLite makes the app's
+    database 0644, so the core couldn't write over it and an upgrade couldn't go back (seen on Simone, Nov 26, 2026).
+    The file put back keeps the database's mode and its group may write it (the app's account is in the core's group)."""
+    mode = (live.stat().st_mode & 0o777 if live.exists() else 0o640) | 0o060
+    tmp = live.with_name(f".{live.name}.restore")
+    try:
+        shutil.copyfile(copy, tmp)
+        os.chmod(tmp, mode)
+        os.replace(tmp, live)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def main(argv: list[str]) -> int:

@@ -335,3 +335,36 @@ def test_once_it_paired_its_step_is_clear(workspace: Path, monkeypatch) -> None:
     installs.code_used(workspace, row.key)
     done = installs.get_install(workspace, row.key)
     assert (done.state, done.step) == (installs.RUNNING, "")
+
+
+def test_the_admin_steps_job_and_report_sit_in_a_private_folder_not_in_tmp_itself(monkeypatch) -> None:
+    """Ubuntu keeps root from writing a file another user made in /tmp (fs.protected_regular): the report was
+    refused on Simone. The job and the report go in a folder of the person's own, removed afterwards."""
+    import json
+    import subprocess
+    import tempfile
+
+    from rich.console import Console
+
+    from hirocli.commands import extension_install as cli
+
+    seen: dict[str, Path] = {}
+
+    def elevated(args, check=False):
+        job, report = Path(args[args.index("system") + 1]), Path(args[args.index("--report") + 1])
+        seen.update(job=job, report=report)
+        assert json.loads(job.read_text(encoding="utf-8"))["key"] == "example.hello"
+        assert not report.exists()  # made by the step itself, never handed to it
+        report.write_text(json.dumps({"ok": True, "result": {"service": "hiro-example-hello"}}), encoding="utf-8")
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(cli.subprocess, "run", elevated)
+    monkeypatch.setattr("hirocli.linux_service.hiro_executable", lambda: "hiro")
+    if sys.platform == "win32":
+        monkeypatch.setattr("hiro_commons.winsw_service.is_admin", lambda: True)
+    else:
+        monkeypatch.setattr(cli.os, "geteuid", lambda: 0)
+    done = cli.run_system_step(Console(), {"action": "install", "key": "example.hello", "command": "example-hello"})
+    assert done == {"service": "hiro-example-hello"}
+    assert seen["job"].parent == seen["report"].parent != Path(tempfile.gettempdir())
+    assert not seen["job"].parent.exists()
