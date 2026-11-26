@@ -164,6 +164,20 @@ envs = "none"
 why = "the place's own logs"
 
 [[item]]
+path = "packages"
+kind = "folder"
+live = "own"
+envs = "none"
+why = "the packages handed to the core for an install or an upgrade, dropped once unpacked or a day after: the place's own"
+
+[[item]]
+path = "cache"
+kind = "folder"
+live = "own"
+envs = "none"
+why = "uv's download cache for installing apps: made again when needed"
+
+[[item]]
 path = "run"
 kind = "folder"
 live = "own"

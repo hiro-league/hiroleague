@@ -88,3 +88,29 @@ def test_the_latest_send_of_a_plan_is_the_plan(log, capsys):
     assert "2. Kids tick them off: live (needs 1; tasks chores-tick)" in shown
     assert "3. Points and rewards: waits (Waits on Q2; needs 2, Q2)" in shown
     assert hw.main(["plan", "show", "nothing"]) == 1
+
+
+def test_show_json_writes_the_last_send_as_a_file_send_takes_back(log, capsys):
+    full = a_plan(design="https://claude.ai/artifact/DesignDoc123", about="Kids tick chores", tasks=["chores-board"],
+                  needs_michel="Answer Q2", side_by_side="Phases 2 and 3")
+    send(log, full)
+    file = log / "out.json"
+    assert hw.main(["plan", "show", "chores board", "--json", str(file)]) == 0
+    assert f"hiro-work plan send {file}" in capsys.readouterr().out
+    written = json.loads(file.read_text(encoding="utf-8"))
+    assert written == full  # every field the send had, the design link and about too; none it left empty
+
+    written["phases"][1]["state"] = "live"  # a state change needs the file only, never the plan doc
+    file.write_text(json.dumps(written), encoding="utf-8")
+    assert hw.main(["plan", "send", str(file)]) == 0
+    first, second = events(log)
+    assert second["phases"][1]["state"] == "live"
+    keep = ("plan", "doc", "design", "about", "tasks", "needs_michel", "side_by_side", "ships")
+    assert {k: second[k] for k in keep} == {k: first[k] for k in keep}
+
+
+def test_show_json_to_a_folder_that_is_missing_says_so(log, capsys):
+    send(log, a_plan())
+    capsys.readouterr()
+    assert hw.main(["plan", "show", "Chores board", "--json", str(log / "missing" / "out.json")]) == 1
+    assert "Can't write" in capsys.readouterr().out
