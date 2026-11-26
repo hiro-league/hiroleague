@@ -8,7 +8,7 @@ const hello: InstallRow = {
   data: '/opt/hiroleague/apps/example.hello/data', installed_at: '', approved: []
 };
 const offer = (version: string, key = 'example.hello'): PackageOffer =>
-  ({ file: `${key}-${version}.zip`, key, title: 'Hello', version, offer: 'upgrade', command: '' });
+  ({ file: `${key}-${version}-py3-none-any.whl`, key, title: 'Hello', version, offer: 'upgrade', command: '' });
 
 describe('installed apps', () => {
   it('says the service and the install state', () => {

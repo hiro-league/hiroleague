@@ -7,13 +7,16 @@ e.g. ``message_send``, which needs an in-process CommunicationManager.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from hiro_commons.process import is_running, read_pid
 
 from hirocli.constants import PID_FILENAME
 from hirocli.domain.config import load_config
+
+if TYPE_CHECKING:
+    from hirocli.domain.packages import Package
 
 
 def workspace_server_invoke_url(workspace_path: Path) -> str:
@@ -50,14 +53,21 @@ def post_invoke_sync(
     return dict(body["result"])
 
 
-def put_package_sync(workspace_path: Path, package: Path, *, timeout_seconds: float = 300.0) -> str:
-    """Hand a package's bytes to the running core (``PUT /packages``); returns its id. The core's account may not
-    read the person's file (a service core on Windows can't read their Downloads), so the bytes travel, not a path."""
+def put_package_sync(workspace_path: Path, package: Package, *, timeout_seconds: float = 300.0) -> str:
+    """Hand a package's wheels to the running core (``PUT /packages``): the app's wheel, then its libraries; returns
+    its id. The core's account may not read the person's files (a service core on Windows can't read their
+    Downloads), so the bytes travel, not a path."""
     require_workspace_server_running(workspace_path)
     url = f"{workspace_server_invoke_url(workspace_path).rstrip('/')}/packages"
-    with package.open("rb") as body, httpx.Client(timeout=timeout_seconds) as client:
-        response = client.put(url, content=body, headers={"content-type": "application/zip"})
-    if response.status_code >= 400:
-        detail = response.text.strip() or response.reason_phrase
-        raise RuntimeError(f"Hiro server /packages failed ({response.status_code}): {detail}")
-    return str(response.json()["package"])
+    package_id = ""
+    with httpx.Client(timeout=timeout_seconds) as client:
+        for path in (package.path, *package.libraries):
+            params = {"file": path.name, **({"package": package_id} if package_id else {})}
+            with path.open("rb") as body:
+                response = client.put(url, params=params, content=body,
+                                      headers={"content-type": "application/octet-stream"})
+            if response.status_code >= 400:
+                detail = response.text.strip() or response.reason_phrase
+                raise RuntimeError(f"Hiro server /packages failed ({response.status_code}): {detail}")
+            package_id = str(response.json()["package"])
+    return package_id

@@ -18,13 +18,16 @@ import tempfile
 import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import typer
 from hiro_commons.log import Logger
 from rich.console import Console
 
 from ..domain.workspace import WorkspaceError
+
+if TYPE_CHECKING:
+    from ..domain.packages import Package
 
 log = Logger.get("CLI.EXTENSION")
 
@@ -130,6 +133,18 @@ def run_system_step(console: Console, job: dict[str, Any]) -> dict[str, Any]:
     raise _Stop(payload.get("error") or f"The administrator step ended (exit code {code}) and changed nothing it said.")
 
 
+def _open(path: Path) -> Package:
+    """The app's wheel the person named, with its libraries beside it; _Stop with the words when it isn't one."""
+    from ..domain.packages import PackageRefused, open_package
+
+    if not path.is_file():
+        raise _Stop(f"There's no file at {path}.")
+    try:
+        return open_package(path)
+    except PackageRefused as exc:
+        raise _Stop(str(exc)) from exc
+
+
 def _wait_paired(workspace_path: Path, workspace_id: str, key: str) -> dict[str, Any] | None:
     deadline = time.monotonic() + _PAIR_WAIT_S
     while time.monotonic() < deadline:
@@ -145,11 +160,10 @@ def install(console: Console, package: Path, *, approve: bool, all_optional: boo
     from ..domain.workspace_server_client import put_package_sync
 
     workspace_path, workspace_id = _workspace(workspace)
-    if not package.is_file():
-        raise _Stop(f"There's no file at {package}.")
+    found = _open(package)
     if not _core_running(workspace_path):
         raise _Stop("The core isn't running: start it first (`hiro start`, or its service), then install.")
-    package_id = put_package_sync(workspace_path, package)
+    package_id = put_package_sync(workspace_path, found)
     sheet = _invoke(workspace_path, "extension_install_sheet", {"package": package_id, "workspace": workspace_id})
     if sheet["refused"]:
         raise _Stop(sheet["words"])
@@ -206,45 +220,99 @@ def remove_installed(console: Console, workspace_path: Path, workspace_id: str, 
         console.print(f"[dim]Its data stays in {done['folder']}; `--purge` removes it too.[/dim]")
 
 
+def _is_channel_name(text: str) -> bool:
+    """A channel's name (``whatsapp``) rather than a file: no path in it, not a wheel's name."""
+    return bool(text) and "/" not in text and "\\" not in text and not text.endswith(".whl") and not Path(text).exists()
+
+
+def channel_step(console: Console, tool: str, name: str, params: dict[str, Any], workspace: str | None) -> bool:
+    """Install, upgrade or remove a channel: in the running core (its program is the core's account's uv tool, and
+    the core stops and starts the plugin around it), or here when the core is stopped. True when it was done."""
+    from ..tools import extension_install as tools
+
+    workspace_path, workspace_id = _workspace(workspace)
+    params = {"channel_name": name, "workspace": workspace_id, **params}
+    if _core_running(workspace_path):
+        result = _invoke(workspace_path, tool, params, timeout=1800.0)
+    else:
+        found = next(t for t in (tools.ExtensionChannelInstallTool, tools.ExtensionChannelUpgradeTool,
+                                 tools.ExtensionChannelRemoveTool) if t.name == tool)
+        result = asdict(found().execute(**params))
+    if result["refused"] and not result["gone"]:
+        console.print(f"[red]{result['words']}[/red]")
+        return False
+    if tool == "extension_install_channel":
+        console.print(f"[green]Installed[/green] [bold]{name} {result['version']}[/bold] ({result['package']}): it is "
+                      f"off. Switch it on with `hiro channel enable {name}` or on the Extensions page.")
+    elif tool == "extension_upgrade_channel":
+        console.print(f"[green]Upgraded[/green] [bold]{name}[/bold]: {result['before'] or '?'} to "
+                      f"{result['version'] or '?'}.")
+    else:
+        console.print(f"[green]Removed[/green] [bold]{name}[/bold]: {', '.join(result['gone'])}.")
+    if result["words"]:
+        console.print(f"[yellow]{result['words']}[/yellow]")
+    return not result["refused"]
+
+
 def register(extension_app: typer.Typer, console: Console) -> None:
     """Register the install commands on `hiro extension`."""
     import httpx
 
     @extension_app.command("install")
     def extension_install(
-        package: Path = typer.Argument(..., help="The app's package (a .zip built by build-kit/package.py)."),
+        package: str = typer.Argument(
+            ..., help="An app's wheel (built by build-kit/package.py; its kits' wheels beside it), or a channel's "
+                      "name (whatsapp)."
+        ),
         approve: bool = typer.Option(
             False, "--approve", help="Approve what the app requires in advance, without asking (scripts, tests)."
         ),
         all_: bool = typer.Option(False, "--all", help="Approve its optional asks too."),
+        version: str = typer.Option("", "--version", help="A channel: this version of its package on PyPI."),
         workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help=_WORKSPACE_HELP),
     ) -> None:
-        """Install an app from its package: shows what it asks and asks you to approve it, makes its account and
-        service (one administrator step), then the core unpacks it, starts it and it pairs by itself."""
-        log.info("hiro extension install", package=package.name, approve=approve, all=all_)
+        """Install an app from its wheel (uv tool install, as the core is): shows what it asks and asks you to approve
+        it, makes its account and service (one administrator step), then the core installs it, starts it and it pairs
+        by itself. Or install a channel by its name: its program as a uv tool, switched off until you switch it on."""
+        log.info("hiro extension install", package=Path(package).name, approve=approve, all=all_, version=version)
+        ok = True
         try:
-            install(console, package.resolve(), approve=approve, all_optional=all_, workspace=workspace)
+            if _is_channel_name(package):
+                ok = channel_step(console, "extension_install_channel", package, {"version": version}, workspace)
+            else:
+                install(console, Path(package).resolve(), approve=approve, all_optional=all_, workspace=workspace)
         except _Stop as exc:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1) from exc
         except (WorkspaceError, RuntimeError, OSError, httpx.HTTPError) as exc:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1) from exc
+        if not ok:  # typer's Exit is a RuntimeError: raised outside the try, or it is printed as "1"
+            raise typer.Exit(1)
 
     @extension_app.command("upgrade")
     def extension_upgrade(
-        key: str = typer.Argument(..., help="The installed app's key (see `hiro extension list`)."),
-        package: Path = typer.Argument(..., help="Its newer package (a .zip built by build-kit/package.py)."),
+        key: str = typer.Argument(..., help="The installed app's key, or a channel's name (see `hiro extension list`)."),
+        package: Optional[Path] = typer.Argument(
+            None, help="An app: its newer wheel (built by build-kit/package.py; its kits' wheels beside it)."
+        ),
         allow_row_loss: Optional[list[str]] = typer.Option(
             None, "--allow-row-loss", help="A table the new version's migrations may empty; repeat it."
         ),
+        version: str = typer.Option("", "--version", help="A channel: this version of its package on PyPI."),
         workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help=_WORKSPACE_HELP),
     ) -> None:
         """Upgrade an app the core installed: its data is copied and the new migrations tried on a copy first; then it
-        switches, and goes back by itself (data and version) when the new version doesn't answer."""
-        log.info("hiro extension upgrade", key=key, package=package.name, allow_row_loss=allow_row_loss)
+        switches, and goes back by itself (data and version) when the new version doesn't answer. Or upgrade a
+        channel: its program installed again from where it came from (or --version from PyPI), then started again."""
+        log.info("hiro extension upgrade", key=key, package=package.name if package else "", version=version,
+                 allow_row_loss=allow_row_loss)
         try:
-            ok = upgrade(console, key, package.resolve(), allow_row_loss=allow_row_loss or [], workspace=workspace)
+            if package is None:
+                ok = channel_step(console, "extension_upgrade_channel", key, {"version": version}, workspace)
+            else:
+                ok = upgrade(console, key, package.resolve(), allow_row_loss=allow_row_loss or [],
+                             workspace=workspace)
         except (_Stop, WorkspaceError, RuntimeError, OSError, httpx.HTTPError) as exc:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1) from exc
@@ -321,11 +389,10 @@ def upgrade(console: Console, key: str, package: Path, *, allow_row_loss: list[s
     from ..domain.workspace_server_client import put_package_sync
 
     workspace_path, workspace_id = _workspace(workspace)
-    if not package.is_file():
-        raise _Stop(f"There's no file at {package}.")
+    found = _open(package)
     if not _core_running(workspace_path):
         raise _Stop("The core isn't running: it upgrades its apps itself.")
-    package_id = put_package_sync(workspace_path, package)
+    package_id = put_package_sync(workspace_path, found)
     console.print("Upgrading: its data copied and its migrations tried first, then switched and checked…")
     done = _invoke(workspace_path, "extension_upgrade",
                    {"key": key, "package": package_id, "allow_row_loss": allow_row_loss, "workspace": workspace_id},

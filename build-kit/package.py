@@ -1,4 +1,5 @@
-"""Build an app's package: the one file the core installs (`hiro extension install <package>`).
+"""Build an app's package: its wheel, which the core installs with `uv tool install`, as the core is
+(`hiro extension install <wheel>`).
 
     python build-kit/package.py <app folder> [--out <folder>] [--ui-built]
 
@@ -6,11 +7,12 @@ Run with the core's Python (`uv run --project hiroserver python build-kit/packag
 manifest model. The app folder holds `backend/` (pyproject.toml, uv.lock, src/<module>) and `frontend/` (a SvelteKit
 app built to `frontend/build`, or just that folder).
 
-The package is `<key, dashed>-<version>.zip` (Michel, Nov 25, 2026: one zip, one package for every system):
+It writes into `--out` the app's wheel and, beside it, the wheels of its libraries that aren't on PyPI (the kits):
 
-    hiro-extension.toml      the manifest, written from the app's declaration (hiro_channel_sdk.manifest)
-    requirements.txt         every library from PyPI, pinned with its hashes (exported from the app's uv.lock)
-    wheels/                  the app's wheel, its built UI inside (<module>/static), and the kits' wheels
+    <module>-<version>-py3-none-any.whl     the app: its code, its built UI (<module>/static) and two files beside them
+        <module>/hiro-extension.toml        its manifest, written from the app's declaration (hiro_channel_sdk.manifest)
+        <module>/hiro-constraints.txt       every version its uv.lock pins (name==version), the kits' included
+    hiro_extension_kit-<version>-....whl    each kit's wheel, named for its pin (the core installs them with the app)
 
 The manifest's fields come from the app itself: its key, port, title, address and asks from its `Extension(...)` and
 `setup(...)` (read in its own environment; the asks as the kit declares them to the core, `asks_for()`), its version
@@ -18,7 +20,7 @@ from pyproject.toml (the declaration must say the same), its command from its on
 it has `<module>/predeploy.py`. The core versions it works with follow the
 kit it was built with: the kits and the core are released together, so kit 0.2.x works with core 0.2.x.
 
-Nothing here changes the app's folder: the UI is put into a copy of the backend, which is built from there.
+Nothing here changes the app's folder: the UI and the two files are put into a copy of the backend, built from there.
 """
 
 from __future__ import annotations
@@ -32,10 +34,11 @@ import subprocess
 import sys
 import tempfile
 import tomllib
-import zipfile
 from pathlib import Path
 
-from hiro_channel_sdk.manifest import KIND_APP, MANIFEST_FILE, Manifest, dashed, render_manifest
+from hiro_channel_sdk.manifest import KIND_APP, MANIFEST_FILE, Manifest, render_manifest
+
+CONSTRAINTS_FILE = "hiro-constraints.txt"  # the core's domain/packages.py reads it by this name
 
 KIT = "hiro-extension-kit"
 HEALTH = "/api/health"
@@ -121,6 +124,15 @@ def _build_ui(frontend: Path, ui_built: bool) -> Path:
     return built
 
 
+def constraints(lock_text: str, exported: str) -> str:
+    """Every version the app's lock pins, one ``name==version`` a line: PyPI's as ``uv export`` gives them (markers
+    kept), then the local packages' (the kits), which the export leaves out. The app itself isn't in it."""
+    lines = [line for line in exported.splitlines() if line.strip() and not line.lstrip().startswith(("#", "-"))]
+    versions = {p["name"]: p["version"] for p in tomllib.loads(lock_text).get("package", [])}
+    lines += [f"{name}=={versions[name]}" for name in sorted(local_packages(lock_text))]
+    return "\n".join(lines) + "\n"
+
+
 def _stage_backend(backend: Path, module: str, ui: Path, stage: Path) -> Path:
     """A copy of the backend with the UI inside the module (<module>/static), its local sources made absolute so the
     copy builds from anywhere."""
@@ -147,7 +159,8 @@ def _declaration(backend: Path, module: str, data: Path) -> dict:
 
 
 def build(app: Path, out: Path, *, ui_built: bool = False) -> Path:
-    """Build the app's package into ``out``; returns its path. Raises PackageError with words."""
+    """Build the app's wheel and its kits' wheels into ``out``; returns the app's wheel. Raises PackageError with
+    words."""
     backend = app / "backend"
     if not (backend / "pyproject.toml").is_file() or not (backend / "uv.lock").is_file():
         raise PackageError(f"{backend} needs pyproject.toml and uv.lock.")
@@ -180,29 +193,28 @@ def build(app: Path, out: Path, *, ui_built: bool = False) -> Path:
         )
         ui = _build_ui(app / "frontend", ui_built)
         copy = _stage_backend(backend, module, ui, stage)
-        wheels = stage / "wheels"
-        _run(["uv", "build", "--wheel", "--out-dir", str(wheels)], copy)
-        for path in local.values():
-            _run(["uv", "build", "--wheel", "--out-dir", str(wheels), str((backend / path).resolve())], backend)
-        requirements = _run(
-            ["uv", "export", "--frozen", "--no-dev", "--no-emit-project", "--no-emit-local",
+        exported = _run(
+            ["uv", "export", "--frozen", "--no-dev", "--no-emit-project", "--no-emit-local", "--no-hashes",
              "--format", "requirements.txt", "--no-header"],
             backend,
         )
+        (copy / "src" / module / MANIFEST_FILE).write_text(render_manifest(manifest), encoding="utf-8")
+        (copy / "src" / module / CONSTRAINTS_FILE).write_text(constraints(lock_text, exported), encoding="utf-8")
+        built = stage / "wheels"
+        _run(["uv", "build", "--wheel", "--out-dir", str(built)], copy)
+        wheel = next(built.glob("*.whl"))
+        for path in local.values():
+            _run(["uv", "build", "--wheel", "--out-dir", str(built), str((backend / path).resolve())], backend)
         out.mkdir(parents=True, exist_ok=True)
-        package = out / f"{dashed(manifest.key)}-{manifest.version}.zip"
-        with zipfile.ZipFile(package, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr(MANIFEST_FILE, render_manifest(manifest))
-            zf.writestr("requirements.txt", requirements)
-            for wheel in sorted(wheels.glob("*.whl")):
-                zf.write(wheel, f"wheels/{wheel.name}")
-    return package
+        for path in built.glob("*.whl"):
+            shutil.copy2(path, out / path.name)
+    return out / wheel.name
 
 
 def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description="Build an app's package for `hiro extension install`.")
+    parser = argparse.ArgumentParser(description="Build an app's wheel (and its kits' wheels) for `hiro extension install`.")
     parser.add_argument("app", type=Path, help="the app's folder (backend/ and frontend/)")
-    parser.add_argument("--out", type=Path, default=Path("dist"), help="where the package goes (default: dist)")
+    parser.add_argument("--out", type=Path, default=Path("dist"), help="where the wheels go (default: dist)")
     parser.add_argument("--ui-built", action="store_true", help="use frontend/build as it is, without npm")
     args = parser.parse_args(argv)
     try:

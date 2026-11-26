@@ -280,3 +280,173 @@ class ExtensionInstallForgetTool(Tool):
                 removed = asdict(ExtensionRemoveTool().execute(extension_id=extension_id, workspace=workspace))
             gone = app_install.forget(workspace_path, key)
         return InstallForgetResult(key=key, forgotten=gone is not None, removed=removed)
+
+
+# ---------------------------------------------------------------------------
+# Channels: a uv tool the core starts itself (services/channel_install.py)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ChannelLifecycleResult:
+    """Where a channel's install, upgrade or removal ended; ``refused`` is the code when it didn't happen."""
+
+    name: str
+    package: str = ""
+    before: str = ""
+    version: str = ""
+    refused: str = ""
+    words: str = ""
+    gone: list[str] = field(default_factory=list)
+
+
+def _channel_manager(tool: Tool) -> Any:
+    rt = getattr(tool, "_runtime", None)
+    return rt.comm_manager.ctx.extension_manager if rt is not None else None
+
+
+class ExtensionChannelInstallTool(Tool):
+    surfaces = frozenset({"cli", "http"})
+    name = "extension_install_channel"
+    description = ("Install a channel of the core's catalog (WhatsApp): its program as a uv tool of its published "
+                   "package, then its row, switched off")
+    params = {
+        "channel_name": ToolParam(str, "The channel's name, e.g. 'whatsapp'"),
+        "version": ToolParam(str, "A version of its package on PyPI (default: the newest, or this checkout's)",
+                             required=False),
+        "workspace": _WORKSPACE,
+    }
+
+    def execute(self, channel_name: str, version: str = "", workspace: str | None = None) -> ChannelLifecycleResult:
+        from ..services import channel_install
+
+        workspace_path = _resolve_path(workspace)
+        with stories.started(stories.EXTENSION_INSTALL, "extensions.install", area="EXTENSIONS", own=True,
+                             title=f"{channel_name} installed"):
+            try:
+                package, done = channel_install.install(workspace_path, workspace, channel_name, version)
+            except channel_install.ChannelInstallRefused as exc:
+                return ChannelLifecycleResult(name=channel_name, refused=exc.code, words=str(exc))
+            except RuntimeError as exc:
+                log.warning(f"⚠️ Channel install failed — {channel_name}: {exc}", channel=channel_name)
+                return ChannelLifecycleResult(name=channel_name, refused="failed", words=str(exc))
+        return ChannelLifecycleResult(name=channel_name, package=package, version=done)
+
+
+class ExtensionChannelUpgradeTool(Tool):
+    """Runs in the core when it runs (``runtime``): the plugin is stopped first (Windows holds a running program's
+    files) and started again after, when it is switched on."""
+
+    surfaces = frozenset({"cli", "http"})
+    runtime = True
+    name = "extension_upgrade_channel"
+    description = "Upgrade a channel's program: installed again from where it came from, or a version from PyPI"
+    params = {
+        "channel_name": ToolParam(str, "The channel's name, e.g. 'whatsapp'"),
+        "version": ToolParam(str, "A version of its package on PyPI (default: from where it was installed)",
+                             required=False),
+        "workspace": _WORKSPACE,
+    }
+
+    def attach_runtime(self, ctx: Any) -> None:
+        self._runtime = ctx
+
+    def execute(self, channel_name: str, version: str = "", workspace: str | None = None) -> ChannelLifecycleResult:
+        from ..domain.channel_config import load_channel_config
+        from ..services import channel_install
+
+        if load_channel_config(_resolve_path(workspace), channel_name) is None:
+            return ChannelLifecycleResult(name=channel_name, refused="not_installed",
+                                          words=f"“{channel_name}” isn't installed: install it first.")
+        with stories.started(stories.EXTENSION_UPGRADE, "extensions.upgrade", area="EXTENSIONS", own=True,
+                             title=f"{channel_name} upgrade"):
+            try:
+                before, after = channel_install.upgrade(channel_name, version)
+            except channel_install.ChannelInstallRefused as exc:
+                return ChannelLifecycleResult(name=channel_name, refused=exc.code, words=str(exc))
+            except RuntimeError as exc:
+                log.warning(f"⚠️ Channel upgrade failed — {channel_name}: {exc}", channel=channel_name)
+                return ChannelLifecycleResult(name=channel_name, refused="failed", words=str(exc))
+        return ChannelLifecycleResult(name=channel_name, before=before, version=after)
+
+    async def execute_async(self, channel_name: str, version: str = "",
+                            workspace: str | None = None) -> ChannelLifecycleResult:
+        import asyncio
+
+        from ..domain.channel_config import load_channel_config
+
+        manager = _channel_manager(self)
+        cfg = await asyncio.to_thread(load_channel_config, _resolve_path(workspace), channel_name)
+        if manager is not None and cfg is not None:
+            await manager.deactivate(channel_name)
+        try:
+            return await asyncio.to_thread(self.execute, channel_name, version, workspace)
+        finally:
+            # Started again whatever happened: a failed upgrade leaves the program uv had, which may still run
+            if manager is not None and cfg is not None and cfg.enabled:
+                await manager.activate(channel_name)
+
+
+class ExtensionChannelRemoveTool(Tool):
+    """Runs in the core when it runs (``runtime``): the plugin is stopped before its program is uninstalled."""
+
+    surfaces = frozenset({"cli", "http"})
+    runtime = True
+    name = "extension_remove_channel"
+    description = ("Remove a channel: stopped, its row and settings dropped, its program uninstalled; with purge its "
+                   "folder (its key and its account's link) and its secrets too")
+    params = {
+        "channel_name": ToolParam(str, "The channel's name, e.g. 'whatsapp'"),
+        "purge": ToolParam(bool, "Delete its folder and secrets too", required=False),
+        "workspace": _WORKSPACE,
+    }
+
+    def attach_runtime(self, ctx: Any) -> None:
+        self._runtime = ctx
+
+    def execute(self, channel_name: str, purge: bool = False, workspace: str | None = None) -> ChannelLifecycleResult:
+        from ..domain.extensions import KIND_CHANNEL, list_paired_extensions
+        from ..services import channel_install
+        from .extension import ExtensionRemoveTool
+
+        workspace_path = _resolve_path(workspace)
+        try:
+            channel_install.catalog_entry(channel_name)  # the phones' channel goes with the core
+        except channel_install.ChannelInstallRefused as exc:
+            if exc.code == "mandatory":
+                return ChannelLifecycleResult(name=channel_name, refused=exc.code, words=str(exc))
+            # Not in the catalog (a channel set up by hand, hiro channel setup): it is removed all the same
+        found = next((e for e in list_paired_extensions(workspace_path, kind=KIND_CHANNEL)
+                      if e.name == channel_name and e.started_by_core), None)
+        if found is None:
+            return ChannelLifecycleResult(name=channel_name, refused="not_installed",
+                                          words=f"“{channel_name}” isn't installed.")
+        secrets = channel_install.secret_keys_of(workspace_path, channel_name) if purge else []
+        with stories.started(stories.EXTENSION_REMOVE, "extensions.remove", area="EXTENSIONS",
+                             title=f"{channel_name} removed"):
+            removed = ExtensionRemoveTool().execute(extension_id=found.extension_id, workspace=workspace)
+            gone = ["its row and settings"] + (["its program"] if removed.uninstalled else [])
+            if purge:
+                try:
+                    gone += channel_install.purge(workspace_path, channel_name, secrets)
+                except (RuntimeError, OSError) as exc:
+                    log.warning(f"⚠️ Channel removed, but not purged — {channel_name}: {exc}", channel=channel_name)
+                    return ChannelLifecycleResult(name=channel_name, refused="failed", gone=gone,
+                                                  words=f"Removed, but its folder stayed: {exc}")
+        words = "" if removed.uninstalled else "Its program stayed installed (the log says why)."
+        return ChannelLifecycleResult(name=channel_name, gone=gone, words=words)
+
+    async def execute_async(self, channel_name: str, purge: bool = False,
+                            workspace: str | None = None) -> ChannelLifecycleResult:
+        import asyncio
+
+        from .channel import mandatory_channel
+
+        manager = _channel_manager(self)
+        if manager is not None and not mandatory_channel(channel_name):
+            await manager.deactivate(channel_name)  # a no-op when it doesn't run
+        result = await asyncio.to_thread(self.execute, channel_name, purge, workspace)
+        rt = getattr(self, "_runtime", None)
+        if rt is not None and not result.refused:
+            getattr(rt.comm_manager.ctx, "channel_status", {}).pop(channel_name, None)
+        return result

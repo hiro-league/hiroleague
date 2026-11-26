@@ -1,8 +1,8 @@
 """Channel subcommands — thin CLI layer over channel tools.
 
-'channel install' and 'channel status' are CLI-only (subprocess / HTTP query)
-and are kept here as direct implementations.  All other commands delegate to
-the corresponding Tool class in tools/channel.py.
+A channel's own settings (setup, config, enable, disable, status). Installing, upgrading and removing one is
+`hiro extension` (commands/extension_install.py), the one lifecycle for apps and channels. 'channel status' is
+CLI-only (an HTTP query); the other commands delegate to the corresponding Tool class in tools/channel.py.
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ def register(channel_app: typer.Typer, console: Console) -> None:
         if not result.channels:
             console.print(
                 "[dim]No channels configured. "
-                "Run [bold]hiro channel setup <name>[/bold] to add one.[/dim]"
+                "Install one with [bold]hiro extension install <name>[/bold].[/dim]"
             )
             return
 
@@ -63,39 +63,6 @@ def register(channel_app: typer.Typer, console: Console) -> None:
             table.add_row(ch["name"], enabled_str, ch["command"], keys_str)
 
         console.print(table)
-
-    @channel_app.command("install")
-    def channel_install(
-        name: str = typer.Argument(..., help="Channel name, e.g. 'telegram'"),
-        package: Optional[str] = typer.Option(
-            None, "--package", "-p",
-            help="Package name to install (default: hiro-channel-<name>)",
-        ),
-        editable: bool = typer.Option(
-            False, "--editable", "-e", help="Install in editable mode (uv tool install -e)"
-        ),
-    ) -> None:
-        """Install a channel plugin via uv tool install."""
-        from ..tools.channel import ChannelInstallTool
-
-        pkg = package or f"hiro-channel-{name}"
-        log.info("hiro channel install", channel=name, package=pkg, editable=editable)
-
-        console.print(f"Installing [bold]{pkg}[/bold]…")
-        try:
-            result = ChannelInstallTool().execute(
-                channel_name=name,
-                package=package,
-                editable=editable,
-            )
-        except RuntimeError as exc:
-            console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1) from exc
-
-        if result.output:
-            console.print(result.output)
-        console.print(f"[green]Installed {result.package}.[/green]")
-        console.print(f"  Next: [bold]hiro channel setup {name}[/bold] to configure it.")
 
     @channel_app.command("setup")
     def channel_setup(

@@ -14,7 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from package import PackageError, command_of, core_range, local_packages  # noqa: E402
+from package import PackageError, command_of, constraints, core_range, local_packages  # noqa: E402
 
 LOCK = """
 version = 1
@@ -68,3 +68,10 @@ def test_the_test_app_has_what_the_build_needs() -> None:
     assert (app / "backend" / "uv.lock").is_file()
     assert (app / "frontend" / "build" / "index.html").is_file()
     assert "hiro-extension-kit" in local_packages((app / "backend" / "uv.lock").read_text(encoding="utf-8"))
+
+
+def test_the_constraints_pin_pypis_versions_and_the_kits_never_the_app() -> None:
+    exported = "# a comment\npydantic==2.13.0\ncolorama==0.4.6 ; sys_platform == 'win32'\n    # via click\n"
+    pinned = constraints(LOCK, exported).splitlines()
+    assert pinned == ["pydantic==2.13.0", "colorama==0.4.6 ; sys_platform == 'win32'", "hiro-commons==0.2.0",
+                      "hiro-extension-kit==0.2.0"]

@@ -23,11 +23,10 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from hiro_commons.process import find_workspace_root
 from hirocli.admin.features.channels.service import ChannelService
 from hirocli.admin_svelte.deps import SelectedWorkspaceIdDep
 from hirocli.admin_svelte.result_payload import _api_data, api_failure
-from hirocli.domain.channel_catalog import available_channels, catalog_channel
+from hirocli.domain.channel_catalog import available_channels
 from hirocli.domain.channel_config import load_channel_config
 from hirocli.domain.channel_descriptor import load_channel_descriptor
 from hirocli.qr_rendering import render_qr_svg
@@ -36,10 +35,8 @@ from hirocli.tools.channel import (
     ChannelConfigShowTool,
     ChannelDisableTool,
     ChannelEnableTool,
-    ChannelInstallTool,
-    ChannelSetupTool,
-    installed_channel_command,
 )
+from hirocli.tools.extension_install import ExtensionChannelInstallTool
 
 channels_router = APIRouter()
 log = Logger.get("CHANNELS")
@@ -170,11 +167,6 @@ async def channel_config_set(
 # Install / lifecycle / actions
 # ---------------------------------------------------------------------------
 
-class InstallRequest(BaseModel):
-    package: str | None = None
-    editable: bool = False
-
-
 @channels_router.get("/channels/available")
 async def list_available_channels(workspace_id: SelectedWorkspaceIdDep) -> Any:
     # Catalog channels the UI can install without prior CLI setup, minus any already
@@ -190,48 +182,14 @@ async def list_available_channels(workspace_id: SelectedWorkspaceIdDep) -> Any:
     return {"channels": channels}
 
 
-def _install_source(name: str, override: str | None) -> str:
-    """Resolve what ``uv tool install`` should install: an explicit override, else a
-    local source checkout when present (so the UI Install works on a source tree without
-    publishing), else the catalog's registry package name (resolved from the index)."""
-    if override:
-        return override
-    root = find_workspace_root()
-    if root is not None:
-        local = root / "channels" / f"hiro-channel-{name}"
-        if local.is_dir():
-            return str(local)
-    entry = catalog_channel(name)
-    return entry.package if entry is not None else f"hiro-channel-{name}"
-
-
 @channels_router.post("/channels/{name}/install")
-async def channel_install(name: str, body: InstallRequest, workspace_id: SelectedWorkspaceIdDep) -> Any:
-    # Install = provision the channel in one step (there is no separate "add"):
-    #   1. `uv tool install` the plugin package (isolated tool env), then
-    #   2. write its config row (DISABLED) so it joins the managed list.
-    # Order matters: install first, so a failed install leaves no dangling config; and
-    # the config's start command is the ABSOLUTE installed-binary path (resolved only
-    # after install, when the binary exists) so Enable works even if uv's tool-bin dir
-    # isn't on the server's PATH. workspace_dir="" pins the isolated-tool model (run the
-    # binary as-is, not wrapped in `uv run` against the shared workspace env).
-    source = _install_source(name, body.package)
-    try:
-        install = await run_in_threadpool(
-            ChannelInstallTool().execute, name, source, body.editable
-        )
-    except RuntimeError as exc:
-        return api_failure(str(exc))
-    entry = catalog_channel(name)
-    fallback = entry.command if entry is not None else f"hiro-channel-{name}"
-    command = await run_in_threadpool(installed_channel_command, name) or fallback
-    try:
-        setup = await run_in_threadpool(
-            ChannelSetupTool().execute, name, command, False, workspace_id, ""
-        )
-    except (ValueError, RuntimeError) as exc:
-        return api_failure(str(exc))
-    return {"package": install.package, "name": setup.name, "enabled": setup.enabled}
+async def channel_install(name: str, workspace_id: SelectedWorkspaceIdDep) -> Any:
+    # The one install of a channel, `hiro extension install <name>`'s (extension_install_channel): its program as a
+    # uv tool of its package (this checkout's folder in a source tree), then its row, switched off.
+    result = await run_in_threadpool(ExtensionChannelInstallTool().execute, name, "", workspace_id)
+    if result.refused:
+        return api_failure(result.words, 409 if result.refused == "installed" else 400)
+    return {"package": result.package, "name": name, "enabled": False}
 
 
 @channels_router.post("/channels/{name}/enable")

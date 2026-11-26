@@ -9,9 +9,10 @@ One install is three steps, the middle one a person's:
 2. **The admin step** (``hiro extension system <job>``, sudo or Windows' prompt): the app's account, folder and
    service, and the core's right to start and stop it (app_system.py). Never here.
 3. **The finish** (the core, as itself, in the running core: on Windows only it holds the right on the service): the
-   release is unpacked into ``releases/<version>`` (a uv venv, the package's pinned requirements with their hashes,
-   its wheels), ``current`` points at it, the app's environment is written with a new pairing code, and the service
-   starts. The row is ``waiting`` until the app pairs with that code (runtime/extension_manager.py), then ``running``.
+   app's wheel is installed into ``releases/<version>`` with ``uv tool install``, as the core is (its libraries that
+   aren't on PyPI with it, the versions its lock pins as constraints), ``current`` points at it, the app's environment
+   is written with a new pairing code, and the service starts. The row is ``waiting`` until the app pairs with that
+   code (runtime/extension_manager.py), then ``running``.
 
 A step after the admin step that fails leaves the row ``failed`` with its words; removing it still works from any
 state. Removing is the admin step first (stop, the service, the right, the account; ``--purge`` the folder), then
@@ -25,7 +26,6 @@ import shutil
 import socket
 import subprocess
 import sys
-import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -43,6 +43,7 @@ from ..domain.hiro_home import AppFolder, app_folder, hiro_home
 from ..domain.install_consent import consent, sheet
 from ..domain.packages import (
     BAD_MANIFEST,
+    CONSTRAINTS_FILE,
     CORE_VERSION,
     NAME_TAKEN,
     PORT_TAKEN,
@@ -53,6 +54,7 @@ from ..domain.packages import (
     service_name,
     stored_package,
     version_in,
+    wheel_name,
 )
 from ..domain.site_names import list_claims, list_other_sites
 from ..domain.system_job import INSTALL, AppSystem, SystemJob, check_job
@@ -287,10 +289,36 @@ def _uv(args: list[str], what: str, env: dict[str, str]) -> None:
         raise InstallFailed(f"{what} failed: {detail or f'exit code {done.returncode}'}.")
 
 
+def release_env(folder: AppFolder, release: Path, workspace_path: Path) -> dict[str, str]:
+    """Where ``uv tool install`` puts a release, as the core's own deploy does: the tool's environment in
+    ``<release>/tools``, its command in ``<release>/bin``, the app's own Python in its folder."""
+    env = {
+        **os.environ,
+        "UV_TOOL_DIR": str(release / "tools"),
+        "UV_TOOL_BIN_DIR": str(release / "bin"),
+        "UV_PYTHON_INSTALL_DIR": str(folder.root / "python"),  # the app's own Python, readable by its account
+        "UV_CACHE_DIR": str(workspace_path / "cache" / "uv"),
+        "UV_LINK_MODE": "copy",  # the release never points into the core's cache
+    }
+    env.pop("VIRTUAL_ENV", None)  # a core run from a venv: the tool gets its own, never that one
+    return env
+
+
+def install_command(uv: str, package: Package, constraints: Path) -> list[str]:
+    """``uv tool install`` of the app's wheel, its libraries that aren't on PyPI with it (``--with``), every version
+    its lock pins (``--constraints``). ``--no-build``: wheels only, so installing never runs a library's build code as
+    the core's account; ``--refresh-package``: a wheel rebuilt at the same version is read again, never uv's cached
+    copy (the core's deploy does the same)."""
+    refresh = [arg for path in (package.path, *package.libraries)
+               for arg in ("--refresh-package", (wheel_name(path.name) or ("", ""))[0])]
+    withs = [arg for library in package.libraries for arg in ("--with", str(library))]
+    return [uv, "tool", "install", "--managed-python", "--python", PYTHON, "--no-build", "--constraints",
+            str(constraints), *refresh, *withs, str(package.path)]
+
+
 def unpack(package: Package, folder: AppFolder, workspace_path: Path) -> Path:
-    """The release ``releases/<version>``: a venv on the Hiro home's Python, the package's pinned requirements (their
-    hashes required) and its wheels, without their dependencies (the requirements hold them all). A failed try's
-    leftovers are replaced."""
+    """The release ``releases/<version>``, installed with ``uv tool install`` as the core is (``install_command``).
+    A failed try's leftovers are replaced."""
     manifest = package.manifest
     release = folder.release(manifest.version)
     staging = folder.root / ".incoming"
@@ -298,28 +326,23 @@ def unpack(package: Package, folder: AppFolder, workspace_path: Path) -> Path:
         if path.exists():
             shutil.rmtree(path)
     staging.mkdir(parents=True)
-    with zipfile.ZipFile(package.path) as zf:  # open_package checked every member stays inside its folder
-        for name in (*package.wheels, "requirements.txt"):
-            if name in zf.namelist():
-                zf.extract(name, staging)
-    env = {
-        **os.environ,
-        "UV_PYTHON_INSTALL_DIR": str(folder.root / "python"),  # the app's own Python, readable by its account
-        "UV_CACHE_DIR": str(workspace_path / "cache" / "uv"),
-        "UV_LINK_MODE": "copy",  # the release never points into the core's cache
-    }
+    constraints = staging / CONSTRAINTS_FILE
+    constraints.write_text(package.constraints, encoding="utf-8")
     uv = find_uv(folder.home)
-    _uv([uv, "venv", "--managed-python", "--python", PYTHON, "--no-project", str(release)], "Making the app's Python", env)
-    # --no-build: wheels only, so installing never runs a library's build code as the core's account
-    if package.requirements.strip():
-        _uv([uv, "pip", "install", "--python", str(release), "--require-hashes", "--no-deps", "--no-build",
-             "-r", str(staging / "requirements.txt")], "Installing the app's libraries", env)
-    _uv([uv, "pip", "install", "--python", str(release), "--no-deps", "--no-build",
-         *(str(staging / w) for w in package.wheels)], "Installing the app", env)
+    _uv(install_command(uv, package, constraints), "Installing the app", release_env(folder, release, workspace_path))
     shutil.rmtree(staging)
     # Each release keeps its manifest: an upgrade runs the old one's predeploy and health, even after a restart
     (release / MANIFEST_FILE).write_text(render_manifest(manifest), encoding="utf-8")
     return release
+
+
+def release_python(release: Path) -> Path:
+    """The Python of a release's tool environment (``<release>/tools/<the app's name>``), which runs its predeploy."""
+    tools = release / "tools"
+    found = sorted(p for p in tools.iterdir() if p.is_dir() and not p.name.startswith(".")) if tools.is_dir() else []
+    if len(found) != 1:
+        raise InstallFailed(f"The release {release.name} has no one tool environment in {tools}.")
+    return found[0] / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
 
 
 def point_current(folder: AppFolder, release: Path) -> None:

@@ -49,12 +49,16 @@ def _free_port() -> int:
         return int(s.getsockname()[1])
 
 
+WHEEL = "example_hello-0.1.0-py3-none-any.whl"
+
+
 def package_bytes(m: Manifest) -> bytes:
+    """An app's wheel as package.py builds it: its manifest and its pins in its module's folder."""
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as zf:
-        zf.writestr("hiro-extension.toml", render_manifest(m))
-        zf.writestr("requirements.txt", "")
-        zf.writestr("wheels/example_hello-0.1.0-py3-none-any.whl", "x")
+        zf.writestr("hello/__init__.py", "")
+        zf.writestr("hello/hiro-extension.toml", render_manifest(m))
+        zf.writestr("hello/hiro-constraints.txt", "fastapi==1.0\nhiro-extension-kit==0.2.0\n")
     return buffer.getvalue()
 
 
@@ -105,24 +109,36 @@ def test_at_pairing_it_is_approved_for_what_it_still_asks_and_its_name_before_it
 # ---------------------------------------------------------------------------
 
 
-def test_a_package_is_kept_by_its_hash_and_found_only_by_it(workspace: Path) -> None:
-    package_id = keep_package(workspace, [b"abc", b"def"])
-    assert len(package_id) == 64 and stored_package(workspace, package_id).read_bytes() == b"abcdef"
+def test_a_package_is_kept_by_its_wheels_hash_with_its_libraries_and_found_only_by_it(workspace: Path) -> None:
+    import hashlib
+
+    wheel = package_bytes(manifest())
+    package_id = keep_package(workspace, WHEEL, [wheel[:10], wheel[10:]])
+    assert package_id == hashlib.sha256(wheel).hexdigest()
+    keep_package(workspace, "hiro_extension_kit-0.2.0-py3-none-any.whl", [b"kit"], into=package_id)
+    found = stored_package(workspace, package_id)
+    assert found.name == WHEEL and found.read_bytes() == wheel
+    assert (found.parent / "hiro_extension_kit-0.2.0-py3-none-any.whl").read_bytes() == b"kit"
     for bad in ("../../etc/passwd", "a" * 64):
         with pytest.raises(PackageRefused):
             stored_package(workspace, bad)
+    for name in ("../evil-0.1-py3-none-any.whl", "notes.txt"):
+        with pytest.raises(PackageRefused, match="isn't a wheel"):
+            keep_package(workspace, name, [b"x"], into=package_id)
     drop_package(workspace, package_id)
     with pytest.raises(PackageRefused, match="isn't kept"):
         stored_package(workspace, package_id)
+    with pytest.raises(PackageRefused, match="isn't kept"):  # a library into a package that is gone
+        keep_package(workspace, "hiro_commons-0.2.0-py3-none-any.whl", [b"x"], into=package_id)
 
 
 def test_a_package_no_install_names_goes_after_a_day(workspace: Path) -> None:
     import os
 
-    kept, old, named = (keep_package(workspace, [x]) for x in (b"new", b"old", b"named"))
+    kept, old, named = (keep_package(workspace, WHEEL, [package_bytes(manifest(title=t))]) for t in ("A", "B", "C"))
     for package_id in (old, named):
-        path = stored_package(workspace, package_id)
-        os.utime(path, (path.stat().st_atime - 2 * 86400, path.stat().st_mtime - 2 * 86400))
+        folder = stored_package(workspace, package_id).parent
+        os.utime(folder, (folder.stat().st_atime - 2 * 86400, folder.stat().st_mtime - 2 * 86400))
     assert prune_packages(workspace, {named}) == 1
     stored_package(workspace, kept), stored_package(workspace, named)
     with pytest.raises(PackageRefused):
@@ -152,7 +168,7 @@ def test_the_checks_refuse_with_their_codes(workspace: Path) -> None:
 
 
 def _prepared(workspace: Path, m: Manifest | None = None, chosen=frozenset()):
-    package_id = keep_package(workspace, [package_bytes(m or manifest())])
+    package_id = keep_package(workspace, WHEEL, [package_bytes(m or manifest())])
     return app_install.prepare(workspace, package_id, set(chosen)), package_id
 
 
@@ -287,7 +303,7 @@ def test_the_finish_is_the_install_story_and_says_the_yes_and_how(workspace: Pat
     monkeypatch.setattr(tools, "_resolve_path", lambda workspace: workspace_path)
     workspace_path = workspace
     _System(monkeypatch)
-    package_id = keep_package(workspace, [package_bytes(manifest())])
+    package_id = keep_package(workspace, WHEEL, [package_bytes(manifest())])
     tools.ExtensionInstallPrepareTool().execute(package=package_id, in_advance=True)
     result = tools.ExtensionInstallFinishTool().execute(key="example.hello")
     assert result.state == installs.WAITING
@@ -368,3 +384,33 @@ def test_the_admin_steps_job_and_report_sit_in_a_private_folder_not_in_tmp_itsel
     assert done == {"service": "hiro-example-hello"}
     assert seen["job"].parent == seen["report"].parent != Path(tempfile.gettempdir())
     assert not seen["job"].parent.exists()
+
+
+def test_a_release_is_installed_with_uv_tool_install_as_the_core_is(tmp_path: Path) -> None:
+    from hirocli.domain.packages import Package
+
+    folder = app_folder("example.hello", tmp_path / "home")
+    release = folder.release("0.1.0")
+    kit = tmp_path / "hiro_extension_kit-0.2.0-py3-none-any.whl"
+    package = Package(path=tmp_path / WHEEL, manifest=manifest(), constraints="", libraries=(kit,))
+    command = app_install.install_command("uv", package, tmp_path / "c.txt")
+    assert command[:3] == ["uv", "tool", "install"] and command[-1] == str(tmp_path / WHEEL)
+    for flag in ("--no-build", "--managed-python"):
+        assert flag in command
+    assert command[command.index("--constraints") + 1] == str(tmp_path / "c.txt")
+    assert command[command.index("--with") + 1] == str(kit)
+    refreshed = [command[i + 1] for i, arg in enumerate(command) if arg == "--refresh-package"]
+    assert refreshed == ["example-hello", "hiro-extension-kit"]
+    env = app_install.release_env(folder, release, tmp_path / "ws")
+    assert (env["UV_TOOL_DIR"], env["UV_TOOL_BIN_DIR"]) == (str(release / "tools"), str(release / "bin"))
+    assert env["UV_PYTHON_INSTALL_DIR"] == str(folder.root / "python") and "VIRTUAL_ENV" not in env
+
+
+def test_a_releases_python_is_its_one_tool_environments(tmp_path: Path) -> None:
+    release = tmp_path / "0.1.0"
+    with pytest.raises(app_install.InstallFailed, match="no one tool environment"):
+        app_install.release_python(release)
+    (release / "tools" / "example-hello").mkdir(parents=True)
+    (release / "tools" / ".lock").write_text("")
+    bin_dir = "Scripts" if sys.platform == "win32" else "bin"
+    assert app_install.release_python(release).parent == release / "tools" / "example-hello" / bin_dir

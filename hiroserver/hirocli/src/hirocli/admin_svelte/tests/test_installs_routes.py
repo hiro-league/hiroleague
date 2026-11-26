@@ -24,10 +24,18 @@ def _package(folder: Path, version: str, key: str = "example.hello") -> Path:
                  port=8190)
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as zf:
-        zf.writestr("hiro-extension.toml", render_manifest(m))
-        zf.writestr(f"wheels/example_hello-{version}-py3-none-any.whl", "x")
-    path = folder / f"{key.replace('.', '-')}-{version}.zip"
+        zf.writestr("hello/hiro-extension.toml", render_manifest(m))
+        zf.writestr("hello/hiro-constraints.txt", "hiro-commons==0.2.0\n")
+    path = folder / f"{key.replace('.', '_')}-{version}-py3-none-any.whl"
     path.write_bytes(buffer.getvalue())
+    return path
+
+
+def _library(folder: Path, name: str = "hiro_commons", version: str = "0.2.0") -> Path:
+    """A kit's wheel beside the app's: no manifest."""
+    path = folder / f"{name}-{version}-py3-none-any.whl"
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr(f"{name}/__init__.py", "")
     return path
 
 
@@ -35,12 +43,13 @@ def test_each_package_offers_an_install_an_upgrade_or_nothing(tmp_path: Path) ->
     _package(tmp_path, "0.1.1")
     _package(tmp_path, "0.2.0", key="acme.notes")
     _package(tmp_path, "0.0.9", key="acme.old")
-    (tmp_path / "broken.zip").write_text("not a zip")
+    _library(tmp_path)  # a kit's wheel: no package of its own, never refused
+    (tmp_path / "broken-0.1.0-py3-none-any.whl").write_text("not a wheel")
     found = routes.read_packages(tmp_path, {"example.hello": "0.1.0", "acme.old": "0.1.0"})
     assert {p.key: p.offer for p in found.packages} == {"example.hello": "upgrade", "acme.notes": "install",
                                                         "acme.old": "none"}
-    assert "acme-notes-0.2.0.zip" in next(p.command for p in found.packages if p.key == "acme.notes")
-    assert "broken.zip" in found.refused
+    assert "acme_notes-0.2.0-py3-none-any.whl" in next(p.command for p in found.packages if p.key == "acme.notes")
+    assert list(found.refused) == ["broken-0.1.0-py3-none-any.whl"]
     assert routes.read_packages(tmp_path / "none", {}).packages == []
 
 
@@ -49,10 +58,14 @@ def test_an_upgrade_takes_only_a_package_of_that_folder(tmp_path: Path) -> None:
     folder.mkdir()
     ws.mkdir()
     _package(folder, "0.1.1")
-    package_id = routes.hand_over(folder, "example-hello-0.1.1.zip", ws)
-    assert stored_package(ws, package_id).is_file()
-    (tmp_path / "outside.zip").write_text("x")
-    for bad in ("../outside.zip", "missing.zip"):
+    _library(folder)
+    _library(folder, "hiro_memory")  # beside it, but no pin of the app's: left alone
+    package_id = routes.hand_over(folder, "example_hello-0.1.1-py3-none-any.whl", ws)
+    wheel = stored_package(ws, package_id)
+    assert sorted(p.name for p in wheel.parent.iterdir()) == ["example_hello-0.1.1-py3-none-any.whl",
+                                                              "hiro_commons-0.2.0-py3-none-any.whl"]
+    (tmp_path / "outside-0.1.0-py3-none-any.whl").write_text("x")
+    for bad in ("../outside-0.1.0-py3-none-any.whl", "missing-0.1.0-py3-none-any.whl"):
         with pytest.raises(PackageRefused):
             routes.hand_over(folder, bad, ws)
 
@@ -115,9 +128,9 @@ def test_an_upgrade_runs_as_a_job_the_page_follows_to_its_end(monkeypatch, tmp_p
     routes._UPGRADES.clear()
 
     async def scenario() -> dict[str, Any]:
-        started = await routes.start_upgrade("example.hello", routes.UpgradeBody(file="example-hello-0.1.1.zip"), "ws")
+        started = await routes.start_upgrade("example.hello", routes.UpgradeBody(file="example_hello-0.1.1-py3-none-any.whl"), "ws")
         assert started["running"] is True
-        again = await routes.start_upgrade("example.hello", routes.UpgradeBody(file="example-hello-0.1.1.zip"), "ws")
+        again = await routes.start_upgrade("example.hello", routes.UpgradeBody(file="example_hello-0.1.1-py3-none-any.whl"), "ws")
         assert again.status_code == 409
         for _ in range(100):
             await asyncio.sleep(0.01)

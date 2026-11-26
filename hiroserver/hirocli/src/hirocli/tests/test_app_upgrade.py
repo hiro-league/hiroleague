@@ -31,10 +31,8 @@ def manifest(version: str, **change) -> Manifest:
 def package(workspace: Path, m: Manifest) -> str:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as zf:
-        zf.writestr(MANIFEST_FILE, render_manifest(m))
-        zf.writestr("requirements.txt", "")
-        zf.writestr(f"wheels/example_hello-{m.version}-py3-none-any.whl", "x")
-    return keep_package(workspace, [buffer.getvalue()])
+        zf.writestr(f"hello/{MANIFEST_FILE}", render_manifest(m))
+    return keep_package(workspace, f"example_hello-{m.version}-py3-none-any.whl", [buffer.getvalue()])
 
 
 class Fake:

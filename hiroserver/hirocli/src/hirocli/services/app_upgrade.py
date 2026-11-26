@@ -29,7 +29,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -163,10 +162,6 @@ def check_upgrade(row: installs.Install, manifest: Manifest) -> None:
 # ---------------------------------------------------------------------------
 
 
-def python_of(release: Path) -> Path:
-    return release / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
-
-
 def release_manifest(release: Path) -> Manifest | None:
     try:
         return parse_manifest((release / MANIFEST_FILE).read_text(encoding="utf-8"))
@@ -184,8 +179,12 @@ def run_predeploy(release: Path, manifest: Manifest, folder: AppFolder, step: st
     env = {**os.environ, "DATA_DIR": str(folder.data), "ALLOW_ROW_LOSS": ",".join(allowed or [])}
     env.pop("VIRTUAL_ENV", None)
     try:
+        python = app_install.release_python(release)
+    except app_install.InstallFailed as exc:
+        raise UpgradeFailed(str(exc)) from exc
+    try:
         done = subprocess.run(  # noqa: S603 — the release's own Python and module, a fixed step
-            [str(python_of(release)), "-m", module, step, copy], capture_output=True, text=True, env=env,
+            [str(python), "-m", module, step, copy], capture_output=True, text=True, env=env,
             cwd=str(folder.data), timeout=_PREDEPLOY_TIMEOUT_S, check=False, encoding="utf-8", errors="replace",
         )
     except (OSError, subprocess.TimeoutExpired) as exc:

@@ -210,6 +210,7 @@ class ChannelInstallTool(Tool):
         "channel_name": ToolParam(str, "Channel name, e.g. 'telegram'"),
         "package": ToolParam(str, "Package name override (default: hiro-channel-<name>)", required=False),
         "editable": ToolParam(bool, "Install in editable/development mode", required=False),
+        "reinstall": ToolParam(bool, "Install it again over the installed one (an upgrade)", required=False),
     }
 
     def execute(
@@ -217,9 +218,14 @@ class ChannelInstallTool(Tool):
         channel_name: str,
         package: str | None = None,
         editable: bool = False,
+        reinstall: bool = False,
     ) -> ChannelInstallResult:
+        from ..services.channel_install import find_uv
+
         pkg = package or f"hiro-channel-{channel_name}"
-        cmd = ["uv", "tool", "install"]
+        cmd = [find_uv(), "tool", "install"]
+        if reinstall:
+            cmd.append("--reinstall")
         if editable:
             cmd.append("--editable")
         cmd.append(pkg)
@@ -250,8 +256,10 @@ class ChannelUninstallTool(Tool):
         package: str | None = None,
     ) -> ChannelUninstallResult:
         pkg = package or f"hiro-channel-{channel_name}"
+        from ..services.channel_install import find_uv
+
         proc = subprocess.run(  # noqa: S603
-            ["uv", "tool", "uninstall", pkg], capture_output=True, text=True
+            [find_uv(), "tool", "uninstall", pkg], capture_output=True, text=True
         )
         output = (proc.stdout or proc.stderr).strip()
 

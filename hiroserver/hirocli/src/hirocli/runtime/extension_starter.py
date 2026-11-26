@@ -92,7 +92,7 @@ class ExtensionStarter:
         except FileNotFoundError:
             if out is not None:
                 out.close()
-            log.error(f"❌ Extension's command not found — {cfg.name}", cmd=cmd[0], hint=f"hiro channel install {cfg.name}")
+            log.error(f"❌ Extension's command not found — {cfg.name}", cmd=cmd[0], hint=f"hiro extension install {cfg.name}")
             return
         except Exception as exc:
             if out is not None:

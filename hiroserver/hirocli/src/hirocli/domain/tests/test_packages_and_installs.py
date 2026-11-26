@@ -1,4 +1,4 @@
-"""A package as the core reads it (domain/packages.py), the Hiro home's layout (domain/hiro_home.py), and the
+"""A package (the app's wheel) as the core reads it (domain/packages.py), the Hiro home's layout (domain/hiro_home.py), and the
 installs store (domain/installs.py)."""
 
 from __future__ import annotations
@@ -14,8 +14,10 @@ from hirocli.domain.packages import (
     BAD_MANIFEST,
     PackageRefused,
     open_package,
+    pins,
     service_name,
     version_in,
+    wheel_name,
 )
 
 MANIFEST = """key = "example.hello"
@@ -28,22 +30,47 @@ port = 8190
 """
 
 
-def make_package(tmp_path: Path, *, manifest: str = MANIFEST, members: dict[str, str] | None = None) -> Path:
-    path = tmp_path / "example-hello-0.1.0.zip"
+CONSTRAINTS = "fastapi==1.0 ; python_version >= '3.12'\nhiro-extension-kit==0.2.0\nhiro_commons==0.2.0\n"
+WHEEL = "example_hello-0.1.0-py3-none-any.whl"
+
+
+def make_package(tmp_path: Path, *, manifest: str = MANIFEST, name: str = WHEEL,
+                 members: dict[str, str] | None = None) -> Path:
+    """An app's wheel as package.py builds it: its manifest and its pins in its module's folder."""
+    path = tmp_path / name
     with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("hello/__init__.py", "")
         if manifest:
-            zf.writestr("hiro-extension.toml", manifest)
-        zf.writestr("requirements.txt", "fastapi==1.0 --hash=sha256:00\n")
-        for name, text in (members or {"wheels/example_hello-0.1.0-py3-none-any.whl": "x"}).items():
-            zf.writestr(name, text)
+            zf.writestr("hello/hiro-extension.toml", manifest)
+        zf.writestr("hello/hiro-constraints.txt", CONSTRAINTS)
+        for member, text in (members or {}).items():
+            zf.writestr(member, text)
     return path
 
 
-def test_a_package_is_read_with_its_manifest_wheels_and_requirements(tmp_path: Path) -> None:
+def library(folder: Path, name: str) -> Path:
+    path = folder / name
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("lib/__init__.py", "")
+    return path
+
+
+def test_a_package_is_the_apps_wheel_with_its_manifest_its_pins_and_its_kits_beside_it(tmp_path: Path) -> None:
+    kit = library(tmp_path, "hiro_extension_kit-0.2.0-py3-none-any.whl")
+    commons = library(tmp_path, "hiro_commons-0.2.0-py3-none-any.whl")
+    library(tmp_path, "hiro_commons-0.1.0-py3-none-any.whl")  # not the version it pins
+    library(tmp_path, "requests-2.0-py3-none-any.whl")  # not one of its pins
     package = open_package(make_package(tmp_path))
     assert package.manifest.key == "example.hello"
-    assert package.wheels == ("wheels/example_hello-0.1.0-py3-none-any.whl",)
-    assert "fastapi==1.0" in package.requirements
+    assert "fastapi==1.0" in package.constraints
+    assert package.libraries == (commons, kit)
+
+
+def test_pins_and_wheel_names_are_read_as_pypi_compares_names() -> None:
+    assert pins(CONSTRAINTS) == {"fastapi": "1.0", "hiro-extension-kit": "0.2.0", "hiro-commons": "0.2.0"}
+    assert wheel_name("Hiro_Extension.Kit-0.2.0-py3-none-any.whl") == ("hiro-extension-kit", "0.2.0")
+    assert wheel_name("neonize-0.5.2-1-py3-none-win_amd64.whl") == ("neonize", "0.5.2")
+    assert wheel_name("hello.zip") is None
 
 
 @pytest.mark.parametrize(
@@ -51,8 +78,8 @@ def test_a_package_is_read_with_its_manifest_wheels_and_requirements(tmp_path: P
     [
         ({"manifest": ""}, "no hiro-extension.toml"),
         ({"manifest": MANIFEST.replace('kind = "app"', 'kind = "plugin"')}, "kind"),
-        ({"members": {"wheels/../../evil.whl": "x"}}, "outside its own folder"),
-        ({"members": {"notes.txt": "x"}}, "holds no wheel"),
+        ({"members": {"other/hiro-extension.toml": MANIFEST}}, "no hiro-extension.toml"),  # two: neither is its own
+        ({"name": "example-hello-0.1.0.zip"}, "isn't a wheel"),
     ],
 )
 def test_a_bad_package_is_refused_as_bad_manifest(tmp_path: Path, kwargs: dict, words: str) -> None:
@@ -61,8 +88,8 @@ def test_a_bad_package_is_refused_as_bad_manifest(tmp_path: Path, kwargs: dict, 
     assert e.value.code == BAD_MANIFEST
 
 
-def test_a_file_that_isnt_a_zip_is_refused(tmp_path: Path) -> None:
-    path = tmp_path / "x.zip"
+def test_a_file_that_isnt_a_wheel_is_refused(tmp_path: Path) -> None:
+    path = tmp_path / WHEEL
     path.write_text("not a zip")
     with pytest.raises(PackageRefused, match="can't be read"):
         open_package(path)

@@ -81,6 +81,44 @@ def register(extension_app: typer.Typer, console: Console) -> None:
             raise typer.Exit(1) from exc
         return True
 
+    def _remove_channel(name: str, *, purge: bool, yes: bool, workspace: str | None) -> bool:
+        """Remove a channel by its name: stopped, its row and its program gone; with purge its folder (its key and
+        its account's link, such as WhatsApp's) and its secrets. False when no channel has that name."""
+        import sys
+        from pathlib import Path
+
+        import httpx
+
+        from ..domain.channel_config import load_channel_config
+        from ..domain.workspace import resolve_workspace
+
+        try:
+            entry, _ = resolve_workspace(workspace)
+        except WorkspaceError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+        if load_channel_config(Path(entry.path), name) is None:
+            return False
+        log.info("hiro extension remove: channel", channel=name, purge=purge)
+        if purge and not yes:
+            if not sys.stdin.isatty():
+                console.print("[red]--purge deletes the channel's folder and its account's link: pass --yes too, or "
+                              "run it in a terminal.[/red]")
+                raise typer.Exit(1)
+            if not typer.confirm(f"Delete {name}'s folder and secrets too? Its account must be linked again (WhatsApp: "
+                                 "scan the QR code). It can't be undone.", default=False):
+                console.print("Nothing was changed.")
+                raise typer.Exit(1)
+        try:
+            ok = extension_install.channel_step(console, "extension_remove_channel", name, {"purge": purge},
+                                                workspace)
+        except (extension_install._Stop, RuntimeError, OSError, httpx.HTTPError) as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+        if not ok:
+            raise typer.Exit(1)
+        return True
+
     @extension_app.command("add")
     def extension_add(
         workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help=_WORKSPACE_HELP),
@@ -180,19 +218,25 @@ def register(extension_app: typer.Typer, console: Console) -> None:
     @extension_app.command("remove")
     def extension_remove(
         extension_id: str = typer.Argument(
-            ..., help="Extension ID to remove, or an installed app's key (see `hiro extension list`)."
+            ..., help="Extension ID to remove, an installed app's key or a channel's name (see `hiro extension list`)."
         ),
-        purge: bool = typer.Option(False, "--purge", help="An installed app: its folder and its data go too."),
+        purge: bool = typer.Option(
+            False, "--purge", help="An installed app: its folder and its data go too; a channel: its folder and secrets."
+        ),
         yes: bool = typer.Option(False, "--yes", help="With --purge: don't ask before deleting its data."),
         workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help=_WORKSPACE_HELP),
     ) -> None:
         """Remove a paired extension; it is refused until paired again. An app's LAN name, its rights and its AI picks
         go with it; its own data stays. An app the core installed loses its service and account too (one
-        administrator step), and with --purge its folder and data."""
+        administrator step), and with --purge its folder and data. A channel, by its name, is stopped and its program
+        uninstalled; with --purge its folder (its account's link) and secrets go too."""
         if _remove_installed(extension_id, purge=purge, yes=yes, workspace=workspace):
             return
+        if _remove_channel(extension_id, purge=purge, yes=yes, workspace=workspace):
+            return
         if purge:
-            console.print("[red]--purge is for an app the core installed: this one keeps its own data.[/red]")
+            console.print("[red]--purge is for an app the core installed or a channel: this one keeps its own data."
+                          "[/red]")
             raise typer.Exit(1)
         from pathlib import Path
 

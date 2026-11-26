@@ -30,7 +30,14 @@ from hirocli.admin_svelte.deps import SelectedWorkspaceIdDep
 from hirocli.admin_svelte.result_payload import api_failure
 from hirocli.domain import installs
 from hirocli.domain.hiro_home import hiro_home
-from hirocli.domain.packages import BAD_MANIFEST, PackageRefused, keep_package, open_package, version_numbers
+from hirocli.domain.packages import (
+    BAD_MANIFEST,
+    PackageRefused,
+    keep_package_files,
+    open_package,
+    read_manifest,
+    version_numbers,
+)
 from hirocli.services.app_upgrade import STEPS_IN_ORDER
 from hirocli.tools.extension_install import ExtensionStartTool, ExtensionStopTool, ExtensionUpgradeTool
 
@@ -125,12 +132,15 @@ def read_packages(folder: Path, installed: dict[str, str]) -> Packages:
     """The packages in ``folder`` and what each offers, against the installed versions (by key)."""
     offers: list[PackageOffer] = []
     refused: dict[str, str] = {}
-    for path in sorted(folder.glob("*.zip")) if folder.is_dir() else []:
+    for path in sorted(folder.glob("*.whl")) if folder.is_dir() else []:
         try:
-            manifest = open_package(path).manifest
+            read = read_manifest(path)
         except PackageRefused as exc:
             refused[path.name] = str(exc)
             continue
+        if read is None:
+            continue  # a library (a kit's wheel), installed with the app beside it
+        manifest = read[0]
         have = installed.get(manifest.key)
         if have is None:
             offer = "install"
@@ -209,11 +219,12 @@ async def stop_install(key: str, workspace_id: SelectedWorkspaceIdDep) -> Any:
 
 
 def hand_over(folder: Path, file: str, workspace_path: Path) -> str:
-    """The package from the Hiro home's folder into the core's own store (an upgrade reads only that)."""
+    """The app's wheel from the Hiro home's folder, with its libraries beside it, into the core's own store (an
+    upgrade reads only that)."""
     path = (folder / file).resolve()
     if path.parent != folder.resolve() or not path.is_file():
         raise PackageRefused(BAD_MANIFEST, f"There's no package {file} in {folder}.")
-    return keep_package(workspace_path, [path.read_bytes()])
+    return keep_package_files(workspace_path, open_package(path))
 
 
 @installs_router.post("/extensions/installs/{key}/upgrade", response_model=UpgradeState, status_code=202)

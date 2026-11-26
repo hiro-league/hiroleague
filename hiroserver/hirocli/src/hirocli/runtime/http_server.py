@@ -6,8 +6,8 @@ Endpoints:
   GET  /channels           — connected channel plugin names and info
   GET  /tools              — list all registered tools and their schemas
   POST /invoke             — execute a tool by name (``invoke_async``; async tools supported)
-  PUT  /packages           — keep a package's bytes for an install (answers its id); the CLI's way to hand the core
-                             a file its account may not read (domain/packages.py)
+  PUT  /packages           — keep a package's wheels for an install (answers its id); the CLI's way to hand the core
+                             files its account may not read (domain/packages.py)
   GET  /characters         — list character profiles (id, name, description, has_photo) for Flutter
   GET  /characters/{id}/profile — single character profile + updated_at cache hint
   GET  /characters/{id}/photo   — character image (or packaged default when no upload)
@@ -200,8 +200,9 @@ async def invoke_tool(body: InvokeRequest, request: Request) -> JSONResponse:
 
 
 @app.put("/packages")
-async def put_package(request: Request) -> JSONResponse:
-    """Keep a package for ``hiro extension install`` (the body is the zip): it is named by its id from here on."""
+async def put_package(request: Request, file: str, package: str = "") -> JSONResponse:
+    """Keep one wheel of a package for ``hiro extension install`` (the body is the wheel, ``file`` its name): the
+    app's wheel first, answered with the package's id, then each of its libraries with ``package`` that id."""
     from ..domain.installs import list_installs
     from ..domain.packages import MAX_PACKAGE_BYTES, PackageRefused, keep_package, prune_packages
 
@@ -210,15 +211,16 @@ async def put_package(request: Request) -> JSONResponse:
         raise HTTPException(status_code=503, detail="Server not initialized")
     size = int(request.headers.get("content-length") or 0)
     if size > MAX_PACKAGE_BYTES:
-        raise HTTPException(status_code=413, detail=f"A package is at most {MAX_PACKAGE_BYTES // 2**20} MB.")
+        raise HTTPException(status_code=413, detail=f"A wheel is at most {MAX_PACKAGE_BYTES // 2**20} MB.")
     body = await request.body()
-    named = {i.package for i in await asyncio.to_thread(list_installs, ctx.workspace_path) if i.package}
-    await asyncio.to_thread(prune_packages, ctx.workspace_path, named)
+    if not package:
+        named = {i.package for i in await asyncio.to_thread(list_installs, ctx.workspace_path) if i.package}
+        await asyncio.to_thread(prune_packages, ctx.workspace_path, named)
     try:
-        package_id = await asyncio.to_thread(keep_package, ctx.workspace_path, [body])
+        package_id = await asyncio.to_thread(keep_package, ctx.workspace_path, file, [body], into=package)
     except PackageRefused as exc:
-        raise HTTPException(status_code=413, detail=str(exc)) from exc
-    log.info("📦 A package was handed to the core", package=package_id[:12], size_kb=len(body) // 1024)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    log.info(f"📦 A wheel was handed to the core — {file}", package=package_id[:12], size_kb=len(body) // 1024)
     return JSONResponse({"package": package_id})
 
 

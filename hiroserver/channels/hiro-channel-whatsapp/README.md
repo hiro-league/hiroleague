@@ -17,9 +17,8 @@ land in later phases.
 ## Dev install
 
 ```bash
-hiro channel install whatsapp --editable       # or: hiro channel setup with a workspace dir
-hiro channel setup whatsapp                     # writes the channel_plugins row
-hiro stop && hiro start                          # ChannelManager spawns the plugin
+hiro extension install whatsapp     # a uv tool of this checkout's folder (PyPI's package elsewhere), switched off
+hiro channel enable whatsapp        # the core starts it; its QR code is on the Extensions page
 ```
 
 On first run, an ASCII QR is written to the plugin log
