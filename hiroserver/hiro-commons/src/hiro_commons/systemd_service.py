@@ -93,6 +93,9 @@ class ServiceSpec:
     # systemd, which would kill it with the rest of the service).
     restart_exit_code: int | None = None
     documentation: str | None = None
+    # The file mode mask its files are made with (UMask=): an app the core installs makes its data group-writable
+    # (0007), so the core's account, in the data folder's group, can copy and put back its databases.
+    umask: str | None = None
 
 
 @dataclass
@@ -200,6 +203,10 @@ def render_unit(spec: ServiceSpec) -> str:
         f"EnvironmentFile={spec.env_file.as_posix()}",
     ]
     lines += [_environment_line(k, v) for k, v in spec.environment.items()]
+    if spec.umask is not None:
+        if not re.fullmatch(r"0[0-7]{3}", spec.umask):
+            raise ServiceError(f"{spec.umask!r} isn't a file mode mask such as 0007.")
+        lines.append(f"UMask={spec.umask}")
     lines += [
         f"ExecStart={exec_start}",
         "Restart=on-failure",
