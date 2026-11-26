@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import shutil
 import subprocess
 import sys
@@ -94,6 +95,21 @@ def _consent(console: Console, approve: bool) -> None:
         raise _Stop("Not approved: nothing was changed.")
 
 
+def work_folder() -> Path:
+    """The folder of this person's the admin step's job and report sit in.
+
+    Fix: not in /tmp itself: Ubuntu keeps root from writing a file another user made in a sticky folder
+    (fs.protected_regular), so the report was refused (Simone, Nov 26). Fix: on Windows not mkdtemp's folder either:
+    Python makes it readable only by SYSTEM, Administrators and its owner, and the report the elevated step writes
+    there is owned by Administrators, so the person's own terminal couldn't read it and the install stopped after its
+    service was made (the PC, Nov 26). There it is a plain folder in their temp, which keeps their own access."""
+    if sys.platform == "win32":
+        path = Path(tempfile.gettempdir()) / f"hiro-app-{secrets.token_hex(8)}"
+        path.mkdir()
+        return path
+    return Path(tempfile.mkdtemp(prefix="hiro-app-"))
+
+
 def run_system_step(console: Console, job: dict[str, Any]) -> dict[str, Any]:
     """The one administrator step, `hiro extension system <job>`: sudo on Linux and Mac (the terminal asks for the
     password), Windows' prompt otherwise. Returns what it did; _Stop when it was declined or failed."""
@@ -101,9 +117,7 @@ def run_system_step(console: Console, job: dict[str, Any]) -> dict[str, Any]:
 
     from ..linux_service import hiro_executable
 
-    # Fix: the job and the report sit in a folder of this person's, not in /tmp itself: Ubuntu keeps root from writing
-    # a file another user made in a sticky folder (fs.protected_regular), so the report was refused (Simone, Nov 26)
-    work = Path(tempfile.mkdtemp(prefix="hiro-app-"))
+    work = work_folder()
     job_path, report_path = str(work / "job.json"), str(work / "done.json")
     try:
         Path(job_path).write_text(json.dumps(job), encoding="utf-8")

@@ -414,3 +414,26 @@ def test_a_releases_python_is_its_one_tool_environments(tmp_path: Path) -> None:
     (release / "tools" / ".lock").write_text("")
     bin_dir = "Scripts" if sys.platform == "win32" else "bin"
     assert app_install.release_python(release).parent == release / "tools" / "example-hello" / bin_dir
+
+
+def test_the_admin_steps_folder_lets_the_person_read_what_an_administrator_writes_there() -> None:
+    import subprocess
+    import tempfile
+
+    from hirocli.commands.extension_install import work_folder
+
+    folder = work_folder()
+    try:
+        if sys.platform == "win32":
+            # mkdtemp's folder admits only SYSTEM, Administrators and its owner: the person's own access must be there
+            import getpass
+
+            rights = subprocess.run(["icacls", str(folder)], capture_output=True, text=True, check=True).stdout
+            assert getpass.getuser().lower() in rights.lower() and "OWNER RIGHTS" not in rights
+        else:
+            import os
+
+            # The person's own folder, not /tmp itself (a sticky folder refuses root's write there)
+            assert folder.stat().st_uid == os.getuid() and folder.parent == Path(tempfile.gettempdir())
+    finally:
+        folder.rmdir()
