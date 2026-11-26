@@ -97,6 +97,9 @@ def install(
     lay.home.mkdir(parents=True, exist_ok=True)
     lock_program_folder(lay.home)
     exe = ws.install_release(lay, source or ws.installed_package_spec())
+    # The service core installs channels and apps' releases with uv, and has no PATH of the person's: without the
+    # home's own copy, a channel installed before any app failed to find uv.
+    ws.copy_uv_into(lay.home)
     spec = ws.build_spec(exe=exe, lay=lay, workspace=workspace)
     if core_name:
         spec = dataclasses.replace(spec, environment={**spec.environment, ENV_CORE_NAME: core_name})

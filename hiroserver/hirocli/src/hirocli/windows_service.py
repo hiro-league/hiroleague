@@ -192,6 +192,10 @@ def install_release(lay: Layout, source: str) -> Path:
         "UV_TOOL_DIR": str(release / "tools"),
         "UV_TOOL_BIN_DIR": str(release / "bin"),
         "UV_PYTHON_INSTALL_DIR": str(lay.python_dir),
+        # Copies, never hard links: a hard link shares the file's permissions with its copy in this person's uv
+        # cache, which the service's account can't read (a clean laptop, Nov 26, 2026: "DLL load failed while
+        # importing _pydantic_core: Access is denied" at every start). The app install does the same.
+        "UV_LINK_MODE": "copy",
     }
     log.info("Installing Hiro League for the service", source=source, release=str(release))
     try:
@@ -227,6 +231,21 @@ def install_release(lay: Layout, source: str) -> Path:
             raise
         raise ServiceError(f"Installing Hiro League for the service failed: {exc}") from exc
     return exe
+
+
+def copy_uv_into(home: Path) -> None:
+    """A service core has no PATH of the person's, yet installs an app's release and a channel's program with uv: the
+    Hiro home keeps its own copy (``<home>/bin/uv.exe``), taken from this person's uv once. Run as an administrator
+    (the home admits no one else's writes)."""
+    target = home / "bin" / "uv.exe"
+    if target.is_file():
+        return
+    found = shutil.which("uv")
+    if not found:
+        raise ServiceError("uv isn't on this PATH: install uv (https://docs.astral.sh/uv/), then run this again.")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(found, target)
+    log.info("The Hiro home has its own uv now — HiroServer · service", path=str(target))
 
 
 def build_spec(*, exe: Path, lay: Layout, workspace: str | None) -> WinswSpec:
