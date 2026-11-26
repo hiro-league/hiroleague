@@ -22,6 +22,7 @@ One run, started when Michel says, ships everything committed since the last one
    own safety (database copies, migration trials, going back by itself) is the hook's, untouched here. A failed core
    deploy stops the apps.
 5. Verify each (it answers; no new errors in its log since its deploy started), then one report.
+6. Each plan phase Merged whose every merged task's work now runs live moves to Live in CodeHiro (plan.went_live).
 
 Without --dry-run, it runs in a tab of the one Windows Terminal window "hiro-deploy", which Michel watches; the call
 that opens it waits until the deploy has started, or says why it didn't (another deploy runs). A deploy that went live
@@ -843,6 +844,33 @@ def show_open(out: Out, plan) -> None:
         out("\nPlans not landed, not in this deploy: " + "; ".join(held))
 
 
+def runs_head(facts: list[Facts], plan: Plan, results: list[Result]) -> set[str]:
+    """The repos that run what the deploy read as env0's dev/main once it ends: each it deployed, that answers with no
+    new error line; each it only pushed, pushed; each it had nothing to do for. A repo whose turn never came (the core
+    failed first) or that failed isn't one."""
+    by = {r.repo: r for r in results}
+    out = set()
+    for f in facts:
+        r = by.get(f.repo)
+        if f.repo in plan.deploys:
+            good = r is not None and r.deployed is True and not r.failed and r.answers is not False and not r.errors
+        elif f.repo in plan.push:
+            good = r is not None and not r.failed
+        else:
+            good = True
+        if good:
+            out.add(f.repo)
+    return out
+
+
+def phases_live(out: Out, facts: list[Facts], plan: Plan, results: list[Result]) -> None:
+    """Each plan phase whose merged work now runs live moves to Live in CodeHiro (plan.went_live)."""
+    import plan as plans
+
+    for line in plans.went_live({f.repo: f.head for f in facts}, runs_head(facts, plan, results)):
+        out(line)
+
+
 def cmd_deploy(a) -> None:
     if a.stop:
         cmd_stop(a.force)
@@ -882,10 +910,12 @@ def cmd_deploy(a) -> None:
                 if plan.empty:
                     out("\nNothing to ship: GitHub has every commit, and each repo runs its latest.")
                     ok = True
+                    phases_live(out, facts, plan, [])
                     return
                 out("")
                 results = run_deploy(out, task, facts, plan)
                 ok = report(out, task, results, started)
+                phases_live(out, facts, plan, results)
                 live_drift(out)
             finally:
                 hw.event(task=task, env=0, step="task", phase="end", ok=ok,

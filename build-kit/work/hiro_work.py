@@ -11,8 +11,8 @@ changes: its phases branch from it and merge back into it, and it reaches dev/ma
 target says where its work goes: dev/main, or its plan's branch. A plan's branch is never checked out.
 
     hiro-work status                         environments, tasks, reserved repos, servers
-    hiro-work start <task> --repos a,b [--kit] [--title ...] [--about ...] [--part-of ...] [--own-branch] [--on-main]
-                    [--env N]
+    hiro-work start <task> --repos a,b [--kit] [--title ...] [--about ...] [--part-of ... [--phase ...]]
+                    [--own-branch] [--on-main] [--env N]
     hiro-work describe <task> [--about ...] [--part-of ...]   what it does / what it is part of, changed
     hiro-work sync <task>                    bring the latest dev/main into the task's branch, without merging the task
     hiro-work merge <task>                   bring the latest in, check, update env0, release the environment
@@ -355,6 +355,9 @@ class Task:
     lands: str = ""
     landed: dict[str, str] = field(default_factory=dict)
     lands_phases: list[str] = field(default_factory=list)
+    # Once merged: where its merge left each repo it brought commits to (dev/main, or its plan's branch). The deploy
+    # moves its plan phase to Live once each runs live (plan.went_live). None: merged before hiro-work kept it
+    merged_at: dict[str, str] | None = None
     created: str = ""
     updated: str = ""
 
@@ -1027,6 +1030,11 @@ def cmd_start(a) -> None:
             raise Stop(f"Task '{a.task}' is already open.")
         repos = expand(a.repos.split(","), a.kit)
         part_of, plan_name, target = plan_target(a.part_of, getattr(a, "on_main", False))
+        phase = getattr(a, "phase", None)
+        if phase:
+            import plan
+
+            plan.phase_to_join(part_of, phase)  # a phase that isn't there, or is done, stops before any reserve
         # A phase of a plan that ships whole never stops for the plan's other open tasks: each phase is a task, on the
         # plan's branch. Elsewhere a phase beside an open one says --own-branch, and a step joins that task
         same = [] if a.own_branch or target else same_work(a.part_of or "", tasks)
@@ -1073,6 +1081,11 @@ def cmd_start(a) -> None:
         raise
     card(task)
     say_overlaps(task)
+    if not task.lands:  # a landing is no phase: plan.landed moves the phases it brings
+        import plan
+
+        for line in plan.started(task.id, part_of, phase, open_ids("working", "paused") - {task.id}):
+            say(line)
 
 
 # ----------------------------------------------------------------------------------- reservations at every step (fresh)
@@ -1392,6 +1405,7 @@ def cmd_merge(a) -> None:
         say(f"Task {task.id} merged into {task.target} (plan {task.plan}): {', '.join(task.repos)}; env0's main is "
             f"untouched and env{env} is free. Its work reaches main when the plan lands.")
     else:
+        follow_plans(task.id, "merged", ("working", "review"), open_ids("working", "paused"))
         say(f"Task {task.id} merged: {', '.join(task.repos)} in env0; env{env} is free. Not pushed: the deploy "
             "pushes.")
     if waiting:
@@ -1482,6 +1496,7 @@ def merge_steps(task: Task, env: int) -> dict[str, list[str]]:
                 outcome.fail(out.stdout.strip()[-300:])
     if failed:
         raise Stop("Checks failed: " + "; ".join(failed) + ". Fix, commit, merge again.")
+    task.merged_at = {}
     if task.target:  # 3. the plan's branch moves to the task's; env0 isn't touched, so no install waits there
         into_plan(task, env)
         return {}
@@ -1491,6 +1506,8 @@ def merge_steps(task: Task, env: int) -> dict[str, list[str]]:
         with step(task.id, env, "fast-forward", repo):
             before = git(repo_dir(0, repo), "rev-parse", "HEAD")
             git(repo_dir(0, repo), "merge", "--ff-only", "-q", task.branch)
+            if (after := git(repo_dir(0, repo), "rev-parse", "HEAD")) != before:
+                task.merged_at[repo] = after
             # A landing's commits are recorded as landed: CodeHiro keeps them the work of the phases that brought them
             record_commits(task.id, env, repo, before, git(repo_dir(0, repo), "rev-parse", "HEAD"),
                            "land" if task.lands else "merge")
@@ -1543,6 +1560,7 @@ def into_plan(task: Task, env: int) -> None:
             with step(task.id, env, "into plan", repo):
                 move_plan_branch(repo, task.target, new, old)
                 record_commits(task.id, env, repo, old or main, new, "plan")
+                task.merged_at[repo] = new
             with step(task.id, env, "copy off", repo) as outcome:
                 if note := copy_off(repo, task.target):
                     outcome.fail(note)
@@ -1651,7 +1669,7 @@ def open_ids(*states: str) -> set[str]:
 
 def follow_plans(task_id: str, to: str, when: tuple[str, ...], others: set[str]) -> None:
     """CodeHiro's copy of each plan naming the task follows what happened to it (plan.follow), then says so: the plan
-    doc is the session's to update, since hiro-work can't edit a Claude Doc."""
+    doc's states catch up when the plan ends (plans.md), since CodeHiro holds where a plan stands."""
     import plan
 
     for line in plan.follow(task_id, to, when, others - {task_id}):
@@ -2179,6 +2197,7 @@ def cmd_review(a) -> None:
         raise Stop(f"Task {task.id} isn't working (it is {task.state}).")
     event(task=task.id, env=task.env, step="review", phase="start")
     say(f"Task {task.id} waits for your review (CodeHiro's Work page says so until its next step).")
+    follow_plans(task.id, "review", ("working",), open_ids("working", "paused"))
 
 
 # ---------------------------------------------------------------------------------------------------------- main
@@ -2206,6 +2225,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--title")
     s.add_argument("--env", type=int, choices=list(ENVS))
     s.add_argument("--part-of", help="the bigger work it is a piece of: a name, or a task's id (its title is used)")
+    s.add_argument("--phase", help="with --part-of a plan: the phase it works on, as the plan names it (it joins the "
+                   "phase's tasks in CodeHiro, and each station moves the phase from then on)")
     s.add_argument("--own-branch", action="store_true",
                    help="a phase of open work: a task of its own beside its open tasks (a step joins that task)")
     s.add_argument("--on-main", action="store_true",

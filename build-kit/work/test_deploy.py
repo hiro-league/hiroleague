@@ -338,3 +338,30 @@ def test_a_deploy_with_nothing_to_ship_says_so_and_ends_well(deploy_files, monke
     assert "Nothing to ship" in (deploy_files / "deploy" / "deploy-empty.log").read_text(encoding="utf-8")
     # No step of any repo: CodeHiro's Deployments reads that as "Nothing to ship"
     assert not [e for e in tr.events_of("deploy-empty") if e.get("repo")]
+
+
+def test_a_repo_runs_what_the_deploy_read_only_when_its_part_went_well():
+    plan = tr.Plan(push=["hiroleague", "codehiro", "nethiro", "hiro-docs"], first=["hiroleague"],
+                   then=["codehiro", "nethiro", "studyhiro"], stops={})
+    results = [tr.Result("hiroleague", deployed=True, answers=True), tr.Result("codehiro", deployed=True, errors=2),
+               tr.Result("nethiro"),  # its turn never came: no deployed
+               tr.Result("studyhiro", deployed=False, failed="build failed"), tr.Result("hiro-docs", pushed=1)]
+    names = ["hiroleague", "codehiro", "nethiro", "studyhiro", "hiro-docs", "trainhiro"]
+    assert tr.runs_head([facts(n) for n in names], plan, results) == {"hiroleague", "hiro-docs", "trainhiro"}
+
+
+def test_the_deploy_moves_plan_phases_live_with_what_it_read_and_what_runs_it(deploy_files, monkeypatch):
+    import plan
+
+    calls = []
+    monkeypatch.setattr(plan, "went_live", lambda heads, live: calls.append((heads, live)) or ["Plan X: moved"])
+    monkeypatch.setattr(tr, "task_id", lambda now: "deploy-live")
+    monkeypatch.setattr(tr, "gather", lambda repos: [facts("codehiro")])
+    monkeypatch.setattr(tr, "run_deploy", lambda out, task, facts, plan: [tr.Result("codehiro", deployed=True)])
+    run_here()
+    assert calls == [({"codehiro": "h"}, {"codehiro"})]
+    assert "Plan X: moved" in (deploy_files / "deploy" / "deploy-live.log").read_text(encoding="utf-8")
+    monkeypatch.setattr(tr, "task_id", lambda now: "deploy-empty")
+    monkeypatch.setattr(tr, "make_plan", lambda facts: tr.Plan(push=[], first=[], then=[], stops={}))
+    run_here()  # nothing to ship: what ran already counts, so a phase merged earlier catches up
+    assert calls[-1] == ({"codehiro": "h"}, {"codehiro"})

@@ -21,10 +21,21 @@ Each send is the whole plan, never a change to it: CodeHiro shows the latest, an
 sends. A send never drops by accident a phase that is live, merged or has tasks: one the last send had and this one
 leaves out (a rename or a split leaves one out too) is refused unless named with --remove.
 
-A plan ends when every phase is live or cancelled. Its phases follow its tasks (hiro-work pause, resume, cancel and
-reopen send it again): a task paused puts its phase in paused, resumed back in working; a task cancelled puts it back
-in next, since the work is still to do, and the plan goes on. Only closing the plan cancels its phases; one live stays
-live. A closed plan opens again with a send that has a phase not live or cancelled. A plan belongs to tasks by its name: every task started with ``--part-of "<name>"`` shows it, and so does each
+A plan ends when every phase is live or cancelled. Its phases follow their tasks: hiro-work sends the plan again at
+each station, so the session never sends a state by hand. A phase moves only when its tasks names the task, only
+forward, and only when no other open task works on it (that one moves it when it gets there):
+
+    hiro-work start --part-of PLAN --phase PHASE   the task joins the phase's tasks; todo, next or waits: working
+    hiro-work review                               working: review
+    hiro-work merge                                working or review: merged (inplan for a plan that ships whole)
+    hiro-work plan land, then merge                inplan: merged, for the phases the landing brought onto main
+    hiro-work deploy                               merged: live, once every merged task's work runs live
+    hiro-work pause / resume                       working or review: paused / paused: working
+    hiro-work cancel / reopen                      working, review or paused: next (the work is still to do) / next:
+                                                   working
+
+Nothing moves for a plan with no send yet. Only closing the plan cancels its phases; one live stays live. A closed
+plan opens again with a send that has a phase not live or cancelled. A plan belongs to tasks by its name: every task started with ``--part-of "<name>"`` shows it, and so does each
 task the file names. The file:
 
     {"name": "Chores board",                        the work's name, as tasks say it in --part-of
@@ -71,7 +82,12 @@ FINAL = (*SHIPPED, "cancelled")
 KEPT = (*SHIPPED, "merged", "inplan")
 # How a phase's state reads in hiro-work's own lines
 SAYS = {"next": "Next", "paused": "Paused", "working": "Being worked on", "cancelled": "Cancelled",
-        "inplan": "In the plan", "merged": "Merged"}
+        "inplan": "In the plan", "merged": "Merged", "review": "In review", "live": "Live", "check": "Live, a check left",
+        "todo": "Not started", "waits": "Waits on a decision"}
+# A new task (hiro-work start) moves its phase from these to working: the phase hasn't started
+START_FROM = ("todo", "next", "waits")
+# A phase a new task can't join: its work is done or dropped, so more work there is a phase of its own
+CLOSED = (*KEPT, "cancelled")
 # The plan's fields a send carries, besides its phases (a resend keeps them: a pause keeps the plan's branch)
 FIELDS = ("doc", "design", "about", "tasks", "needs_michel", "side_by_side", "ships", "branch")
 # How a plan ships: phase by phase into main (the default), or whole, on its own branch
@@ -254,25 +270,122 @@ def resend(old: dict, phases: list[dict]) -> None:
              **{k: old.get(k) or ("" if k != "tasks" else []) for k in FIELDS}, phases=phases)
 
 
-def follow(task_id: str, to: str, when: tuple[str, ...], others: set[str]) -> list[str]:
-    """CodeHiro's copy of each plan naming the task follows it: each phase the task works on whose state is in
+def move(phases: list[dict], task_id: str, to: str, when: tuple[str, ...], others: set[str]) -> list[str]:
+    """One plan's phases (each a copy, changed here): each phase whose tasks names the task, whose state is in
     ``when``, and that no other task in ``others`` (the open ones) works on, moves to ``to``, its own words cleared.
-    Returns one line per plan that moved."""
+    ``when`` holds only the states before ``to``: a move is always forward. Returns the phases moved, as people read
+    them."""
+    moved = []
+    for i, ph in enumerate(phases, 1):
+        tasks = set(ph.get("tasks") or [])
+        if task_id in tasks and ph.get("state") in when and not (tasks - {task_id}) & others:
+            ph["state"], ph["says"] = to, ""
+            moved.append(f"phase {i} ({ph['name']})")
+    return moved
+
+
+def told(plan: dict, moved: list[str], to: str) -> str:
+    # The doc's states wait for the plan's end (plans.md): CodeHiro holds where a plan stands
+    return (f"Plan {plan['plan']}: {', '.join(moved)} now {SAYS.get(to, to)} in CodeHiro (the plan doc's states catch "
+            "up when the plan ends).")
+
+
+def follow(task_id: str, to: str, when: tuple[str, ...], others: set[str]) -> list[str]:
+    """CodeHiro's copy of each plan naming the task follows it (move), sent again where a phase moved. Returns one
+    line per plan that moved."""
     out = []
     for plan in plans(read_log(hw.EVENTS)):
-        moved, phases = [], []
-        for i, ph in enumerate(plan["phases"], 1):
-            ph = dict(ph)
-            tasks = set(ph.get("tasks") or [])
-            if task_id in tasks and ph.get("state") in when and not (tasks - {task_id}) & others:
-                ph["state"], ph["says"] = to, ""
+        phases = [dict(ph) for ph in plan["phases"]]
+        if moved := move(phases, task_id, to, when, others):
+            resend(plan, phases)
+            out.append(told(plan, moved, to))
+    return out
+
+
+def phase_to_join(plan_name: str, phase: str) -> tuple[dict, int]:
+    """The plan as last sent and the index of the phase --phase names in it. Stop, before a start reserves anything,
+    when there is no such plan or phase, or the phase's work is done or dropped (more work there is a phase of its
+    own, which a send adds)."""
+    if not plan_name:
+        raise hw.Stop('--phase needs --part-of "<plan>": the plan the phase is in.')
+    plan = latest(plan_name)
+    if not plan:
+        raise hw.Stop(f"No plan {plan_name} has been sent: send it first (hiro-work plan send FILE), or start without "
+                      "--phase.")
+    wanted = " ".join(phase.split()).casefold()
+    i = next((i for i, ph in enumerate(plan["phases"]) if str(ph["name"]).casefold() == wanted), None)
+    if i is None:
+        names = "; ".join(f'"{ph["name"]}"' for ph in plan["phases"])
+        raise hw.Stop(f"Plan {plan['plan']} has no phase {phase}. Its phases: {names}.")
+    ph = plan["phases"][i]
+    if ph.get("state") in CLOSED:
+        raise hw.Stop(f"Plan {plan['plan']}: phase {i + 1} ({ph['name']}) is {SAYS.get(ph['state'], ph['state'])}, so a "
+                      "new task can't join it. More work on it is a phase of its own: send the plan with it, then "
+                      "start with that phase.")
+    return plan, i
+
+
+def started(task_id: str, plan_name: str, phase: str | None, others: set[str]) -> list[str]:
+    """After hiro-work start: with --phase the task joins that phase's tasks, then each phase naming it moves to working
+    from todo, next or waits (move's rules). Without --phase only phases a send names it in move. One send at most.
+    Returns what to tell the session."""
+    if not phase:
+        return follow(task_id, "working", START_FROM, others)
+    plan, i = phase_to_join(plan_name, phase)
+    phases = [dict(ph) for ph in plan["phases"]]
+    joins = task_id not in (phases[i].get("tasks") or [])
+    if joins:
+        phases[i]["tasks"] = [*(phases[i].get("tasks") or []), task_id]
+    moved = move(phases, task_id, "working", START_FROM, others)
+    if not (joins or moved):
+        return []
+    resend(plan, phases)
+    if moved:
+        return [told(plan, moved, "working")]
+    state = phases[i]["state"]
+    return [f"Plan {plan['plan']}: {task_id} joins phase {i + 1} ({phases[i]['name']}) in CodeHiro; it stays "
+            f"{SAYS.get(state, state)} (another open task works on it, or it is under way)."]
+
+
+def is_live(tasks: list[str], heads: dict[str, str], live: set[str]) -> bool:
+    """A Merged phase's work runs live: no task of it is open, at least one merged, and each merged one's work (what
+    its merge left in each repo, `merged_at`) is in what the deploy shipped (``heads``: env0's dev/main as it read
+    them) of a repo that now runs it (``live``). A cancelled task brought nothing. A task whose record doesn't say what
+    it merged (from before hiro-work kept it), or that no record names, keeps the phase Merged: never Live by a
+    guess."""
+    merged = []
+    for tid in tasks:
+        rec = hw.named_task(tid)
+        if not rec or rec.get("state") not in hw.ENDED:
+            return False
+        if rec["state"] == "done":
+            merged.append(rec)
+    if not merged:
+        return False
+    for rec in merged:
+        at = rec.get("merged_at")
+        if not isinstance(at, dict):
+            return False
+        for repo, sha in at.items():
+            if repo not in live or not heads.get(repo) or not hw.is_ancestor(hw.repo_dir(0, repo), sha, heads[repo]):
+                return False
+    return True
+
+
+def went_live(heads: dict[str, str], live: set[str]) -> list[str]:
+    """After a deploy: each Merged phase whose work runs live (is_live) moves to Live. Returns one line per plan that
+    moved."""
+    out = []
+    for plan in plans(read_log(hw.EVENTS)):
+        phases = [dict(ph) for ph in plan["phases"]]
+        moved = []
+        for i, ph in enumerate(phases, 1):
+            if ph.get("state") == "merged" and is_live(ph.get("tasks") or [], heads, live):
+                ph["state"], ph["says"] = "live", ""
                 moved.append(f"phase {i} ({ph['name']})")
-            phases.append(ph)
         if moved:
             resend(plan, phases)
-            # The doc's states wait for the plan's end (plans.md): CodeHiro holds where a plan stands
-            out.append(f"Plan {plan['plan']}: {', '.join(moved)} now {SAYS.get(to, to)} in CodeHiro (the plan doc's "
-                       "states catch up when the plan ends).")
+            out.append(told(plan, moved, "live"))
     return out
 
 
@@ -410,7 +523,7 @@ def cmd_land(a) -> None:
         task=tid, repos=",".join(repos), kit=False, title=f"Land {plan['plan']}", env=a.env, part_of=plan["plan"],
         own_branch=True, on_main=True, about=f"Lands plan {plan['plan']}: what {branch} holds, onto main",
         preset=hw.switches.DEFAULT, set=None, data="env0", quick_sign_in=False, as_person=None, lands=branch,
-        lands_phases=phases))
+        lands_phases=phases, phase=None))
     task = hw.get(tid)
     conflicts = []
     for repo in repos:
@@ -451,9 +564,7 @@ def landed(task) -> list[str]:
     if not moved:
         return []
     resend(plan, phases)
-    # The doc's states wait for the plan's end (plans.md): CodeHiro holds where a plan stands
-    return [f"Plan {plan['plan']}: {', '.join(moved)} now Merged in CodeHiro (the plan doc's states catch up when the "
-            "plan ends)."]
+    return [told(plan, moved, "merged")]
 
 
 def shipped(plan: dict) -> str:
