@@ -20,9 +20,10 @@ envs = "copy"
 # Per-place rows: sign-in sessions, the extensions (the paired apps and the channel plugins, WhatsApp among them: their
 # keys and settings; extension_records, and the two tables it was copied from), the devices (their keys), LAN names
 # and the owner's other sites (each points at this machine's address and ports), characters (their folders are the
-# place's own), local model servers, and "Sign in with Home Assistant" (its address, its token and who is who)
+# place's own), local model servers, "Sign in with Home Assistant" (its address, its token and who is who), and the
+# extensions the core installed (installs: services and folders of this machine only)
 place_tables = ["admin_sessions", "extension_records", "extensions", "devices", "channel_plugins", "site_names",
-                "other_sites", "characters", "local_models", "ha_sign_in", "ha_logins"]
+                "other_sites", "characters", "local_models", "ha_sign_in", "ha_logins", "installs"]
 why = "the family list, roles, rights and the AI usage log"
 
 [[item]]

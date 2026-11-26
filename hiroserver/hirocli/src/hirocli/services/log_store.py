@@ -34,6 +34,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import IO, Any
 
+from hiro_channel_sdk.manifest import dashed
 from hiro_commons.log import Logger
 from hiro_commons.logging_foundation import daily, line
 
@@ -48,8 +49,9 @@ RECEIVED_FILE = "received.json"
 
 
 def app_stream(name: str) -> str:
-    """The stream an app's lines are kept in: `app-<its extension name>`."""
-    return f"{APP_PREFIX}{name}".lower()
+    """The stream an app's lines are kept in: `app-<its key, dashed>` (`app-home`, `app-acme-weather`: a publisher's key
+    has a dot, which a stream's name can't hold; fix: an installed app's lines were refused)."""
+    return f"{APP_PREFIX}{dashed(name)}".lower()
 
 
 def check_stream(stream: str) -> str:

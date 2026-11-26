@@ -55,3 +55,12 @@ def test_a_batch_that_isnt_one_is_refused(tmp_path: Path, store) -> None:
 def test_extensions_only() -> None:
     callers = {method: who for method, _handler, who in _REGISTERED_HANDLERS}
     assert callers[METHOD_LOGS_SEND] == EXTENSIONS_ONLY
+
+
+def test_a_publishers_app_keeps_its_lines_under_its_dashed_key() -> None:
+    # A key with a dot (example.hello) can't name a stream: its lines go to app-example-hello (fix: they were refused)
+    from hirocli.services import log_store
+
+    assert log_store.app_stream("example.hello") == "app-example-hello"
+    assert log_store.check_stream(log_store.app_stream("example.hello")) == "app-example-hello"
+    assert log_store.app_stream("home") == "app-home"

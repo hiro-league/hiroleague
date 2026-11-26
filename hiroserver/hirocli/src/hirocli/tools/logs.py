@@ -38,6 +38,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from hiro_channel_sdk.manifest import dashed
 from hiro_commons.log import Logger
 from hiro_commons.logging_foundation import daily, story
 from hiro_commons.timestamps import human_datetime
@@ -221,8 +222,8 @@ def _collect_log_files(
         wanted = [n for n in others if n.startswith(_APP_PREFIX)]
     elif src in others:
         wanted = [src]
-    elif f"{_APP_PREFIX}{src}" in others:  # an app by its own name: "home"
-        wanted = [f"{_APP_PREFIX}{src}"]
+    elif f"{_APP_PREFIX}{dashed(src)}" in others:  # an app by its own key: "home", "acme.weather"
+        wanted = [f"{_APP_PREFIX}{dashed(src)}"]
     else:
         wanted = []
     streams.extend(LogStream(name, log_dir, name) for name in wanted)

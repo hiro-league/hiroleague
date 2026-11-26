@@ -247,6 +247,28 @@ _DDL = [
         expires_at    TEXT NOT NULL
     )
     """,
+    # The extensions the core installed (Installing apps, phase 5: hiro extension install), one row each by key: its
+    # version and the one before, its port (one install per port), its service and account, its state (approving,
+    # waiting: not paired yet, running, removing), the hash of its install's pairing code until the app pairs, and an
+    # upgrade's current step. An extension_records row joins it by the key once the app pairs. Kept until removed.
+    """
+    CREATE TABLE IF NOT EXISTS installs (
+        key               TEXT PRIMARY KEY,
+        kind              TEXT NOT NULL DEFAULT 'app',
+        title             TEXT NOT NULL DEFAULT '',
+        version           TEXT NOT NULL DEFAULT '',
+        previous_version  TEXT NOT NULL DEFAULT '',
+        port              INTEGER UNIQUE,
+        service           TEXT NOT NULL DEFAULT '',
+        account           TEXT NOT NULL DEFAULT '',
+        state             TEXT NOT NULL DEFAULT '',
+        step              TEXT NOT NULL DEFAULT '',
+        code_hash         TEXT NOT NULL DEFAULT '',
+        home              TEXT NOT NULL DEFAULT '',
+        installed_at      TEXT NOT NULL DEFAULT '',
+        updated_at        TEXT NOT NULL DEFAULT ''
+    )
+    """,
 ]
 
 # ---------------------------------------------------------------------------
