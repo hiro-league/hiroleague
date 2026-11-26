@@ -13,15 +13,15 @@
   import KindFilter from './view/KindFilter.svelte';
   import ListenAddressCard from './view/ListenAddressCard.svelte';
   import ChannelSettingsPanel from './view/settings/ChannelSettingsPanel.svelte';
-  import MockupBadge from '$kit/ui/mockup-badge.svelte';
-  import CommandDialog from './mockup/CommandDialog.svelte';
-  import UpgradeDialog from './mockup/UpgradeDialog.svelte';
-  import { createInstallsMock } from './mockup/installs-mock.svelte';
+  import CommandDialog from './dialogs/CommandDialog.svelte';
+  import UpgradeDialog from './dialogs/UpgradeDialog.svelte';
+  import { createInstalls } from './state/installs.svelte';
 
   // The one list of everything plugged into the core: its channel plugins and its apps (Unified communication).
   const ctrl = createExtensionsController(toast.show);
-  // mockup (Installing apps, task 6): what the core's installs add, on mock data
-  const mock = createInstallsMock();
+  // Installing apps: the installed apps' facts, what each app still needs set, start, stop, upgrade, and the
+  // install and remove commands
+  const inst = createInstalls(() => ctrl.installs, () => ctrl.load(), toast.show);
   const settingsRow = $derived(ctrl.panel === 'settings' ? ctrl.picked : null);
   // mockup (Permissions phase 8)
   const VIEWS = $derived<PageTab<'all' | 'approval'>[]>([
@@ -34,8 +34,7 @@
   <!-- The page's actions and the list's filter sit in the sticky header, so they stay in reach down a long list. -->
   <PageHeader title="Extensions" description="Everything that plugs into Hiro: its channels (WhatsApp, phones) and its apps (HomeHiro…).">
     {#snippet actions()}
-      <MockupBadge title="Installed apps: their state, what is left to set, start, stop, upgrade, and the install and remove commands (mock data)" />
-      <Button variant="outline" onclick={() => mock.openInstall()}>
+      <Button variant="outline" onclick={() => inst.openInstall()}>
         <PackagePlus size={15} /> Install an app
       </Button>
       <Button variant="outline" onclick={() => ctrl.openInstall()}>
@@ -56,16 +55,16 @@
   </PageHeader>
   <!-- grid-cols-1 (minmax(0,1fr)): a wide table scrolls inside its card instead of widening the page on a phone. -->
   <section class="grid grid-cols-1 gap-4">
-    <ExtensionsTable {ctrl} {mock} />
+    <ExtensionsTable {ctrl} {inst} />
     <ListenAddressCard {ctrl} />
   </section>
 </section>
 
 <ExtensionPairingDialog {ctrl} />
 <InstallChannelDialog {ctrl} />
-<ExtensionAbout {ctrl} {mock} />
-<UpgradeDialog {mock} titleOf={ctrl.titleOf} />
-<CommandDialog {mock} />
+<ExtensionAbout {ctrl} {inst} />
+<UpgradeDialog {inst} />
+<CommandDialog {inst} />
 {#if settingsRow}
   {#key settingsRow.extension_id}
     <ChannelSettingsPanel name={settingsRow.name} label={settingsRow.label} enabled={settingsRow.enabled === true} notify={toast.show} onclose={() => ctrl.closePanel()} />

@@ -13,12 +13,11 @@
   import { dateTime } from '$kit/format/time';
   import { hasSettings, statusTime } from '../shared/extension-rows';
   import type { ExtensionsController } from '../state/extensions-controller.svelte';
-  import { stateLine } from '../mockup/installed';
-  import type { InstallsMock } from '../mockup/installs-mock.svelte';
+  import type { Installs } from '../state/installs.svelte';
 
-  let { ctrl, mock }: { ctrl: ExtensionsController; mock: InstallsMock } = $props();
+  let { ctrl, inst }: { ctrl: ExtensionsController; inst: Installs } = $props();
 
-  // mockup (Installing apps, task 6): a To set column, and an installed app's state, start and stop, upgrade
+  // Installing apps: a To set column, and an installed app's state, start and stop, upgrade
   const GRID = '1.6fr 90px 80px 1.3fr 100px 230px';
   // ResourceView's shape: nothing to show yet reads as loading / failed; rows already held stay up while it reloads.
   const view = $derived({
@@ -52,10 +51,11 @@
         {/snippet}
         {#snippet body()}
           {#each ctrl.rows as row (row.extension_id)}
-            {@const installed = mock.installOf(row)}
-            {@const status = installed ? stateLine(installed) : ctrl.statusOf(row)}
+            {@const installed = inst.installOf(row)}
+            {@const status = inst.line(row) ?? ctrl.statusOf(row)}
             {@const time = statusTime(row)}
-            {@const left = mock.setupLeft(row)}
+            {@const left = inst.setupLeft(row)}
+            {@const offer = inst.upgradeOffer(row)}
             <div class={TABLE_GRID_ROW} style:grid-template-columns={GRID}>
               <button type="button" class="group grid min-w-0 text-left" onclick={() => ctrl.openAbout(row)} title="About {row.label}">
                 <span class="truncate font-sans text-sm font-semibold group-hover:underline">{row.label}</span>
@@ -85,6 +85,8 @@
                   <button type="button" onclick={() => ctrl.openAbout(row)} title={left.map((l) => l.title).join(', ')}>
                     <Badge variant="outline" class="border-warning/50 text-warning">{left.length} to set</Badge>
                   </button>
+                {:else if inst.setupError(row)}
+                  <span class="text-xs text-warning" title={inst.setupError(row)}>No answer</span>
                 {:else if row.kind === 'app' && row.connected}
                   <span class="text-xs text-muted-foreground">Nothing</span>
                 {:else}
@@ -94,17 +96,17 @@
               <span class="flex items-center justify-end gap-1.5">
                 {#if installed}
                   <Switch
-                    checked={installed.state === 'running'}
-                    disabled={installed.state === 'upgrading'}
-                    onCheckedChange={() => mock.toggle(row)}
+                    checked={installed.running === true}
+                    disabled={installed.state === 'upgrading' || installed.running === null || inst.isSwitching(row)}
+                    onCheckedChange={() => inst.toggle(row)}
                     tone="success"
-                    aria-label={installed.state === 'running' ? `Stop ${row.label}` : `Start ${row.label}`}
-                    title={installed.state === 'running' ? 'Running: stop it' : 'Stopped: start it'}
+                    aria-label={installed.running ? `Stop ${row.label}` : `Start ${row.label}`}
+                    title={installed.running ? 'Running: stop it' : 'Stopped: start it'}
                     class="mx-2"
                   />
-                  {#if installed.offered}
-                    <Button size="sm" variant="outline" onclick={() => mock.openUpgrade(row)} title="Upgrade {row.label} to {installed.offered}">
-                      <ArrowUpCircle size={13} /> {installed.offered}
+                  {#if offer}
+                    <Button size="sm" variant="outline" onclick={() => inst.openUpgrade(row, offer)} title="Upgrade {row.label} to {offer.version}">
+                      <ArrowUpCircle size={13} /> {offer.version}
                     </Button>
                   {/if}
                 {/if}
@@ -140,7 +142,7 @@
                   size="icon"
                   variant="ghost"
                   disabled={row.mandatory || ctrl.busy}
-                  onclick={() => (installed ? mock.openRemove(row) : void ctrl.remove(row))}
+                  onclick={() => void (installed ? inst.openRemove(row) : ctrl.remove(row))}
                   title={row.mandatory ? "Phones' chat needs it: it can't be removed" : `Remove ${row.label}`}
                   aria-label="Remove {row.label}"
                 >

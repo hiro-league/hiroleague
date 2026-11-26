@@ -23,6 +23,7 @@ from hirocli.admin_svelte.routes.config import config_router
 from hirocli.admin_svelte.routes.devices import devices_router
 from hirocli.admin_svelte.routes.events import events_router
 from hirocli.admin_svelte.routes.extensions import extensions_router
+from hirocli.admin_svelte.routes.installs import installs_router
 from hirocli.admin_svelte.routes.gateways import gateways_router
 from hirocli.admin_svelte.routes.graph_runs import graph_runs_router
 from hirocli.admin_svelte.routes.image_lab import image_lab_router
@@ -82,6 +83,7 @@ if feature_active("devices"):
     api_router.include_router(devices_router)
 # Extensions: the one list of channel plugins and apps with live status, pairing codes,
 # removal, the listen address and the core's test call. Always mounted.
+api_router.include_router(installs_router)  # before extensions': /extensions/setup isn't an id
 api_router.include_router(extensions_router)
 # AI profiles, uses, Try it and local servers' models (Phase 7a: the Catalog's AI tabs). Always mounted.
 api_router.include_router(ai_router)

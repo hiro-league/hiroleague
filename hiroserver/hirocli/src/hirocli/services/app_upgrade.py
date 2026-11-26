@@ -66,6 +66,8 @@ SWITCHING = "switching to the new release"
 CHECKING = "checking the new version answers"
 GOING_BACK = "going back to the version before"
 BEFORE_THE_SWITCH = (UNPACKING, TRYING)
+# The steps a page shows, in order (going back is the exception, not a step)
+STEPS_IN_ORDER = (UNPACKING, TRYING, SWITCHING, CHECKING)
 
 KEEP_RELEASES = 3
 HEALTH_MARGIN_S = 90.0

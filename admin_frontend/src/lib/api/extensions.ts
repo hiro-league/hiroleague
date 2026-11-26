@@ -58,9 +58,29 @@ export type ExtensionListen = {
   live_host: string | null;
 };
 
+/** An app the core installed (the route's `InstallRow`), joined to its row by its key (the row's name). */
+export type InstallRow = {
+  key: string;
+  title: string;
+  version: string;
+  port: number | null;
+  /** approving, waiting (to pair), running, upgrading, failed, removing */
+  state: string;
+  /** What it does now (an upgrade's step), or why it failed. */
+  step: string;
+  service: string;
+  /** Whether its service runs (null: the system doesn't know it). */
+  running: boolean | null;
+  folder: string;
+  data: string;
+  installed_at: string;
+  approved: { permission: string; subject: string }[];
+};
+
 export type ExtensionListData = {
   listen: ExtensionListen;
   extensions: ExtensionRow[];
+  installs: InstallRow[];
 };
 
 export type ExtensionPairingData = {
@@ -250,4 +270,61 @@ export async function channelAction(name: string, action: string) {
     `/channels/${encodeURIComponent(name)}/action/${encodeURIComponent(action)}`,
     { method: 'POST' }
   );
+}
+
+// --- Installed apps (Installing apps, phase 5): what is left to set, packages, start, stop, upgrade ---
+
+/** One thing an app still needs set: a page of the app's own site (`app`, its name), or of the admin (`app` null). */
+export type SetupLeft = { title: string; app: string | null; path: string };
+
+/** By extension id: what each connected app still needs set; an app that didn't answer has its words in `errors`. */
+export type SetupAnswer = { left: Record<string, SetupLeft[]>; errors: Record<string, string> };
+
+/** A package in the Hiro home's packages folder and what it offers: install, upgrade, or none. */
+export type PackageOffer = { file: string; key: string; title: string; version: string; offer: 'install' | 'upgrade' | 'none'; command: string };
+
+export type PackagesData = { folder: string; packages: PackageOffer[]; refused: Record<string, string> };
+
+export type RemoveCommands = { remove: string; purge: string };
+
+/** An upgrade the page started: running, then where it ended; `steps` are the core's own, in order. */
+export type UpgradeState = {
+  key: string;
+  running: boolean;
+  title: string;
+  before: string;
+  to: string;
+  /** upgraded, stayed (never switched, or went back), failed, refused */
+  outcome: string;
+  words: string;
+  new_asks: string[];
+  steps: string[];
+};
+
+export async function getSetup(signal?: AbortSignal) {
+  return apiRequest<SetupAnswer>('/extensions/setup', { signal });
+}
+
+export async function getPackages(signal?: AbortSignal) {
+  return apiRequest<PackagesData>('/extensions/packages', { signal });
+}
+
+export async function getRemoveCommands(key: string) {
+  return apiRequest<RemoveCommands>(`/extensions/installs/${encodeURIComponent(key)}/commands`);
+}
+
+export async function startInstalled(key: string) {
+  return apiRequest<{ key: string; step: string }>(`/extensions/installs/${encodeURIComponent(key)}/start`, { method: 'POST' });
+}
+
+export async function stopInstalled(key: string) {
+  return apiRequest<{ key: string; step: string }>(`/extensions/installs/${encodeURIComponent(key)}/stop`, { method: 'POST' });
+}
+
+export async function startUpgrade(key: string, file: string) {
+  return apiRequest<UpgradeState>(`/extensions/installs/${encodeURIComponent(key)}/upgrade`, { method: 'POST', body: { file } });
+}
+
+export async function getUpgrade(key: string) {
+  return apiRequest<UpgradeState>(`/extensions/installs/${encodeURIComponent(key)}/upgrade`);
 }

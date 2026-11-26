@@ -28,7 +28,7 @@ import {
   type ExtensionKind,
   type StatusLine
 } from '../shared/extension-rows';
-import { MOCK_HELLO } from '../mockup/installed';
+import { unpairedInstalls } from '../shared/installs';
 export type ExtensionsController = ReturnType<typeof createExtensionsController>;
 
 /**
@@ -39,8 +39,9 @@ export type ExtensionsController = ReturnType<typeof createExtensionsController>
 export function createExtensionsController(notify: Notify) {
   // A channel switched on connects a few seconds later: the list reads again every 5 s while the page is open.
   const list = new Resource(listExtensions, { every: 5000 });
-  // mockup (Installing apps, task 6): Hello, an app the core installed, joins the list until the backend serves installs
-  const all = $derived(sortExtensions([...(list.data?.extensions ?? []), MOCK_HELLO]));
+  // Installing apps: an install with no extension behind it yet (not paired, or failed first) is a row too
+  const all = $derived(sortExtensions([...(list.data?.extensions ?? []),
+    ...unpairedInstalls(list.data?.installs ?? [], list.data?.extensions ?? [])]));
   let kinds = $state<ExtensionKind[]>([]);
   // Permissions phase 8: "Needs approval" shows only the apps that wait for the owner's yes; kept in the address
   // (?show=approval), so the top bar's mark opens the page there
@@ -234,6 +235,10 @@ export function createExtensionsController(notify: Notify) {
 
   return {
     /** The rows the kind filter lets through. */
+    /** The apps the core installed (Installing apps): joined to their rows by key. */
+    get installs() {
+      return list.data?.installs ?? [];
+    },
     get rows() {
       return rows;
     },

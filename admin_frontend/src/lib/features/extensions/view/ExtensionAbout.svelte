@@ -15,10 +15,10 @@
   import ExtensionApproval from './ExtensionApproval.svelte';
   import { createApprovalSheet } from '../state/approval-sheet.svelte';
   import type { ExtensionsController } from '../state/extensions-controller.svelte';
-  import MockupBadge from '$kit/ui/mockup-badge.svelte';
-  import type { InstallsMock } from '../mockup/installs-mock.svelte';
+  import { isInstallOnly } from '../shared/installs';
+  import type { Installs } from '../state/installs.svelte';
 
-  let { ctrl, mock }: { ctrl: ExtensionsController; mock: InstallsMock } = $props();
+  let { ctrl, inst }: { ctrl: ExtensionsController; inst: Installs } = $props();
 
   type SheetTab = 'info' | 'permissions';
 
@@ -34,9 +34,10 @@
   const waits = $derived(!!row && row.kind === 'app' && row.waits);
   // What the picked app asks (read only for an app: a channel asks for nothing)
   const sheet = createApprovalSheet(() => (row && row.kind === 'app' ? row.extension_id : ''), () => ctrl.reload());
-  // mockup (Installing apps, task 6): an installed app's facts and what is left to set
-  const installed = $derived(row ? mock.installOf(row) : null);
-  const left = $derived(row ? mock.setupLeft(row) : []);
+  // Installing apps: an installed app's facts and what it still needs set
+  const installed = $derived(row ? inst.installOf(row) : null);
+  const left = $derived(row ? inst.setupLeft(row) : []);
+  const installOnly = $derived(!!row && isInstallOnly(row));
   const tab = $derived<SheetTab>(
     row && chosen?.id === row.extension_id ? chosen.tab : waits ? 'permissions' : 'info'
   );
@@ -54,7 +55,7 @@
   function facts(r: ExtensionRow): [string, string][] {
     const out: [string, string][] = [
       ['Name', r.name],
-      ['Version', mock.installOf(r)?.version || r.version || '—'], // mockup: an installed app's own
+      ['Version', inst.installOf(r)?.version || r.version || '—'], // an installed app's own, after an upgrade
       ['Paired', r.paired_at ? dateTime(r.paired_at) : 'Not yet'],
       ['Started by', r.started_by_core ? 'The core' : 'Itself'],
       ['Relays chat', r.relays_chat ? "Yes: other people's messages" : 'No'],
@@ -81,7 +82,7 @@
     {@const time = statusTime(row)}
     {#if row.description}<p class="text-muted-foreground">{row.description}</p>{/if}
 
-    {#if row.kind === 'app'}
+    {#if row.kind === 'app' && !installOnly}
       <PageTabs {tabs} value={tab} onchange={pick} label="{row.label}'s sheet" variant="line" />
     {/if}
 
@@ -120,9 +121,9 @@
             </div>
           {/each}
           {#if installed}
-            {#each [['Installed by', 'The core'], ['Port', String(installed.port)], ['Version before', installed.previous || '—'], ['Newer package', installed.offered || 'None'], ['Folder', installed.folder], ['Data', installed.data]] as [key, value] (key)}
+            {#each [['Installed by', 'The core'], ['Port', String(installed.port ?? '—')], ['Service', installed.service], ['Newer package', inst.upgradeOffer(row)?.file ?? 'None'], ['Folder', installed.folder], ['Data', installed.data]] as [key, value] (key)}
               <div class={ROW}>
-                <dt class="flex items-center gap-1.5 text-muted-foreground">{key} <MockupBadge /></dt>
+                <dt class="text-muted-foreground">{key}</dt>
                 <dd class="min-w-0 truncate font-mono text-xs" title={value}>{value}</dd>
               </div>
             {/each}
@@ -132,12 +133,14 @@
 
       {#if row.kind === 'app' && left.length}
         <section class="grid gap-2">
-          <h3 class="flex items-center gap-2 text-sm font-semibold">To set <MockupBadge /></h3>
+          <h3 class="text-sm font-semibold">To set</h3>
           <ul class="divide-y rounded-md border">
             {#each left as item (item.title)}
               <li class="flex items-center justify-between gap-3 px-3 py-2.5 text-sm">
                 <span>{item.title}</span>
-                <a href={item.link} target="_blank" rel="noreferrer" class="inline-flex items-center gap-1 text-primary hover:underline">Open <ExternalLink size={12} /></a>
+                {#if inst.href(row, item)}
+                  <a href={inst.href(row, item)} target="_blank" rel="noreferrer" class="inline-flex items-center gap-1 text-primary hover:underline">Open <ExternalLink size={12} /></a>
+                {/if}
               </li>
             {/each}
           </ul>
@@ -187,10 +190,10 @@
           {!waits ? 'Save' : row.pending ? `Approve ${row.label}` : 'Approve what is new'}
         </Button>
       {:else}
-        <Button variant="outline" disabled={!row.connected || ctrl.testing} onclick={() => void ctrl.testCall(row)}>
+        <Button variant="outline" disabled={!row.connected || ctrl.testing || installOnly} onclick={() => void ctrl.testCall(row)}>
           <PlugZap size={15} /> Test call
         </Button>
-        {#if row.kind === 'app'}
+        {#if row.kind === 'app' && !installOnly}
           <Button
             variant="outline"
             disabled={ctrl.busy}
@@ -200,7 +203,7 @@
             <KeyRound size={15} /> Pair again
           </Button>
         {/if}
-        <Button variant="destructive" disabled={row.mandatory || ctrl.busy} onclick={() => (installed ? mock.openRemove(row) : void ctrl.remove(row))}>
+        <Button variant="destructive" disabled={row.mandatory || ctrl.busy} onclick={() => void (installed ? inst.openRemove(row) : ctrl.remove(row))}>
           <Link2Off size={15} /> Remove
         </Button>
       {/if}

@@ -86,9 +86,28 @@ class ExtensionListen(BaseModel):
     live_host: str | None = None
 
 
+class InstallRow(BaseModel):
+    """An app the core installed (Installing apps, phase 5): its version, port, state and step, its folders, and what was
+    approved at its install. Joined to its extension's row by the key (its name)."""
+
+    key: str
+    title: str
+    version: str
+    port: int | None
+    state: str
+    step: str
+    service: str
+    running: bool | None
+    folder: str
+    data: str
+    installed_at: str
+    approved: list[dict[str, str]]
+
+
 class ExtensionList(BaseModel):
     listen: ExtensionListen
     extensions: list[ExtensionRow]
+    installs: list[InstallRow] = []
 
 
 class ExtensionRemoved(BaseModel):
@@ -152,7 +171,16 @@ async def list_extensions(request: Request, workspace_id: SelectedWorkspaceIdDep
         listen.update({"listening": state["listening"], "error": state["error"], "live_host": state["host"]})
     else:
         listen.update({"listening": None, "error": None, "live_host": None})
-    return {"listen": listen, "extensions": extensions}
+    installs = await run_in_threadpool(_installs, workspace_path)
+    return {"listen": listen, "extensions": extensions, "installs": installs}
+
+
+def _installs(workspace_path: Path | None) -> list[dict[str, Any]]:
+    """The apps the core installed (with whether their service runs), for the list's rows."""
+    from hirocli.domain import installs
+    from hirocli.tools.extension_install import install_row
+
+    return [install_row(r) for r in installs.list_installs(workspace_path)] if workspace_path else []
 
 
 def _approval_views(workspace_path: Path | None, extension_ids: list[str]) -> dict[str, approvals.AppApproval]:

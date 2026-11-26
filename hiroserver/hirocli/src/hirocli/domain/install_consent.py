@@ -49,6 +49,13 @@ def consent(items: list[Asked], chosen: set[tuple[str, str]] | None) -> list[App
     return approve(items, None, picked)
 
 
+def left_off(agreed: tuple[ApprovedItem, ...] | list[ApprovedItem], info: dict[str, Any]) -> frozenset[tuple[str, str]]:
+    """The optional asks the person left off at install: answered, so they don't wait on the Extensions page. Fix: the
+    pairing kept no answer for them, and Hello showed one item waiting for approval (seen in env4, Nov 26, 2026)."""
+    have = {(i.permission, i.subject) for i in agreed}
+    return frozenset(a.key for a in asked(info, []) or [] if a.understood and not a.required and a.key not in have)
+
+
 def at_pairing(agreed: tuple[ApprovedItem, ...] | list[ApprovedItem], info: dict[str, Any]) -> list[ApprovedItem]:
     """What the app is approved for when it pairs with its install's code: what the person approved that its
     declaration still asks, and its address and name as approved (it claims its name only after pairing, so its

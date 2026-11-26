@@ -328,7 +328,7 @@ def test_an_installed_app_pairs_with_its_install_code_approved_for_what_the_pers
     """Installing apps, phase 5: the install's code pairs only the app it was made for, once, before the admin's
     code is tried (an installed app's tries never use the admin's code up). The app is approved for what the person
     approved at install that it asks, its name included; anything more waits for the owner."""
-    from hiro_channel_sdk.approvals import PEOPLE_NOTIFY, PEOPLE_SEE, SITE_NAME, AppAsk, ApprovedItem
+    from hiro_channel_sdk.approvals import PEOPLE_NOTIFY, PEOPLE_SEE, SITE_NAME, VOICE_SPEAK, AppAsk, ApprovedItem
 
     from hirocli.domain import approvals, installs
     from hirocli.services import app_install
@@ -357,7 +357,10 @@ def test_an_installed_app_pairs_with_its_install_code_approved_for_what_the_pers
         await _wait_for(lambda: other.status == STATUS_NOT_PAIRED and "error" in other.status_detail)
         assert "example.hello" in other.status_detail["error"]
 
-        asks = [AppAsk(permission=PEOPLE_SEE), AppAsk(permission=PEOPLE_NOTIFY)]
+        # people.notify required here (never shown at install: it waits); voice.speak optional and left off at
+        # install (answered: it doesn't wait)
+        asks = [AppAsk(permission=PEOPLE_SEE), AppAsk(permission=PEOPLE_NOTIFY),
+                AppAsk(permission=VOICE_SPEAK, required=False)]
         hello = ExtensionClient(f"ws://127.0.0.1:{port}", ExtensionInfo(name="example.hello", asks=asks),
                                 ExtensionCredentials(tmp_path / "hello"))
         hello_runner = asyncio.create_task(hello.run())
@@ -368,7 +371,7 @@ def test_an_installed_app_pairs_with_its_install_code_approved_for_what_the_pers
         assert {(i.permission, i.subject) for i in approved} == {(PEOPLE_SEE, ""),
                                                                  (SITE_NAME, "example-hello.hiro.local:8190")}
         view = approvals.view(workspace, paired.extension_id)
-        assert [i.permission for i in view.items if i.waiting] == [PEOPLE_NOTIFY]  # asked beyond the install: waits
+        assert [i.permission for i in view.items if i.waiting] == [PEOPLE_NOTIFY]  # required beyond the install: waits
         assert installs.get_install(workspace, "example.hello").state == installs.RUNNING
         assert installs.install_for_code(workspace, code) is None  # used once
         assert rewritten == ["example.hello"]

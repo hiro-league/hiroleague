@@ -104,7 +104,7 @@ from hiro_commons.signing import verify_signature
 from ..domain.channel_config import list_enabled_channels, load_channel_config
 from ..domain.talkers import talking_numbers
 from ..domain import approvals, installs
-from ..domain.install_consent import at_pairing
+from ..domain.install_consent import at_pairing, left_off
 from ..services import app_install
 from . import app_asks
 from ..domain.extensions import (
@@ -728,6 +728,8 @@ class ExtensionManager:
             raise _Denied(EXTENSION_DENIED_NAME_TAKEN, str(exc)) from exc
         approved = at_pairing(installed.consent, dumped)
         await asyncio.to_thread(approvals.write, workspace, extension.extension_id, approved)
+        await asyncio.to_thread(approvals.set_declined, workspace, extension.extension_id,
+                                left_off(installed.consent, dumped))
         await asyncio.to_thread(installs.code_used, workspace, installed.key)  # after the record: one code, one app
         await asyncio.to_thread(app_install.paired, workspace, installed.key)
         self._wrong_codes = 0
