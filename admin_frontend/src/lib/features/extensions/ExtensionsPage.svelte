@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Download, Link2 } from '@lucide/svelte';
+  import { Download, Link2, PackagePlus } from '@lucide/svelte';
   import { Button } from '$kit/components/ui/button/index.js';
   import PageTabs, { type PageTab } from '$kit/ui/page-tabs.svelte';
   import PageHeader from '$kit/ui/page-header.svelte';
@@ -13,9 +13,15 @@
   import KindFilter from './view/KindFilter.svelte';
   import ListenAddressCard from './view/ListenAddressCard.svelte';
   import ChannelSettingsPanel from './view/settings/ChannelSettingsPanel.svelte';
+  import MockupBadge from '$kit/ui/mockup-badge.svelte';
+  import CommandDialog from './mockup/CommandDialog.svelte';
+  import UpgradeDialog from './mockup/UpgradeDialog.svelte';
+  import { createInstallsMock } from './mockup/installs-mock.svelte';
 
   // The one list of everything plugged into the core: its channel plugins and its apps (Unified communication).
   const ctrl = createExtensionsController(toast.show);
+  // mockup (Installing apps, task 6): what the core's installs add, on mock data
+  const mock = createInstallsMock();
   const settingsRow = $derived(ctrl.panel === 'settings' ? ctrl.picked : null);
   // mockup (Permissions phase 8)
   const VIEWS = $derived<PageTab<'all' | 'approval'>[]>([
@@ -28,6 +34,10 @@
   <!-- The page's actions and the list's filter sit in the sticky header, so they stay in reach down a long list. -->
   <PageHeader title="Extensions" description="Everything that plugs into Hiro: its channels (WhatsApp, phones) and its apps (HomeHiro…).">
     {#snippet actions()}
+      <MockupBadge title="Installed apps: their state, what is left to set, start, stop, upgrade, and the install and remove commands (mock data)" />
+      <Button variant="outline" onclick={() => mock.openInstall()}>
+        <PackagePlus size={15} /> Install an app
+      </Button>
       <Button variant="outline" onclick={() => ctrl.openInstall()}>
         <Download size={15} /> Install a channel
       </Button>
@@ -46,14 +56,16 @@
   </PageHeader>
   <!-- grid-cols-1 (minmax(0,1fr)): a wide table scrolls inside its card instead of widening the page on a phone. -->
   <section class="grid grid-cols-1 gap-4">
-    <ExtensionsTable {ctrl} />
+    <ExtensionsTable {ctrl} {mock} />
     <ListenAddressCard {ctrl} />
   </section>
 </section>
 
 <ExtensionPairingDialog {ctrl} />
 <InstallChannelDialog {ctrl} />
-<ExtensionAbout {ctrl} />
+<ExtensionAbout {ctrl} {mock} />
+<UpgradeDialog {mock} titleOf={ctrl.titleOf} />
+<CommandDialog {mock} />
 {#if settingsRow}
   {#key settingsRow.extension_id}
     <ChannelSettingsPanel name={settingsRow.name} label={settingsRow.label} enabled={settingsRow.enabled === true} notify={toast.show} onclose={() => ctrl.closePanel()} />

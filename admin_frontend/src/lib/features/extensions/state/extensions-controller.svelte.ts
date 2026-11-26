@@ -28,6 +28,7 @@ import {
   type ExtensionKind,
   type StatusLine
 } from '../shared/extension-rows';
+import { MOCK_HELLO } from '../mockup/installed';
 export type ExtensionsController = ReturnType<typeof createExtensionsController>;
 
 /**
@@ -38,7 +39,8 @@ export type ExtensionsController = ReturnType<typeof createExtensionsController>
 export function createExtensionsController(notify: Notify) {
   // A channel switched on connects a few seconds later: the list reads again every 5 s while the page is open.
   const list = new Resource(listExtensions, { every: 5000 });
-  const all = $derived(sortExtensions(list.data?.extensions ?? []));
+  // mockup (Installing apps, task 6): Hello, an app the core installed, joins the list until the backend serves installs
+  const all = $derived(sortExtensions([...(list.data?.extensions ?? []), MOCK_HELLO]));
   let kinds = $state<ExtensionKind[]>([]);
   // Permissions phase 8: "Needs approval" shows only the apps that wait for the owner's yes; kept in the address
   // (?show=approval), so the top bar's mark opens the page there
