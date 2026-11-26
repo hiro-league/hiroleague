@@ -249,8 +249,10 @@ _DDL = [
     """,
     # The extensions the core installed (Installing apps, phase 5: hiro extension install), one row each by key: its
     # version and the one before, its port (one install per port), its service and account, its state (approving,
-    # waiting: not paired yet, running, removing), the hash of its install's pairing code until the app pairs, and an
-    # upgrade's current step. An extension_records row joins it by the key once the app pairs. Kept until removed.
+    # waiting: not paired yet, running, failed, removing), the hash of its install's pairing code until the app pairs,
+    # its current step (or why it failed), the program its service runs, what the person approved at install (consent, a JSON list of
+    # {permission, subject}) and the package it installs from until it is unpacked. An extension_records row joins it
+    # by the key once the app pairs. Kept until removed.
     """
     CREATE TABLE IF NOT EXISTS installs (
         key               TEXT PRIMARY KEY,
@@ -266,7 +268,10 @@ _DDL = [
         code_hash         TEXT NOT NULL DEFAULT '',
         home              TEXT NOT NULL DEFAULT '',
         installed_at      TEXT NOT NULL DEFAULT '',
-        updated_at        TEXT NOT NULL DEFAULT ''
+        updated_at        TEXT NOT NULL DEFAULT '',
+        consent           TEXT NOT NULL DEFAULT '[]',
+        package           TEXT NOT NULL DEFAULT '',
+        command           TEXT NOT NULL DEFAULT ''
     )
     """,
 ]
@@ -378,6 +383,22 @@ _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
     ("ha_logins", "login",         "TEXT NOT NULL DEFAULT ''"),
     ("ha_logins", "person_id",     "TEXT NOT NULL DEFAULT ''"),
     ("ha_logins", "suggested_id",  "TEXT NOT NULL DEFAULT ''"),
+    ("installs", "kind",           "TEXT NOT NULL DEFAULT 'app'"),
+    ("installs", "title",          "TEXT NOT NULL DEFAULT ''"),
+    ("installs", "version",        "TEXT NOT NULL DEFAULT ''"),
+    ("installs", "previous_version", "TEXT NOT NULL DEFAULT ''"),
+    ("installs", "port",           "INTEGER"),
+    ("installs", "service",        "TEXT NOT NULL DEFAULT ''"),
+    ("installs", "account",        "TEXT NOT NULL DEFAULT ''"),
+    ("installs", "state",          "TEXT NOT NULL DEFAULT ''"),
+    ("installs", "step",           "TEXT NOT NULL DEFAULT ''"),
+    ("installs", "code_hash",      "TEXT NOT NULL DEFAULT ''"),
+    ("installs", "home",           "TEXT NOT NULL DEFAULT ''"),
+    ("installs", "installed_at",   "TEXT NOT NULL DEFAULT ''"),
+    ("installs", "updated_at",     "TEXT NOT NULL DEFAULT ''"),
+    ("installs", "consent",        "TEXT NOT NULL DEFAULT '[]'"),
+    ("installs", "package",        "TEXT NOT NULL DEFAULT ''"),
+    ("installs", "command",        "TEXT NOT NULL DEFAULT ''"),
 ]
 
 

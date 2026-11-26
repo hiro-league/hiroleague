@@ -1,12 +1,20 @@
 """An extension's package (build-kit/package.py's zip) as the core reads it before it installs anything: its manifest,
 its wheels and its pinned requirements, and the checks that refuse it (the design's §8: name_taken, core_version,
-port_taken, bad_manifest). Pure but for reading the zip.
+port_taken, bad_manifest). Pure but for reading the zip, and for the core's own store of the packages handed to it.
+
+**The store:** the person's file may sit where the core's account can't read it (a service core on Windows can't read
+a person's Downloads), so the CLI hands the core the package's bytes, kept as ``<workspace>/packages/<sha-256>.zip``.
+The install names it by that id and unpacks only that file. Retention: a package goes once its install is unpacked,
+cancelled or removed.
 """
 
 from __future__ import annotations
 
+import hashlib
 import re
+import secrets
 import zipfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -97,3 +105,51 @@ def version_in(versions: str, version: str) -> bool:
 def service_name(key: str) -> str:
     """The app's service and its account, both: ``hiro-<key, dashed>`` (``hiro-acme-weather``)."""
     return f"hiro-{dashed(key)}"
+
+
+# ---------------------------------------------------------------------------
+# The core's store of packages handed to it
+# ---------------------------------------------------------------------------
+
+PACKAGES_DIR = "packages"
+MAX_PACKAGE_BYTES = 512 * 1024 * 1024  # a package is wheels: HomeHiro's is a few MB
+_PACKAGE_ID = re.compile(r"[0-9a-f]{64}")
+
+
+def stored_package(workspace_path: Path, package_id: str) -> Path:
+    """The stored package with this id; PackageRefused(bad_manifest) when the id isn't one or it is gone."""
+    if not _PACKAGE_ID.fullmatch(package_id or ""):
+        raise PackageRefused(BAD_MANIFEST, "That isn't a package handed to this core.")
+    path = workspace_path / PACKAGES_DIR / f"{package_id}.zip"
+    if not path.is_file():
+        raise PackageRefused(BAD_MANIFEST, "That package isn't kept here any more: hand it to the core again.")
+    return path
+
+
+def keep_package(workspace_path: Path, chunks: Iterable[bytes]) -> str:
+    """Keep a package's bytes; returns its id (its SHA-256). Written to a temporary file, then renamed, so a stored
+    package is whole. PackageRefused(bad_manifest) past MAX_PACKAGE_BYTES."""
+    folder = workspace_path / PACKAGES_DIR
+    folder.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256()
+    size = 0
+    tmp = folder / f".incoming-{secrets.token_hex(6)}.part"
+    try:
+        with tmp.open("wb") as out:
+            for chunk in chunks:
+                size += len(chunk)
+                if size > MAX_PACKAGE_BYTES:
+                    raise PackageRefused(BAD_MANIFEST, f"A package is at most {MAX_PACKAGE_BYTES // 2**20} MB.")
+                digest.update(chunk)
+                out.write(chunk)
+        package_id = digest.hexdigest()
+        tmp.replace(folder / f"{package_id}.zip")
+    finally:
+        tmp.unlink(missing_ok=True)
+    return package_id
+
+
+def drop_package(workspace_path: Path, package_id: str) -> None:
+    """Forget a stored package (its install was unpacked, cancelled or removed)."""
+    if _PACKAGE_ID.fullmatch(package_id or ""):
+        (workspace_path / PACKAGES_DIR / f"{package_id}.zip").unlink(missing_ok=True)

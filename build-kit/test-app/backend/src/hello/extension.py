@@ -2,7 +2,8 @@
 
 from importlib.metadata import version
 
-from hiro_extension_kit.extension import Extension
+from hiro_channel_sdk.approvals import PEOPLE_NOTIFY, PEOPLE_SEE
+from hiro_extension_kit.extension import Extension, ask
 
 VERSION = version("example-hello")
 
@@ -15,5 +16,9 @@ EXTENSION = Extension(
     site_title="Hello",
     site_icon="hand",
     features=(),
-    asks=(),
+    # One required ask and one optional one, so an install shows both (Hello uses neither)
+    asks=(
+        ask(PEOPLE_SEE, "It greets people by name"),
+        ask(PEOPLE_NOTIFY, "It can say hello on WhatsApp", required=False),
+    ),
 )

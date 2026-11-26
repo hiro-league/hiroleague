@@ -103,7 +103,9 @@ from hiro_commons.signing import verify_signature
 
 from ..domain.channel_config import list_enabled_channels, load_channel_config
 from ..domain.talkers import talking_numbers
-from ..domain import approvals
+from ..domain import approvals, installs
+from ..domain.install_consent import at_pairing
+from ..services import app_install
 from . import app_asks
 from ..domain.extensions import (
     KIND_APP,
@@ -676,8 +678,14 @@ class ExtensionManager:
             log.info(f"✅ Extension paired — {info.name}", kind=extension.kind, extension_id=extension.extension_id)
             return extension
 
-        # Else the admin's code: it pairs an app.
+        # An install's code (Installing apps, phase 5): tried before the admin's, so an installed app never uses up
+        # the admin's code with wrong tries.
         workspace = self._ctx.workspace_path
+        installed = await asyncio.to_thread(installs.install_for_code, workspace, code)
+        if installed is not None:
+            return await self._pair_installed(installed, info, public_key, dumped)
+
+        # Else the admin's code: it pairs an app.
         session = await asyncio.to_thread(load_extension_pairing, workspace)
         if session is None or not hmac.compare_digest(session.code, code):
             self._wrong_codes += 1
@@ -700,6 +708,31 @@ class ExtensionManager:
         await asyncio.to_thread(approvals.keep, workspace, extension.extension_id, dumped, new=True)
         self._wrong_codes = 0
         log.info(f"✅ Extension paired — {info.name}", kind=extension.kind, extension_id=extension.extension_id)
+        return extension
+
+    async def _pair_installed(
+        self, installed: installs.Install, info: ExtensionInfo, public_key: str, dumped: dict[str, Any]
+    ) -> PairedExtension:
+        """An app the core installed pairs with its install's code: bound to its key, used once. It is approved for
+        what the person approved at install that it still asks (domain/install_consent.py); anything more waits."""
+        workspace = self._ctx.workspace_path
+        if info.name != installed.key:
+            # The code stays for the app it was made for.
+            raise _Denied(EXTENSION_DENIED_NAME_TAKEN,
+                          f"This code pairs the installed “{installed.key}”, but this app is “{info.name}”.")
+        try:
+            extension = await asyncio.to_thread(
+                add_paired_extension, workspace, name=info.name, public_key=public_key, info=dumped
+            )
+        except ExtensionNameTaken as exc:
+            raise _Denied(EXTENSION_DENIED_NAME_TAKEN, str(exc)) from exc
+        approved = at_pairing(installed.consent, dumped)
+        await asyncio.to_thread(approvals.write, workspace, extension.extension_id, approved)
+        await asyncio.to_thread(installs.code_used, workspace, installed.key)  # after the record: one code, one app
+        await asyncio.to_thread(app_install.paired, workspace, installed.key)
+        self._wrong_codes = 0
+        log.info(f"✅ Extension paired from its install — {info.name}: approved for {len(approved)} item(s)",
+                 extension_id=extension.extension_id)
         return extension
 
     async def _pair_again(

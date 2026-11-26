@@ -81,3 +81,20 @@ def test_an_unknown_field_or_bad_toml_is_refused() -> None:
         parse_manifest(GOOD + 'colour = "blue"\n')
     with pytest.raises(ManifestError, match="isn't valid TOML"):
         parse_manifest("key = ")
+
+
+def test_the_asks_and_the_address_ride_the_manifest_and_read_back_the_same() -> None:
+    from hiro_channel_sdk.approvals import APPS_ASK, PEOPLE_NOTIFY, PEOPLE_SEE, AppAsk
+
+    asks = (
+        AppAsk(permission=PEOPLE_SEE, why="It greets people by name"),
+        AppAsk(permission=PEOPLE_NOTIFY, required=False, why='Says "hello" on WhatsApp'),
+        AppAsk(permission=APPS_ASK, to="home", why="Asks HomeHiro who is in"),
+    )
+    manifest = parse_manifest(GOOD).model_copy(update={"asks": asks, "site": "http://weather.local"})
+    text = render_manifest(manifest)
+    assert text.count("[[asks]]") == 3 and "required = false" in text
+    assert parse_manifest(text) == manifest
+    assert parse_manifest(GOOD).asks == ()
+    with pytest.raises(ManifestError, match="site"):
+        parse_manifest(GOOD + 'site = "weather.local"\n')

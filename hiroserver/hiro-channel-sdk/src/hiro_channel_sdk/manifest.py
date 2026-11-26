@@ -2,7 +2,8 @@
 
 Every package the core installs carries one manifest at its top. The build kit writes it from the app's declaration
 (``build-kit/package.py``), and the core reads it before it installs anything: the key, the core versions the package
-works with, the port it asks for, the program its service runs, and the commands an upgrade runs.
+works with, the port it asks for, the program its service runs, the commands an upgrade runs, and what the app asks to
+do on its own (``asks``, the SDK's approvals.py), so the person installing it approves those knowingly first.
 
 The key is the extension's one name (README rule 6: rights, AI picks and asks are kept under it). It is ``name`` or
 ``publisher.name``; each part is lowercase letters, digits and dashes, starting with a letter. Where a system takes no
@@ -25,6 +26,8 @@ import tomllib
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
+
+from .approvals import AppAsk
 
 MANIFEST_FILE = "hiro-extension.toml"
 
@@ -85,6 +88,11 @@ class Manifest(BaseModel):
     port: int | None = None
     predeploy: str = ""  # the command an upgrade runs for its copy and trial, e.g. "python -m homehiro.predeploy"
     health: str = "/api/health"  # the path an upgrade asks once the new release runs
+    # The address it sends people to when it isn't its own name under the core's domain (HomeHiro's
+    # http://homehiro.local: the kit's `Extension.site_default`); "" for http://<key, dashed>.<domain>
+    site: str = ""
+    # What it asks to do on its own, as its declaration asks it (the kit's asks_for): shown and approved at install
+    asks: tuple[AppAsk, ...] = ()
 
     @field_validator("key")
     @classmethod
@@ -123,6 +131,13 @@ class Manifest(BaseModel):
             raise ValueError(f"{value!r} isn't a path such as /api/health")
         return value
 
+    @field_validator("site")
+    @classmethod
+    def _site(cls, value: str) -> str:
+        if value and not value.startswith(("http://", "https://")):
+            raise ValueError(f"{value!r} isn't an address such as http://homehiro.local")
+        return value
+
     @model_validator(mode="after")
     def _port_for_an_app(self) -> Manifest:
         if self.kind == KIND_APP and self.port is None:
@@ -158,8 +173,17 @@ def _problem(error: dict) -> str:
 
 
 def render_manifest(manifest: Manifest) -> str:
-    """The manifest as TOML, its fields in the model's order (a JSON string is a valid TOML basic string)."""
-    lines = []
-    for field, value in manifest.model_dump(exclude_none=True).items():
-        lines.append(f"{field} = {value}" if isinstance(value, int) else f"{field} = {json.dumps(value)}")
+    """The manifest as TOML, its fields in the model's order (a JSON string is a valid TOML basic string), its asks as
+    ``[[asks]]`` tables at the end (TOML puts tables after the plain fields)."""
+    data = manifest.model_dump(exclude_none=True)
+    asks = data.pop("asks")
+    lines = [_line(field, value) for field, value in data.items()]
+    for ask in asks:
+        lines += ["", "[[asks]]", *(_line(field, value) for field, value in ask.items() if value is not None)]
     return "\n".join(lines) + "\n"
+
+
+def _line(field: str, value: object) -> str:
+    if isinstance(value, bool):
+        return f"{field} = {'true' if value else 'false'}"
+    return f"{field} = {value}" if isinstance(value, int) else f"{field} = {json.dumps(value)}"

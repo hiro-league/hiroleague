@@ -113,6 +113,15 @@ _LAZY_EXPORTS: dict[str, str] = {
     "ExtensionApproveTool": ".extension",
     "ExtensionPairAgainTool": ".extension",
     "ExtensionStateTool": ".extension_state",
+    # an app installed, started, stopped and removed by the core (Installing apps, phase 5)
+    "ExtensionInstallSheetTool": ".extension_install",
+    "ExtensionInstallPrepareTool": ".extension_install",
+    "ExtensionInstallCancelTool": ".extension_install",
+    "ExtensionInstallFinishTool": ".extension_install",
+    "ExtensionInstallsTool": ".extension_install",
+    "ExtensionStartTool": ".extension_install",
+    "ExtensionStopTool": ".extension_install",
+    "ExtensionInstallForgetTool": ".extension_install",
     # every name the machine serves (Installing apps, phase 4)
     "SitesAddTool": ".sites",
     "SitesListTool": ".sites",
@@ -288,6 +297,16 @@ def all_tools() -> list[Tool]:
         ExtensionPairAgainTool,
         ExtensionRemoveTool,
     )
+    from .extension_install import (
+        ExtensionInstallSheetTool,
+        ExtensionInstallPrepareTool,
+        ExtensionInstallCancelTool,
+        ExtensionInstallFinishTool,
+        ExtensionInstallsTool,
+        ExtensionStartTool,
+        ExtensionStopTool,
+        ExtensionInstallForgetTool,
+    )
     from .extension_state import ExtensionStateTool
     from .notify import NotifyTool
     from .sites import SitesAddTool, SitesListTool, SitesRemoveTool
@@ -393,6 +412,14 @@ def all_tools() -> list[Tool]:
         ExtensionNamesTool(),
         ExtensionApprovalTool(),
         ExtensionApproveTool(),
+        ExtensionInstallSheetTool(),
+        ExtensionInstallPrepareTool(),
+        ExtensionInstallCancelTool(),
+        ExtensionInstallFinishTool(),
+        ExtensionInstallsTool(),
+        ExtensionStartTool(),
+        ExtensionStopTool(),
+        ExtensionInstallForgetTool(),
         ExtensionStateTool(),
         SitesListTool(),
         SitesAddTool(),
@@ -563,6 +590,16 @@ if TYPE_CHECKING:  # pragma: no cover
         ExtensionApproveTool,
         ExtensionPairAgainTool,
         ExtensionRemoveTool,
+    )
+    from .extension_install import (  # noqa: F401
+        ExtensionInstallSheetTool,
+        ExtensionInstallPrepareTool,
+        ExtensionInstallCancelTool,
+        ExtensionInstallFinishTool,
+        ExtensionInstallsTool,
+        ExtensionStartTool,
+        ExtensionStopTool,
+        ExtensionInstallForgetTool,
     )
     from .extension_state import ExtensionStateTool  # noqa: F401
     from .sites import SitesAddTool, SitesListTool, SitesRemoveTool  # noqa: F401

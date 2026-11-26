@@ -12,9 +12,10 @@ The package is `<key, dashed>-<version>.zip` (Michel, Nov 25, 2026: one zip, one
     requirements.txt         every library from PyPI, pinned with its hashes (exported from the app's uv.lock)
     wheels/                  the app's wheel, its built UI inside (<module>/static), and the kits' wheels
 
-The manifest's fields come from the app itself: its key, port and title from its `Extension(...)` and `setup(...)`
-(read in its own environment), its version from pyproject.toml (the declaration must say the same), its command from
-its one console script, its predeploy when it has `<module>/predeploy.py`. The core versions it works with follow the
+The manifest's fields come from the app itself: its key, port, title, address and asks from its `Extension(...)` and
+`setup(...)` (read in its own environment; the asks as the kit declares them to the core, `asks_for()`), its version
+from pyproject.toml (the declaration must say the same), its command from its one console script, its predeploy when
+it has `<module>/predeploy.py`. The core versions it works with follow the
 kit it was built with: the kits and the core are released together, so kit 0.2.x works with core 0.2.x.
 
 Nothing here changes the app's folder: the UI is put into a copy of the backend, which is built from there.
@@ -46,8 +47,12 @@ import importlib
 module = importlib.import_module(sys.argv[1])
 from hiro_extension_kit import identity
 from hiro_extension_kit.extension import ext
+from hiro_extension_kit.hiroleague import asks_for
 e = ext()
-print(json.dumps({"key": e.name, "port": e.port, "version": e.version, "title": identity.app().title}))
+asks = asks_for()
+print(json.dumps({"key": e.name, "port": e.port, "version": e.version, "title": identity.app().title,
+                  "site": e.site_default or "",
+                  "asks": None if asks is None else [a.model_dump(exclude_none=True) for a in asks]}))
 """
 
 
@@ -161,11 +166,17 @@ def build(app: Path, out: Path, *, ui_built: bool = False) -> Path:
                 f"The app declares version {declared['version']} to the core but pyproject.toml says "
                 f"{project['version']}."
             )
+        if declared["asks"] is None:
+            # The person installing it approves what it asks before anything is made: an app that says nothing
+            # would be installed with its asks unknown, and every one would wait on the Extensions page
+            raise PackageError(
+                "The app doesn't say what it asks to do on its own: set Extension(asks=...) (asks=() for nothing)."
+            )
         manifest = Manifest(
             key=declared["key"], kind=KIND_APP, title=declared["title"], version=project["version"],
             core=core_range(kit_version), command=command_of(project), port=declared["port"],
             predeploy=f"python -m {module}.predeploy" if (backend / "src" / module / "predeploy.py").is_file() else "",
-            health=HEALTH,
+            health=HEALTH, site=declared["site"], asks=tuple(declared["asks"]),
         )
         ui = _build_ui(app / "frontend", ui_built)
         copy = _stage_backend(backend, module, ui, stage)

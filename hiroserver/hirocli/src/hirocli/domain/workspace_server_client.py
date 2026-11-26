@@ -48,3 +48,16 @@ def post_invoke_sync(
         raise RuntimeError(f"Hiro server /invoke failed ({response.status_code}): {detail}")
     body = response.json()
     return dict(body["result"])
+
+
+def put_package_sync(workspace_path: Path, package: Path, *, timeout_seconds: float = 300.0) -> str:
+    """Hand a package's bytes to the running core (``PUT /packages``); returns its id. The core's account may not
+    read the person's file (a service core on Windows can't read their Downloads), so the bytes travel, not a path."""
+    require_workspace_server_running(workspace_path)
+    url = f"{workspace_server_invoke_url(workspace_path).rstrip('/')}/packages"
+    with package.open("rb") as body, httpx.Client(timeout=timeout_seconds) as client:
+        response = client.put(url, content=body, headers={"content-type": "application/zip"})
+    if response.status_code >= 400:
+        detail = response.text.strip() or response.reason_phrase
+        raise RuntimeError(f"Hiro server /packages failed ({response.status_code}): {detail}")
+    return str(response.json()["package"])

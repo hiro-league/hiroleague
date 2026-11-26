@@ -320,3 +320,64 @@ def test_the_welcome_says_the_cores_own_domain(tmp_path: Path) -> None:
         await asyncio.wait_for(server, 5)
 
     asyncio.run(scenario())
+
+
+def test_an_installed_app_pairs_with_its_install_code_approved_for_what_the_person_approved(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Installing apps, phase 5: the install's code pairs only the app it was made for, once, before the admin's
+    code is tried (an installed app's tries never use the admin's code up). The app is approved for what the person
+    approved at install that it asks, its name included; anything more waits for the owner."""
+    from hiro_channel_sdk.approvals import PEOPLE_NOTIFY, PEOPLE_SEE, SITE_NAME, AppAsk, ApprovedItem
+
+    from hirocli.domain import approvals, installs
+    from hirocli.services import app_install
+
+    rewritten: list[str] = []
+    monkeypatch.setattr(app_install, "paired", lambda workspace_path, key: rewritten.append(key))
+
+    async def scenario() -> None:
+        workspace = tmp_path / "ws"
+        port = _free_port()
+        manager, ctx = _core(workspace, port)
+        code = installs.new_code()
+        consent = [ApprovedItem(permission=PEOPLE_SEE),
+                   ApprovedItem(permission=SITE_NAME, subject="example-hello.hiro.local:8190")]
+        installs.add_install(workspace, key="example.hello", kind="app", title="Hello", version="0.1.0", port=8190,
+                             service="hiro-example-hello", account="hiro-example-hello", home=str(tmp_path),
+                             consent=consent, command="example-hello", code=code)
+        admin_code = start_extension_pairing(workspace, code_length=6, ttl_seconds=60).code
+        server = asyncio.create_task(manager.run())
+        await _wait_for(lambda: manager.listen_state()["listening"])
+
+        # Another app with the install's code: refused, and the code stays for Hello.
+        other = _client(port, tmp_path / "home")
+        other_runner = asyncio.create_task(other.run())
+        other.pair(code)
+        await _wait_for(lambda: other.status == STATUS_NOT_PAIRED and "error" in other.status_detail)
+        assert "example.hello" in other.status_detail["error"]
+
+        asks = [AppAsk(permission=PEOPLE_SEE), AppAsk(permission=PEOPLE_NOTIFY)]
+        hello = ExtensionClient(f"ws://127.0.0.1:{port}", ExtensionInfo(name="example.hello", asks=asks),
+                                ExtensionCredentials(tmp_path / "hello"))
+        hello_runner = asyncio.create_task(hello.run())
+        hello.pair(code)
+        await _wait_for(lambda: hello.status == STATUS_CONNECTED)
+        [paired] = [e for e in list_paired_extensions(workspace) if e.name == "example.hello"]
+        approved = approvals.read(workspace, paired.extension_id).approved
+        assert {(i.permission, i.subject) for i in approved} == {(PEOPLE_SEE, ""),
+                                                                 (SITE_NAME, "example-hello.hiro.local:8190")}
+        view = approvals.view(workspace, paired.extension_id)
+        assert [i.permission for i in view.items if i.waiting] == [PEOPLE_NOTIFY]  # asked beyond the install: waits
+        assert installs.get_install(workspace, "example.hello").state == installs.RUNNING
+        assert installs.install_for_code(workspace, code) is None  # used once
+        assert rewritten == ["example.hello"]
+        assert load_extension_pairing(workspace).code == admin_code  # the admin's code untouched
+
+        for client, task in ((other, other_runner), (hello, hello_runner)):
+            await client.stop()
+            await task
+        ctx.stop_event.set()
+        await asyncio.wait_for(server, 5)
+
+    asyncio.run(scenario())

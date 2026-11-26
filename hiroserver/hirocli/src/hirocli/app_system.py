@@ -164,7 +164,10 @@ def install_linux(app: AppSystem) -> SystemDone:
         os.chown(path, core.pw_uid, core.pw_gid)
         path.chmod(0o755)
     folder.data.mkdir(parents=True, exist_ok=True)
-    os.chown(folder.data, account.pw_uid, core.pw_gid)
+    # Its data folder and, when an earlier install's data was kept (remove without --purge), everything in it: a new
+    # account has a new uid, and the files would stay the old one's
+    for path in (folder.data, *folder.data.rglob("*")):
+        os.chown(path, account.pw_uid, core.pw_gid, follow_symlinks=False)
     folder.data.chmod(0o2770)  # setgid: what either makes there stays in the core's group
     _write(Path(str(linux_unit_path(app.service))), linux_unit(app, core_group))
     _write(Path(str(polkit_rule_path(app.service))), polkit_rule(app.service, core_user))
@@ -258,6 +261,7 @@ def install_windows(app: AppSystem) -> SystemDone:
     _run(["icacls", str(apps), "/grant", f"{account}:(OI)(CI)M"], f"Letting the core change {apps}")
     for path in (folder.root, folder.releases, folder.data):
         path.mkdir(parents=True, exist_ok=True)
+    _home_uv(folder.home)
     install_service(windows_spec(app), folder.service_dir)  # the app's virtual account exists from here on
     lock_folder(folder.root, service_id=app.service, service_rights="RX")
     _run(["icacls", str(folder.root), "/grant", f"{account}:(OI)(CI)M"], f"Letting the core change {folder.root}")
@@ -268,6 +272,20 @@ def install_windows(app: AppSystem) -> SystemDone:
     log.info("✅ An app's service made — HiroServer · extension", key=app.key, service=app.service, core=account)
     return SystemDone(action=INSTALL, key=app.key, service=app.service, account=f"NT SERVICE\\{app.service}",
                       core_account=account, folder=str(folder.root))
+
+
+def _home_uv(home: Path) -> None:
+    """The core unpacks an app's release with uv: a service core has no PATH of the person's, so the Hiro home keeps
+    its own copy (``<home>/bin/uv.exe``), taken from this person's uv once."""
+    target = home / "bin" / "uv.exe"
+    if target.is_file():
+        return
+    found = shutil.which("uv")
+    if not found:
+        raise ServiceError("uv isn't on this PATH: install uv (https://docs.astral.sh/uv/), then install the app again.")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(found, target)
+    log.info("The Hiro home has its own uv now — HiroServer · extension", path=str(target))
 
 
 def remove_windows(app: AppSystem, purge: bool) -> SystemDone:

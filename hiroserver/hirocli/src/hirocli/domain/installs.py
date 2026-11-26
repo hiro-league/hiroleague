@@ -1,8 +1,11 @@
 """The extensions the core installed (``hiro extension install``): one ``installs`` row each in workspace.db, by key.
 
-A row is made when an install starts (state ``approving``: the person's admin step still to come), and keeps the
-install's progress: ``waiting`` once the service runs and the app hasn't paired yet, ``running`` once it has,
-``removing`` while it goes. An app running from its own container has no row: it shows as not installed by the core.
+A row is made once the person approved what the app asks (state ``approving``: their admin step still to come), and
+keeps the install's progress: ``waiting`` once the service runs and the app hasn't paired yet, ``running`` once it has,
+``failed`` when a step after the admin step failed (``step`` says why; removing it still works), ``removing`` while it
+goes. It keeps what the person approved (``consent``), which the app is approved for when it pairs with its install's
+code, and the package it installs from until it is unpacked. An app running from its own container has no row: it
+shows as not installed by the core.
 
 The install's pairing code is the app's way to pair with no shell: long and random, given in the service's
 environment (app.env), bound to this key, and gone once used. Only its hash is kept here; the code itself is never
@@ -16,12 +19,14 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import secrets
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from hiro_channel_sdk.approvals import ApprovedItem
 from hiro_commons.timestamps import utc_iso
 
 from .db import db_path, ensure_db
@@ -31,8 +36,9 @@ TABLE = "installs"
 APPROVING = "approving"  # the row is made; the person's admin step (account, service) is still to come
 WAITING = "waiting"  # the service runs; the app hasn't paired with its install's code yet
 RUNNING = "running"  # the app paired: its extension_records row has the same key
+FAILED = "failed"  # a step after the admin step failed: ``step`` says why
 REMOVING = "removing"
-STATES = (APPROVING, WAITING, RUNNING, REMOVING)
+STATES = (APPROVING, WAITING, RUNNING, FAILED, REMOVING)
 
 
 @dataclass(frozen=True)
@@ -50,6 +56,9 @@ class Install:
     home: str  # the Hiro home it was installed under
     installed_at: str
     updated_at: str
+    consent: tuple[ApprovedItem, ...] = ()  # what the person approved at install
+    package: str = ""  # the stored package it installs from (packages.py), until it is unpacked
+    command: str = ""  # the program its service runs (the manifest's command)
 
 
 class InstallExists(ValueError):
@@ -71,6 +80,8 @@ def _row(row: sqlite3.Row) -> Install:
         previous_version=row["previous_version"], port=row["port"], service=row["service"], account=row["account"],
         state=row["state"], step=row["step"], home=row["home"], installed_at=row["installed_at"],
         updated_at=row["updated_at"],
+        consent=tuple(ApprovedItem.model_validate(i) for i in json.loads(row["consent"] or "[]")),
+        package=row["package"], command=row["command"],
     )
 
 
@@ -93,15 +104,20 @@ def get_install(workspace_path: Path, key: str) -> Install | None:
 
 
 def add_install(workspace_path: Path, *, key: str, kind: str, title: str, version: str, port: int | None,
-                service: str, account: str, home: str, code: str) -> Install:
-    """A new install, state ``approving``. Raises InstallExists when the key (or the port) is taken by another row."""
+                service: str, account: str, home: str, consent: list[ApprovedItem] | tuple[ApprovedItem, ...] = (),
+                package: str = "", command: str = "", code: str = "") -> Install:
+    """A new install, state ``approving``. Raises InstallExists when the key (or the port) is taken by another row.
+    Its pairing code is usually set when the service is about to start (``set_code``)."""
     now = utc_iso(datetime.now(UTC))
+    agreed = json.dumps([i.model_dump() for i in consent])
     try:
         with _connect(workspace_path) as conn:
             conn.execute(
                 f"INSERT INTO {TABLE} (key, kind, title, version, port, service, account, state, code_hash, home, "
-                "installed_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (key, kind, title, version, port, service, account, APPROVING, code_hash(code), home, now, now),
+                "installed_at, updated_at, consent, package, command) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                "?, ?)",
+                (key, kind, title, version, port, service, account, APPROVING, code_hash(code) if code else "", home,
+                 now, now, agreed, package, command),
             )
             conn.commit()
     except sqlite3.IntegrityError as exc:
@@ -117,6 +133,21 @@ def set_state(workspace_path: Path, key: str, state: str, *, step: str = "") -> 
     with _connect(workspace_path) as conn:
         conn.execute(f"UPDATE {TABLE} SET state = ?, step = ?, updated_at = ? WHERE key = ?",
                      (state, step, utc_iso(datetime.now(UTC)), key))
+        conn.commit()
+
+
+def set_code(workspace_path: Path, key: str, code: str) -> None:
+    """The install's pairing code, given to the app in its environment: only its hash is kept."""
+    with _connect(workspace_path) as conn:
+        conn.execute(f"UPDATE {TABLE} SET code_hash = ?, updated_at = ? WHERE key = ?",
+                     (code_hash(code), utc_iso(datetime.now(UTC)), key))
+        conn.commit()
+
+
+def set_package(workspace_path: Path, key: str, package: str) -> None:
+    with _connect(workspace_path) as conn:
+        conn.execute(f"UPDATE {TABLE} SET package = ?, updated_at = ? WHERE key = ?",
+                     (package, utc_iso(datetime.now(UTC)), key))
         conn.commit()
 
 

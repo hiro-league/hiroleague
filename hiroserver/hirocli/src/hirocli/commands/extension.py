@@ -36,6 +36,50 @@ def _human(iso: str | None) -> str:
 
 def register(extension_app: typer.Typer, console: Console) -> None:
     """Register extension commands."""
+    from . import extension_install
+
+    extension_install.register(extension_app, console)
+
+    def _remove_installed(name: str, *, purge: bool, yes: bool, workspace: str | None) -> bool:
+        """Remove an app the core installed (by its key, or its paired record's id); False when it isn't one."""
+        import sys
+        from pathlib import Path
+
+        import httpx
+
+        from ..domain import installs
+        from ..domain.extensions import get_paired_extension
+        from ..domain.hiro_home import app_folder
+        from ..domain.workspace import resolve_workspace
+
+        try:
+            entry, _ = resolve_workspace(workspace)
+        except WorkspaceError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+        workspace_path = Path(entry.path)
+        row = installs.get_install(workspace_path, name)
+        if row is None:
+            found = get_paired_extension(workspace_path, name)
+            row = installs.get_install(workspace_path, found.name) if found is not None else None
+        if row is None:
+            return False
+        log.info("hiro extension remove: installed", key=row.key, purge=purge)
+        if purge and not yes:
+            if not sys.stdin.isatty():
+                console.print("[red]--purge deletes the app's data: pass --yes too, or run it in a terminal.[/red]")
+                raise typer.Exit(1)
+            folder = app_folder(row.key, Path(row.home)).root
+            if not typer.confirm(f"Delete {row.title}'s folder and data too ({folder})? It can't be undone.",
+                                 default=False):
+                console.print("Nothing was changed.")
+                raise typer.Exit(1)
+        try:
+            extension_install.remove_installed(console, workspace_path, entry.id, row.key, purge=purge)
+        except (extension_install._Stop, RuntimeError, OSError, httpx.HTTPError) as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+        return True
 
     @extension_app.command("add")
     def extension_add(
@@ -85,16 +129,33 @@ def register(extension_app: typer.Typer, console: Console) -> None:
     @extension_app.command("list")
     def extension_list(
         workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help=_WORKSPACE_HELP),
+        as_json: bool = typer.Option(False, "--json", help="Print the extensions and the installs as JSON."),
     ) -> None:
-        """List every extension: its channel plugins and its apps."""
+        """List every extension: its channel plugins and its apps, and the apps the core installed."""
+        import json
+
         from ..tools.extension import ExtensionListTool
+        from ..tools.extension_install import ExtensionInstallsTool
 
         try:
             result = ExtensionListTool().execute(workspace=workspace)
+            installed = ExtensionInstallsTool().execute(workspace=workspace).installs
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1) from exc
 
+        if as_json:
+            print(json.dumps({"extensions": result.extensions, "installs": installed}, indent=2))
+            return
+        if installed:
+            table = Table(title="Installed by the core", show_header=True)
+            for column in ("Key", "Version", "Port", "State", "Running", "Data"):
+                table.add_column(column, style="bold" if column == "Key" else None)
+            for row in installed:
+                running = {True: "yes", False: "no", None: "—"}[row["running"]]
+                state = row["state"] + (f": {row['step']}" if row["state"] == "failed" else "")
+                table.add_row(row["key"], row["version"], str(row["port"] or "—"), state, running, row["data"])
+            console.print(table)
         if not result.extensions:
             console.print("[dim]No extensions yet. Pair an app with `hiro extension add`.[/dim]")
             return
@@ -118,11 +179,21 @@ def register(extension_app: typer.Typer, console: Console) -> None:
 
     @extension_app.command("remove")
     def extension_remove(
-        extension_id: str = typer.Argument(..., help="Extension ID to remove (see `hiro extension list`)."),
+        extension_id: str = typer.Argument(
+            ..., help="Extension ID to remove, or an installed app's key (see `hiro extension list`)."
+        ),
+        purge: bool = typer.Option(False, "--purge", help="An installed app: its folder and its data go too."),
+        yes: bool = typer.Option(False, "--yes", help="With --purge: don't ask before deleting its data."),
         workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help=_WORKSPACE_HELP),
     ) -> None:
         """Remove a paired extension; it is refused until paired again. An app's LAN name, its rights and its AI picks
-        go with it; its own data stays."""
+        go with it; its own data stays. An app the core installed loses its service and account too (one
+        administrator step), and with --purge its folder and data."""
+        if _remove_installed(extension_id, purge=purge, yes=yes, workspace=workspace):
+            return
+        if purge:
+            console.print("[red]--purge is for an app the core installed: this one keeps its own data.[/red]")
+            raise typer.Exit(1)
         from pathlib import Path
 
         import httpx

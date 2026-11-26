@@ -25,9 +25,13 @@ TRY_PROFILE = Declared("core.try_profile", "action", "Try an AI profile")
 TRY_VOICE = Declared("core.try_voice", "action", "Try a voice")
 GENERATE_IMAGE = Declared("core.generate_image", "action", "Generate an image")
 EXTENSION_APPROVED = Declared("core.extension_approved", "action", "Approve an app")  # Permissions phase 8
+# Installing apps, phase 5: the core's own part of an install (the package unpacked, the service started) and of a
+# removal (what it kept for the app dropped)
+EXTENSION_INSTALL = Declared("core.extension_install", "job", "Install an app")
+EXTENSION_REMOVE = Declared("core.extension_remove", "action", "Remove an app")
 
 STORIES = (CHAT_TURN, MEMORY_SWEEP, KNOWLEDGE_INGEST, GRAPH_INGEST, TRY_PROFILE, TRY_VOICE, GENERATE_IMAGE,
-           EXTENSION_APPROVED)
+           EXTENSION_APPROVED, EXTENSION_INSTALL, EXTENSION_REMOVE)
 story.declare(*STORIES)
 
 

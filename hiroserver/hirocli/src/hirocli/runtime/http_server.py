@@ -6,6 +6,8 @@ Endpoints:
   GET  /channels           — connected channel plugin names and info
   GET  /tools              — list all registered tools and their schemas
   POST /invoke             — execute a tool by name (``invoke_async``; async tools supported)
+  PUT  /packages           — keep a package's bytes for an install (answers its id); the CLI's way to hand the core
+                             a file its account may not read (domain/packages.py)
   GET  /characters         — list character profiles (id, name, description, has_photo) for Flutter
   GET  /characters/{id}/profile — single character profile + updated_at cache hint
   GET  /characters/{id}/photo   — character image (or packaged default when no upload)
@@ -195,6 +197,26 @@ async def invoke_tool(body: InvokeRequest, request: Request) -> JSONResponse:
         result_dict = result
 
     return JSONResponse({"tool": invoke_result.tool_name, "result": result_dict})
+
+
+@app.put("/packages")
+async def put_package(request: Request) -> JSONResponse:
+    """Keep a package for ``hiro extension install`` (the body is the zip): it is named by its id from here on."""
+    from ..domain.packages import MAX_PACKAGE_BYTES, PackageRefused, keep_package
+
+    ctx = request.app.state.ctx
+    if ctx is None:
+        raise HTTPException(status_code=503, detail="Server not initialized")
+    size = int(request.headers.get("content-length") or 0)
+    if size > MAX_PACKAGE_BYTES:
+        raise HTTPException(status_code=413, detail=f"A package is at most {MAX_PACKAGE_BYTES // 2**20} MB.")
+    body = await request.body()
+    try:
+        package_id = await asyncio.to_thread(keep_package, ctx.workspace_path, [body])
+    except PackageRefused as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    log.info("📦 A package was handed to the core", package=package_id[:12], size_kb=len(body) // 1024)
+    return JSONResponse({"package": package_id})
 
 
 class _RestartBody(BaseModel):
