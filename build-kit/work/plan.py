@@ -7,6 +7,9 @@ change, the session sends them, through the same outbox as every step (C:\hiro\l
                                   the plan as it stands now, from a JSON file (below): one event, the whole plan
     hiro-work plan list           every plan sent: its phases live, and when it was last sent
     hiro-work plan show NAME      a plan as last sent
+    hiro-work plan show NAME --json FILE
+                                  the same, written to FILE as the file plan send takes: change a phase's state in
+                                  it and send it, with no need to read the plan doc
     hiro-work plan close NAME     the plan stops here: its open tasks are cancelled, its phases not done yet too;
                                   a plan that ships whole has its branch set aside (cancelled/plan/<name>)
     hiro-work plan land NAME [--env N]
@@ -254,7 +257,7 @@ def resend(old: dict, phases: list[dict]) -> None:
 def follow(task_id: str, to: str, when: tuple[str, ...], others: set[str]) -> list[str]:
     """CodeHiro's copy of each plan naming the task follows it: each phase the task works on whose state is in
     ``when``, and that no other task in ``others`` (the open ones) works on, moves to ``to``, its own words cleared.
-    Returns one line per plan that moved, telling the session to update the plan doc."""
+    Returns one line per plan that moved."""
     out = []
     for plan in plans(read_log(hw.EVENTS)):
         moved, phases = [], []
@@ -267,8 +270,9 @@ def follow(task_id: str, to: str, when: tuple[str, ...], others: set[str]) -> li
             phases.append(ph)
         if moved:
             resend(plan, phases)
-            out.append(f"Plan {plan['plan']}: {', '.join(moved)} now {SAYS.get(to, to)} in CodeHiro. Update the plan doc "
-                       "to match.")
+            # The doc's states wait for the plan's end (plans.md): CodeHiro holds where a plan stands
+            out.append(f"Plan {plan['plan']}: {', '.join(moved)} now {SAYS.get(to, to)} in CodeHiro (the plan doc's "
+                       "states catch up when the plan ends).")
     return out
 
 
@@ -447,7 +451,9 @@ def landed(task) -> list[str]:
     if not moved:
         return []
     resend(plan, phases)
-    return [f"Plan {plan['plan']}: {', '.join(moved)} now Merged in CodeHiro. Update the plan doc to match."]
+    # The doc's states wait for the plan's end (plans.md): CodeHiro holds where a plan stands
+    return [f"Plan {plan['plan']}: {', '.join(moved)} now Merged in CodeHiro (the plan doc's states catch up when the "
+            "plan ends)."]
 
 
 def shipped(plan: dict) -> str:
@@ -478,6 +484,27 @@ def cmd_send(a) -> None:
         hw.say(f"  {plan['branch']} is back from {aside_branch(plan['branch'])} in {', '.join(back)}.")
 
 
+def as_file(plan: dict) -> dict:
+    """A plan as last sent, as the file `plan send` takes: sent back unchanged, the plan stays as it is."""
+    out = {"name": plan["plan"], "doc": plan.get("doc")}
+    out |= {k: plan[k] for k in ("design", "about", "tasks", "needs_michel", "side_by_side") if plan.get(k)}
+    if plan.get("ships") == "whole":
+        out["ships"] = "whole"
+    out["phases"] = [{k: ph[k] for k in ("name", "state", "says", "needs", "tasks") if ph.get(k)}
+                     for ph in plan["phases"]]
+    return out
+
+
+def write_file(plan: dict, path: Path) -> None:
+    """The plan as a file `plan send` takes, written whole or not at all."""
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(json.dumps(as_file(plan), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        tmp.replace(path)
+    except OSError as exc:
+        raise hw.Stop(f"Can't write {path}: {exc.strerror or exc}.") from exc
+
+
 def cmd_show(a) -> None:
     every = plans(read_log(hw.EVENTS))
     if a.what == "list":
@@ -491,6 +518,11 @@ def cmd_show(a) -> None:
     plan = next((p for p in every if str(p["plan"]).casefold() == a.name.casefold()), None)
     if not plan:
         raise hw.Stop(f"No plan {a.name} (hiro-work plan list).")
+    if a.json:
+        write_file(plan, Path(a.json))
+        hw.say(f"Plan {plan['plan']} as last sent ({when(plan.get('at'))}): written to {a.json}. Change it, then "
+               f"hiro-work plan send {a.json}")
+        return
     hw.say(f"{plan['plan']}: {shipped(plan)}, sent {when(plan.get('at'))}\n{plan.get('doc')}")
     if plan.get("ships") == "whole":
         hw.say(f"Ships whole on {plan.get('branch')}: its phases merge into it, and it reaches main when it lands.")
@@ -524,6 +556,7 @@ def add_parser(sub) -> None:
     p.add_argument("what", help="send, list, show, close or land")
     p.add_argument("name", nargs="?", help="send: the plan's JSON file; show, close, land: the plan's name")
     p.add_argument("--env", type=int, choices=list(hw.ENVS), help="land: the environment the landing works in")
+    p.add_argument("--json", metavar="FILE", help="show: write the plan as last sent to FILE, the file plan send takes")
     p.add_argument("--remove", action="append", metavar="PHASE",
                    help="send: a phase the last send had that this one leaves out on purpose (once per phase)")
     p.set_defaults(func=cmd_plan)

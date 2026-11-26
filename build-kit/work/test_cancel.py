@@ -118,7 +118,7 @@ def test_a_cancelled_subtask_puts_its_phase_back_to_next_and_the_plan_goes_on(wo
     assert hw.main(["cancel", "chores-tick"]) == 0
     states = [p["state"] for p in last_plan()["phases"]]
     assert states == ["live", "next", "todo"]
-    assert "Update the plan doc" in capsys.readouterr().out
+    assert "now Next in CodeHiro (the plan doc's states catch up when the plan ends)" in capsys.readouterr().out
 
 
 def test_a_phase_another_open_task_works_on_keeps_its_state(work, tmp_path):
