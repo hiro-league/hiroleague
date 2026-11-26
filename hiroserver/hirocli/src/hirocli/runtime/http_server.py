@@ -202,7 +202,8 @@ async def invoke_tool(body: InvokeRequest, request: Request) -> JSONResponse:
 @app.put("/packages")
 async def put_package(request: Request) -> JSONResponse:
     """Keep a package for ``hiro extension install`` (the body is the zip): it is named by its id from here on."""
-    from ..domain.packages import MAX_PACKAGE_BYTES, PackageRefused, keep_package
+    from ..domain.installs import list_installs
+    from ..domain.packages import MAX_PACKAGE_BYTES, PackageRefused, keep_package, prune_packages
 
     ctx = request.app.state.ctx
     if ctx is None:
@@ -211,6 +212,8 @@ async def put_package(request: Request) -> JSONResponse:
     if size > MAX_PACKAGE_BYTES:
         raise HTTPException(status_code=413, detail=f"A package is at most {MAX_PACKAGE_BYTES // 2**20} MB.")
     body = await request.body()
+    named = {i.package for i in await asyncio.to_thread(list_installs, ctx.workspace_path) if i.package}
+    await asyncio.to_thread(prune_packages, ctx.workspace_path, named)
     try:
         package_id = await asyncio.to_thread(keep_package, ctx.workspace_path, [body])
     except PackageRefused as exc:

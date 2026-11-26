@@ -25,6 +25,7 @@ from hirocli.domain.packages import (
     PackageRefused,
     drop_package,
     keep_package,
+    prune_packages,
     stored_package,
 )
 from hirocli.services import app_install
@@ -113,6 +114,19 @@ def test_a_package_is_kept_by_its_hash_and_found_only_by_it(workspace: Path) -> 
     drop_package(workspace, package_id)
     with pytest.raises(PackageRefused, match="isn't kept"):
         stored_package(workspace, package_id)
+
+
+def test_a_package_no_install_names_goes_after_a_day(workspace: Path) -> None:
+    import os
+
+    kept, old, named = (keep_package(workspace, [x]) for x in (b"new", b"old", b"named"))
+    for package_id in (old, named):
+        path = stored_package(workspace, package_id)
+        os.utime(path, (path.stat().st_atime - 2 * 86400, path.stat().st_mtime - 2 * 86400))
+    assert prune_packages(workspace, {named}) == 1
+    stored_package(workspace, kept), stored_package(workspace, named)
+    with pytest.raises(PackageRefused):
+        stored_package(workspace, old)
 
 
 def test_the_checks_refuse_with_their_codes(workspace: Path) -> None:

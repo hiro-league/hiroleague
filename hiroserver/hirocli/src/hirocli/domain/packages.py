@@ -5,13 +5,14 @@ port_taken, bad_manifest). Pure but for reading the zip, and for the core's own 
 **The store:** the person's file may sit where the core's account can't read it (a service core on Windows can't read
 a person's Downloads), so the CLI hands the core the package's bytes, kept as ``<workspace>/packages/<sha-256>.zip``.
 The install names it by that id and unpacks only that file. Retention: a package goes once its install is unpacked,
-cancelled or removed.
+cancelled or removed; one no install names (its sheet was declined) goes a day after it came.
 """
 
 from __future__ import annotations
 
 import hashlib
 import re
+import time
 import secrets
 import zipfile
 from collections.abc import Iterable
@@ -153,3 +154,18 @@ def drop_package(workspace_path: Path, package_id: str) -> None:
     """Forget a stored package (its install was unpacked, cancelled or removed)."""
     if _PACKAGE_ID.fullmatch(package_id or ""):
         (workspace_path / PACKAGES_DIR / f"{package_id}.zip").unlink(missing_ok=True)
+
+
+def prune_packages(workspace_path: Path, named: set[str], *, older_than_s: float = 86400.0) -> int:
+    """Drop the stored packages no install names that came more than a day ago (a sheet declined, a CLI stopped);
+    returns how many went."""
+    folder = workspace_path / PACKAGES_DIR
+    if not folder.is_dir():
+        return 0
+    cutoff = time.time() - older_than_s
+    gone = 0
+    for path in folder.glob("*.zip"):
+        if path.stem not in named and path.stat().st_mtime < cutoff:
+            path.unlink(missing_ok=True)
+            gone += 1
+    return gone
