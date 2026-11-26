@@ -1551,9 +1551,10 @@ def into_plan(task: Task, env: int) -> None:
 
 # Repos' checks side by side in a merge, the second starting only while the PC has MERGE_MIN_FREE_GB free. Measured on
 # Nov 19, 2026 (--all, env2): HomeHiro 68 s and StudyHiro 80 s one after another, 92 s side by side; side by side they
-# took 10.5 GB at their peak (alone 6 and 8 GB), so 12 GB leaves room when both start at once.
+# took 10.5 GB at their peak (alone 6 and 8 GB). 6 GB, not 12: with env0's servers up and other environments busy the
+# PC rarely had 12 GB free, so every merge ran its apps one after another; 6 GB covers one app check (Nov 26, a trial).
 MERGE_CHECKS = 2
-MERGE_MIN_FREE_GB = 12
+MERGE_MIN_FREE_GB = 6
 MERGE_POLL = 2  # seconds between looks for a free slot
 
 
