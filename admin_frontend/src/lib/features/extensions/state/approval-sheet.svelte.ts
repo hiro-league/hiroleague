@@ -4,6 +4,7 @@ import { approveExtension, getExtensionApproval, type AppApproval } from '$lib/a
 import { Action } from '$kit/state/action.svelte';
 import { Resource } from '$kit/state/resource.svelte';
 import { approvedOptional, declinable, groups, networkName } from '../shared/approval-items';
+import { MOCK_HELLO_APPROVAL } from '../mockup/installed';
 
 export type ApprovalSheet = ReturnType<typeof createApprovalSheet>;
 
@@ -14,6 +15,8 @@ export type ApprovalSheet = ReturnType<typeof createApprovalSheet>;
 export function createApprovalSheet(appId: () => string, changed: () => Promise<void>) {
   const data = new Resource<AppApproval | null>((signal) => {
     const id = appId();
+    // mockup (Installing apps, task 6): Hello's mock row has no record in the core; its approval is mock data
+    if (id === MOCK_HELLO_APPROVAL.extension_id) return Promise.resolve(MOCK_HELLO_APPROVAL);
     return id ? getExtensionApproval(id, signal) : Promise.resolve(null);
   });
   // The switches as the owner set them; null until one is touched (then the approved ones show)
@@ -61,7 +64,7 @@ export function createApprovalSheet(appId: () => string, changed: () => Promise<
     approve: () =>
       saving.run(async () => {
         const id = appId();
-        if (!id) return;
+        if (!id || id === MOCK_HELLO_APPROVAL.extension_id) return; // mockup: nothing reaches the core
         data.set(await approveExtension(id, picked));
         switches = null;
       })

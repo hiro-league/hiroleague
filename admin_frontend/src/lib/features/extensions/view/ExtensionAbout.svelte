@@ -33,11 +33,7 @@
   let chosen = $state<{ id: string; tab: SheetTab } | null>(null);
   const waits = $derived(!!row && row.kind === 'app' && row.waits);
   // What the picked app asks (read only for an app: a channel asks for nothing)
-  // mockup: Hello's mock row has no record in the core to read its approval from
-  const sheet = createApprovalSheet(
-    () => (row && row.kind === 'app' && !row.extension_id.startsWith('mockup-') ? row.extension_id : ''),
-    () => ctrl.reload()
-  );
+  const sheet = createApprovalSheet(() => (row && row.kind === 'app' ? row.extension_id : ''), () => ctrl.reload());
   // mockup (Installing apps, task 6): an installed app's facts and what is left to set
   const installed = $derived(row ? mock.installOf(row) : null);
   const left = $derived(row ? mock.setupLeft(row) : []);

@@ -1,6 +1,6 @@
 // mockup (Installing apps, phase 5, task 6): what the core's installs add to the Extensions page, as mock data until
 // the backend serves it. Nothing here reaches the core.
-import type { ExtensionRow } from '$lib/api/extensions';
+import type { AppApproval, ExtensionRow } from '$lib/api/extensions';
 
 export type InstallState = 'running' | 'stopped' | 'upgrading' | 'waiting' | 'failed';
 
@@ -114,3 +114,25 @@ export function stateLine(info: InstallInfo): { tone: 'ok' | 'off' | 'warn' | 'e
       return { tone: 'error', text: `Failed: ${info.step}` };
   }
 }
+
+/** Hello's Permissions: what was approved at its install, the optional ask left off. */
+export const MOCK_HELLO_APPROVAL: AppApproval = {
+  extension_id: MOCK_HELLO.extension_id,
+  name: MOCK_HELLO.name,
+  approved_for_everything: false,
+  pending: false,
+  waits: false,
+  claimed: [],
+  items: [
+    { permission: 'people.see', subject: '', words: 'read the people list: names, WhatsApp numbers, roles',
+      required: true, why: 'It greets people by name', approved: true, waiting: false, understood: true },
+    { permission: 'site.address', subject: 'http://example-hello.hiro.local', words: 'send signed-in people to its address',
+      required: true, why: 'Where HiroLeague sends people once they are signed in', approved: true, waiting: false,
+      understood: true },
+    { permission: 'site.name', subject: 'example-hello.hiro.local:8190',
+      words: 'take a name on the network for a port on this machine', required: true, why: 'Its name on the home network',
+      approved: true, waiting: false, understood: true },
+    { permission: 'people.notify', subject: '', words: 'notify people on WhatsApp: text, a picture or a voice note',
+      required: false, why: 'It can say hello on WhatsApp', approved: false, waiting: false, understood: true }
+  ]
+};
