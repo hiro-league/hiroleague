@@ -89,10 +89,10 @@ name = "reports"
 title = "CodeHiro"
 api_port = 11
 ui_port = 12
-backend = "scc_report"
-api = "uv run uvicorn scc_reporting.service.app:app_from_env --factory --reload --reload-dir scc_reporting --host 127.0.0.1 --port {port} --timeout-graceful-shutdown 3"
+backend = "backend"
+api = "uv run uvicorn codehiro.service.app:app_from_env --factory --reload --reload-dir src --host 127.0.0.1 --port {port} --timeout-graceful-shutdown 3"
 api_env = { REPORTS_PORT = "{port}", REPORTS_DATA_DIR = "{data}", REPORTS_SOURCES = "simone:{repo}.git" }
-frontend = "history-dashboard"
+frontend = "frontend"
 ui_api_env = "REPORTS_API"
 data = "repo"
 settings_db = "reports.db"
