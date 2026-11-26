@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from hiro_channel_sdk.constants import ENV_CORE_URL, ENV_PAIRING_CODE
-from hiro_channel_sdk.manifest import KIND_APP, Manifest
+from hiro_channel_sdk.manifest import KIND_APP, MANIFEST_FILE, Manifest, render_manifest
 from hiro_commons.log import Logger
 
 from .. import __version__
@@ -310,12 +310,15 @@ def unpack(package: Package, folder: AppFolder, workspace_path: Path) -> Path:
     }
     uv = find_uv(folder.home)
     _uv([uv, "venv", "--managed-python", "--python", PYTHON, "--no-project", str(release)], "Making the app's Python", env)
+    # --no-build: wheels only, so installing never runs a library's build code as the core's account
     if package.requirements.strip():
-        _uv([uv, "pip", "install", "--python", str(release), "--require-hashes", "--no-deps",
+        _uv([uv, "pip", "install", "--python", str(release), "--require-hashes", "--no-deps", "--no-build",
              "-r", str(staging / "requirements.txt")], "Installing the app's libraries", env)
-    _uv([uv, "pip", "install", "--python", str(release), "--no-deps",
+    _uv([uv, "pip", "install", "--python", str(release), "--no-deps", "--no-build",
          *(str(staging / w) for w in package.wheels)], "Installing the app", env)
     shutil.rmtree(staging)
+    # Each release keeps its manifest: an upgrade runs the old one's predeploy and health, even after a restart
+    (release / MANIFEST_FILE).write_text(render_manifest(manifest), encoding="utf-8")
     return release
 
 

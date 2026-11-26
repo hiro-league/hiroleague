@@ -29,9 +29,10 @@ EXTENSION_APPROVED = Declared("core.extension_approved", "action", "Approve an a
 # removal (what it kept for the app dropped)
 EXTENSION_INSTALL = Declared("core.extension_install", "job", "Install an app")
 EXTENSION_REMOVE = Declared("core.extension_remove", "action", "Remove an app")
+EXTENSION_UPGRADE = Declared("core.extension_upgrade", "job", "Upgrade an app")
 
 STORIES = (CHAT_TURN, MEMORY_SWEEP, KNOWLEDGE_INGEST, GRAPH_INGEST, TRY_PROFILE, TRY_VOICE, GENERATE_IMAGE,
-           EXTENSION_APPROVED, EXTENSION_INSTALL, EXTENSION_REMOVE)
+           EXTENSION_APPROVED, EXTENSION_INSTALL, EXTENSION_REMOVE, EXTENSION_UPGRADE)
 story.declare(*STORIES)
 
 

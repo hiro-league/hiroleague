@@ -122,6 +122,7 @@ _LAZY_EXPORTS: dict[str, str] = {
     "ExtensionStartTool": ".extension_install",
     "ExtensionStopTool": ".extension_install",
     "ExtensionInstallForgetTool": ".extension_install",
+    "ExtensionUpgradeTool": ".extension_install",
     # every name the machine serves (Installing apps, phase 4)
     "SitesAddTool": ".sites",
     "SitesListTool": ".sites",
@@ -306,6 +307,7 @@ def all_tools() -> list[Tool]:
         ExtensionStartTool,
         ExtensionStopTool,
         ExtensionInstallForgetTool,
+        ExtensionUpgradeTool,
     )
     from .extension_state import ExtensionStateTool
     from .notify import NotifyTool
@@ -420,6 +422,7 @@ def all_tools() -> list[Tool]:
         ExtensionStartTool(),
         ExtensionStopTool(),
         ExtensionInstallForgetTool(),
+        ExtensionUpgradeTool(),
         ExtensionStateTool(),
         SitesListTool(),
         SitesAddTool(),
@@ -600,6 +603,7 @@ if TYPE_CHECKING:  # pragma: no cover
         ExtensionStartTool,
         ExtensionStopTool,
         ExtensionInstallForgetTool,
+        ExtensionUpgradeTool,
     )
     from .extension_state import ExtensionStateTool  # noqa: F401
     from .sites import SitesAddTool, SitesListTool, SitesRemoveTool  # noqa: F401

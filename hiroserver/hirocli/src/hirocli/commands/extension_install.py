@@ -231,6 +231,26 @@ def register(extension_app: typer.Typer, console: Console) -> None:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1) from exc
 
+    @extension_app.command("upgrade")
+    def extension_upgrade(
+        key: str = typer.Argument(..., help="The installed app's key (see `hiro extension list`)."),
+        package: Path = typer.Argument(..., help="Its newer package (a .zip built by build-kit/package.py)."),
+        allow_row_loss: Optional[list[str]] = typer.Option(
+            None, "--allow-row-loss", help="A table the new version's migrations may empty; repeat it."
+        ),
+        workspace: Optional[str] = typer.Option(None, "--workspace", "-W", help=_WORKSPACE_HELP),
+    ) -> None:
+        """Upgrade an app the core installed: its data is copied and the new migrations tried on a copy first; then it
+        switches, and goes back by itself (data and version) when the new version doesn't answer."""
+        log.info("hiro extension upgrade", key=key, package=package.name, allow_row_loss=allow_row_loss)
+        try:
+            ok = upgrade(console, key, package.resolve(), allow_row_loss=allow_row_loss or [], workspace=workspace)
+        except (_Stop, WorkspaceError, RuntimeError, OSError, httpx.HTTPError) as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+        if not ok:
+            raise typer.Exit(1)
+
     def _service(key: str, workspace: str | None, tool: str) -> None:
         try:
             workspace_path, workspace_id = _workspace(workspace)
@@ -294,3 +314,26 @@ def register(extension_app: typer.Typer, console: Console) -> None:
             raise typer.Exit(1) from exc
         _report({"ok": True, "result": asdict(done)})
         console.print(f"[green]Done:[/green] {done.action} {done.key} ({done.service}).")
+
+
+def upgrade(console: Console, key: str, package: Path, *, allow_row_loss: list[str], workspace: str | None) -> bool:
+    """Hand the package to the core and run the upgrade there; True when it runs the new version."""
+    from ..domain.workspace_server_client import put_package_sync
+
+    workspace_path, workspace_id = _workspace(workspace)
+    if not package.is_file():
+        raise _Stop(f"There's no file at {package}.")
+    if not _core_running(workspace_path):
+        raise _Stop("The core isn't running: it upgrades its apps itself.")
+    package_id = put_package_sync(workspace_path, package)
+    console.print("Upgrading: its data copied and its migrations tried first, then switched and checked…")
+    done = _invoke(workspace_path, "extension_upgrade",
+                   {"key": key, "package": package_id, "allow_row_loss": allow_row_loss, "workspace": workspace_id},
+                   timeout=3600.0)
+    colour = {"upgraded": "green", "stayed": "yellow"}.get(done["outcome"], "red")
+    console.print(f"[{colour}]{done['words']}[/{colour}]")
+    if done["new_asks"]:
+        console.print("It asks for more, which waits for your yes on the Extensions page (or `hiro extension approve`):")
+        for words in done["new_asks"]:
+            console.print(f"  • {words}")
+    return done["outcome"] == "upgraded"

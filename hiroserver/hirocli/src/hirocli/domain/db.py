@@ -249,9 +249,10 @@ _DDL = [
     """,
     # The extensions the core installed (Installing apps, phase 5: hiro extension install), one row each by key: its
     # version and the one before, its port (one install per port), its service and account, its state (approving,
-    # waiting: not paired yet, running, failed, removing), the hash of its install's pairing code until the app pairs,
+    # waiting: not paired yet, running, upgrading, failed, removing), the hash of its install's pairing code until the app pairs,
     # its current step (or why it failed), the program its service runs, what the person approved at install (consent, a JSON list of
-    # {permission, subject}) and the package it installs from until it is unpacked. An extension_records row joins it
+    # {permission, subject}), the package it installs from until it is unpacked, and an upgrade's target version and
+    # its copy of the data (the stamp restore puts back) while it runs. An extension_records row joins it
     # by the key once the app pairs. Kept until removed.
     """
     CREATE TABLE IF NOT EXISTS installs (
@@ -271,7 +272,9 @@ _DDL = [
         updated_at        TEXT NOT NULL DEFAULT '',
         consent           TEXT NOT NULL DEFAULT '[]',
         package           TEXT NOT NULL DEFAULT '',
-        command           TEXT NOT NULL DEFAULT ''
+        command           TEXT NOT NULL DEFAULT '',
+        upgrade_to        TEXT NOT NULL DEFAULT '',
+        upgrade_stamp     TEXT NOT NULL DEFAULT ''
     )
     """,
 ]
@@ -399,6 +402,8 @@ _EXPECTED_COLUMNS: list[tuple[str, str, str]] = [
     ("installs", "consent",        "TEXT NOT NULL DEFAULT '[]'"),
     ("installs", "package",        "TEXT NOT NULL DEFAULT ''"),
     ("installs", "command",        "TEXT NOT NULL DEFAULT ''"),
+    ("installs", "upgrade_to",     "TEXT NOT NULL DEFAULT ''"),
+    ("installs", "upgrade_stamp",  "TEXT NOT NULL DEFAULT ''"),
 ]
 
 

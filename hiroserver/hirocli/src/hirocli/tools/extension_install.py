@@ -183,6 +183,9 @@ class _ServiceTool(Tool):
         row = installs.get_install(_resolve_path(workspace), key)
         if row is None:
             return InstallStepResult(key=key, refused="not_installed", words=f"“{key}” isn't installed by the core.")
+        if row.state == installs.UPGRADING:
+            return InstallStepResult(key=key, state=row.state, refused="upgrading",
+                                     words=f"{row.title} is upgrading ({row.step}): it starts and stops by itself.")
         try:
             (app_system.start if self._start else app_system.stop)(row.service)
         except app_system.ServiceError as exc:
@@ -200,6 +203,51 @@ class ExtensionStopTool(_ServiceTool):
     name = "extension_stop"
     description = "Stop an installed app's service"
     _start = False
+
+
+@dataclass
+class UpgradeResult:
+    """Where an upgrade ended: ``upgraded``, ``stayed`` (never switched, or went back), ``failed`` or ``refused``."""
+
+    key: str
+    title: str = ""
+    before: str = ""
+    to: str = ""
+    outcome: str = ""
+    words: str = ""
+    new_asks: list[str] = field(default_factory=list)
+
+
+class ExtensionUpgradeTool(Tool):
+    """Runs in the core (``runtime``): it stops and starts the app's service with the core's right."""
+
+    surfaces = frozenset({"cli", "http"})
+    runtime = True
+    name = "extension_upgrade"
+    description = ("Upgrade an installed app from a package handed to the core: its migrations tried on a copy first, "
+                   "then switched, health-checked, and put back by itself when the new version doesn't answer")
+    params = {
+        "key": ToolParam(str, "The installed app's key"),
+        "package": ToolParam(str, "The package's id (from PUT /packages)"),
+        "allow_row_loss": ToolParam(list, "Tables the new version's migrations may empty (the owner names them)",
+                                    required=False),
+        "workspace": _WORKSPACE,
+    }
+
+    def execute(self, key: str, package: str, allow_row_loss: list[str] | None = None,
+                workspace: str | None = None) -> UpgradeResult:
+        from ..services import app_upgrade
+
+        workspace_path = _resolve_path(workspace)
+        row = installs.get_install(workspace_path, key)
+        with stories.started(stories.EXTENSION_UPGRADE, "extensions.upgrade", area="EXTENSIONS", own=True,
+                             title=f"{row.title if row else key} upgrade"):
+            try:
+                done = app_upgrade.upgrade(workspace_path, key, package, allow_row_loss or [])
+            except PackageRefused as exc:
+                log.warning(f"⚠️ Upgrade refused — {key}: {exc}", key=key, code=exc.code)
+                return UpgradeResult(key=key, outcome="refused", words=str(exc))
+        return UpgradeResult(**asdict(done))
 
 
 @dataclass

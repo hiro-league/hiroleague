@@ -36,9 +36,10 @@ TABLE = "installs"
 APPROVING = "approving"  # the row is made; the person's admin step (account, service) is still to come
 WAITING = "waiting"  # the service runs; the app hasn't paired with its install's code yet
 RUNNING = "running"  # the app paired: its extension_records row has the same key
+UPGRADING = "upgrading"  # an upgrade runs: ``step`` is the one it took last, ``upgrade_to`` its version
 FAILED = "failed"  # a step after the admin step failed: ``step`` says why
 REMOVING = "removing"
-STATES = (APPROVING, WAITING, RUNNING, FAILED, REMOVING)
+STATES = (APPROVING, WAITING, RUNNING, UPGRADING, FAILED, REMOVING)
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,8 @@ class Install:
     consent: tuple[ApprovedItem, ...] = ()  # what the person approved at install
     package: str = ""  # the stored package it installs from (packages.py), until it is unpacked
     command: str = ""  # the program its service runs (the manifest's command)
+    upgrade_to: str = ""  # while it upgrades: the version it goes to
+    upgrade_stamp: str = ""  # while it upgrades: the copy of its data that going back puts back
 
 
 class InstallExists(ValueError):
@@ -81,7 +84,8 @@ def _row(row: sqlite3.Row) -> Install:
         state=row["state"], step=row["step"], home=row["home"], installed_at=row["installed_at"],
         updated_at=row["updated_at"],
         consent=tuple(ApprovedItem.model_validate(i) for i in json.loads(row["consent"] or "[]")),
-        package=row["package"], command=row["command"],
+        package=row["package"], command=row["command"], upgrade_to=row["upgrade_to"],
+        upgrade_stamp=row["upgrade_stamp"],
     )
 
 
@@ -141,6 +145,34 @@ def set_code(workspace_path: Path, key: str, code: str) -> None:
     with _connect(workspace_path) as conn:
         conn.execute(f"UPDATE {TABLE} SET code_hash = ?, updated_at = ? WHERE key = ?",
                      (code_hash(code), utc_iso(datetime.now(UTC)), key))
+        conn.commit()
+
+
+def set_upgrade(workspace_path: Path, key: str, *, step: str, to: str | None = None, stamp: str | None = None) -> None:
+    """An upgrade's step, recorded before it is taken (``upgrading``), with its target version and its copy's stamp
+    when they change."""
+    sets, values = ["state = ?", "step = ?", "updated_at = ?"], [UPGRADING, step, utc_iso(datetime.now(UTC))]
+    if to is not None:
+        sets.append("upgrade_to = ?")
+        values.append(to)
+    if stamp is not None:
+        sets.append("upgrade_stamp = ?")
+        values.append(stamp)
+    with _connect(workspace_path) as conn:
+        conn.execute(f"UPDATE {TABLE} SET {', '.join(sets)} WHERE key = ?", (*values, key))
+        conn.commit()
+
+
+def end_upgrade(workspace_path: Path, key: str, *, version: str | None = None, previous: str | None = None,
+                state: str = RUNNING, step: str = "") -> None:
+    """The upgrade is over: settled on ``version`` (the one before kept as ``previous``), or back where it was."""
+    sets = ["state = ?", "step = ?", "upgrade_to = ''", "upgrade_stamp = ''", "updated_at = ?"]
+    values: list[object] = [state, step, utc_iso(datetime.now(UTC))]
+    if version is not None:
+        sets += ["version = ?", "previous_version = ?"]
+        values += [version, previous or ""]
+    with _connect(workspace_path) as conn:
+        conn.execute(f"UPDATE {TABLE} SET {', '.join(sets)} WHERE key = ?", (*values, key))
         conn.commit()
 
 

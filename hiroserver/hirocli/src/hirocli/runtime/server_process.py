@@ -183,6 +183,14 @@ async def _logged_part(part) -> None:
         log.error(f"❌ Server part stopped with an error: {name}", part=name, exc_info=True)
 
 
+async def _resume_upgrades(workspace_path: Path) -> None:
+    """An installed app's upgrade a restart cut off goes on at the start (services/app_upgrade.py), off the loop."""
+    from hirocli.services.app_upgrade import resume
+
+    for line in await asyncio.to_thread(resume, workspace_path):
+        log.info(f"Upgrade resumed at start — {line}")
+
+
 async def _main(
     foreground: bool = False,
     workspace_path: Path | None = None,
@@ -346,6 +354,8 @@ async def _main(
         run_loop_stall_sentinel(),
         # Phase 7a Part B: idle local models unloaded, plan sign-ins tidied, plan tools updated nightly.
         run_ai_background(ctx),
+        # Installing apps, phase 5: an app's upgrade a restart cut off goes on (back, from the switch on)
+        _resume_upgrades(workspace_path),
     ]
     if admin_task is not None:
         coros.append(admin_task)

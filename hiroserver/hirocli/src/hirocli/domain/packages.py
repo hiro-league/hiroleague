@@ -73,7 +73,7 @@ def open_package(path: Path) -> Package:
     return Package(path=path, manifest=manifest, wheels=wheels, requirements=requirements)
 
 
-def _numbers(version: str) -> tuple[int, ...]:
+def version_numbers(version: str) -> tuple[int, ...]:
     match = re.match(r"\d+(?:\.\d+)*", version)
     return tuple(int(n) for n in match[0].split(".")) if match else ()
 
@@ -87,12 +87,12 @@ def _compare(a: tuple[int, ...], b: tuple[int, ...]) -> int:
 def version_in(versions: str, version: str) -> bool:
     """Whether ``version`` (the core's, 0.2.0) is in the manifest's range (">=0.2,<0.3"): each clause compares the
     release numbers; ``~=X.Y`` is >=X.Y within X. Pure."""
-    mine = _numbers(version)
+    mine = version_numbers(version)
     for clause in versions.split(","):
         match = _CLAUSE.fullmatch(clause.strip())
         if not match:
             return False
-        op, other = match[1], _numbers(match[2])
+        op, other = match[1], version_numbers(match[2])
         c = _compare(mine, other)
         ok = {
             ">=": c >= 0, "<=": c <= 0, ">": c > 0, "<": c < 0, "==": c == 0, "!=": c != 0,
