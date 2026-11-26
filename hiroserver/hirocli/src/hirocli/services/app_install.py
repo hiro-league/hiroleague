@@ -133,6 +133,7 @@ def read_sheet(workspace_path: Path, package_id: str) -> Sheet:
     """The stored package, checked, and what its app asks. PackageRefused when it can't be installed here."""
     config = load_config(workspace_path)
     package = open_package(stored_package(workspace_path, package_id))
+    drop_stale(workspace_path, package.manifest.key)
     check(workspace_path, package.manifest, config)
     port = package.manifest.port or 0
     return Sheet(package=package, port=port, items=sheet(package.manifest, config.site_domain(), port))
@@ -169,6 +170,18 @@ def prepare(workspace_path: Path, package_id: str, chosen: set[tuple[str, str]] 
     log.info(f"📦 Install approved — {manifest.title} {manifest.version}: {len(agreed)} item(s), {how}; the admin "
              "step next", key=manifest.key, port=found.port, items=", ".join(_item(i) for i in agreed))
     return row, system_job(manifest)
+
+
+def drop_stale(workspace_path: Path, key: str) -> bool:
+    """Drop an install left ``approving`` with nothing made for it, so it doesn't refuse the next try. Fix: one whose
+    CLI was closed before its admin step made anything refused the next try as "installed already" (seen on the PC,
+    Nov 26, 2026). One whose service exists is left alone: its install may still be running elsewhere."""
+    from .. import app_system
+
+    row = installs.get_install(workspace_path, key)
+    if row is None or row.state != installs.APPROVING or app_system.is_running(row.service) is not None:
+        return False
+    return cancel(workspace_path, key)
 
 
 def cancel(workspace_path: Path, key: str) -> bool:

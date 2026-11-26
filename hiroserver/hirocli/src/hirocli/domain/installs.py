@@ -168,7 +168,8 @@ def install_for_code(workspace_path: Path, code: str) -> Install | None:
 
 def code_used(workspace_path: Path, key: str) -> None:
     """The app paired with its install's code: the code is gone, and the install runs."""
+    # Fix: the step kept saying "Waiting for the app to pair" once it had paired (seen on the PC, Nov 26, 2026)
     with _connect(workspace_path) as conn:
-        conn.execute(f"UPDATE {TABLE} SET code_hash = '', state = ?, updated_at = ? WHERE key = ?",
+        conn.execute(f"UPDATE {TABLE} SET code_hash = '', state = ?, step = '', updated_at = ? WHERE key = ?",
                      (RUNNING, utc_iso(datetime.now(UTC)), key))
         conn.commit()

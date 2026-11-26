@@ -156,14 +156,17 @@ def _prepared(workspace: Path, m: Manifest | None = None, chosen=frozenset()):
     return app_install.prepare(workspace, package_id, set(chosen)), package_id
 
 
-def test_prepare_keeps_the_yes_and_answers_the_job_and_a_declined_step_forgets_it(workspace: Path) -> None:
+def test_prepare_keeps_the_yes_and_answers_the_job_and_a_declined_step_forgets_it(workspace: Path,
+                                                                                    monkeypatch) -> None:
     (row, job), package_id = _prepared(workspace)
     assert row.state == installs.APPROVING and row.command == "example-hello" and row.package == package_id
     assert {i.permission for i in row.consent} == {PEOPLE_SEE, SITE_ADDRESS, SITE_NAME}
     assert job.model_dump() == {"action": "install", "key": "example.hello", "command": "example-hello",
                                 "purge": False}
+    monkeypatch.setattr(app_system, "is_running", lambda service: False)  # its admin step made the service
     with pytest.raises(PackageRefused, match="installed already"):
         _prepared(workspace)
+    monkeypatch.setattr(app_system, "is_running", lambda service: None)  # declined: nothing made
     assert app_install.cancel(workspace, "example.hello") is True
     assert installs.get_install(workspace, "example.hello") is None
     with pytest.raises(PackageRefused):
@@ -316,3 +319,19 @@ def test_a_failed_finish_is_a_warning_with_its_key_and_the_remove_is_its_own_sto
     assert forgotten.forgotten is True
     named = [a for _, _, a in _lines(caplog) if a.get("story.name") == "core.extension_remove"]
     assert named and named[0]["story.title"] == "Hello removed"
+
+
+def test_an_install_left_approving_with_nothing_made_doesnt_block_the_next_try(workspace: Path, monkeypatch) -> None:
+    _System(monkeypatch, made=False)
+    (row, _), _ = _prepared(workspace)  # its CLI closed before the admin step made anything
+    (again, _), _ = _prepared(workspace)
+    assert again.key == row.key and again.state == installs.APPROVING
+
+
+def test_once_it_paired_its_step_is_clear(workspace: Path, monkeypatch) -> None:
+    _System(monkeypatch)
+    (row, _), _ = _prepared(workspace)
+    app_install.finish(workspace, row.key)
+    installs.code_used(workspace, row.key)
+    done = installs.get_install(workspace, row.key)
+    assert (done.state, done.step) == (installs.RUNNING, "")
