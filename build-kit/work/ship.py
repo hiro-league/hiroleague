@@ -12,7 +12,7 @@ sent twice does no harm. When CodeHiro can't be reached the lines simply wait, a
 hiro-work starts it (``kick()``) whenever it writes an event, unless one is already running: the second one finds the
 lock taken and stops at once. With no key file (C:\hiro\secrets\work.key) it sends nothing. Standard library only.
 
-Settings (environment): ``HIRO_WORK_URL`` (default http://reports.local/api/work/events), ``HIRO_WORK_SOURCE``
+Settings (environment): ``HIRO_WORK_URL`` (default http://code.hiro.local/api/work/events), ``HIRO_WORK_SOURCE``
 (default ``pc``), ``HIRO_WORK_KEY_FILE`` (default <root>\secrets\work.key), ``HIRO_ROOT`` (default C:\hiro).
 """
 
@@ -34,7 +34,7 @@ from pathlib import Path
 
 ROOT = Path(os.environ.get("HIRO_ROOT", r"C:\hiro"))
 EVENTS = ROOT / "logs" / "events.jsonl"
-URL = os.environ.get("HIRO_WORK_URL", "http://reports.local/api/work/events")
+URL = os.environ.get("HIRO_WORK_URL", "http://code.hiro.local/api/work/events")
 SOURCE = os.environ.get("HIRO_WORK_SOURCE", "pc")
 KEY_FILE = Path(os.environ.get("HIRO_WORK_KEY_FILE", str(ROOT / "secrets" / "work.key")))
 EVERY = 2.0  # seconds between looks at the log

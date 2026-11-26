@@ -21,7 +21,7 @@ CORE_KEY = "hiroleague"
 
 # Hiro League's own extensions, the only ones with a bare key: the apps (each one's Extension(name=...)) and the
 # channels (the channel catalog's and the core's built-in devices channel). A new Hiro League extension is added here.
-HIRO_LEAGUE_OWN = frozenset({"home", "net", "train", "study", "reports", "eval", "whatsapp", "devices"})
+HIRO_LEAGUE_OWN = frozenset({"home", "net", "train", "study", "code", "eval", "whatsapp", "devices"})
 
 # A publisher starting with this is Hiro League's: refused for anyone else
 RESERVED_PUBLISHER_PREFIX = "hiro"

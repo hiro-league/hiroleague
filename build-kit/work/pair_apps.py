@@ -4,7 +4,7 @@ Run in the core's own environment (it needs the SDK and the core's package), wit
 
     uv run python pair_apps.py <workspace folder> <ws://127.0.0.1:7N01> <name>=<key folder> ...
 
-<name> is the app's extension name (home, net, train, study, reports), <key folder> where the app keeps its key
+<name> is the app's extension name (home, net, train, study, code), <key folder> where the app keeps its key
 (DATA_DIR/hiroleague). An app whose key the core already knows is left alone. Any other gets a fresh pairing code
 (the core's own, written to its workspace as `hiro extension add` does; for an app the core already holds by that
 name, one that pairs it again on its record, as `hiro extension pair-again` does) and pairs with it, one app at a

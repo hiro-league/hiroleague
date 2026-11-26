@@ -16,8 +16,9 @@ def test_hiro_leagues_own_and_publisher_keys_pass(key: str) -> None:
 
 
 def test_every_live_name_passes() -> None:
-    # Simone's records on Nov 25, 2026: a rule that refused one would lock that app out at its next pairing
-    for name in ("home", "net", "train", "study", "reports", "eval", "whatsapp", "devices"):
+    # Simone's records on Nov 25, 2026, CodeHiro's as code (its key from Installing apps, phase 6): a rule that
+    # refused one would lock that app out at its next pairing
+    for name in ("home", "net", "train", "study", "code", "eval", "whatsapp", "devices"):
         assert key_refusal(name) is None, name
 
 
