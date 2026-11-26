@@ -74,15 +74,20 @@ def _extract(archive: Path, member: str, dest: Path) -> None:
     tmp = dest.with_name(f".{dest.name}.new")
     try:
         if archive.suffix == ".zip":
-            with zipfile.ZipFile(archive) as zf, zf.open(member) as src, tmp.open("wb") as out:
-                out.write(src.read())
+            with zipfile.ZipFile(archive) as zf, zf.open(member) as src:
+                data = src.read()
         else:
             with tarfile.open(archive, "r:gz") as tf:
                 found = tf.extractfile(member)
                 if found is None:
                     raise ServiceError(f"{archive.name} holds no {member}.")
-                with found as src, tmp.open("wb") as out:
-                    out.write(src.read())
+                with found as src:
+                    data = src.read()
+        # Fix: installing the service again replaced the program the running front door uses, which Windows refuses
+        # (Access is denied, seen Nov 26, 2026). The archive is checked, so the same bytes are the pinned program.
+        if dest.is_file() and dest.stat().st_size == len(data) and dest.read_bytes() == data:
+            return
+        tmp.write_bytes(data)
         os.chmod(tmp, 0o755)
         os.replace(tmp, dest)
     except (OSError, KeyError, zipfile.BadZipFile, tarfile.TarError) as exc:

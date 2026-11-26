@@ -81,3 +81,20 @@ def test_a_download_that_is_not_the_pinned_file_is_a_service_error(tmp_path, mon
     monkeypatch.setattr(cr, "fetch_checked", refuse)
     with pytest.raises(ServiceError, match="not the file"):
         cr.fetch_caddy(tmp_path, "windows", "amd64")
+
+
+def test_installing_again_keeps_the_same_program_the_running_front_door_uses(tmp_path, monkeypatch) -> None:
+    """Windows refuses to replace a running caddy.exe: the same program already in place is kept, untouched."""
+    def make(dest: Path) -> None:
+        with zipfile.ZipFile(dest, "w") as zf:
+            zf.writestr("caddy.exe", b"MZ caddy")
+
+    _fake_fetch(monkeypatch, make)
+    program = cr.fetch_caddy(tmp_path, "windows", "amd64")
+
+    def locked(src, dst) -> None:
+        raise PermissionError(5, "Access is denied")
+
+    monkeypatch.setattr(cr.os, "replace", locked)
+    assert cr.fetch_caddy(tmp_path, "windows", "amd64") == program  # no replace tried
+    assert program.read_bytes() == b"MZ caddy"
