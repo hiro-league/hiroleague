@@ -181,9 +181,14 @@ def drop_stale(workspace_path: Path, key: str) -> bool:
     from .. import app_system
 
     row = installs.get_install(workspace_path, key)
-    if row is None or row.state != installs.APPROVING or app_system.is_running(row.service) is not None:
+    if row is None or row.state != installs.APPROVING:
         return False
-    return cancel(workspace_path, key)
+    try:
+        made = app_system.is_running(row.service) is not None
+    except app_system.ServiceError as exc:
+        log.warning(f"⚠️ A stale install kept — {row.title}: whether its service exists can't be told: {exc}", key=key)
+        return False
+    return False if made else cancel(workspace_path, key)
 
 
 def cancel(workspace_path: Path, key: str) -> bool:
@@ -196,7 +201,18 @@ def cancel(workspace_path: Path, key: str) -> bool:
     row = installs.get_install(workspace_path, key)
     if row is None or row.state != installs.APPROVING:
         return False
-    if app_system.is_running(row.service) is not None:
+    try:
+        made = app_system.is_running(row.service) is not None
+    except app_system.ServiceError as exc:
+        # Fix (Nov 27): the system that can't be asked (a Mac, before the core had its Mac path) crashed the cancel
+        # with a 500. Not knowing, the row stays for `hiro extension remove`, which takes away whatever was made.
+        words = ("The install stopped, and whether its account and service were made can't be told: remove it, then "
+                 "install it again.")
+        installs.set_state(workspace_path, key, installs.FAILED, step=words)
+        log.warning(f"⚠️ Install stopped partway — {row.title}: its service can't be checked, the row is kept to "
+                    f"remove it: {exc}", key=key, service=row.service)
+        return False
+    if made:
         words = "The install stopped after its account and service were made: remove it, then install it again."
         installs.set_state(workspace_path, key, installs.FAILED, step=words)
         log.warning(f"⚠️ Install stopped partway — {row.title}: its service exists, the row is kept to remove it",
@@ -246,8 +262,9 @@ def _app(row: installs.Install) -> AppSystem:
 
 
 def write_environment(workspace_path: Path, row: installs.Install, code: str = "") -> None:
-    """Write the app's environment where its service reads it: app.env (Linux, Mac; only the core reads it, systemd
-    reads it as root), or its WinSW configuration (Windows: WinSW has no environment file)."""
+    """Write the app's environment where its service reads it: app.env (Linux: systemd reads it as root; Mac: the
+    app's own account, through its folder's ACL entry), or its WinSW configuration (Windows: WinSW has no environment
+    file)."""
     from .. import app_system
 
     app = _app(row)

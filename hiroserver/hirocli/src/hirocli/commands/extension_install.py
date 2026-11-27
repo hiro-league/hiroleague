@@ -226,7 +226,10 @@ def remove_installed(console: Console, workspace_path: Path, workspace_id: str, 
     from ..tools.extension_install import ExtensionInstallForgetTool
 
     done = run_system_step(console, {"action": "remove", "key": key, "purge": purge})
-    console.print(f"[green]Removed[/green] its service and account ({done['service']}).")
+    what = "its service" if done.get("kept") else "its service and account"
+    console.print(f"[green]Removed[/green] {what} ({done['service']}).")
+    if done.get("kept"):
+        console.print(f"[yellow]{done['kept']}[/yellow]")
     params = {"key": key, "workspace": workspace_id}
     if _core_running(workspace_path):
         result = _invoke(workspace_path, "extension_install_forget", params)
