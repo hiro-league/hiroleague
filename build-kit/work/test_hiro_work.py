@@ -560,6 +560,80 @@ def test_start_fetches_env0s_repos_side_by_side_as_one_timed_step(tmp_path, monk
     assert steps == ["fetch", "fetch"] and read()[-1]["ok"] is True  # one step, not one per repo
 
 
+def _old_env(tmp_path, monkeypatch):
+    """env0's hiroleague and codehiro one commit ahead of env1's, whose worktrees sit detached on the old one (as
+    env5's codehiro did on Nov 27, before CodeHiro's backend/). Each install records the commit it saw."""
+    _events(tmp_path, monkeypatch)
+    monkeypatch.setattr(hw, "ROOT", tmp_path)
+    monkeypatch.setattr(hw, "TASKS", tmp_path / "tasks")
+    monkeypatch.setattr(hw, "REPOS", ["hiroleague", "codehiro"])
+    monkeypatch.setattr(hw, "MAIN", {})
+    monkeypatch.setattr(hw, "memory_link", lambda env, repo: None)  # never the real ~/.claude
+    monkeypatch.setattr(hw, "refresh_data", lambda env, task, data: None)
+    monkeypatch.setattr(hw, "card", lambda task: None)
+    import plan
+
+    monkeypatch.setattr(plan, "started", lambda *a: [])  # no plan to move
+    old = {}
+    for repo in hw.REPOS:
+        origin = _repo(tmp_path / "origins" / repo, "one")
+        env0 = tmp_path / "env0" / repo
+        hw.git(tmp_path, "clone", "-q", str(origin), str(env0))
+        old[repo] = hw.git(env0, "rev-parse", "HEAD")
+        hw.git(env0, "worktree", "add", "-q", "--detach", str(tmp_path / "env1" / repo), old[repo])
+        hw.git(env0, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "two")
+    hooks = tmp_path / "env0" / "hiroleague" / "build-kit" / "git-hooks"
+    hooks.mkdir(parents=True)
+    (hooks / "install.py").write_text("", encoding="utf-8")  # the git hooks step runs it
+    seen = []
+    monkeypatch.setattr(hw, "install", lambda env, repo, task=None: seen.append(
+        (repo, hw.git(hw.repo_dir(env, repo), "rev-parse", "HEAD"))))
+    return old, seen
+
+
+def _start(task_id="t"):
+    hw.cmd_start(hw.argparse.Namespace(task=task_id, repos="hiroleague", kit=False, title=None, env=1, part_of=None,
+                                       about=None, preset="Safe", set=None, data="env0", own_branch=False,
+                                       as_person=None, quick_sign_in=False))
+
+
+def test_start_installs_each_repo_once_after_it_sits_on_its_base(tmp_path, monkeypatch):
+    _old, seen = _old_env(tmp_path, monkeypatch)
+    _start()
+    main = {r: hw.git(tmp_path / "env0" / r, "rev-parse", "main") for r in hw.REPOS}
+    assert seen == [("hiroleague", main["hiroleague"]), ("codehiro", main["codehiro"])]  # never the old commit
+    assert hw.git(tmp_path / "env1" / "hiroleague", "branch", "--show-current") == "task/t"
+    assert hw.get("t").base == {"hiroleague": main["hiroleague"]}
+
+
+def test_a_start_refused_for_uncommitted_files_moves_no_repo(tmp_path, monkeypatch):
+    old, seen = _old_env(tmp_path, monkeypatch)
+    (tmp_path / "env1" / "codehiro" / "history-dashboard").mkdir()
+    (tmp_path / "env1" / "codehiro" / "history-dashboard" / "x.js").write_text("", encoding="utf-8")
+    with pytest.raises(hw.Stop, match="codehiro has uncommitted files"):
+        _start()
+    core = tmp_path / "env1" / "hiroleague"
+    assert hw.git(core, "branch", "--show-current") == "" and hw.git(core, "rev-parse", "HEAD") == old["hiroleague"]
+    assert not hw.git(core, "branch", "--list", "task/t") and seen == []
+    assert not hw.task_path("t").exists()
+
+
+def test_a_start_that_stops_after_the_switch_leaves_no_task_branch(tmp_path, monkeypatch):
+    old, _seen = _old_env(tmp_path, monkeypatch)
+
+    def fails(env, task, data):
+        raise hw.Stop("the data copy failed")
+
+    monkeypatch.setattr(hw, "refresh_data", fails)  # after the switch and the installs
+    with pytest.raises(hw.Stop, match="the data copy failed"):
+        _start()
+    core = tmp_path / "env1" / "hiroleague"
+    assert hw.git(core, "branch", "--show-current") == ""  # detached again, where it sat
+    assert hw.git(core, "rev-parse", "HEAD") == old["hiroleague"]
+    assert not hw.git(core, "branch", "--list", "task/t")  # the branch it made is gone
+    assert not hw.task_path("t").exists()
+
+
 def test_reserve_adds_a_free_repo_and_refuses_one_held(tmp_path, monkeypatch):
     read = _events(tmp_path, monkeypatch)
     monkeypatch.setattr(hw, "ROOT", tmp_path)
