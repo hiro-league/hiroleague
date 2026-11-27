@@ -120,8 +120,10 @@ def test_spec_runs_the_server_under_winsw_with_its_own_data_and_secrets() -> Non
     assert env["PYTHON_KEYRING_BACKEND"] == "keyring.backends.null.Keyring"
     assert env[ENV_SECRETS_FILE] == str(HOME / "hiro.env")
     assert env[ENV_DATA_DIR] == str(HOME / "data")
-    # hirogate and the channel plugins sit beside hiro.exe; nothing for WinSW to expand.
-    assert env["PATH"].startswith(str(exe.parent) + ";")
+    # hirogate sits beside hiro.exe, the channels' commands in the home; nothing for WinSW to expand.
+    assert env["PATH"].startswith(f"{exe.parent};{HOME / 'channels' / 'bin'};")
+    # The home the install named, where the core installs apps and channels
+    assert env["HIRO_HOME"] == str(HOME)
     assert "%" not in w.render_config(spec)
 
 
@@ -174,7 +176,7 @@ def test_install_registers_then_locks_the_data_then_starts(elevated) -> None:
     steps = [c[0] for c in elevated]
     assert steps == [
         "disk", "disk", "lock_program", "release", "uv", "cpp_runtime", "front_door", "register", "grant_read",
-        "lock_data", "secrets", "lock_secrets", "start",
+        "lock_data", "lock_data", "secrets", "lock_secrets", "start",
     ]
     assert elevated[3] == ("release", r"C:\hiro\env4\hiroleague\hiroserver\hiroleague")
     # The service core's own uv, in the home: it installs a channel with it before any app is installed.
@@ -190,7 +192,9 @@ def test_install_registers_then_locks_the_data_then_starts(elevated) -> None:
     # The account exists only once registered, so it is given the program and the data after, and it starts last.
     assert elevated[8] == ("grant_read", HOME)
     assert elevated[9] == ("lock_data", HOME / "data", "hiro", "M")
-    assert elevated[11] == ("lock_secrets", HOME / "hiro.env")
+    # Its channels' programs go in the home, which it may change: never its account's own profile (Nov 27, 2026)
+    assert elevated[10] == ("lock_data", HOME / "channels", "hiro", "M")
+    assert elevated[12] == ("lock_secrets", HOME / "hiro.env")
     assert result.front_door == "hiro-caddy" and result.firewall == [door.RULE_CADDY, door.RULE_NAMES]
     assert result.manager == "winsw"
     assert result.user == r"NT SERVICE\hiro"

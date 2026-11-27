@@ -37,6 +37,7 @@ from .. import linux_service as ls
 from .. import windows_service as ws
 from ..constants import ENV_CORE_NAME, ENV_DATA_DIR, ENV_SECRETS_FILE
 from ..domain.front_door import ENV_FRONT_DOOR
+from ..domain.hiro_home import channels_folder
 from .service_models import ServiceControlResult, ServiceInstallResult, ServiceStatusResult, ServiceUninstallResult
 
 log = Logger.get("TOOLS.SERVICE")
@@ -118,6 +119,11 @@ def install(
     grant_read(lay.home, service_id=name)
     lay.logs_dir.mkdir(parents=True, exist_ok=True)
     lock_folder(lay.data_dir, service_id=name, service_rights="M")
+    # The service installs its channels' programs here, never in its account's own profile (ServiceProfiles). Another
+    # service's grant stays: /grant:r replaces this account's entry only.
+    channels = channels_folder(lay.home).root
+    channels.mkdir(parents=True, exist_ok=True)
+    lock_folder(channels, service_id=name, service_rights="M")
     secrets = lay.secrets_file(name)
     created = ws.write_secrets_file(secrets, ws.env_file_content(name))
     lock_file(secrets, service_id=name)

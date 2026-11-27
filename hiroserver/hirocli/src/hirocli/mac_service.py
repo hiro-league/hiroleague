@@ -6,6 +6,7 @@ Hiro home, ``/Library/Application Support/HiroLeague``, owned by that account:
 
     <home>/<name>.env        the secrets file (provider keys), mode 0600, read by the server itself
     <home>/logs/<name>.log   what the server prints before its own log file is open (a failed start)
+    <home>/channels/         the channels' programs the server installs (domain/hiro_home.py)
 
 Builds the Hiro-specific parts and hands them to the generic ``hiro_commons.launchd_service``; mirrors
 ``hirocli.linux_service``.
@@ -22,6 +23,7 @@ from hiro_commons.launchd_service import LaunchdSpec
 from hiro_commons.systemd_service import NULL_KEYRING_BACKEND, ServiceError, ServiceUser, render_env_file
 
 from .constants import ENV_SECRETS_FILE, ENV_SERVICE_MANAGER
+from .domain.hiro_home import ENV_HIRO_HOME, channels_folder
 from .linux_service import provider_env_sections, service_name
 
 HOME = Path("/Library/Application Support/HiroLeague")
@@ -70,7 +72,10 @@ def build_spec(*, exe: str, user: ServiceUser, workspace: str | None) -> Launchd
             "PYTHON_KEYRING_BACKEND": NULL_KEYRING_BACKEND,
             ENV_SERVICE_MANAGER: "launchd",
             ENV_SECRETS_FILE: secrets_file(workspace).as_posix(),
-            "PATH": f"{Path(exe).parent.as_posix()}:{_SYSTEM_PATH}",
+            ENV_HIRO_HOME: HOME.as_posix(),
+            # Then the channels' commands the server starts: the home's path has a space, so a channel there is set up
+            # by its bare command name, found on this PATH (tools/channel.installed_channel_command).
+            "PATH": f"{Path(exe).parent.as_posix()}:{channels_folder(HOME).bin.as_posix()}:{_SYSTEM_PATH}",
             "HOME": user.home.as_posix(),
             "PYTHONUNBUFFERED": "1",
         },
@@ -88,9 +93,10 @@ def env_file_content(name: str, user: str, workspace: str | None) -> str:
 
 
 def prepare_home(user: ServiceUser, workspace: str | None) -> None:
-    """Make the Hiro home and its logs folder, owned by the service's account (it writes its log there)."""
+    """Make the Hiro home, its logs folder and its channels' folder, owned by the service's account (it writes its log
+    there and installs its channels there)."""
     try:
-        for folder in (HOME, log_file(workspace).parent):
+        for folder in (HOME, log_file(workspace).parent, channels_folder(HOME).root):
             folder.mkdir(mode=0o755, parents=True, exist_ok=True)
             os.chown(folder, user.uid, user.gid)
     except OSError as exc:

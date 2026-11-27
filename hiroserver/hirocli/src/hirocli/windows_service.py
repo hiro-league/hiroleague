@@ -9,6 +9,7 @@ install names another), the way Simone's deploy uses ``/opt/hiroleague``:
     <home>\\releases\\<time>\\    one install of Hiro League (its tools and its bin\\hiro.exe)
     <home>\\service\\<name>.exe   the service's own copy of WinSW, and <name>.xml beside it
     <home>\\cache\\downloads\\    one checked copy of each pinned download (WinSW, Caddy) for every service
+    <home>\\channels\\            the channels' programs the service installs (domain/hiro_home.py), which it may change
     <home>\\<name>.env            the secrets file (provider keys), read by the server itself
     <data>\\                      the workspace registry and workspaces (HIRO_DATA_DIR); <home>\\data unless named
     <data>\\service-logs\\        WinSW's own log and what the server writes before its log file is open
@@ -32,6 +33,7 @@ from hiro_commons.systemd_service import NULL_KEYRING_BACKEND, ServiceError, ren
 from hiro_commons.winsw_service import WinswSpec
 
 from .constants import ENV_DATA_DIR, ENV_SECRETS_FILE, ENV_SERVICE_MANAGER
+from .domain.hiro_home import ENV_HIRO_HOME, channels_folder
 from .linux_service import SERVICE_DESCRIPTION, provider_env_sections, service_name
 
 log = Logger.get("CLI.SERVICE")
@@ -106,11 +108,11 @@ def installed_package_spec() -> str:
         return f"hiroleague=={version('hirocli')}"
 
 
-def _system_path(bin_dir: Path) -> str:
+def _system_path(bin_dir: Path, channels_bin: Path) -> str:
     # The service gets the machine's environment, not a person's; spelled out (WinSW would expand a %NAME%) with the
-    # release's own bin first: it also holds hirogate and the channel-plugin commands the server starts.
+    # release's own bin first (it also holds hirogate), then the Hiro home's channels' commands the server starts.
     root = os.environ.get("SystemRoot") or r"C:\Windows"
-    parts = [str(bin_dir), rf"{root}\System32", root, rf"{root}\System32\Wbem", rf"{root}\System32\WindowsPowerShell\v1.0"]
+    parts = [str(bin_dir), str(channels_bin),rf"{root}\System32", root, rf"{root}\System32\Wbem", rf"{root}\System32\WindowsPowerShell\v1.0"]
     return ";".join(parts)
 
 
@@ -268,7 +270,8 @@ def build_spec(*, exe: Path, lay: Layout, workspace: str | None) -> WinswSpec:
             ENV_SERVICE_MANAGER: "winsw",
             ENV_SECRETS_FILE: str(lay.secrets_file(name)),
             ENV_DATA_DIR: str(lay.data_dir),
-            "PATH": _system_path(exe.parent),
+            ENV_HIRO_HOME: str(lay.home),  # an install's --home: the core installs apps and channels there
+            "PATH": _system_path(exe.parent, channels_folder(lay.home).bin),
             "PYTHONUNBUFFERED": "1",
             # WinSW writes what the server prints to a file: UTF-8, so a line with an emoji doesn't fail.
             "PYTHONIOENCODING": "utf-8",

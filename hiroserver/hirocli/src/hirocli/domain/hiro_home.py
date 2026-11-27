@@ -18,6 +18,12 @@ One app's folder, ``<home>/apps/<key>/``:
     app.env               the service's environment (DATA_DIR, PORT, HIRO_CORE_URL, the install's pairing code)
     data/                 the app's DATA_DIR: its databases, its key, its files
     service/              Windows: the service's own WinSW and its configuration
+
+A service core's channels, ``<home>/channels/`` (a core a person runs keeps them as uv's tools in their profile):
+
+    tools/                each channel's tool environment (UV_TOOL_DIR), on the core's own Python
+    bin/                  each channel's command (UV_TOOL_BIN_DIR), on the service's PATH
+    cache/                uv's cache for them (UV_CACHE_DIR)
 """
 
 from __future__ import annotations
@@ -29,6 +35,7 @@ from pathlib import Path
 
 ENV_HIRO_HOME = "HIRO_HOME"
 APPS = "apps"
+CHANNELS = "channels"
 
 
 def default_home(platform: str = sys.platform) -> Path:
@@ -82,3 +89,30 @@ class AppFolder:
 
 def app_folder(key: str, home: Path | None = None) -> AppFolder:
     return AppFolder(home=home or hiro_home(), key=key)
+
+
+@dataclass(frozen=True)
+class ChannelsFolder:
+    """Where a service core keeps its channels' programs, under a Hiro home."""
+
+    home: Path
+
+    @property
+    def root(self) -> Path:
+        return self.home / CHANNELS
+
+    @property
+    def tools(self) -> Path:
+        return self.root / "tools"
+
+    @property
+    def bin(self) -> Path:
+        return self.root / "bin"
+
+    @property
+    def cache(self) -> Path:
+        return self.root / "cache"
+
+
+def channels_folder(home: Path | None = None) -> ChannelsFolder:
+    return ChannelsFolder(home=home or hiro_home())

@@ -4,7 +4,12 @@ phase 5; the design's §6).
 A channel installs the way it always has: its program is a uv tool (``uv tool install``) of its published package
 (``hiro-channel-whatsapp`` on PyPI), or of its folder beside the core's own source (a dev checkout, or the
 folder the core was installed from), and the core starts it itself. So there is
-no account, no service and no administrator step. ``hiro extension`` is the one lifecycle for apps and channels;
+no account, no service and no administrator step.
+
+A service core keeps that tool in the Hiro home, as the apps keep theirs (``<home>/channels``: domain/hiro_home.py), on
+its own Python: never in its account's profile (``C:\\Windows\\ServiceProfiles\\hiro\\...`` on Windows), which nobody
+sees and nothing removes. A core a person runs (a dev checkout, hiro-work's environments) keeps it as uv's own tool in
+that person's profile, where their terminal finds it. ``hiro extension`` is the one lifecycle for apps and channels;
 ``hiro channel`` keeps a channel's own settings.
 
 - **Install** (``hiro extension install whatsapp``): a channel of the catalog (domain/channel_catalog.py), not the
@@ -24,8 +29,10 @@ from __future__ import annotations
 
 import importlib.metadata
 import json
+import os
 import shutil
 import subprocess
+import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,7 +44,8 @@ from hiro_commons.process import find_workspace_root
 
 from ..domain.channel_catalog import CatalogChannel, catalog_channel
 from ..domain.channel_config import load_channel_config
-from ..domain.hiro_home import hiro_home
+from ..constants import ENV_SERVICE_MANAGER
+from ..domain.hiro_home import ChannelsFolder, channels_folder, hiro_home
 from ..runtime.extension_starter import key_dir
 
 log = Logger.get("EXTENSIONS.CHANNELS")
@@ -160,14 +168,56 @@ def find_uv() -> str:
     return found
 
 
-def _uv(args: list[str], what: str) -> str:
+# The service managers `hiro service install` sets the core up under (linux_service, windows_service, mac_service).
+_SERVICE_MANAGERS = ("systemd", "winsw", "launchd")
+
+
+def home_channels() -> ChannelsFolder | None:
+    """Where this core keeps its channels' programs: the Hiro home's ``channels`` for a service core, None for a core a
+    person runs (uv's own tools, in their profile)."""
+    return channels_folder() if os.environ.get(ENV_SERVICE_MANAGER) in _SERVICE_MANAGERS else None
+
+
+def uv_env() -> dict[str, str] | None:
+    """The environment uv runs in for a channel: None (the core's own) for a core a person runs; for a service core,
+    its channels' folders in the Hiro home, which ``hiro service install`` makes and lets the service's account change.
+    RuntimeError with words when that folder isn't there (a service installed before channels lived in the home)."""
+    folder = home_channels()
+    if folder is None:
+        return None
+    if not folder.root.is_dir():
+        raise RuntimeError(f"The Hiro home has no folder for channels ({folder.root}): run `hiro service install` "
+                           "again from an administrator terminal (sudo on Linux), then install the channel.")
+    env = {
+        **os.environ,
+        "UV_TOOL_DIR": str(folder.tools),
+        "UV_TOOL_BIN_DIR": str(folder.bin),
+        "UV_CACHE_DIR": str(folder.cache),
+        "UV_LINK_MODE": "copy",  # the tool never shares a file with a cache another account may change
+    }
+    env.pop("VIRTUAL_ENV", None)  # the tool gets its own environment, never the core's
+    return env
+
+
+def python_args() -> list[str]:
+    """A service core's channel runs on the core's own Python (``--python``, its base interpreter): readable by the
+    core's account, and nothing to download. A core a person runs leaves it to uv, as it always has."""
+    return ["--python", sys.executable] if home_channels() is not None else []
+
+
+def run_uv(args: list[str], *, timeout: float = _UV_TIMEOUT_S, what: str = "") -> subprocess.CompletedProcess[str]:
+    """uv with a channel's environment (``uv_env``). RuntimeError with words when it can't run or runs too long."""
     try:
-        done = subprocess.run(  # noqa: S603 — uv with fixed arguments, no shell
-            [find_uv(), *args], capture_output=True, text=True, timeout=_UV_TIMEOUT_S, check=False, encoding="utf-8",
-            errors="replace",
+        return subprocess.run(  # noqa: S603 — uv by its full path, fixed arguments, no shell
+            [find_uv(), *args], capture_output=True, text=True, timeout=timeout, check=False, encoding="utf-8",
+            errors="replace", env=uv_env(),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise RuntimeError(f"{what} failed: {exc}.") from exc
+        raise RuntimeError(f"{what or 'uv ' + ' '.join(args[:2])} failed: {exc}.") from exc
+
+
+def _uv(args: list[str], what: str) -> str:
+    done = run_uv(args, what=what)
     if done.returncode != 0:
         detail = " | ".join((done.stderr or done.stdout).strip().splitlines()[-3:])
         raise RuntimeError(f"{what} failed: {detail or f'exit code {done.returncode}'}.")

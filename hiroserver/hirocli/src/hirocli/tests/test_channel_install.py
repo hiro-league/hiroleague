@@ -274,3 +274,111 @@ def test_no_uv_anywhere_leaves_the_bare_command_with_a_warning(monkeypatch, capl
     with caplog.at_level("WARNING"):
         assert channel_tools.installed_channel_command("whatsapp") is None
     assert any("Could not resolve uv tool bin dir" in r.getMessage() for r in caplog.records)
+
+
+# --- A service core keeps its channels in the Hiro home (Michel, Nov 27, 2026) ----------------------------------------
+
+
+@pytest.fixture
+def service_home(tmp_path: Path, monkeypatch) -> Path:
+    """A service core (as `hiro service install` sets it up): its Hiro home, with the channels' folder made."""
+    home = tmp_path / "HiroLeague"
+    (home / "channels").mkdir(parents=True)
+    monkeypatch.setenv("HIRO_HOME", str(home))
+    monkeypatch.setenv("HIRO_SERVICE_MANAGER", "winsw")
+    return home
+
+
+def _record_uv(monkeypatch) -> list[tuple[list[str], dict[str, str] | None]]:
+    import subprocess
+
+    ran: list[tuple[list[str], dict[str, str] | None]] = []
+
+    def run(cmd, **kw):
+        ran.append((cmd, kw.get("env")))
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(channel_install, "find_uv", lambda: "uv")
+    monkeypatch.setattr(channel_install.subprocess, "run", run)
+    return ran
+
+
+def test_a_service_core_installs_and_removes_a_channel_in_the_hiro_home_on_its_own_python(service_home: Path,
+                                                                                         monkeypatch) -> None:
+    # Without this the service's uv put the program in its account's profile (C:\Windows\ServiceProfiles\hiro\...):
+    # outside the home, its own Python downloaded there, removed by nothing (the fresh-install test, Nov 27, 2026)
+    ran = _record_uv(monkeypatch)
+    channel_tools.ChannelInstallTool().execute("whatsapp", "hiro-channel-whatsapp", reinstall=True)
+    channel_tools.ChannelUninstallTool().execute("whatsapp")
+    (install, install_env), (uninstall, uninstall_env) = ran
+    assert install == ["uv", "tool", "install", "--python", channel_install.sys.executable, "--reinstall",
+                       "hiro-channel-whatsapp"]
+    assert uninstall == ["uv", "tool", "uninstall", "hiro-channel-whatsapp"]
+    for env in (install_env, uninstall_env):
+        assert env is not None
+        assert env["UV_TOOL_DIR"] == str(service_home / "channels" / "tools")
+        assert env["UV_TOOL_BIN_DIR"] == str(service_home / "channels" / "bin")
+        assert env["UV_CACHE_DIR"] == str(service_home / "channels" / "cache")
+        assert env["UV_LINK_MODE"] == "copy"
+
+
+def test_a_core_a_person_runs_keeps_its_channels_as_that_person_s_uv_tools(monkeypatch) -> None:
+    monkeypatch.delenv("HIRO_SERVICE_MANAGER", raising=False)
+    ran = _record_uv(monkeypatch)
+    channel_tools.ChannelInstallTool().execute("whatsapp", "hiro-channel-whatsapp")
+    assert ran == [(["uv", "tool", "install", "hiro-channel-whatsapp"], None)]
+
+
+def test_a_service_without_the_channels_folder_says_to_install_the_service_again(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("HIRO_HOME", str(tmp_path / "HiroLeague"))
+    monkeypatch.setenv("HIRO_SERVICE_MANAGER", "systemd")
+    ran = _record_uv(monkeypatch)
+    with pytest.raises(RuntimeError, match="hiro service install"):
+        channel_tools.ChannelInstallTool().execute("whatsapp", "hiro-channel-whatsapp")
+    assert ran == []
+
+
+def _wheel(folder: Path, version: str) -> Path:
+    """A one-command wheel, hiro-channel-fake, that needs nothing from an index: uv installs it offline."""
+    import base64
+    import hashlib
+    import zipfile
+
+    name, dist = "hiro_channel_fake", f"hiro_channel_fake-{version}.dist-info"
+    files = {
+        f"{name}/__init__.py": f"def main():\n    print('fake {version}')\n",
+        f"{dist}/METADATA": f"Metadata-Version: 2.1\nName: hiro-channel-fake\nVersion: {version}\n",
+        f"{dist}/WHEEL": "Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+        f"{dist}/entry_points.txt": f"[console_scripts]\nhiro-channel-fake = {name}:main\n",
+    }
+    record = []
+    for path, text in files.items():
+        digest = base64.urlsafe_b64encode(hashlib.sha256(text.encode()).digest()).rstrip(b"=").decode()
+        record.append(f"{path},sha256={digest},{len(text.encode())}")
+    files[f"{dist}/RECORD"] = "\n".join([*record, f"{dist}/RECORD,,"]) + "\n"
+    wheel = folder / f"{name}-{version}-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as zf:
+        for path, text in files.items():
+            zf.writestr(path, text)
+    return wheel
+
+
+@pytest.mark.skipif(channel_install.shutil.which("uv") is None, reason="uv isn't on this machine")
+def test_a_service_core_s_channel_really_lands_in_the_hiro_home_and_leaves_with_its_removal(service_home: Path,
+                                                                                            tmp_path: Path,
+                                                                                            monkeypatch) -> None:
+    # uv for real, offline, every folder it writes inside this test's own (the person's uv tools are never touched)
+    monkeypatch.setenv("UV_OFFLINE", "1")
+    channels = service_home / "channels"
+    channel_tools.ChannelInstallTool().execute("fake", str(_wheel(tmp_path, "0.1.0")))
+    command = channel_tools.installed_channel_command("fake")
+    assert command is not None and Path(command).parent == channels / "bin"
+    assert channel_install.installed_version("hiro-channel-fake") == "0.1.0"
+    assert (channels / "tools" / "hiro-channel-fake" / "uv-receipt.toml").is_file()
+
+    channel_tools.ChannelInstallTool().execute("fake", str(_wheel(tmp_path, "0.2.0")), reinstall=True)
+    assert channel_install.installed_version("hiro-channel-fake") == "0.2.0"
+
+    channel_tools.ChannelUninstallTool().execute("fake")
+    assert not (channels / "tools" / "hiro-channel-fake").exists()
+    assert channel_tools.installed_channel_command("fake") is None

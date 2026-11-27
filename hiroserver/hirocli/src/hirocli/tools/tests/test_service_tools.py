@@ -39,6 +39,7 @@ def linux_as_root(monkeypatch, linux_as_user):
     )
     calls: dict = {}
     monkeypatch.setattr(service_linux, "check_user_can_run", lambda user, args: calls.setdefault("checked", (user.name, args)))
+    monkeypatch.setattr(ls, "prepare_channels", lambda user: calls.setdefault("channels", user.name))
 
     def fake_install(spec, user, env_content, *, start=True):
         calls.update(spec=spec, user=user.name, env=env_content, start=start)
@@ -61,15 +62,17 @@ def test_service_name_per_workspace() -> None:
     assert ls.service_name("My Home") == "hiro-My-Home"
 
 
-def test_build_spec_runs_hiro_in_foreground_with_server_environment() -> None:
+def test_build_spec_runs_hiro_in_foreground_with_server_environment(monkeypatch) -> None:
+    monkeypatch.delenv("HIRO_HOME", raising=False)
     spec = ls.build_spec(exe=EXE, user="hiro", group="hiro", workspace=None)
 
     assert spec.exec_args == [EXE, "start", "--foreground"]
     assert spec.env_file.as_posix() == "/etc/hiro/hiro.env"
     assert spec.environment["PYTHON_KEYRING_BACKEND"] == "keyring.backends.null.Keyring"
     assert spec.environment[ENV_SERVICE_MANAGER] == "systemd"
-    # The folder holding `hiro` also holds hirogate and the channel plugins the server starts.
-    assert spec.environment["PATH"].startswith("/opt/hiroleague/current/bin:")
+    # The folder holding `hiro` also holds hirogate; the channels the server starts are the Hiro home's.
+    assert spec.environment["PATH"].startswith("/opt/hiroleague/current/bin:/opt/hiroleague/channels/bin:")
+    assert spec.environment["HIRO_HOME"] == "/opt/hiroleague"
     assert spec.restart_exit_code == SERVICE_RESTART_EXIT_CODE
 
     unit = sd.render_unit(spec)
@@ -124,6 +127,8 @@ def test_install_as_root_runs_as_the_chosen_user(linux_as_root, user) -> None:
     result = service_tools.ServiceInstallTool().execute(user=user)
 
     assert linux_as_root["checked"] == (user, [EXE, "--help"])
+    # The home's channels' folder is the service's account's: it installs its channels there
+    assert linux_as_root["channels"] == user
     assert linux_as_root["spec"].user == user
     assert linux_as_root["start"] is True
     assert "# OPENAI_API_KEY=" in linux_as_root["env"]
@@ -255,3 +260,14 @@ def test_foreground_start_when_already_running_fails(monkeypatch) -> None:
 
     bg = CliRunner().invoke(app, ["start", "--no-admin"])
     assert bg.exit_code == 0
+
+
+def test_the_channels_folder_is_made_for_the_service_s_account(tmp_path, monkeypatch) -> None:
+    owned: list[tuple] = []
+    monkeypatch.setenv("HIRO_HOME", str(tmp_path / "hiroleague"))
+    # raising=False: Windows has no chown, and the check runs there too
+    monkeypatch.setattr(ls.os, "chown", lambda path, uid, gid: owned.append((Path(path), uid, gid)), raising=False)
+    user = sd.ServiceUser(name="michel", uid=1001, gid=1002, group="michel", home=Path("/home/michel"))
+    folder = ls.prepare_channels(user)
+    assert folder == tmp_path / "hiroleague" / "channels" and folder.is_dir()
+    assert owned == [(folder, 1001, 1002)]

@@ -59,14 +59,13 @@ def installed_channel_command(name: str) -> str | None:
     registers channels the same way; 2026-11-06). None when uv can't say, the binary isn't
     there, or the path has spaces (ChannelSetupTool splits the command on whitespace).
     """
-    from ..services.channel_install import find_uv
+    from ..services.channel_install import run_uv
 
     try:
-        # uv as the install found it: a Windows service core has no uv on its PATH, only the Hiro home's copy, so a
-        # bare "uv" failed there and the channel was set up with a bare command that doesn't start (Nov 26, 2026).
-        out = subprocess.run(  # noqa: S603
-            [find_uv(), "tool", "dir", "--bin"], capture_output=True, text=True, timeout=15
-        )
+        # uv as the install found it, with the install's folders: a Windows service core has no uv on its PATH, only
+        # the Hiro home's copy, so a bare "uv" failed there and the channel was set up with a bare command that
+        # doesn't start (Nov 26, 2026); and a service core's channels live in the Hiro home, not uv's default.
+        out = run_uv(["tool", "dir", "--bin"], timeout=15)
     except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
         log.warning(
             f"⚠️ Could not resolve uv tool bin dir — channel {name} · using the bare command",
@@ -224,17 +223,17 @@ class ChannelInstallTool(Tool):
         editable: bool = False,
         reinstall: bool = False,
     ) -> ChannelInstallResult:
-        from ..services.channel_install import find_uv
+        from ..services.channel_install import python_args, run_uv
 
         pkg = package or f"hiro-channel-{channel_name}"
-        cmd = [find_uv(), "tool", "install"]
+        cmd = ["tool", "install", *python_args()]
         if reinstall:
             cmd.append("--reinstall")
         if editable:
             cmd.append("--editable")
         cmd.append(pkg)
 
-        proc = subprocess.run(cmd, capture_output=True, text=True)  # noqa: S603
+        proc = run_uv(cmd)
         output = (proc.stdout or proc.stderr).strip()
 
         if proc.returncode != 0:
@@ -260,11 +259,9 @@ class ChannelUninstallTool(Tool):
         package: str | None = None,
     ) -> ChannelUninstallResult:
         pkg = package or f"hiro-channel-{channel_name}"
-        from ..services.channel_install import find_uv
+        from ..services.channel_install import run_uv
 
-        proc = subprocess.run(  # noqa: S603
-            [find_uv(), "tool", "uninstall", pkg], capture_output=True, text=True
-        )
+        proc = run_uv(["tool", "uninstall", pkg])
         output = (proc.stdout or proc.stderr).strip()
 
         if proc.returncode != 0:
