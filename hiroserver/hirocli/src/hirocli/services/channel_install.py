@@ -2,7 +2,8 @@
 phase 5; the design's §6).
 
 A channel installs the way it always has: its program is a uv tool (``uv tool install``) of its published package
-(``hiro-channel-whatsapp`` on PyPI), or of its folder in a source checkout, and the core starts it itself. So there is
+(``hiro-channel-whatsapp`` on PyPI), or of its folder beside the core's own source (a dev checkout, or the
+folder the core was installed from), and the core starts it itself. So there is
 no account, no service and no administrator step. ``hiro extension`` is the one lifecycle for apps and channels;
 ``hiro channel`` keeps a channel's own settings.
 
@@ -21,11 +22,15 @@ Stopping and starting the running plugin around an upgrade or a removal is the c
 
 from __future__ import annotations
 
+import importlib.metadata
+import json
 import shutil
 import subprocess
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 
 from hiro_commons.log import Logger
 from hiro_commons.process import find_workspace_root
@@ -74,15 +79,40 @@ def catalog_entry(name: str) -> CatalogChannel:
     return entry
 
 
+def source_root(direct_url: str | None) -> Path | None:
+    """The folder of the core's packages (``hiroserver``) when hirocli was installed from its folder: its install
+    record (``direct_url.json``, PEP 610) names ``<root>/hirocli``. None for a package from an index (PyPI), or a
+    record that isn't one."""
+    try:
+        record = json.loads(direct_url or "")
+    except ValueError:
+        return None
+    url = urlparse(record.get("url", "")) if isinstance(record, dict) else None
+    if url is None or url.scheme != "file" or "dir_info" not in record:
+        return None
+    return Path(url2pathname(unquote(url.path))).parent
+
+
+def core_source_root() -> Path | None:
+    """The core's source folder when it was installed from one, not from PyPI (a bundle a person unzipped)."""
+    try:
+        return source_root(importlib.metadata.distribution("hirocli").read_text("direct_url.json"))
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
 def install_source(entry: CatalogChannel, version: str = "") -> Source:
     """Where a new install comes from: ``<package>==<version>`` from PyPI when a version is named; else the channel's
-    folder of the source checkout the core runs from (a dev core); else its package from PyPI."""
+    folder of the source checkout the core runs from (a dev core), or of the folder the core was installed from;
+    else its package from PyPI. Why the folder first: the channel there is the one the core's lock tested, and the
+    install keeps to that lock's versions (tools/channel.py); PyPI's may be an older release of the same version
+    number, whose own pins the lock doesn't hold (Nov 27, 2026: WhatsApp 0.2.0 on PyPI needs neonize 0.3.18.post0, the
+    lock 0.5.2)."""
     if version:
         return Source(f"{entry.package}=={version}")
-    root = find_workspace_root()
-    if root is not None:
-        local = root / "channels" / entry.package
-        if local.is_dir():
+    for root in (find_workspace_root(), core_source_root()):
+        local = root / "channels" / entry.package if root is not None else None
+        if local is not None and local.is_dir():
             return Source(str(local))
     return Source(entry.package)
 
