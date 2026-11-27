@@ -1824,7 +1824,9 @@ def cmd_resume(a) -> None:
             raise Stop("Every environment is busy.")
         task.state, task.env = "working", env
         save(task)
-    init_env(env, task.id)
+    # Why the installs wait for the switch, as in start: a repo on an old commit has another layout, and installing it
+    # there fails (env5's codehiro before CodeHiro's backend/, Nov 27)
+    init_env(env, task.id, install=False)
     for repo in REPOS:
         d = repo_dir(env, repo)
         if repo in task.repos:

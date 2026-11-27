@@ -606,6 +606,20 @@ def test_start_installs_each_repo_once_after_it_sits_on_its_base(tmp_path, monke
     assert hw.get("t").base == {"hiroleague": main["hiroleague"]}
 
 
+def test_resume_installs_each_repo_once_after_it_sits_on_the_tasks_branch(tmp_path, monkeypatch):
+    import plan
+
+    _old, seen = _old_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(plan, "follow", lambda *a: [])  # no plan to move
+    main = {r: hw.git(tmp_path / "env0" / r, "rev-parse", "main") for r in hw.REPOS}
+    hw.git(tmp_path / "env0" / "hiroleague", "branch", "task/t", "main")  # paused: its work waits on its branch
+    hw.TASKS.mkdir()
+    hw.save(hw.Task(id="t", title="t", env=None, repos=["hiroleague"], state="paused"))
+    hw.cmd_resume(hw.argparse.Namespace(task="t", env=1, part_of=None))
+    assert seen == [("hiroleague", main["hiroleague"]), ("codehiro", main["codehiro"])]  # never the old commit
+    assert hw.git(tmp_path / "env1" / "hiroleague", "branch", "--show-current") == "task/t"
+
+
 def test_a_start_refused_for_uncommitted_files_moves_no_repo(tmp_path, monkeypatch):
     old, seen = _old_env(tmp_path, monkeypatch)
     (tmp_path / "env1" / "codehiro" / "history-dashboard").mkdir()
