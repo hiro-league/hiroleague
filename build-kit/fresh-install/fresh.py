@@ -113,7 +113,8 @@ def build_bundle(out: Path, *, close: bool, cache: bool) -> str:
     if close:
         (out / "CLOSE").write_text("close the machine when the run ends\n", encoding="utf-8")
     if cache:  # the run scripts point the machine's uv at the cache (--fresh: no file, the internet as a person's)
-        (out / "CACHE").write_text(f"{CACHE_INDEX} {CACHE_PYTHONS}\n", encoding="utf-8")
+        # \n alone: written on Windows, a \r\n ended up inside the Linux machine's uv settings
+        (out / "CACHE").write_text(f"{CACHE_INDEX} {CACHE_PYTHONS}\n", encoding="utf-8", newline="\n")
     return commit
 
 

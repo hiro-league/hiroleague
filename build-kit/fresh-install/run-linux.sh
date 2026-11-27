@@ -62,11 +62,10 @@ HELLO="$BUNDLE/hello"
 # The package cache (fresh.py, unless --fresh): uv's machine-wide settings, which every uv here obeys (the person's,
 # the service's, the core's own for apps), point at Simone's cache. The only difference from a person's machine.
 if [ -f "$BUNDLE/CACHE" ]; then
-  read -r CACHE_INDEX CACHE_PYTHONS <"$BUNDLE/CACHE"
+  read -r CACHE_INDEX CACHE_PYTHONS < <(tr -d '\r' <"$BUNDLE/CACHE")  # never a \r into uv's settings
   sudo mkdir -p /etc/uv
   printf 'python-install-mirror = "%s"\n\n[[index]]\nurl = "%s"\ndefault = true\n' "$CACHE_PYTHONS" "$CACHE_INDEX" \
     | sudo tee /etc/uv/uv.toml >/dev/null
-  export UV_HTTP_TIMEOUT=1800  # the cache answers a file it fetches for the first time only once it has it all
 fi
 run "uv" ok "" sh -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'
 run "core (uv tool install)" ok "" uv tool install --python 3.12 "$BUNDLE/hiroleague/hiroserver/hiroleague"

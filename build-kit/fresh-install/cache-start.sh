@@ -21,10 +21,11 @@ if ! listening "$PYPI_PORT"; then
     UV_TOOL_DIR="$ROOT/tools" UV_TOOL_BIN_DIR="$ROOT/bin" \
       uv tool install --quiet "gunicorn==27.0.1" --with "proxpi==1.3.1" --python 3.12
   fi
-  # proxpi's defaults lose the files at a restart (a temporary folder) and keep 5 GB; a first download is waited
-  # for (the default sends a machine to PyPI after 0.9 s, so a big file would come from the internet twice)
-  PROXPI_CACHE_DIR="$CACHE/pypi" PROXPI_CACHE_SIZE=$((30 * 1024 * 1024 * 1024)) PROXPI_DOWNLOAD_TIMEOUT=1800 \
-    nohup "$ROOT/bin/gunicorn" --bind "0.0.0.0:$PYPI_PORT" --threads 8 --timeout 1900 proxpi.server:app \
+  # proxpi's defaults lose the files at a restart (a temporary folder) and keep 5 GB. Its download wait stays the
+  # default (0.9 s, then the machine is sent to PyPI, so a new file comes twice the first time): a long wait holds one
+  # of its 8 workers per new file, and a run's many new files then leave none for the index (uv gives up at 30 s)
+  PROXPI_CACHE_DIR="$CACHE/pypi" PROXPI_CACHE_SIZE=$((30 * 1024 * 1024 * 1024)) \
+    nohup "$ROOT/bin/gunicorn" --bind "0.0.0.0:$PYPI_PORT" --threads 8 proxpi.server:app \
     >>"$CACHE/pypi.log" 2>&1 &
 fi
 if ! listening "$PYTHON_PORT"; then

@@ -92,7 +92,6 @@ if (Test-Path $cacheFile) {
     New-Item -ItemType Directory -Force 'C:\ProgramData\uv' | Out-Null
     $toml = "python-install-mirror = `"$pythons`"`n`n[[index]]`nurl = `"$index`"`ndefault = true`n"
     [IO.File]::WriteAllText('C:\ProgramData\uv\uv.toml', $toml, (New-Object Text.UTF8Encoding($false)))
-    $env:UV_HTTP_TIMEOUT = '1800'  # the cache answers a file it fetches for the first time only once it has it all
 }
 Invoke-Step 'uv' ok '' 'powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"' | Out-Null
 $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
@@ -130,9 +129,12 @@ Invoke-Step 'devices refused' fails 'comes with the core' 'hiro extension instal
 # throwaway Sandbox, its password made here and never kept)
 $release = Get-ChildItem 'C:\ProgramData\HiroLeague\releases' | Sort-Object Name | Select-Object -Last 1
 $userLog = New-LogPath 'a standard user is told to be an administrator'
-$password = [Guid]::NewGuid().ToString('N') + 'Aa1!'
-net user freshperson $password /add | Out-Null
-$credential = New-Object Management.Automation.PSCredential('freshperson', (ConvertTo-SecureString $password -AsPlainText -Force))
+$password = ConvertTo-SecureString ([Guid]::NewGuid().ToString('N') + 'Aa1!') -AsPlainText -Force
+# New-LocalUser asks nothing: `net user /add` asks yes or no for a password past 14 characters, the answer defaulted to
+# no, and the account was never made ("The user name or password is incorrect")
+New-LocalUser -Name freshperson -Password $password -AccountNeverExpires | Out-Null
+Add-LocalGroupMember -SID 'S-1-5-32-545' -Member freshperson  # Users: a standard person, who may sign in
+$credential = New-Object Management.Automation.PSCredential('freshperson', $password)
 $userLine = "set HIRO_DATA_DIR=C:\ProgramData\HiroLeague\data&& `"$($release.FullName)\bin\hiro.exe`" extension list"
 # Its output goes to a folder the standard user may write (not the mapped results folder), then into the log; the
 # start's own failure and the exit code go in the log too: a run that said nothing left an empty log
