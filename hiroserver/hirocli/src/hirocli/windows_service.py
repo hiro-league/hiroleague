@@ -192,6 +192,10 @@ def install_release(lay: Layout, source: str) -> Path:
         "UV_TOOL_DIR": str(release / "tools"),
         "UV_TOOL_BIN_DIR": str(release / "bin"),
         "UV_PYTHON_INSTALL_DIR": str(lay.python_dir),
+        # Copies, never hard links into the installer's uv cache: Windows keeps one set of permissions per file, so the
+        # Hiro home's (locked by lock_program_folder) became every link's, and the person could no longer replace those
+        # files in their own environments (`uv sync`: "Access is denied", seen Nov 27, 2026 with protobuf).
+        "UV_LINK_MODE": "copy",
     }
     log.info("Installing Hiro League for the service", source=source, release=str(release))
     try:

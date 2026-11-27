@@ -205,6 +205,24 @@ def test_a_failed_release_install_leaves_no_folder(tmp_path, monkeypatch) -> Non
     assert list((tmp_path / "releases").iterdir()) == []
 
 
+def test_a_release_is_installed_from_copies_never_links_into_the_uv_cache(tmp_path, monkeypatch) -> None:
+    """A hard link shares its file's permissions: the Hiro home's would lock the person's own environments."""
+    lay = ws.Layout(home=tmp_path / "HiroLeague", data_dir=tmp_path / "HiroLeague" / "data")
+    monkeypatch.setattr(ws.shutil, "which", lambda name: r"C:\uv\uv.exe")
+    monkeypatch.setenv("UV_LINK_MODE", "hardlink")  # a person's own setting doesn't reach the service's release
+    fake_uv = _fake_uv(str(lay.python_dir / "cpython-3.12.10-windows-x86_64-none"))
+    envs: list[dict] = []
+
+    def run(cmd, **kw):
+        if "tool" in cmd:
+            envs.append(kw["env"])
+        return fake_uv(cmd, **kw)
+
+    monkeypatch.setattr(ws.subprocess, "run", run)
+    ws.install_release(lay, "hiroleague==0.2.0")
+    assert [env["UV_LINK_MODE"] for env in envs] == ["copy"]
+
+
 def test_release_install_without_uv_says_so(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(ws.shutil, "which", lambda name: None)
     with pytest.raises(ServiceError, match="uv is needed"):
