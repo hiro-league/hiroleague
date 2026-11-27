@@ -9,3 +9,5 @@ build-kit/git-hooks/** text eol=lf
 # the generators write.
 admin_frontend/schemas/** text eol=lf
 admin_frontend/src/lib/api/generated/** text eol=lf
+# The fresh-install test's Linux script runs in a fresh WSL Ubuntu: LF, or bash can't parse it.
+build-kit/fresh-install/*.sh text eol=lf
