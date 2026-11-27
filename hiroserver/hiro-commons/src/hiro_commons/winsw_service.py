@@ -47,6 +47,8 @@ WINSW_URL = "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.
 WINSW_SHA256 = "05b82d46ad331cc16bdc00de5c6332c1ef818df8ceefcd49c726553209b3a0da"
 
 SC = "sc.exe"
+# sc.exe exits with the Windows error code: ERROR_SERVICE_ALREADY_RUNNING
+_SERVICE_ALREADY_RUNNING = 1056
 ICACLS = "icacls.exe"
 # Well-known SIDs, so the grants work on a Windows in any language.
 SID_SYSTEM = "*S-1-5-18"
@@ -271,9 +273,9 @@ def _run(cmd: list[str], *, timeout: float = _COMMAND_TIMEOUT_S) -> subprocess.C
         raise ServiceError(f"'{' '.join(cmd)}' did not finish within {int(timeout)} s.") from exc
 
 
-def _run_ok(cmd: list[str], what: str) -> subprocess.CompletedProcess[str]:
+def _run_ok(cmd: list[str], what: str, *, ok_codes: tuple[int, ...] = (0,)) -> subprocess.CompletedProcess[str]:
     result = _run(cmd)
-    if result.returncode != 0:
+    if result.returncode not in ok_codes:
         detail = (result.stderr or result.stdout).strip().splitlines()[-3:]
         log.error("❌ A service command failed — HiroServer · service", command=" ".join(cmd), error=" | ".join(detail))
         raise ServiceError(f"{what} failed: {' '.join(detail) or f'exit code {result.returncode}'}")
@@ -405,7 +407,10 @@ def start_service(name: str) -> ServiceState:
     state = service_state(name)
     if state.state == "RUNNING":
         return state
-    _run_ok([SC, "start", name], f"Starting the service {name}")
+    # 1056, "already running": the service manager started it meanwhile (its restart after a failure), or it is
+    # starting. What was asked is under way, so wait for it: an upgrade's going back failed on it (the fresh-install
+    # test, Nov 28, 2026), and the next upgrade was then refused.
+    _run_ok([SC, "start", name], f"Starting the service {name}", ok_codes=(0, _SERVICE_ALREADY_RUNNING))
     return wait_for_state(name, "RUNNING")
 
 

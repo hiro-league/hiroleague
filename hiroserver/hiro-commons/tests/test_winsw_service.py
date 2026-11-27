@@ -136,3 +136,29 @@ def test_needs_admin_error_names_the_command() -> None:
     assert exc.command == r"C:\x\hiro.exe service install"
     assert "needs an administrator" in str(exc)
     assert isinstance(exc, ServiceError)
+
+
+def test_a_start_the_service_manager_beat_us_to_waits_for_it_to_run(monkeypatch) -> None:
+    # Between the state read and `sc start`, the service manager restarted it after a failure: sc answers 1056, and an
+    # upgrade's going back failed on it (the fresh-install test, Nov 28, 2026)
+    import subprocess
+
+    states = iter(["STOPPED", "START_PENDING", "RUNNING"])
+    monkeypatch.setattr(w, "require_windows", lambda: None)
+    monkeypatch.setattr(w, "service_state", lambda name: w.ServiceState(name=name, installed=True, state=next(states)))
+    monkeypatch.setattr(w.time, "sleep", lambda s: None)
+    monkeypatch.setattr(w, "_run", lambda cmd, **kw: subprocess.CompletedProcess(
+        cmd, 1056, stdout="[SC] StartService FAILED 1056:\n\nAn instance of the service is already running.\n", stderr=""))
+    assert w.start_service("hiro-example-hello").state == "RUNNING"
+
+
+def test_a_start_that_really_fails_says_so(monkeypatch) -> None:
+    import subprocess
+
+    monkeypatch.setattr(w, "require_windows", lambda: None)
+    monkeypatch.setattr(w, "service_state", lambda name: w.ServiceState(name=name, installed=True, state="STOPPED"))
+    monkeypatch.setattr(w, "_run", lambda cmd, **kw: subprocess.CompletedProcess(
+        cmd, 1053, stdout="[SC] StartService FAILED 1053:\n\nThe service did not respond in a timely fashion.\n",
+        stderr=""))
+    with pytest.raises(ServiceError, match="Starting the service hiro-example-hello failed"):
+        w.start_service("hiro-example-hello")
