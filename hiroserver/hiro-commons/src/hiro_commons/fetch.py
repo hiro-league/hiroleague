@@ -11,6 +11,7 @@ download, so a file changed there is refused. Kept with the Hiro home: one file 
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import shutil
@@ -85,7 +86,11 @@ def _keep_shared(shared: Path, url: str, dest: Path, expected: str) -> None:
         shutil.copyfile(dest, tmp)
         os.replace(tmp, kept)
     except OSError as exc:
-        tmp.unlink(missing_ok=True)
+        # Why the cleanup ignores its own failure: on Linux, with a file where the folder should be, the unlink raises
+        # NotADirectoryError (Windows says FileNotFoundError, which missing_ok takes), and that failed the download.
+        # The first error is the one logged below.
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
         log.warning("⚠️ Could not keep a copy in the downloads folder — HiroServer · fetch", file=kept.name, error=str(exc))
 
 

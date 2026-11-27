@@ -175,3 +175,25 @@ def test_a_folder_it_cannot_write_costs_only_a_later_download(server, tmp_path: 
     assert dest.read_bytes() == BODY
     (warning,) = [line for line in logged() if line["SeverityText"] == "WARNING"]
     assert "Could not keep a copy" in warning["Body"]
+
+
+def test_a_cleanup_that_fails_too_still_costs_only_a_later_download(server, tmp_path: Path, logged,
+                                                                    monkeypatch) -> None:
+    # Linux's answer to the unlink under a file where the folder should be, on every system (the deploy's check on
+    # Simone failed on it, Nov 27)
+    shared = tmp_path / "downloads"
+    shared.write_text("a file where the folder should be", encoding="utf-8")
+
+    unlink = Path.unlink
+
+    def not_a_folder(self, missing_ok=False):
+        if self.parent == shared:  # only the copy's cleanup, inside the downloads "folder"
+            raise NotADirectoryError(20, "Not a directory", str(self))
+        unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", not_a_folder)
+    dest = tmp_path / "hiro.exe"
+    assert fetch_checked(f"{server}/winsw.exe", dest, GOOD, shared=shared) is True
+    assert dest.read_bytes() == BODY
+    (warning,) = [line for line in logged() if line["SeverityText"] == "WARNING"]
+    assert "Could not keep a copy" in warning["Body"]
