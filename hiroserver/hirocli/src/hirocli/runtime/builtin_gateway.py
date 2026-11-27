@@ -21,6 +21,7 @@ from hiro_commons.constants.storage import RUN_DIR
 from hiro_commons.keys import public_key_to_b64
 from hiro_commons.log import Logger
 from hiro_commons.process import is_running, kill_process, read_pid, remove_pid, write_pid
+from hiro_commons.process_job import ProcessJob
 
 from hirocli.domain.features import feature_active
 
@@ -48,18 +49,23 @@ def gateway_command(ctx: ServerContext) -> list[str]:
     ]
 
 
-def _start(cmd: list[str], out: IO[str] | None) -> subprocess.Popen[bytes]:
-    """Start the gateway on its own (a new process group, no window), its output into `out` (or nowhere)."""
+def _start(cmd: list[str], out: IO[str] | None) -> tuple[subprocess.Popen[bytes], ProcessJob]:
+    """Start the gateway on its own (a new process group, no window), its output into `out` (or nowhere), and hold it
+    in a job (Windows): ``sys.executable`` is a venv's launcher, and the real Python it starts would otherwise outlive
+    a server that was killed."""
     target: Any = out if out is not None else subprocess.DEVNULL
+    job = ProcessJob("the gateway")
     if sys.platform == "win32":
-        return subprocess.Popen(
+        proc = subprocess.Popen(
             cmd,
             creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW),
             close_fds=True,
             stdout=target,
             stderr=target,
         )
-    return subprocess.Popen(cmd, start_new_session=True, close_fds=True, stdout=target, stderr=target)
+        job.hold(proc.pid)
+        return proc, job
+    return subprocess.Popen(cmd, start_new_session=True, close_fds=True, stdout=target, stderr=target), job
 
 
 class BuiltinGateway:
@@ -100,7 +106,7 @@ class BuiltinGateway:
         except RuntimeError:  # the server's logging isn't set up (a test): the gateway's own file still has its lines
             out = None
         try:
-            proc = _start(cmd, out)
+            proc, job = _start(cmd, out)
         except Exception:
             log.error("❌ Could not start the gateway", exc_info=True)
             if out is not None:
@@ -120,6 +126,8 @@ class BuiltinGateway:
             stopping.cancel()
             if not ended.done():
                 self._stop(proc)
+            job.terminate()  # the tree first (_stop), then anything of it left in its job
+            if not ended.done():
                 await asyncio.wait({ended}, timeout=5)
             remove_pid(self._ctx.workspace_path, PID_FILENAME)
             if out is not None:
