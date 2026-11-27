@@ -314,3 +314,24 @@ def purge(workspace_path: Path, name: str, secrets: list[str]) -> list[str]:
         gone.append(f"{len(secrets)} secret(s)")
     log.info(f"Channel purged — {name}: {', '.join(gone) or 'nothing was left'}", channel=name)
     return gone
+
+
+def move_program(name: str, old: str, new: str) -> list[str]:
+    """A channel's program moved into the Hiro home by the core's deploy (deploy/deploy.sh): each workspace's row for
+    ``name`` that starts ``old`` starts ``new`` now, its switch, settings and account's link kept. Returns the
+    workspaces changed. Run with the core stopped: a running core doesn't see the write."""
+    from ..domain.channel_config import save_channel_config
+    from ..domain.workspace import load_registry
+
+    changed: list[str] = []
+    for entry in load_registry().workspaces.values():
+        path = Path(entry.path)
+        cfg = load_channel_config(path, name) if path.is_dir() else None
+        if cfg is None or cfg.command[:1] != [old]:
+            continue
+        cfg.command = [new, *cfg.command[1:]]
+        save_channel_config(path, cfg)
+        changed.append(entry.name)
+    log.info(f"Channel moved into the Hiro home — {name}: {', '.join(changed) or 'no workspace ran it from there'}",
+             channel=name, old=old, new=new)
+    return changed

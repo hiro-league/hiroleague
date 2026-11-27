@@ -382,3 +382,28 @@ def test_a_service_core_s_channel_really_lands_in_the_hiro_home_and_leaves_with_
     channel_tools.ChannelUninstallTool().execute("fake")
     assert not (channels / "tools" / "hiro-channel-fake").exists()
     assert channel_tools.installed_channel_command("fake") is None
+
+
+def test_the_deploy_moves_a_channel_s_program_into_the_hiro_home_keeping_its_switch_and_settings(
+        tmp_path: Path, monkeypatch) -> None:
+    # Simone's live WhatsApp ran from the deploy account's own uv tools (Nov 28, 2026): its rows start the home's now
+    from hirocli.domain import workspace as ws_mod
+
+    old, new = "/home/michel/.local/bin/hiro-channel-whatsapp", "/opt/hiroleague/channels/bin/hiro-channel-whatsapp"
+    paths = {name: tmp_path / name for name in ("default", "other")}
+    for path in paths.values():
+        path.mkdir()
+    save_channel_config(paths["default"], ChannelConfig(name="whatsapp", enabled=True, command=[old],
+                                                        config={"allowed": ["+1"]}))
+    save_channel_config(paths["other"], ChannelConfig(name="whatsapp", enabled=False, command=["/elsewhere/wa"]))
+    registry = ws_mod.WorkspaceRegistry(workspaces={
+        name: ws_mod.WorkspaceEntry(id=name, name=name, path=str(path), port_slot=i)
+        for i, (name, path) in enumerate(paths.items())})
+    monkeypatch.setattr(ws_mod, "load_registry", lambda: registry)
+
+    assert channel_install.move_program("whatsapp", old, new) == ["default"]
+    moved = load_channel_config(paths["default"], "whatsapp")
+    assert moved is not None and moved.command == [new] and moved.enabled and moved.config == {"allowed": ["+1"]}
+    untouched = load_channel_config(paths["other"], "whatsapp")
+    assert untouched is not None and untouched.command == ["/elsewhere/wa"] and not untouched.enabled
+    assert channel_install.move_program("whatsapp", old, new) == []  # a second deploy changes nothing

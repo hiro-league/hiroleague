@@ -121,19 +121,30 @@ chmod -R a+rX "$RELEASE_DIR" "${HIRO_HOME}/python" 2>/dev/null || true
 # don't. A package the SDK or the commons gains then stops the plugin at import while the core stays healthy
 # (2026-11-20: opentelemetry; WhatsApp was down for three days, unnoticed). So every deploy installs the tool
 # again and proves it starts. Only a tool installed from this checkout; skipped where there is none.
+# The tool lives in the Hiro home's channels, where the core installs, upgrades and removes a channel
+# (services/channel_install.py). One still in this account's own uv tools moves there once (Michel, Nov 28, 2026):
+# installed in the home here, its row pointed at it while the service is stopped (3, after the databases are
+# copied, so going back puts the old row back), the old tool removed once the new release answers (4).
 WA_SRC="${REPO_ROOT}/hiroserver/channels/hiro-channel-whatsapp"
-WA_TOOLS="$(uv tool dir 2>/dev/null || true)"
-WA_RECEIPT="${WA_TOOLS}/hiro-channel-whatsapp/uv-receipt.toml"
-if [ -n "$WA_TOOLS" ] && [ -f "$WA_RECEIPT" ] && grep -qF "editable = \"${WA_SRC}\"" "$WA_RECEIPT"; then
-  say "installing the WhatsApp plugin's tool again (its packages follow this commit)"
-  if ! uv tool install --python "$HIRO_PYTHON" --reinstall "${REFRESH[@]}" --editable "$WA_SRC"; then
+CHANNELS="${HIRO_HOME}/channels"
+WA_BIN="${CHANNELS}/bin/hiro-channel-whatsapp"
+WA_OLD_BIN="$(uv tool dir --bin 2>/dev/null || true)/hiro-channel-whatsapp"
+from_checkout() { [ -f "$1" ] && grep -qF "editable = \"${WA_SRC}\"" "$1"; }
+WA_MOVE=""
+from_checkout "$(uv tool dir 2>/dev/null || true)/hiro-channel-whatsapp/uv-receipt.toml" && WA_MOVE=yes
+# The core finds uv in the Hiro home: the service's PATH holds the release's bin, not this account's uv
+mkdir -p "${HIRO_HOME}/bin" "$CHANNELS"
+install -m 0755 "$(command -v uv)" "${HIRO_HOME}/bin/uv"
+if [ -n "$WA_MOVE" ] || from_checkout "${CHANNELS}/tools/hiro-channel-whatsapp/uv-receipt.toml"; then
+  say "installing the WhatsApp plugin's tool again in ${CHANNELS} (its packages follow this commit)"
+  if ! UV_TOOL_DIR="${CHANNELS}/tools" UV_TOOL_BIN_DIR="${CHANNELS}/bin" UV_PYTHON_INSTALL_DIR="${HIRO_HOME}/python" \
+       uv tool install --python "$HIRO_PYTHON" --reinstall "${REFRESH[@]}" --editable "$WA_SRC"; then
     cleanup_release
-    die "the WhatsApp plugin's tool could not be installed: the core is untouched (the running release goes on). The tool may be half installed: run 'uv tool install --reinstall --editable ${WA_SRC}' and deploy again."
+    die "the WhatsApp plugin's tool could not be installed: the core is untouched (the running release goes on). The tool may be half installed in ${CHANNELS}: deploy again."
   fi
-  WA_BIN="$(uv tool dir --bin 2>/dev/null || true)"
-  if ! "${WA_BIN}/hiro-channel-whatsapp" --help >/dev/null 2>&1; then
+  if ! "$WA_BIN" --help >/dev/null 2>&1; then
     cleanup_release
-    die "the WhatsApp plugin does not start after its install ('${WA_BIN}/hiro-channel-whatsapp --help' fails): the core is untouched (the running release goes on). Run that command to see why, then deploy again."
+    die "the WhatsApp plugin does not start after its install ('${WA_BIN} --help' fails): the core is untouched (the running release goes on). Run that command to see why, then deploy again."
   fi
 else
   say "the WhatsApp plugin's tool isn't installed from this checkout: nothing to install again"
@@ -195,6 +206,16 @@ if ! sudo -n "$SNAPSHOT_HELPER" save "$UNIT"; then
   cleanup_release
   die "deploy stopped before any change (the databases were not copied)."
 fi
+if [ -n "$WA_MOVE" ]; then  # the one move (2b): every workspace's WhatsApp row starts the home's program
+  say "pointing WhatsApp at its program in ${CHANNELS}"
+  if ! "${RELEASE_DIR}/tools/hiroleague/bin/python" -c 'import sys
+from hirocli.services.channel_install import move_program
+print("moved in:", ", ".join(move_program("whatsapp", sys.argv[1], sys.argv[2])) or "no workspace")' \
+       "$WA_OLD_BIN" "$WA_BIN"; then
+    say "could not point WhatsApp at ${WA_BIN}: it keeps its old program, which stays"
+    WA_MOVE=""
+  fi
+fi
 
 # --- 4. Switch and start ----------------------------------------------------------------------
 switch_current "$RELEASE_DIR"
@@ -211,6 +232,11 @@ if healthy; then
         [ "$old" = "$current_target" ] || rm -rf "$old" 2>/dev/null \
           || say "could not remove the old release $(basename "$old") (files owned by another user, e.g. root from a sudo run); remove it with: sudo rm -rf $old"
       done
+  if [ -n "$WA_MOVE" ]; then  # the move is done: the old tool goes (going back would still have found it)
+    uv tool uninstall hiro-channel-whatsapp >/dev/null 2>&1 \
+      && say "removed the WhatsApp plugin's old tool from $(id -un)'s own uv tools" \
+      || say "could not remove the WhatsApp plugin's old tool; remove it with: uv tool uninstall hiro-channel-whatsapp"
+  fi
   say "deployed ${RELEASE_ID}: ${HIRO_HEALTH_URL} answers."
   exit 0
 fi
