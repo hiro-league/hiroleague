@@ -87,20 +87,6 @@ envs = "copy"
 why = "the core's settings (AI, voice, embedding and reranker profiles and their picks): env0's own for now"
 
 [[item]]
-path = "preferences.v3.json"
-kind = "file"
-live = "own"
-envs = "copy"
-why = "an older version of the settings, kept by the core"
-
-[[item]]
-path = "preferences.v4.json"
-kind = "file"
-live = "own"
-envs = "copy"
-why = "an older version of the settings, kept by the core"
-
-[[item]]
 path = "preferences.json.before-*"
 kind = "file"
 live = "own"
@@ -108,18 +94,34 @@ envs = "none"
 why = "snapshots of the settings taken before a change"
 
 [[item]]
-path = "providers.json"
+path = "credentials/credentials_index.json"
 kind = "file"
 live = "own"
 envs = "copy"
 why = "the AI providers and their keys: env0's own; emptied in env1..env5 unless the task has real AI (below)"
 
 [[item]]
-path = "master_key.pem"
+path = "credentials/master_key.pem"
 kind = "file"
 live = "own"
 envs = "copy"
 why = "the workspace's own key"
+
+# The same two files on an older workspace's root, until env0's core and live have moved them into credentials/ (the
+# core moves them at start): a copy made before that still brings the key. A later task drops these two.
+[[item]]
+path = "providers.json"
+kind = "file"
+live = "own"
+envs = "copy"
+why = "an older workspace's AI providers (now credentials/credentials_index.json), until its core moves them"
+
+[[item]]
+path = "master_key.pem"
+kind = "file"
+live = "own"
+envs = "copy"
+why = "an older workspace's key (now credentials/master_key.pem), until its core moves it"
 
 [[item]]
 path = "characters"
@@ -192,6 +194,14 @@ envs = "none"
 why = "the core's own gateway's state (whether the core is connected, its last sign-in error): this run's, not data"
 
 # In env1..env5: what is turned off, unless the task asks for that real system
+[[switch]]
+path = "credentials/credentials_index.json"
+key = "providers"
+value = []
+unless = "ai"
+why = "no AI provider, no AI call: every ask, the core's own jobs and voices check the providers first"
+
+# The same on an older workspace's root (see its item above), until env0's core has moved it
 [[switch]]
 path = "providers.json"
 key = "providers"

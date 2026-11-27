@@ -179,13 +179,20 @@ def copy_db(src: Path, dst: Path) -> None:
         a.backup(b)
 
 
+# The core's folders whose files its list names one by one (db/<name>, credentials/<name>).
+CORE_NESTED = ("db", "credentials")
+
+
 def listing(folder: Path, group: str) -> list[str]:
-    """A data folder's names as its list names them: top-level, and the core's db/ files as db/<name>."""
+    """A data folder's names as its list names them: top-level, and the files of the core's nested folders as
+    <folder>/<name>."""
     if not folder.is_dir():
         return []
     names = sorted(p.name for p in folder.iterdir())
-    if group == CORE and (folder / "db").is_dir():
-        names = [n for n in names if n != "db"] + sorted(f"db/{p.name}" for p in (folder / "db").iterdir())
+    if group == CORE:
+        for sub in CORE_NESTED:
+            if (folder / sub).is_dir():
+                names = [n for n in names if n != sub] + sorted(f"{sub}/{p.name}" for p in (folder / sub).iterdir())
     return names
 
 
@@ -645,9 +652,12 @@ def live_listing(lst: CopyList, group: str) -> list[str]:
     """A group's live data folder's names, as listing() gives env0's."""
     folder = lst.live
     names = ssh(["ls", "-1A", folder], timeout=60).split()
-    if group == CORE and "db" in names:
-        names = [n for n in names if n != "db"] + [f"db/{n}" for n in ssh(["ls", "-1A", f"{folder}/db"],
-                                                                         timeout=60).split()]
+    if group == CORE:
+        for sub in CORE_NESTED:
+            if sub in names:
+                names = [n for n in names if n != sub] + [
+                    f"{sub}/{n}" for n in ssh(["ls", "-1A", f"{folder}/{sub}"], timeout=60).split()
+                ]
     return sorted(names)
 
 

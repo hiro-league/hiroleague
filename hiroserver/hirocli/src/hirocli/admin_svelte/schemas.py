@@ -40,9 +40,7 @@ class WorkspaceRestartRequest(BaseModel):
 class WorkspaceSetupRequest(BaseModel):
     gateway_url: str
     http_port: int | None = None
-    skip_autostart: bool = False
     start_server: bool = False
-    elevated_task: bool = False
 
 
 class OpenFolderRequest(BaseModel):
@@ -56,8 +54,6 @@ class GatewayCreateRequest(BaseModel):
     host: str = "0.0.0.0"
     log_dir: str = ""
     make_default: bool = False
-    skip_autostart: bool = False
-    elevated_task: bool = False
 
 
 class GatewayStartRequest(BaseModel):
@@ -66,7 +62,6 @@ class GatewayStartRequest(BaseModel):
 
 class GatewayRemoveRequest(BaseModel):
     purge: bool = False
-    elevated_task: bool = False
 
 
 class ProviderAddApiKeyRequest(BaseModel):

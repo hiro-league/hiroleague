@@ -8,8 +8,11 @@ Workspace layout:
     config.json              ← boot config (this module)
     preferences.json         ← single source of truth for LLM, voice, and
                                audio settings (domain/preferences.py)
-    master_key.pem           ← Ed25519 private key (domain/crypto.py)
-    workspace.db             ← SQLite: characters, devices, extension_records (domain/db.py)
+    credentials/
+      master_key.pem         ← Ed25519 private key (domain/crypto.py, domain/workspace_layout.py)
+      credentials_index.json ← the providers' index; their keys are in the OS keyring (domain/credential_store.py)
+    db/
+      workspace.db           ← SQLite: characters, devices, extension_records (domain/db.py)
     data/
       data.db                ← SQLite: users, channels, messages (domain/data_store.py)
       media/<channel_id>/    ← binary content files (domain/media_store.py)
@@ -43,9 +46,10 @@ from hiro_commons.constants.network import (
     PORT_OFFSET_HTTP,
     PORT_RANGE_START,
 )
-from hiro_commons.constants.storage import CONFIG_FILENAME, LOGS_DIR, MASTER_KEY_FILENAME, RUN_DIR
+from hiro_commons.constants.storage import CONFIG_FILENAME, LOGS_DIR, RUN_DIR
 
 from ..environment import default_workspace_log_level
+from . import workspace_layout
 from .site_names import DEFAULT_CORE_NAME, check_core_name, domain_of
 from hiro_commons.log import Logger
 
@@ -81,7 +85,6 @@ class Config(BaseModel):
     # workspaces setup` (or `hiro service install --name`) for a new workspace; a workspace set up before keeps
     # hiro. Nothing renames it yet.
     core_name: str = DEFAULT_CORE_NAME
-    master_key_file: str = MASTER_KEY_FILENAME
     pairing_code_length: int = DEFAULT_PAIRING_CODE_LENGTH
     pairing_code_ttl_seconds: int = DEFAULT_PAIRING_CODE_TTL_SECONDS
     attestation_expires_days: int = DEFAULT_ATTESTATION_EXPIRY_DAYS
@@ -92,10 +95,6 @@ class Config(BaseModel):
     metrics_enabled: bool = False
     metrics_interval: float = 2.0
     metrics_history_size: int = 1800
-
-    # Set by setup; used by teardown to pick the correct removal path without user input.
-    # Values: "elevated" | "schtasks" | "registry" | "skipped" | "failed" | None
-    autostart_method: str | None = None
 
     @field_validator("core_name")
     @classmethod
@@ -147,8 +146,8 @@ def workspace_log_dir(workspace_path: Path) -> Path:
     return workspace_path / LOGS_DIR
 
 
-def master_key_path(workspace_path: Path, config: Config) -> Path:
-    return workspace_path / config.master_key_file
+def master_key_path(workspace_path: Path) -> Path:
+    return workspace_layout.master_key_path(workspace_path)
 
 
 def resolve_log_dir(workspace_path: Path, config: Config) -> Path:

@@ -293,7 +293,7 @@ class AgentManager:
                 self._reload_memory_on_change,
                 key="agent.graph-memory",
             )
-            # Providers/admin mutations write ``providers.json`` via another
+            # Providers/admin mutations write the credentials index via another
             # ``CredentialStore`` instance — keep graph caches and media services in sync.
             bus = get_domain_event_bus()
             bus.subscribe(DomainEventType.PROVIDERS_CHANGED, self._handle_providers_changed)
@@ -957,7 +957,7 @@ class AgentManager:
     async def _handle_providers_changed(self, event: DomainEvent) -> None:
         """Refresh credential metadata from disk, drop compiled graphs, rebuild STT/Vision/memory.
 
-        ``CredentialStore`` publishes ``PROVIDERS_CHANGED`` after every ``providers.json``
+        ``CredentialStore`` publishes ``PROVIDERS_CHANGED`` after every credentials index
         write so admin/CLI mutations propagate without restarting HiroServer.
         """
         if event.workspace_path != self._ctx.workspace_path:

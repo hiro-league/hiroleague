@@ -18,7 +18,6 @@ STATE_FILENAME = "state.json"
 class GatewayConfig(BaseModel):
     desktop_public_key: str
     log_dir: str = ""
-    autostart_method: str = "skipped"
 
 
 class GatewayState(BaseModel):

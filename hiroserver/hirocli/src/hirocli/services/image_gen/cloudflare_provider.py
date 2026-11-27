@@ -8,7 +8,7 @@ API contract (developers.cloudflare.com/workers-ai/models/flux-1-schnell, verifi
   The REST wrapper nests the model output under "result"; both shapes are handled.
 
 Credentials come from the workspace credential store: the API token is the keyring
-secret, the account id is non-secret providers.json metadata (it is part of the URL).
+secret, the account id is non-secret credentials index metadata (it is part of the URL).
 """
 
 from __future__ import annotations

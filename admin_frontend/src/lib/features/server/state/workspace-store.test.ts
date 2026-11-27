@@ -40,7 +40,6 @@ const wsRow = (over: Partial<WorkspaceRow> = {}): WorkspaceRow =>
     http_port: 8080,
     admin_port: 8083,
     pid: null,
-    autostart_method: null,
     stderr_log_exists: false,
     stderr_log_recent: false,
     stderr_log_mtime: null,

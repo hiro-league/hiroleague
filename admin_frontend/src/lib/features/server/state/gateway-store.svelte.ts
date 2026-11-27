@@ -39,9 +39,7 @@ export function createGatewayStore(notify: Notify) {
     desktopPublicKey: '',
     port: '',
     host: '0.0.0.0',
-    makeDefault: false,
-    skipAutostart: false,
-    elevatedTask: false
+    makeDefault: false
   });
   let removeForm = $state({ purge: false });
 
@@ -84,9 +82,7 @@ export function createGatewayStore(notify: Notify) {
       desktopPublicKey: '',
       port: '',
       host: '0.0.0.0',
-      makeDefault: false,
-      skipAutostart: false,
-      elevatedTask: false
+      makeDefault: false
     };
     dialog = 'create';
   }
@@ -109,9 +105,7 @@ export function createGatewayStore(notify: Notify) {
         desktop_public_key: createForm.desktopPublicKey,
         port: Number(createForm.port),
         host: createForm.host.trim() || '0.0.0.0',
-        make_default: createForm.makeDefault,
-        skip_autostart: createForm.skipAutostart,
-        elevated_task: createForm.elevatedTask
+        make_default: createForm.makeDefault
       });
       resetDialog();
       await load();

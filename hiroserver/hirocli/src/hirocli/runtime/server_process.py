@@ -22,7 +22,7 @@ import signal
 import sys
 from pathlib import Path
 
-from hiro_commons import logging_foundation
+from hiro_commons import logging_foundation, tasks
 from hiro_commons.env_file import EnvFileError, load_env_file
 from hiro_commons.log import Logger
 from hiro_commons.process import remove_pid, spawn_detached, uv_python_cmd, write_pid
@@ -36,9 +36,11 @@ from hirocli.constants import (
     ENV_WORKSPACE_PATH,
     PID_FILENAME,
     SERVICE_RESTART_EXIT_CODE,
+    TERMINAL_MANAGER,
 )
 from hirocli.domain.config import load_config, mark_disconnected, workspace_log_dir
 from hirocli.domain.crypto import load_or_create_master_key
+from hirocli.domain.workspace_layout import drop_old_copies
 from hirocli.domain.character import seed_default_characters
 from hirocli.domain.data_store import ensure_data_db
 from hirocli.domain.db import ensure_db
@@ -58,6 +60,7 @@ from hirocli.runtime.service_watch import watch_service_wrapper
 from hirocli.services.metrics import MetricsCollector
 from hirocli.tools import all_tools
 from hirocli.tools.registry import RuntimeContext, ToolRegistry
+from hirocli.tools.server_control import ensure_mandatory_devices_channel
 
 log = Logger.get("SERVER")
 
@@ -74,7 +77,11 @@ def _build_context(
 ) -> ServerContext:
     """Load config, keys, and build the shared ServerContext."""
     config = load_config(workspace_path)
-    desktop_private_key = load_or_create_master_key(workspace_path, filename=config.master_key_file)
+    desktop_private_key = load_or_create_master_key(workspace_path)
+    # The devices channel is told where the key is: a server started without `hiro start` (a self-restart into new
+    # code) still gives it the key's place in credentials/, where the line above may just have moved it.
+    ensure_mandatory_devices_channel(workspace_path, config)
+    drop_old_copies(workspace_path)
     return ServerContext(
         workspace_path=workspace_path,
         workspace_name=workspace_name,
@@ -197,7 +204,9 @@ async def _main(
     workspace_name: str | None = None,
     admin: bool = False,
     metrics: bool = False,
-) -> None:
+) -> bool:
+    """Run the server until it stops. True when a terminal run (foreground, no service manager) asked to restart: its
+    command then starts the next server in the same terminal."""
     if workspace_path is None:
         ws_str = os.environ.get(ENV_WORKSPACE_PATH)
         if not ws_str:
@@ -267,6 +276,10 @@ async def _main(
         admin_task = asyncio.create_task(
             run_admin_ui_logged(ctx), name="admin_ui"
         )
+        if foreground and os.environ.get(ENV_SERVICE_MANAGER) in (None, "", TERMINAL_MANAGER):
+            # A terminal run says where its admin is, as a background start does (issue 448); a service has no one to
+            # tell.
+            tasks.keep(_announce_admin(ctx), name="announce_admin")
 
     from hirocli.domain.credential_store import CredentialStore
     from hirocli.domain.workspace import workspace_id_for_path
@@ -384,13 +397,40 @@ async def _main(
         get_domain_event_bus().detach_loop()
         log_store.stop()
 
+    restart_in_terminal = False
     if ctx.restart_requested:
         _exit_for_service_restart(workspace_path)
-        log.info("Restart requested — spawning new server process")
-        _spawn_server(workspace_path, admin=ctx.restart_admin)
+        if foreground:
+            # A restart keeps the way the server was started: a terminal run comes back in its terminal (Michel,
+            # Nov 27), not as a hidden background successor.
+            log.info("Restart requested — this terminal starts a fresh server")
+            restart_in_terminal = True
+        else:
+            log.info("Restart requested — spawning new server process")
+            _spawn_server(workspace_path, admin=ctx.restart_admin)
 
     mark_disconnected(workspace_path)
     log.info("hiro server exited")
+    return restart_in_terminal
+
+
+async def _announce_admin(ctx: ServerContext) -> None:
+    """Print the "Hiro is running" panel once the admin answers (up to a minute), above the logs that follow."""
+    from rich.console import Console
+
+    from hirocli.admin_address import lan_url, print_ready_panel
+    from hirocli.tools.server_control import admin_ui_ready
+
+    port = ctx.config.admin_port
+    deadline = asyncio.get_running_loop().time() + 60.0
+    while not ctx.stop_event.is_set():
+        if await asyncio.to_thread(admin_ui_ready, port):
+            print_ready_panel(Console(), port, lan_url(ctx.config.site_domain()))
+            return
+        if asyncio.get_running_loop().time() > deadline:
+            log.warning("⚠️ The admin didn't answer within a minute: its address isn't shown", admin_port=port)
+            return
+        await asyncio.sleep(0.5)
 
 
 def _exit_for_service_restart(workspace_path: Path) -> None:
@@ -439,4 +479,6 @@ if __name__ == "__main__":
     _admin = os.environ.get(ENV_ADMIN_UI) == "1"
     _metrics = os.environ.get(ENV_METRICS) == "1"
     _ws_name = os.environ.get(ENV_WORKSPACE) or None
-    asyncio.run(_main(workspace_name=_ws_name, admin=_admin, metrics=_metrics))
+    # A terminal run's next server shows its output in the terminal, as the first one did.
+    _foreground = os.environ.get(ENV_SERVICE_MANAGER) == TERMINAL_MANAGER
+    asyncio.run(_main(foreground=_foreground, workspace_name=_ws_name, admin=_admin, metrics=_metrics))

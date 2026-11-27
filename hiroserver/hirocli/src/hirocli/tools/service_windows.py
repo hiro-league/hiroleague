@@ -195,6 +195,7 @@ def status(*, workspace: str | None = None) -> ServiceStatusResult:
         secrets_file=env.get(ENV_SECRETS_FILE) if env.get(ENV_SECRETS_FILE) and Path(env[ENV_SECRETS_FILE]).exists() else None,
         install_command=command_line("install"),
         logs=logpath or "",
+        data_dir=env.get(ENV_DATA_DIR) or None,
     )
 
 

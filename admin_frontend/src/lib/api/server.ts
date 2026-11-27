@@ -16,7 +16,6 @@ export type WorkspaceRow = {
   admin_port: number;
   port_slot: number;
   gateway_url: string | null;
-  autostart_method: string | null;
   stderr_log_path: string;
   stderr_log_exists: boolean;
   stderr_log_size: number;
@@ -32,7 +31,6 @@ export type GatewayRow = {
   port: number;
   path: string;
   is_default: boolean;
-  autostart_method: string | null;
   desktop_connected?: boolean;
   last_auth_error?: string | null;
   stderr_log_path: string;
@@ -113,9 +111,7 @@ export async function setupWorkspace(
   body: {
     gateway_url: string;
     http_port?: number | null;
-    skip_autostart: boolean;
     start_server: boolean;
-    elevated_task: boolean;
   }
 ) {
   return apiRequest<WorkspaceSetupResult>(`/workspaces/${encodeURIComponent(id)}/setup`, {
@@ -159,8 +155,6 @@ export async function createGateway(body: {
   host: string;
   log_dir?: string;
   make_default: boolean;
-  skip_autostart: boolean;
-  elevated_task: boolean;
 }) {
   return apiRequest<string>('/gateways', { method: 'POST', body });
 }
@@ -176,9 +170,9 @@ export async function stopGateway(name: string) {
   return apiRequest<boolean>(`/gateways/${encodeURIComponent(name)}/stop`, { method: 'POST' });
 }
 
-export async function removeGateway(name: string, purge: boolean, elevatedTask = false) {
+export async function removeGateway(name: string, purge: boolean) {
   return apiRequest<string>(`/gateways/${encodeURIComponent(name)}`, {
     method: 'DELETE',
-    body: { purge, elevated_task: elevatedTask }
+    body: { purge }
   });
 }

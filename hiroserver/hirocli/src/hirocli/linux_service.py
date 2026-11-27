@@ -2,8 +2,7 @@
 
 Builds the Hiro-specific parts (service name, the `hiro start --foreground` command line, the
 environment, the secrets-file template from the provider catalog) and hands them to the generic
-``hiro_commons.systemd_service``. Mirrors ``hirocli.autostart``, which does the same for Windows'
-sign-in auto-start.
+``hiro_commons.systemd_service``.
 """
 
 from __future__ import annotations

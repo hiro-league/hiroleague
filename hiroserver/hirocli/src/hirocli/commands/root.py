@@ -82,7 +82,7 @@ def register(app: typer.Typer, console: Console) -> None:
             if result.provisioned:
                 console.print(
                     f"[cyan]Auto-provisioned fresh workspace '[bold]{result.workspace}[/bold]' "
-                    f"(minimal setup — no provider keys, no auto-start).[/cyan]"
+                    f"(minimal setup — no provider keys).[/cyan]"
                 )
             console.print(
                 f"[green]Server started[/green] (PID {result.pid}). "
@@ -93,10 +93,9 @@ def register(app: typer.Typer, console: Console) -> None:
                     "[yellow]No providers configured[/yellow] — run "
                     "[bold]hiro provider add <provider>[/bold] to enable the assistant."
                 )
-            # Background mode only: wait for the admin UI to bind its port before
-            # printing a clickable URL, so we never advertise a dead link. On
-            # timeout we surface a clear error instead (foreground blocks until
-            # exit, so there is nothing to advertise there).
+            # Background mode: wait for the admin UI to bind its port before printing a clickable URL, so we never
+            # advertise a dead link; on timeout a clear error instead. A foreground run prints the same panel itself,
+            # above its logs, once its admin answers (runtime/server_process.py, _announce_admin).
             if result.admin_port and not foreground:
                 _announce_admin_ui(console, result.admin_port)
                 _hint_owner_sign_in(console, result.workspace)
@@ -322,36 +321,28 @@ def register(app: typer.Typer, console: Console) -> None:
 
     @app.command()
     def uninstall(
-        workspace: Optional[str] = typer.Option(
-            None, "--workspace", "-W",
-            help="Workspace to uninstall (default: registry default).",
+        purge: bool = typer.Option(
+            False, "--purge", help="Also delete every workspace's folder and every gateway's files.",
         ),
-        purge: bool = typer.Option(False, "--purge", help="Also delete the workspace folder."),
+        yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask before going on."),
     ) -> None:
-        """Stop server, remove auto-start, then print package uninstall commands."""
+        """Take every workspace and gateway down (services, servers; folders with --purge), then say how to remove
+        the package."""
         console.print("[bold cyan]hiro uninstall[/bold cyan]")
         log.info("hiro uninstall", purge=purge)
 
-        from ..tools.server import UninstallTool
+        from ..tools import teardown
+        from .teardown_view import confirm_plan, print_outcome
 
-        try:
-            result = UninstallTool().execute(
-                workspace=workspace,
-                purge=purge,
-            )
-        except WorkspaceError as exc:
-            console.print(f"[red]{exc}[/red]")
-            return
-
-        td = result.teardown
-        if td.autostart_removed:
-            console.print("[green]Auto-start removed[/green] (Task Scheduler + Registry).")
+        plan = teardown.plan_uninstall(purge=purge)
+        if not plan.workspaces and not plan.gateways:
+            console.print("No workspace or gateway to take down.")
         else:
-            console.print("[yellow]Auto-start removal failed or skipped.[/yellow]")
-
-        if purge:
-            console.print(f"[green]Workspace folder removed:[/green] {td.workspace_path}")
-            console.print(f"[green]Workspace '{td.workspace}' removed from registry.[/green]")
+            confirm_plan(console, plan, yes=yes)
+            if not print_outcome(console, teardown.carry_out(plan)):
+                console.print("[yellow]Some were left: do what each line says, then run hiro uninstall again, "
+                              "before removing the package.[/yellow]")
+                raise typer.Exit(1)
 
         # End users install the `hiroleague` umbrella package; workspace devs
         # use `uv tool install --editable hirocli` directly. Show both flows so
@@ -384,17 +375,9 @@ def _hint_owner_sign_in(console: Console, workspace: str | None) -> None:
 
 def _print_admin_ready_panel(console: Console, admin_port: int) -> None:
     """Render the friendly, clickable admin-dashboard panel."""
-    from rich.panel import Panel
+    from ..admin_address import print_ready_panel
 
-    url = f"http://localhost:{admin_port}"
-    console.print(
-        Panel(
-            f"🌐  Admin dashboard:  [bold cyan]{url}[/bold cyan]",
-            title="[green]Hiro is running[/green]",
-            border_style="green",
-            expand=False,
-        )
-    )
+    print_ready_panel(console, admin_port)
 
 
 def _announce_admin_ui(console: Console, admin_port: int) -> None:

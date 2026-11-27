@@ -96,12 +96,6 @@ class GatewaySetupTool(Tool):
         ),
         "log_dir": ToolParam(str, "Custom log directory (default: instance folder)", required=False),
         "make_default": ToolParam(bool, "Set this instance as the default", required=False),
-        "skip_autostart": ToolParam(bool, "Do not register auto-start", required=False),
-        "elevated_task": ToolParam(
-            bool,
-            "(Windows) Request UAC elevation for Task Scheduler auto-start entry",
-            required=False,
-        ),
     }
 
     def execute(
@@ -112,8 +106,6 @@ class GatewaySetupTool(Tool):
         host: str = "0.0.0.0",
         log_dir: str = "",
         make_default: bool = False,
-        skip_autostart: bool = False,
-        elevated_task: bool = False,
     ) -> GatewaySetupResult:
         return setup_instance(
             name,
@@ -122,15 +114,13 @@ class GatewaySetupTool(Tool):
             desktop_public_key=desktop_public_key,
             log_dir=log_dir,
             make_default=make_default,
-            skip_autostart=skip_autostart,
-            elevated_task=elevated_task,
         )
 
 
 class GatewayTeardownTool(Tool):
     surfaces = frozenset({"cli", "http"})
     name = "gateway_teardown"
-    description = "Stop a local gateway instance and remove its auto-start registration"
+    description = "Stop a local gateway instance; with purge, also remove it"
     params = {
         "instance": ToolParam(
             str,
@@ -142,17 +132,11 @@ class GatewayTeardownTool(Tool):
             "Also remove the instance from the registry and delete its files",
             required=False,
         ),
-        "elevated_task": ToolParam(
-            bool,
-            "(Windows) Request UAC elevation to remove high-privilege Task Scheduler entry",
-            required=False,
-        ),
     }
 
     def execute(
         self,
         instance: str | None = None,
         purge: bool = False,
-        elevated_task: bool = False,
     ) -> GatewayTeardownResult:
-        return teardown_instance(instance, purge=purge, elevated_task=elevated_task)
+        return teardown_instance(instance, purge=purge)

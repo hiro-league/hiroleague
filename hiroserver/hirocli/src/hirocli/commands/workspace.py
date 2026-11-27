@@ -53,7 +53,6 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
         table.add_column("ID", style="dim")
         table.add_column("Setup")
         table.add_column("Server")
-        table.add_column("Autostart")
         table.add_column("HTTP")
         table.add_column("Admin")
         table.add_column("Gateway URL")
@@ -67,21 +66,13 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
             default_marker = "[cyan]*[/cyan]" if ws["is_default"] else ""
             setup_str = "[green]configured[/green]" if ws["is_configured"] else "[yellow]needs setup[/yellow]"
             server_str = "[green]running[/green]" if running else "[dim]stopped[/dim]"
-            method = ws.get("autostart_method")
-            autostart_str = {
-                "elevated": "[magenta]elevated[/magenta]",
-                "schtasks": "[blue]schtasks[/blue]",
-                "registry": "[cyan]registry[/cyan]",
-                "skipped": "[dim]skipped[/dim]",
-                "failed": "[red]failed[/red]",
-            }.get(method or "", "[dim]—[/dim]")
             http_str = f":{ws['http_port']}"
             admin_str = f":{ws['admin_port']}"
             gw_str = ws.get("gateway_url") or "[dim]—[/dim]"
             short_id = ws["id"][:8]
             table.add_row(
                 default_marker, ws["name"], short_id, setup_str, server_str,
-                autostart_str, http_str, admin_str, gw_str, ws["path"],
+                http_str, admin_str, gw_str, ws["path"],
             )
 
         console.print(table)
@@ -146,16 +137,9 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
         http_port: Optional[int] = typer.Option(
             None, "--port", "-p", help="Local HTTP server port (default: from workspace slot)"
         ),
-        skip_autostart: bool = typer.Option(
-            False, "--skip-autostart", help="Do not register auto-start"
-        ),
         start_server: bool = typer.Option(
             False, "--start-server",
             help="Start the server immediately after setup completes.",
-        ),
-        elevated_task: bool = typer.Option(
-            False, "--elevated-task",
-            help="(Windows) Request UAC elevation to create a high-privilege Task Scheduler entry.",
         ),
         metrics: Optional[bool] = typer.Option(
             None, "--metrics/--no-metrics",
@@ -171,7 +155,7 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
             help="Skip interactive API key provisioning; auto-import env keys in the tool when possible.",
         ),
     ) -> None:
-        """Configure gateway, generate device ID, and register auto-start."""
+        """Configure gateway and generate device ID. To start at boot: `hiro service install`."""
         from ..tools.server import SetupTool
 
         console.print("[bold cyan]hiro workspaces setup[/bold cyan]")
@@ -208,9 +192,7 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
                 gateway_url=effective_gateway_url,
                 workspace=workspace,
                 http_port=http_port,
-                skip_autostart=skip_autostart,
                 start_server=start_server,
-                elevated_task=elevated_task,
                 metrics_enabled=metrics,
                 metrics_interval=metrics_interval,
                 skip_env_import=use_interactive_credentials,
@@ -234,11 +216,8 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
             workspace=result.workspace,
             gateway_url=result.gateway_url,
             http_port=result.http_port,
-            skip_autostart=skip_autostart,
-            elevated_task=elevated_task,
             start_server=start_server,
             device_id=result.device_id,
-            autostart=result.autostart_method,
             core_name=result.core_name,
         )
 
@@ -251,26 +230,6 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
         console.print(f"  master_key : [bold]{result.master_key}[/bold]")
         console.print(f"  desktop_pub: [bold]{result.desktop_pub}[/bold]")
         console.print("  channel    : [bold]devices[/bold] (mandatory)")
-
-        if result.autostart_registered:
-            method = result.autostart_method
-            if method == "elevated":
-                console.print(
-                    "[green]Auto-start registered[/green] via Task Scheduler "
-                    "(elevated, run-level: HIGHEST)."
-                )
-            elif method == "schtasks":
-                console.print(
-                    "[green]Auto-start registered[/green] via Task Scheduler "
-                    "(run-level: LIMITED, no elevation needed)."
-                )
-            elif method == "registry":
-                console.print(
-                    "[green]Auto-start registered[/green] via Registry Run key "
-                    "[dim](Task Scheduler was unavailable â€” registry fallback used)[/dim]."
-                )
-        elif result.autostart_method == "failed":
-            console.print("[yellow]Auto-start registration failed.[/yellow]")
 
         if result.providers_imported:
             console.print(
@@ -324,26 +283,23 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
         ),
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
     ) -> None:
-        """Remove a workspace from the registry."""
-        if not yes:
-            action = "remove and DELETE the folder of" if purge else "remove"
-            typer.confirm(
-                f"Are you sure you want to {action} workspace '{workspace}'?", abort=True
-            )
-
+        """Remove a workspace: its service and server first, then its entry (and its folder with --purge)."""
         log.info("hiro workspaces remove", workspace_arg=workspace, purge=purge)
 
-        from ..tools.workspace import WorkspaceRemoveTool
+        from ..tools.teardown import TeardownPlan
+        from ..tools.workspace import WorkspaceRemoveTool, plan_remove
+        from .teardown_view import confirm_plan, print_outcome
 
         try:
+            entry, registry = resolve_workspace(workspace)
+            confirm_plan(console, TeardownPlan(workspaces=[plan_remove(entry, registry, purge=purge)]), yes=yes)
             result = WorkspaceRemoveTool().execute(workspace=workspace, purge=purge)
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1) from exc
-
+        if result.teardown is not None:
+            print_outcome(console, TeardownPlan(workspaces=[result.teardown]))
         console.print(f"[green]Workspace '[bold]{result.name}[/bold]' removed.[/green]")
-        if result.purged:
-            console.print("  Workspace folder deleted from disk.")
 
     @workspace_app.command("update")
     def workspace_update(
@@ -438,14 +394,6 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
             table.add_row("Gateway URL", result.gateway_url or "—")
             table.add_row("Gateway WS", ws_status)
             table.add_row("Device ID", result.device_id or "—")
-            autostart_display = {
-                "elevated": "[magenta]elevated[/magenta] (Task Scheduler, HIGHEST)",
-                "schtasks": "[blue]schtasks[/blue] (Task Scheduler, LIMITED)",
-                "registry": "[cyan]registry[/cyan] (HKCU Run key)",
-                "skipped": "[dim]skipped[/dim]",
-                "failed": "[red]failed[/red]",
-            }.get(result.autostart_method or "", "[dim]—[/dim]")
-            table.add_row("Autostart", autostart_display)
         table.add_row("HTTP port", str(result.http_port))
         table.add_row("Extension port", str(result.extension_port))
         table.add_row("Admin port", str(result.admin_port))
@@ -461,31 +409,23 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
         ),
         purge: bool = typer.Option(
             False, "--purge",
-            help="Also delete the workspace folder (config, state, keys, logsâ€¦).",
+            help="Also delete the workspace folder (config, state, keys, logs…).",
         ),
+        yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask before going on."),
     ) -> None:
-        """Stop server and remove all auto-start registrations for a workspace."""
-        from ..tools.server import TeardownTool
+        """Take a workspace down: its service, its server; with --purge, also its folder and its entry."""
+        from ..tools.server import TeardownTool, plan_teardown
+        from ..tools.teardown import TeardownPlan
+        from .teardown_view import confirm_plan, print_outcome
 
         console.print("[bold cyan]hiro workspaces teardown[/bold cyan]")
         log.info("hiro workspaces teardown", purge=purge)
 
         try:
-            result = TeardownTool().execute(
-                workspace=workspace,
-                purge=purge,
-            )
+            confirm_plan(console, TeardownPlan(workspaces=[plan_teardown(workspace, purge=purge)]), yes=yes)
+            result = TeardownTool().execute(workspace=workspace, purge=purge)
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            return
-
-        if result.autostart_removed:
-            console.print("[green]Auto-start removed[/green] (Task Scheduler + Registry).")
-        else:
-            console.print("[yellow]Auto-start removal failed or skipped.[/yellow]")
-
-        if purge:
-            console.print(f"[green]Workspace folder removed:[/green] {result.workspace_path}")
-            console.print(f"[green]Workspace '{result.workspace}' removed from registry.[/green]")
-
-        console.print("\n[green]Teardown complete.[/green]")
+            raise typer.Exit(1) from exc
+        if not print_outcome(console, TeardownPlan(workspaces=[result])):
+            raise typer.Exit(1)

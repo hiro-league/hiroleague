@@ -9,16 +9,15 @@ profiles (``embedding.profiles``, ``rerank.profiles``) and points each of Hiro's
 when ``version < 5`` (after ``convert_v4`` for an older file); a v5 file is never touched.
 
 Every leg keeps the model it used (its override, else the default), so search and the embedder locks behave as
-before:
+before. No copy of the old file is kept: nothing would read it.
 
-1. Copies ``preferences.json`` to ``preferences.v4.json`` (only when that copy doesn't exist yet).
-2. The default model becomes "Default embedder" / "Default reranker" (``default-embedder`` /
+1. The default model becomes "Default embedder" / "Default reranker" (``default-embedder`` /
    ``default-reranker``), even when no leg uses it, so the choice isn't lost.
-3. Each leg points at the profile with its exact settings (model; for a reranker also its device), made
+2. Each leg points at the profile with its exact settings (model; for a reranker also its device), made
    for it when none has them: "Memory embedder" (``graph-embedder``), "Knowledge embedder",
    "Memory reranker", "Knowledge reranker". A leg with no model anywhere gets no profile (as before: no
    embedder blocks indexing, no reranker keeps the search order).
-4. A model in a form the profile refuses is skipped with a WARNING naming the leg; the load never fails
+3. A model in a form the profile refuses is skipped with a WARNING naming the leg; the load never fails
    because of it.
 
 The caller validates the result, saves it as version 5 and logs one summary line.
@@ -28,12 +27,10 @@ from __future__ import annotations
 
 import json
 import logging
-import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from hiro_commons.constants.storage import PREFERENCES_FILENAME
 from pydantic import ValidationError
 
 from .convert_v4 import _get_path, _pop_path, _set_path
@@ -41,7 +38,6 @@ from .models_search import EmbeddingProfile, RerankProfile
 
 logger = logging.getLogger(__name__)
 
-PREFERENCES_V4_BACKUP = "preferences.v4.json"
 V5 = 5
 
 
@@ -107,7 +103,6 @@ class SearchConversionSummary:
     embedding_profiles: dict[str, str] = field(default_factory=dict)  # profile id → model
     rerank_profiles: dict[str, str] = field(default_factory=dict)
     skipped: list[str] = field(default_factory=list)  # "<leg>: <model> (<why>)"
-    backup: str | None = None
 
     def line(self) -> str:
         def profiles(rows: dict[str, str]) -> str:
@@ -138,7 +133,6 @@ def convert_preferences_v4_to_v5(
 ) -> tuple[dict[str, Any], SearchConversionSummary]:
     """Convert the raw v4 dict (a copy is returned; ``data`` is not changed). See the module notes."""
     summary = SearchConversionSummary()
-    summary.backup = _backup_preferences(workspace_path)
     out: dict[str, Any] = json.loads(json.dumps(data))  # deep copy of plain JSON
 
     embedding = _section(out, "embedding")
@@ -245,23 +239,9 @@ def _valid(cls: type, payload: dict[str, Any], what: str, summary: SearchConvers
     return True
 
 
-def _backup_preferences(workspace_path: Path) -> str | None:
-    src = workspace_path / PREFERENCES_FILENAME
-    dest = workspace_path / PREFERENCES_V4_BACKUP
-    if dest.exists() or not src.is_file():
-        return str(dest) if dest.exists() else None
-    try:
-        shutil.copy2(src, dest)
-    except OSError as exc:
-        # The conversion still runs (the old file is about to be replaced): say so loudly.
-        logger.error("❌ preferences.v4.json backup failed — workspace · preferences v5 conversion",
-                     extra={"error": str(exc), "workspace_path": str(workspace_path)})
-        return None
-    return str(dest)
 
 
 __all__ = [
-    "PREFERENCES_V4_BACKUP",
     "SearchConversionSummary",
     "V5",
     "convert_preferences_v4_to_v5",

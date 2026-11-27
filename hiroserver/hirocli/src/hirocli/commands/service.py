@@ -22,7 +22,7 @@ from hiro_commons.systemd_service import NeedsRootError, ServiceError
 from hiro_commons.timestamps import human_datetime
 from rich.console import Console
 
-from ..domain.workspace import WorkspaceRegistry, admin_port_for
+from ..admin_address import lan_url
 
 log = Logger.get("CLI.SERVICE")
 
@@ -30,10 +30,18 @@ log = Logger.get("CLI.SERVICE")
 _REPORT_HELP = "Where an elevated run writes its outcome (used by the command itself)."
 
 
-def _first_admin_port() -> int:
-    # The first workspace's admin port (slot 0); only used in the "next steps" hint, since the
-    # service user's own workspace registry may not be readable from here.
-    return admin_port_for(WorkspaceRegistry(), 0)
+def _announce_service_admin(console: Console, port: int, lan: str | None, *, open_browser: bool) -> None:
+    """The "Hiro is running" panel once the service's admin answers; the first install also opens it in a browser
+    (once: a start at boot never does)."""
+    from ..admin_address import local_url, open_admin, print_ready_panel
+    from ..tools.server_control import wait_for_admin_ui
+
+    if not wait_for_admin_ui(port, timeout=60.0):
+        console.print(f"[yellow]The admin didn't answer on port {port} yet: open {local_url(port)} in a moment.[/yellow]")
+        return
+    print_ready_panel(console, port, lan)
+    if open_browser:
+        open_admin(local_url(port))
 
 
 def _print_needs_root(console: Console, exc: NeedsRootError) -> None:
@@ -153,7 +161,7 @@ def register(service_app: typer.Typer, console: Console) -> None:
         log.info("hiro service install", user=user, workspace=workspace, home=home, data_dir=data_dir, source=source,
                  core_name=core_name)
         from ..domain.site_names import SiteNameError, check_core_name
-        from ..tools.service import ServiceInstallTool
+        from ..tools.service import ServiceInstallTool, install_and_find_admin
 
         if core_name:
             try:
@@ -169,8 +177,9 @@ def register(service_app: typer.Typer, console: Console) -> None:
                               "needs it:[/yellow] the install brings it from Microsoft (its signed installer, no window).")
         result = _run(
             console, "install", report,
-            lambda: ServiceInstallTool().execute(
-                user=user, workspace=workspace, home=home, data_dir=data_dir, source=source, core_name=core_name,
+            lambda: install_and_find_admin(
+                ServiceInstallTool(), workspace,
+                user=user, home=home, data_dir=data_dir, source=source, core_name=core_name,
             ),
             _argv("install", user=user, home=home, data_dir=data_dir, **{"from": source}, workspace=workspace,
                   name=core_name),
@@ -199,23 +208,28 @@ def register(service_app: typer.Typer, console: Console) -> None:
             console.print(f"  Names:      {result['front_door_names']}")
         for rule in result.get("firewall") or []:
             console.print(f"  Firewall:   {rule}")
-        port = _first_admin_port()
+        port = result.get("admin_port")
+        lan = lan_url(result.get("site_domain") or "", front_door=bool(result.get("front_door")))
         console.print("\n[bold]Next steps[/bold]")
         console.print(f"  1. Add your provider API keys:  [cyan]{result['edit_secrets']}[/cyan]  (e.g. OPENAI_API_KEY=...)")
         console.print(f"  2. Load them:                   [cyan]{result['restart_command']}[/cyan]")
-        if result["manager"] == "systemd":
+        if port is None:
+            console.print("  3. Open the admin UI on this computer, at the port its workspace's config.json names "
+                          "(admin_port): the service's first start hasn't made it yet")
+        elif result["manager"] == "systemd" and not lan:
             console.print(
-                f"  3. Open the admin UI. It listens on this machine only (port {port} for the first workspace); "
-                f"from another computer: [cyan]ssh -L {port}:localhost:{port} <this-server>[/cyan], "
-                f"then http://localhost:{port}"
+                f"  3. Open the admin UI. It listens on this machine only (port {port}); from another computer: "
+                f"[cyan]ssh -L {port}:localhost:{port} <this-server>[/cyan], then http://localhost:{port}"
             )
         else:
-            console.print(f"  3. Open the admin UI on this computer: http://localhost:{port}")
+            console.print("  3. Open the admin UI (below).")
         console.print(
             "     In Providers/Models → Providers, click [bold]Scan environment[/bold] once to turn on the providers "
             "whose keys you added."
         )
         console.print(f"\n  State: [cyan]hiro service status[/cyan] · Logs: [cyan]{result['logs']}[/cyan]")
+        if port is not None:
+            _announce_service_admin(console, port, lan, open_browser=result.get("first_install") and report is None)
 
     @service_app.command("uninstall")
     def uninstall(
