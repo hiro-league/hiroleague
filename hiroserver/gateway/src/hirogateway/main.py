@@ -25,6 +25,7 @@ from rich.table import Table
 from .auth import GatewayAuthManager
 from .config import load_config, resolve_log_dir
 from .constants import APP_NAME, PID_FILENAME
+from .http_answers import answer_plain_http, install_quiet_handshakes
 from .instance import (
     GatewayInstanceError,
     GatewayRegistry,
@@ -138,7 +139,8 @@ async def _serve(host: str, port: int) -> None:
         signal.signal(signal.SIGTERM, lambda *_: loop.call_soon_threadsafe(stop_event.set))
         signal.signal(signal.SIGINT, lambda *_: loop.call_soon_threadsafe(stop_event.set))
 
-    async with websockets.serve(handle_connection, host, port, reuse_address=True):
+    install_quiet_handshakes()
+    async with websockets.serve(handle_connection, host, port, reuse_address=True, process_request=answer_plain_http):
         log.info(f"✅ Gateway listening at ws://{host}:{port}")
         await stop_event.wait()
         log.info("🛑 Shutting down", connected_devices=get_connected_devices())
