@@ -38,11 +38,11 @@ image_url() {
 
 cleanup() {
   if [ "$KEEP" = --keep ]; then
-    say "Kept: $VM at ${IP:-?} (ssh ${SSH_OPTS[*]} person@${IP:-?}); remove it: virsh destroy $VM; virsh undefine $VM; virsh vol-delete $VM.qcow2 --pool $POOL; virsh vol-delete $VM-seed.iso --pool $POOL"
+    say "Kept: $VM at ${IP:-?} (ssh ${SSH_OPTS[*]} person@${IP:-?}); remove it: virsh destroy $VM; virsh undefine $VM --nvram; virsh vol-delete $VM.qcow2 --pool $POOL; virsh vol-delete $VM-seed.iso --pool $POOL"
     return
   fi
   v destroy "$VM" >/dev/null 2>&1 || true
-  v undefine "$VM" >/dev/null 2>&1 || true
+  v undefine "$VM" --nvram >/dev/null 2>&1 || true  # its UEFI variables with it
   v vol-delete "$VM.qcow2" --pool "$POOL" >/dev/null 2>&1 || true
   v vol-delete "$VM-seed.iso" --pool "$POOL" >/dev/null 2>&1 || true
   rm -f "$HERE/key" "$HERE/key.pub" "$HERE/bundle.tar"
@@ -82,8 +82,10 @@ v vol-create-as "$POOL" "$VM-seed.iso" "$(stat -c%s "$HERE/seed.iso")" --format 
 v vol-upload "$VM-seed.iso" "$HERE/seed.iso" --pool "$POOL"
 v vol-create-as "$POOL" "$VM.qcow2" "${DISK_GB}G" --format qcow2 --backing-vol "$BASE" --backing-vol-format qcow2 >/dev/null
 
-say "Starting $VM ($DISTRO, $CPUS CPUs, $((MEMORY_MB / 1024)) GB, libvirt's NAT network)"
-virt-install -q --connect "$CONN" --name "$VM" --memory "$MEMORY_MB" --vcpus "$CPUS" \
+say "Starting $VM ($DISTRO, $CPUS CPUs, $((MEMORY_MB / 1024)) GB, UEFI, libvirt's NAT network)"
+# UEFI, as a machine bought today boots: Debian 13's cloud image restarts as its kernel starts under libvirt's default
+# BIOS (a loop at GRUB's "Booting", Nov 28, 2026) and boots under UEFI; Ubuntu's boots under both.
+virt-install -q --connect "$CONN" --name "$VM" --memory "$MEMORY_MB" --vcpus "$CPUS" --boot uefi \
   --disk "vol=$POOL/$VM.qcow2,bus=virtio" --disk "vol=$POOL/$VM-seed.iso,device=cdrom" \
   --import --osinfo detect=on,require=off --network network=default,model=virtio \
   --graphics none --noautoconsole
