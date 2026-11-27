@@ -222,11 +222,8 @@ class ChannelInstallTool(Tool):
     ) -> ChannelInstallResult:
         from ..services.channel_install import find_uv
 
-        from ..domain.packages import core_constraints
-
         pkg = package or f"hiro-channel-{channel_name}"
-        # uv resolves a tool afresh: without the core's tested versions a channel would get the newest of each
-        cmd = [find_uv(), "tool", "install", "--constraints", str(core_constraints())]
+        cmd = [find_uv(), "tool", "install"]
         if reinstall:
             cmd.append("--reinstall")
         if editable:

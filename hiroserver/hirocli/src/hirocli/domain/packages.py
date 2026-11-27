@@ -60,13 +60,6 @@ class Package:
     libraries: tuple[Path, ...]  # the wheels beside it for its pins that aren't on PyPI (the kits)
 
 
-def core_constraints() -> Path:
-    """The core's own tested versions: every version its uv.lock pins, for every package of its workspace, its
-    channels' included (scripts/tested_versions.py writes it, inside the core's package). A channel installs with it
-    as ``--constraints``, so it runs on the versions the core was tested with."""
-    return Path(__file__).resolve().parent.parent / CONSTRAINTS_FILE
-
-
 def normalized(name: str) -> str:
     """A project's name as PyPI compares it (PEP 503): ``Hiro_Extension.Kit`` → ``hiro-extension-kit``."""
     return re.sub(r"[-_.]+", "-", name).lower()

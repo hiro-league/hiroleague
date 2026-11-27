@@ -32,6 +32,7 @@ dependencies = [
     # Every version below is uv.lock's, the versions the check tested: `uv tool install hiroleague` resolves afresh
     # and would otherwise take the newest of each (scripts/tested_versions.py says why and writes them).
     # --- tested versions: written by scripts/tested_versions.py from uv.lock, never by hand ---
+    # Refreshed to the latest: never (uv lock --upgrade)
     "aiohappyeyeballs==2.6.1",
     "aiohttp==3.13.5",
     "aiolimiter==1.2.1",

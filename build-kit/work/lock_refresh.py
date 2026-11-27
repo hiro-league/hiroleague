@@ -6,10 +6,10 @@ Run inside a task that reserves hiroleague (``hiro-work start lock-refresh --rep
 checkout, one step after another, each timed in the Work area and its output in ``C:\hiro\logs\envN\lock-refresh-*``;
 the first that fails stops it:
 
-1. **refresh:** ``scripts/tested_versions.py --upgrade`` (uv lock --upgrade, then the hiroleague package's pins and the
-   core's constraints file written from the new lock), printing what moved;
+1. **refresh:** ``scripts/tested_versions.py --upgrade`` (uv lock --upgrade, then the hiroleague package's pins written
+   from the new lock), printing what moved;
 2. **check:** ``scripts/check.sh --all``, every part;
-3. **commit:** the three files, on the task's branch, what moved in the message (the fresh install installs the
+3. **commit:** the two files, on the task's branch, what moved in the message (the fresh install installs the
    committed code only);
 4. **admin pages:** built, for the bundle;
 5. **fresh install:** ``build-kit/fresh-install/fresh.py linux``, then ``windows``: a person's whole path on a new
@@ -29,7 +29,7 @@ from pathlib import Path
 import hiro_work as hw
 
 REPO = "hiroleague"
-FILES = ("hiroserver/uv.lock", "hiroserver/hiroleague/pyproject.toml", "hiroserver/hirocli/src/hirocli/hiro-constraints.txt")
+FILES = ("hiroserver/uv.lock", "hiroserver/hiroleague/pyproject.toml")
 SYSTEMS = ("linux", "windows")
 
 

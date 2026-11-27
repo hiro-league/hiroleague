@@ -32,24 +32,23 @@ def test_an_export_gives_its_pins_with_their_markers_and_nothing_else() -> None:
 
 
 def test_the_pins_block_is_replaced_and_the_rest_kept() -> None:
-    text = tv.with_pins(PYPROJECT, ["a==1", "b==2 ; sys_platform == 'linux'"])
+    text = tv.with_pins(PYPROJECT, ["a==1", "b==2 ; sys_platform == 'linux'"], "2026-11-27")
     assert '"hirocli~=0.2.0",' in text and "old==1.0" not in text
-    assert f'{tv.START}\n    "a==1",\n    "b==2 ; sys_platform == \'linux\'",\n{tv.END}\n]' in text
-    assert tv.with_pins(text, []).count('"') == tv.with_pins(PYPROJECT, []).count('"') == 2  # emptied: hirocli's
+    assert (f'{tv.START}\n    # Refreshed to the latest: 2026-11-27 (uv lock --upgrade)\n    "a==1",\n'
+            f'    "b==2 ; sys_platform == \'linux\'",\n{tv.END}\n]') in text
+    assert tv.with_pins(text, [], None).count('"') == 2  # emptied: only hirocli's
 
 
 def test_a_pyproject_without_the_block_is_refused_in_words() -> None:
     with pytest.raises(tv.Refused, match="no tested-versions block"):
-        tv.with_pins('[project]\ndependencies = ["hirocli"]\n', ["a==1"])
+        tv.with_pins('[project]\ndependencies = ["hirocli"]\n', ["a==1"], None)
 
 
-def test_the_constraints_file_says_the_day_it_was_refreshed() -> None:
-    text = tv.constraints_text(["a==1"], "2026-11-27")
-    assert tv.refreshed(text) == "2026-11-27"
-    assert text.endswith("a==1\n")
-    assert tv.refreshed("a==1\n") is None
-    never = tv.constraints_text(["a==1"], None)
+def test_the_block_says_the_day_the_lock_was_refreshed() -> None:
+    assert tv.refreshed(tv.with_pins(PYPROJECT, ["a==1"], "2026-11-27")) == "2026-11-27"
+    never = tv.with_pins(PYPROJECT, ["a==1"], None)
     assert "Refreshed to the latest: never" in never and tv.refreshed(never) is None
+    assert tv.refreshed(PYPROJECT) is None
 
 
 def test_a_refresh_names_what_moved_came_and_went() -> None:
