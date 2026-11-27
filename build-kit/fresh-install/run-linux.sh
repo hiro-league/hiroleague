@@ -92,7 +92,7 @@ check "service log has no error" sh -c "sudo journalctl -u hiro --no-pager | pyt
 
 # The result
 {
-  echo "# Fresh install: Linux (WSL Ubuntu $(. /etc/os-release; echo "$VERSION_ID"))"
+  echo "# Fresh install: Linux ($(. /etc/os-release; echo "$PRETTY_NAME"), ${FRESH_MACHINE:-WSL})"
   echo
   echo "$(date '+%a, %b %-d, %-I:%M %p') · core $(cat "$BUNDLE/COMMIT" 2>/dev/null)"
   echo

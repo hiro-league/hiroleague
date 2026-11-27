@@ -2,6 +2,7 @@
 
     uv run --project hiroserver python build-kit/fresh-install/fresh.py linux [--keep]
     uv run --project hiroserver python build-kit/fresh-install/fresh.py windows [--keep]
+    uv run --project hiroserver python build-kit/fresh-install/fresh.py simone [--distro <name>|all] [--keep]
 
 Run from the root of a hiroleague checkout. Everything lands in ``C:\\hiro\\test-packages\\fresh`` (``--root``):
 
@@ -16,12 +17,19 @@ Run from the root of a hiroleague checkout. Everything lands in ``C:\\hiro\\test
    - ``windows``: a new Windows Sandbox (``fresh.wsb``: the bundle mapped read-only, the results folder writable,
      run-windows.ps1 at logon). It closes itself at the end (``--keep`` leaves it open). Needs the Sandbox switched
      on once (an administrator, then a restart).
-3. **The result:** ``runs/<time>/results/result.md`` (one table: each step, PASS or FAIL, its time, its log) and
-   ``result.json``. The run script inside the machine walks the path: uv, the core, ``hiro service install``,
-   Hello's install, 0.1.3 (goes back), 0.1.2 (stays), 0.1.1 (upgrades), its removal, WhatsApp's install, upgrade and
-   removal, the phones' channel refused, the core's LAN name, the service's log read for problems.
+   - ``simone``: a new virtual machine on Simone per distribution (simone-vm.sh: libvirt, the distribution's official
+     cloud image, a person with sudo, 2 CPUs and 4 GB on libvirt's NAT network), deleted after the run; Simone then
+     asks for the core's name, as another machine. Ubuntu 24.04 and 22.04, Debian 13, Fedora 45, Rocky 10 (``--distro
+     all``: one after another). Needs Michel's account's libvirt group, no sudo; it touches only machines and volumes
+     named ``hiro-fresh-*``.
+3. **The result:** ``runs/<time>/results/result.md`` (simone: ``runs/<time>/<distro>/results``; one table: each
+   step, PASS or FAIL, its time, its log) and ``result.json``. The run script inside the machine walks the path:
+   uv, the core, ``hiro service install``, Hello's install, 0.1.3 (goes back), 0.1.2 (stays), 0.1.1 (upgrades), its
+   removal, WhatsApp's install, upgrade and removal, the phones' channel refused, the core's LAN name, the service's
+   log read for problems.
 
-Nothing here touches this PC's own Hiro League: no service, no uv tool, no workspace; the machine is thrown away.
+Nothing here touches this PC's or Simone's own Hiro League: no service, no uv tool, no workspace; the machine is
+thrown away.
 """
 
 from __future__ import annotations
@@ -186,6 +194,31 @@ def run_linux(root: Path, run_dir: Path, bundle: Path, results: Path, *, keep: b
         raise SystemExit(f"The run script stopped before its result: see its output above and {results / 'logs'}")
 
 
+# --- Simone: a throwaway virtual machine per distribution ---------------------------------------------------------
+
+SIMONE = "simone"  # the server, as ssh names it
+DISTROS = ("ubuntu-24.04", "ubuntu-22.04", "debian-13", "fedora-45", "rocky-10")
+
+
+def run_simone(run_dir: Path, bundle: Path, distro: str, *, keep: bool) -> Path:
+    """One throwaway machine on Simone (simone-vm.sh: libvirt, the distribution's cloud image); returns its results."""
+    name = f"{run_dir.name}-{distro}"
+    remote = f"hiro-fresh/runs/{name}"
+    local = run_dir / distro
+    local.mkdir(parents=True)
+    tar = run_dir / "bundle.tar"
+    if not tar.is_file():
+        with tarfile.open(tar, "w") as out:
+            out.add(bundle, arcname=".")
+    run(["ssh", SIMONE, f"mkdir -p {remote}"])
+    run(["scp", "-q", str(tar), str(HERE / "simone-vm.sh"), f"{SIMONE}:{remote}/"])
+    say(f"Simone: {distro} in a throwaway machine (its output below)")
+    subprocess.run(["ssh", SIMONE, "bash", f"{remote}/simone-vm.sh", distro, name, *(["--keep"] if keep else [])],
+                   check=False)
+    subprocess.run(["scp", "-q", "-r", f"{SIMONE}:{remote}/results", str(local)], check=False)
+    return local / "results"
+
+
 # --- the result ----------------------------------------------------------------------------------------------------
 
 
@@ -197,26 +230,40 @@ def wait_for(results: Path, timeout_s: int = _WAIT_S) -> None:
         time.sleep(10)
 
 
+def report(results: Path) -> bool:
+    """Print one machine's result; True when every step passed."""
+    result, summary = results / "result.md", results / "result.json"
+    if not (result.is_file() and summary.is_file()):
+        say(f"The run wrote no result: see {results / 'logs'}")
+        return False
+    say(result.read_text(encoding="utf-8"))
+    say(f"Result: {result}")
+    return bool(json.loads(summary.read_text(encoding="utf-8")).get("passed"))
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Install Hiro League fresh on a throwaway machine.")
-    parser.add_argument("system", choices=("linux", "windows"))
+    parser.add_argument("system", choices=("linux", "windows", "simone"))
+    parser.add_argument("--distro", choices=(*DISTROS, "all"), default=DISTROS[0],
+                        help=f"simone: the distribution, or all of them one after another (default {DISTROS[0]})")
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT, help=f"where runs go (default {DEFAULT_ROOT})")
     parser.add_argument("--keep", action="store_true", help="keep the machine after the run, to look inside")
     args = parser.parse_args(argv)
-    run_dir = args.root / "runs" / f"{datetime.now().astimezone():%Y%m%d-%H%M%S}-{args.system}"  # this PC's time: a folder name
+    run_dir = args.root / "runs" / f"{datetime.now().astimezone():%Y%m%d-%H%M%S}-{args.system}"  # this PC's time
     bundle, results = run_dir / "bundle", run_dir / "results"
     results.mkdir(parents=True)
     build_bundle(bundle, close=not args.keep)
+    if args.system == "simone":
+        distros = DISTROS if args.distro == "all" else (args.distro,)
+        passed = {d: report(run_simone(run_dir, bundle, d, keep=args.keep)) for d in distros}
+        if len(passed) > 1:
+            say("\n".join(f"{'PASS' if ok else 'FAIL'}  {d}" for d, ok in passed.items()))
+        return 0 if all(passed.values()) else 1
     if args.system == "windows":
         run_windows(run_dir, bundle, results)
     else:
         run_linux(args.root, run_dir, bundle, results, keep=args.keep)
-    result, summary = results / "result.md", results / "result.json"
-    if not (result.is_file() and summary.is_file()):
-        raise SystemExit(f"The run wrote no result: see {results / 'logs'}")
-    say(result.read_text(encoding="utf-8"))
-    say(f"Result: {result}")
-    return 0 if json.loads(summary.read_text(encoding="utf-8")).get("passed") else 1
+    return 0 if report(results) else 1
 
 
 if __name__ == "__main__":

@@ -56,7 +56,7 @@ part "build-kit: package" "build-kit/package.py build-kit/test_package.py build-
 # The fresh-install test's driver and scripts (build-kit/fresh-install): its own rules, ruff, and the Linux script's
 # syntax; the run itself (a throwaway machine, minutes of downloads) is run by hand
 part "build-kit: fresh install" "build-kit/fresh-install" \
-    bash -c "cd '${REPO_ROOT}/hiroserver' && uv run ruff check ../build-kit/fresh-install && bash -n ../build-kit/fresh-install/run-linux.sh && uv run python -m pytest ../build-kit/fresh-install -q -p no:cacheprovider"
+    bash -c "cd '${REPO_ROOT}/hiroserver' && uv run ruff check ../build-kit/fresh-install && bash -n ../build-kit/fresh-install/run-linux.sh && bash -n ../build-kit/fresh-install/simone-vm.sh && uv run python -m pytest ../build-kit/fresh-install -q -p no:cacheprovider"
 # What every area reads: the workspace's own settings and lock, and the runner
 ws="hiroserver/pyproject.toml hiroserver/uv.lock scripts/run-tests.sh"
 # The lint every Hiro League repo follows (build-kit/ruff-rules.toml, which each app's pyproject extends too), over

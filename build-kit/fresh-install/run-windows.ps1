@@ -150,7 +150,7 @@ Invoke-Step 'service log has no error' ok '' "type `"$serviceLogs\hiro.err.log`"
 # --- the result ----------------------------------------------------------------------------------------------------
 $commit = Get-Content (Join-Path $Bundle 'COMMIT') -ErrorAction SilentlyContinue
 $os = (Get-CimInstance Win32_OperatingSystem).Caption
-$lines = @("# Fresh install: Windows ($os, Windows Sandbox)", '', ((Get-Date -Format 'ddd, MMM d, h:mm tt') + " · core $commit"), '',
+$lines = @("# Fresh install: Windows ($os, Windows Sandbox)", '', ((Get-Date -Format 'ddd, MMM d, h:mm tt') + " - core $commit"), '',
     '| | Step | Took | Detail | Log |', '|---|---|---|---|---|')
 foreach ($s in $script:Steps) {
     $mark = if ($s.ok) { 'PASS' } else { '**FAIL**' }
