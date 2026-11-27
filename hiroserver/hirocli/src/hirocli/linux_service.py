@@ -18,18 +18,20 @@ from hiro_commons.systemd_service import (
     NULL_KEYRING_BACKEND,
     ServiceError,
     ServiceSpec,
+    ServiceUser,
     env_file_path,
     render_env_file,
     unit_file_name,
 )
 
 from .constants import ENV_SERVICE_MANAGER, SERVICE_RESTART_EXIT_CODE
+from .domain.hiro_home import ENV_HIRO_HOME, channels_folder, default_home
 
 SERVICE_BASE_NAME = "hiro"
 SERVICE_DESCRIPTION = "HiroLeague server"
 DOCS_URL = "https://docs.hiroleague.com/hiro/get-started/linux-service"
-# Standard system PATH after the folder `hiro` lives in: that folder also holds hirogate and the
-# channel-plugin commands the server starts (uv puts every tool's commands side by side).
+# Standard system PATH after the folder `hiro` lives in (it also holds hirogate) and the Hiro home's channels'
+# commands, which the server starts.
 _SYSTEM_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 
@@ -81,12 +83,31 @@ def sudo_command(exe: str, action: str, *, user: str | None, workspace: str | No
     return " ".join(shlex.quote(p) for p in parts)
 
 
+def home() -> str:
+    """The Hiro home the service keeps its channels in: HIRO_HOME, else /opt/hiroleague (a POSIX path, whatever
+    system builds it: the tests run on Windows too)."""
+    return (os.environ.get(ENV_HIRO_HOME, "").strip() or str(default_home("linux"))).replace("\\", "/")
+
+
+def prepare_channels(user: ServiceUser) -> Path:
+    """The Hiro home's channels' folder, owned by the service's account, which installs its channels there (as root;
+    the home itself is left as it is: on Simone the deploy's account owns it)."""
+    folder = channels_folder(Path(home())).root
+    try:
+        folder.mkdir(mode=0o755, parents=True, exist_ok=True)
+        os.chown(folder, user.uid, user.gid)
+    except OSError as exc:
+        raise ServiceError(f"Could not prepare {folder} for the service's channels: {exc}") from exc
+    return folder
+
+
 def build_spec(*, exe: str, user: str, group: str, workspace: str | None) -> ServiceSpec:
     name = service_name(workspace)
     exec_args = [exe, "start", "--foreground"]
     if workspace:
         exec_args += ["--workspace", workspace]
     bin_dir = str(Path(exe).parent).replace("\\", "/")
+    channels_bin = str(channels_folder(Path(home())).bin).replace("\\", "/")
     return ServiceSpec(
         name=name,
         description=SERVICE_DESCRIPTION if not workspace else f"{SERVICE_DESCRIPTION} ({workspace})",
@@ -99,7 +120,8 @@ def build_spec(*, exe: str, user: str, group: str, workspace: str | None) -> Ser
             # (credential_store falls back to the catalog's env variables).
             "PYTHON_KEYRING_BACKEND": NULL_KEYRING_BACKEND,
             ENV_SERVICE_MANAGER: "systemd",
-            "PATH": f"{bin_dir}:{_SYSTEM_PATH}",
+            ENV_HIRO_HOME: home(),
+            "PATH": f"{bin_dir}:{channels_bin}:{_SYSTEM_PATH}",
             # Log lines reach the journal as they happen, not when a buffer fills.
             "PYTHONUNBUFFERED": "1",
         },

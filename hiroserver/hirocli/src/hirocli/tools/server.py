@@ -577,13 +577,32 @@ def _detect_install_method(installed_path: Path | None) -> tuple[str, str]:
     return "pip", "Installed via pip into a regular Python environment."
 
 
-def _build_upgrade_command(method: str) -> list[str] | None:
-    """Return the recommended shell command for the given install method.
+def torch_backend(platform: str = sys.platform) -> str | None:
+    """On Linux, the torch build this install runs, as uv's torch backend names it (``cpu``, ``cu130``...), from its
+    version's build (``2.12.0+cpu``): an upgrade keeps it, since uv's receipt doesn't remember the backend and PyPI's
+    Linux torch is NVIDIA's (~2 GB). None elsewhere, and for PyPI's own build, which an upgrade then keeps as it is."""
+    if not platform.startswith("linux"):
+        return None
+    try:
+        version = metadata.version("torch")
+    except metadata.PackageNotFoundError:
+        return "cpu"  # a Linux install with no torch yet gets the processor-only one (Michel, Nov 27, 2026)
+    return version.partition("+")[2] or None
+
+
+def _build_upgrade_command(method: str, backend: str | None = None) -> list[str] | None:
+    """Return the recommended shell command for the given install method; ``backend``: the torch build to keep
+    (``torch_backend``).
 
     ``None`` means there's no fully-automatic upgrade path (editable /
     unknown) — the user has to handle it themselves.
     """
     if method == "uv-tool-hiroleague":
+        if backend:
+            # `uv tool upgrade` takes no torch backend: install it again, newest, on this install's Python and build.
+            python = f"{sys.version_info.major}.{sys.version_info.minor}"
+            return ["uv", "tool", "install", "--upgrade", "--reinstall", "--python", python, "--torch-backend",
+                    backend, "hiroleague"]
         # --reinstall forces uv to drop the cached pin and re-resolve, which
         # is the only way to escape "Nothing to upgrade" on already-pinned
         # tool installs.
@@ -659,7 +678,7 @@ class UpgradeTool(Tool):
                 continue
 
         method, explanation = _detect_install_method(install_path)
-        upgrade_cmd = _build_upgrade_command(method)
+        upgrade_cmd = _build_upgrade_command(method, torch_backend())
 
         # Inspect the server state for the requested (or default) workspace
         # so we can stop/restart around the upgrade. We tolerate "no

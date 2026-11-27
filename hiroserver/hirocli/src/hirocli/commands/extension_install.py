@@ -250,8 +250,8 @@ def _is_channel_name(text: str) -> bool:
 
 
 def channel_step(console: Console, tool: str, name: str, params: dict[str, Any], workspace: str | None) -> bool:
-    """Install, upgrade or remove a channel: in the running core (its program is the core's account's uv tool, and
-    the core stops and starts the plugin around it), or here when the core is stopped. True when it was done."""
+    """Install, upgrade or remove a channel: in the running core (its program is the core's uv tool, in the Hiro
+    home for a service core, and the core stops and starts the plugin around it), or here when the core is stopped. True when it was done."""
     from ..tools import extension_install as tools
 
     workspace_path, workspace_id = _workspace(workspace)

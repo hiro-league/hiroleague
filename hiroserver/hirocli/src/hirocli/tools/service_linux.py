@@ -51,6 +51,8 @@ def install(*, user: str | None = None, workspace: str | None = None, core_name:
         spec = dataclasses.replace(spec, environment={**spec.environment, ENV_CORE_NAME: core_name})
     # Fail before writing anything when the service user can't even start `hiro`.
     check_user_can_run(service_user, [exe, "--help"])
+    # The service installs its channels' programs in the Hiro home, never in its account's own profile.
+    ls.prepare_channels(service_user)
     # The machine's front door, set up by the default service only (one per machine), before the core starts: the
     # core's account joins Caddy's group here, which a process started after it has.
     front = door.install_linux(service_user) if not workspace else None

@@ -20,6 +20,7 @@
 #   HIRO_HEALTH_URL     [http://127.0.0.1:18080/status] the server's /status (first workspace's port)
 #   HIRO_HEALTH_TIMEOUT [240] seconds to wait for it after a start
 #   HIRO_PYTHON         [3.12] Python version uv installs into
+#   HIRO_TORCH_BACKEND  [cpu] torch's build (uv's --torch-backend): cpu, or a GPU one (auto, cu130...)
 #   HIRO_KEEP_RELEASES  [3] releases kept on disk (the current one included)
 #
 # Needs: uv, node + npm, curl; the sudoers line and the root helper from the deploy guide
@@ -32,6 +33,7 @@ HIRO_SERVICE="${HIRO_SERVICE:-hiro}"
 HIRO_HEALTH_URL="${HIRO_HEALTH_URL:-http://127.0.0.1:18080/status}"
 HIRO_HEALTH_TIMEOUT="${HIRO_HEALTH_TIMEOUT:-240}"
 HIRO_PYTHON="${HIRO_PYTHON:-3.12}"
+HIRO_TORCH_BACKEND="${HIRO_TORCH_BACKEND:-cpu}"
 HIRO_KEEP_RELEASES="${HIRO_KEEP_RELEASES:-3}"
 
 UNIT="${HIRO_SERVICE}.service"
@@ -86,6 +88,9 @@ if ! (cd hiroserver && uv export --frozen --no-emit-workspace --no-dev --no-hash
         --package hiroleague -o "$CONSTRAINTS" >/dev/null); then
   cleanup_release; die "could not export uv.lock: nothing was changed."
 fi
+# A pin names a version, never its build (torch==2.12.0+cpu → 2.12.0): the build is HIRO_TORCH_BACKEND's, so a GPU one
+# isn't refused by the lock's processor-only build.
+sed -i -E 's/^([^ ;=]+==[^ ;+]+)\+[A-Za-z0-9.]+/\1/' "$CONSTRAINTS"
 # Rebuild HiroLeague's own packages from this checkout every time. uv caches a build of a local
 # package by its version and pyproject.toml, so without this a release whose code changed but whose
 # version didn't (0.2.0) would install the OLD cached code, and checks pass on the checkout regardless
@@ -98,10 +103,12 @@ for member in hiroserver/hiroleague hiroserver/hirocli hiroserver/gateway hirose
 done
 # Each release gets its own tool and command folders, so the previous one stays installed and
 # going back is moving a link. Python goes in a folder under HIRO_HOME too: anything uv puts in
-# the deploy user's home would not be readable by a dedicated service user.
+# the deploy user's home would not be readable by a dedicated service user. torch is the processor-only build unless
+# HIRO_TORCH_BACKEND names a GPU one: PyPI's Linux torch brings NVIDIA's ~2 GB, which the local reranker doesn't need.
 if ! UV_TOOL_DIR="${RELEASE_DIR}/tools" UV_TOOL_BIN_DIR="${RELEASE_DIR}/bin" \
      UV_PYTHON_INSTALL_DIR="${HIRO_HOME}/python" \
-     uv tool install --python "$HIRO_PYTHON" --constraints "$CONSTRAINTS" "${REFRESH[@]}" ./hiroserver/hiroleague; then
+     uv tool install --python "$HIRO_PYTHON" --torch-backend "$HIRO_TORCH_BACKEND" --constraints "$CONSTRAINTS" \
+       "${REFRESH[@]}" ./hiroserver/hiroleague; then
   cleanup_release; die "install failed: nothing was changed."
 fi
 "${RELEASE_DIR}/bin/hiro" --help >/dev/null 2>&1 \
@@ -114,19 +121,30 @@ chmod -R a+rX "$RELEASE_DIR" "${HIRO_HOME}/python" 2>/dev/null || true
 # don't. A package the SDK or the commons gains then stops the plugin at import while the core stays healthy
 # (2026-11-20: opentelemetry; WhatsApp was down for three days, unnoticed). So every deploy installs the tool
 # again and proves it starts. Only a tool installed from this checkout; skipped where there is none.
+# The tool lives in the Hiro home's channels, where the core installs, upgrades and removes a channel
+# (services/channel_install.py). One still in this account's own uv tools moves there once (Michel, Nov 28, 2026):
+# installed in the home here, its row pointed at it while the service is stopped (3, after the databases are
+# copied, so going back puts the old row back), the old tool removed once the new release answers (4).
 WA_SRC="${REPO_ROOT}/hiroserver/channels/hiro-channel-whatsapp"
-WA_TOOLS="$(uv tool dir 2>/dev/null || true)"
-WA_RECEIPT="${WA_TOOLS}/hiro-channel-whatsapp/uv-receipt.toml"
-if [ -n "$WA_TOOLS" ] && [ -f "$WA_RECEIPT" ] && grep -qF "editable = \"${WA_SRC}\"" "$WA_RECEIPT"; then
-  say "installing the WhatsApp plugin's tool again (its packages follow this commit)"
-  if ! uv tool install --python "$HIRO_PYTHON" --reinstall "${REFRESH[@]}" --editable "$WA_SRC"; then
+CHANNELS="${HIRO_HOME}/channels"
+WA_BIN="${CHANNELS}/bin/hiro-channel-whatsapp"
+WA_OLD_BIN="$(uv tool dir --bin 2>/dev/null || true)/hiro-channel-whatsapp"
+from_checkout() { [ -f "$1" ] && grep -qF "editable = \"${WA_SRC}\"" "$1"; }
+WA_MOVE=""
+from_checkout "$(uv tool dir 2>/dev/null || true)/hiro-channel-whatsapp/uv-receipt.toml" && WA_MOVE=yes
+# The core finds uv in the Hiro home: the service's PATH holds the release's bin, not this account's uv
+mkdir -p "${HIRO_HOME}/bin" "$CHANNELS"
+install -m 0755 "$(command -v uv)" "${HIRO_HOME}/bin/uv"
+if [ -n "$WA_MOVE" ] || from_checkout "${CHANNELS}/tools/hiro-channel-whatsapp/uv-receipt.toml"; then
+  say "installing the WhatsApp plugin's tool again in ${CHANNELS} (its packages follow this commit)"
+  if ! UV_TOOL_DIR="${CHANNELS}/tools" UV_TOOL_BIN_DIR="${CHANNELS}/bin" UV_PYTHON_INSTALL_DIR="${HIRO_HOME}/python" \
+       uv tool install --python "$HIRO_PYTHON" --reinstall "${REFRESH[@]}" --editable "$WA_SRC"; then
     cleanup_release
-    die "the WhatsApp plugin's tool could not be installed: the core is untouched (the running release goes on). The tool may be half installed: run 'uv tool install --reinstall --editable ${WA_SRC}' and deploy again."
+    die "the WhatsApp plugin's tool could not be installed: the core is untouched (the running release goes on). The tool may be half installed in ${CHANNELS}: deploy again."
   fi
-  WA_BIN="$(uv tool dir --bin 2>/dev/null || true)"
-  if ! "${WA_BIN}/hiro-channel-whatsapp" --help >/dev/null 2>&1; then
+  if ! "$WA_BIN" --help >/dev/null 2>&1; then
     cleanup_release
-    die "the WhatsApp plugin does not start after its install ('${WA_BIN}/hiro-channel-whatsapp --help' fails): the core is untouched (the running release goes on). Run that command to see why, then deploy again."
+    die "the WhatsApp plugin does not start after its install ('${WA_BIN} --help' fails): the core is untouched (the running release goes on). Run that command to see why, then deploy again."
   fi
 else
   say "the WhatsApp plugin's tool isn't installed from this checkout: nothing to install again"
@@ -188,6 +206,16 @@ if ! sudo -n "$SNAPSHOT_HELPER" save "$UNIT"; then
   cleanup_release
   die "deploy stopped before any change (the databases were not copied)."
 fi
+if [ -n "$WA_MOVE" ]; then  # the one move (2b): every workspace's WhatsApp row starts the home's program
+  say "pointing WhatsApp at its program in ${CHANNELS}"
+  if ! "${RELEASE_DIR}/tools/hiroleague/bin/python" -c 'import sys
+from hirocli.services.channel_install import move_program
+print("moved in:", ", ".join(move_program("whatsapp", sys.argv[1], sys.argv[2])) or "no workspace")' \
+       "$WA_OLD_BIN" "$WA_BIN"; then
+    say "could not point WhatsApp at ${WA_BIN}: it keeps its old program, which stays"
+    WA_MOVE=""
+  fi
+fi
 
 # --- 4. Switch and start ----------------------------------------------------------------------
 switch_current "$RELEASE_DIR"
@@ -204,6 +232,11 @@ if healthy; then
         [ "$old" = "$current_target" ] || rm -rf "$old" 2>/dev/null \
           || say "could not remove the old release $(basename "$old") (files owned by another user, e.g. root from a sudo run); remove it with: sudo rm -rf $old"
       done
+  if [ -n "$WA_MOVE" ]; then  # the move is done: the old tool goes (going back would still have found it)
+    uv tool uninstall hiro-channel-whatsapp >/dev/null 2>&1 \
+      && say "removed the WhatsApp plugin's old tool from $(id -un)'s own uv tools" \
+      || say "could not remove the WhatsApp plugin's old tool; remove it with: uv tool uninstall hiro-channel-whatsapp"
+  fi
   say "deployed ${RELEASE_ID}: ${HIRO_HEALTH_URL} answers."
   exit 0
 fi

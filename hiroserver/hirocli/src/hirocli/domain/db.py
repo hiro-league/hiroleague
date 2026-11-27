@@ -451,7 +451,14 @@ def _add_missing_columns(conn: sqlite3.Connection) -> None:
         if not table_existing[table]:
             continue  # not created yet
         if col_name not in table_existing[table]:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_def}")
+            try:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_def}")
+            except sqlite3.OperationalError as exc:
+                # Another connection added it since this one read the table (two threads opening the database at a
+                # core's first start after an upgrade: the merge's check, Nov 28, 2026): it is there, which is all
+                # that was asked. Anything else is a real failure.
+                if "duplicate column name" not in str(exc):
+                    raise
             table_existing[table].add(col_name)
 
 

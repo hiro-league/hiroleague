@@ -78,7 +78,9 @@ def test_spec_runs_the_server_as_the_user_with_its_secrets_file() -> None:
     assert env[ENV_SERVICE_MANAGER] == "launchd"
     assert env[ENV_SECRETS_FILE] == "/Library/Application Support/HiroLeague/hiro.env"
     assert env["PYTHON_KEYRING_BACKEND"] == "keyring.backends.null.Keyring"
-    assert env["PATH"].startswith("/Users/michel/.local/bin:")
+    # Then the Hiro home's channels: their path has a space, so they are set up by name and found here
+    assert env["PATH"].startswith("/Users/michel/.local/bin:/Library/Application Support/HiroLeague/channels/bin:")
+    assert env["HIRO_HOME"] == "/Library/Application Support/HiroLeague"
     assert env["HOME"] == "/Users/michel"
 
 

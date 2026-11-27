@@ -73,6 +73,10 @@ dependencies = [
     # Local cross-encoder reranker for knowledge retrieval. Pulls torch +
     # huggingface-hub transitively; ~100MB on first install.
     "sentence-transformers>=5.4",
+    # sentence-transformers' torch, named here so the lock takes the processor-only build on Linux (its source
+    # below): PyPI's Linux torch brings NVIDIA's ~2 GB, which the local reranker doesn't need (Michel, Nov 27, 2026).
+    # An install chooses the build with uv's torch backend (`--torch-backend cpu`, or a GPU one).
+    "torch>=2.12",
     # Knowledge reranker — cloud providers (catalog) + local FlashRank starter loader.
     # Cohere/Voyage are LangChain BaseDocumentCompressor impls; flashrank is a small ONNX
     # cross-encoder loader (no torch). sentence-transformers (above) covers the bge/gte lanes.
@@ -122,6 +126,9 @@ hiro-channel-sdk = { workspace = true }
 hiro-memory = { workspace = true }
 hirogate = { workspace = true }
 en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
+# The processor-only torch on Linux (the index is the workspace's, hiroserver/pyproject.toml); PyPI's torch for
+# Windows and the Mac is processor-only already
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hirocli"]

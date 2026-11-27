@@ -31,23 +31,18 @@ v() { virsh -q -c "$CONN" "$@"; }
 image_url() {
   case "$1" in
     ubuntu-24.04) echo https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img ;;
-    ubuntu-22.04) echo https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img ;;
     debian-13) echo https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2 ;;
-    fedora-45)
-      local base=https://download.fedoraproject.org/pub/fedora/linux/releases/45/Cloud/x86_64/images/
-      echo "$base$(curl -fsL "$base" | grep -oE 'Fedora-Cloud-Base-Generic-[^"]+\.qcow2' | head -1)" ;;
-    rocky-10) echo https://dl.rockylinux.org/pub/rocky/10/images/x86_64/Rocky-10-GenericCloud-Base.latest.x86_64.qcow2 ;;
-    *) echo "unknown distribution: $1 (ubuntu-24.04, ubuntu-22.04, debian-13, fedora-45, rocky-10)" >&2; return 1 ;;
+    *) echo "unknown distribution: $1 (ubuntu-24.04, debian-13)" >&2; return 1 ;;
   esac
 }
 
 cleanup() {
   if [ "$KEEP" = --keep ]; then
-    say "Kept: $VM at ${IP:-?} (ssh ${SSH_OPTS[*]} person@${IP:-?}); remove it: virsh destroy $VM; virsh undefine $VM; virsh vol-delete $VM.qcow2 --pool $POOL; virsh vol-delete $VM-seed.iso --pool $POOL"
+    say "Kept: $VM at ${IP:-?} (ssh ${SSH_OPTS[*]} person@${IP:-?}); remove it: virsh destroy $VM; virsh undefine $VM --nvram; virsh vol-delete $VM.qcow2 --pool $POOL; virsh vol-delete $VM-seed.iso --pool $POOL"
     return
   fi
   v destroy "$VM" >/dev/null 2>&1 || true
-  v undefine "$VM" >/dev/null 2>&1 || true
+  v undefine "$VM" --nvram >/dev/null 2>&1 || true  # its UEFI variables with it
   v vol-delete "$VM.qcow2" --pool "$POOL" >/dev/null 2>&1 || true
   v vol-delete "$VM-seed.iso" --pool "$POOL" >/dev/null 2>&1 || true
   rm -f "$HERE/key" "$HERE/key.pub" "$HERE/bundle.tar"
@@ -87,9 +82,12 @@ v vol-create-as "$POOL" "$VM-seed.iso" "$(stat -c%s "$HERE/seed.iso")" --format 
 v vol-upload "$VM-seed.iso" "$HERE/seed.iso" --pool "$POOL"
 v vol-create-as "$POOL" "$VM.qcow2" "${DISK_GB}G" --format qcow2 --backing-vol "$BASE" --backing-vol-format qcow2 >/dev/null
 
-say "Starting $VM ($DISTRO, $CPUS CPUs, $((MEMORY_MB / 1024)) GB, libvirt's NAT network)"
-virt-install -q --connect "$CONN" --name "$VM" --memory "$MEMORY_MB" --vcpus "$CPUS" \
-  --disk "vol=$POOL/$VM.qcow2,bus=virtio" --disk "vol=$POOL/$VM-seed.iso,device=cdrom" \
+say "Starting $VM ($DISTRO, $CPUS CPUs, $((MEMORY_MB / 1024)) GB, UEFI, libvirt's NAT network)"
+# UEFI, as a machine bought today boots: Debian 13's cloud image restarts as its kernel starts under libvirt's default
+# BIOS (a loop at GRUB's "Booting", Nov 28, 2026) and boots under UEFI; Ubuntu's boots under both. The seed is a
+# read-only virtio disk: under UEFI neither image reads it as an IDE CD-ROM, so cloud-init never set the network up.
+virt-install -q --connect "$CONN" --name "$VM" --memory "$MEMORY_MB" --vcpus "$CPUS" --boot uefi \
+  --disk "vol=$POOL/$VM.qcow2,bus=virtio" --disk "vol=$POOL/$VM-seed.iso,device=disk,bus=virtio,readonly=on" \
   --import --osinfo detect=on,require=off --network network=default,model=virtio \
   --graphics none --noautoconsole
 
