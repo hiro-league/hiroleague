@@ -14,6 +14,7 @@ from typer.testing import CliRunner
 from hiro_commons import winsw_service as w
 from hiro_commons.env_file import parse_env_text
 from hiro_commons.systemd_service import ServiceError
+from hirocli import cpp_runtime
 from hirocli import front_door_setup as door
 from hirocli import linux_service as ls
 from hirocli import windows_service as ws
@@ -50,6 +51,12 @@ def elevated(monkeypatch, windows):
 
     monkeypatch.setattr(ws, "install_release", fake_release)
     monkeypatch.setattr(ws, "copy_uv_into", lambda home: calls.append(("uv", home)))
+
+    def fake_runtime(cache):
+        calls.append(("cpp_runtime", cache))
+        return "installed now (Microsoft's Visual C++ Redistributable)"
+
+    monkeypatch.setattr(cpp_runtime, "install", fake_runtime)
     monkeypatch.setattr(door, "which_python", lambda release: HOME / "python" / "cpython-3.12" / "python.exe")
 
     def fake_door(home, core_python):
@@ -163,19 +170,22 @@ def test_install_registers_then_locks_the_data_then_starts(elevated) -> None:
 
     steps = [c[0] for c in elevated]
     assert steps == [
-        "disk", "disk", "lock_program", "release", "uv", "front_door", "register", "grant_read", "lock_data",
-        "secrets", "lock_secrets", "start",
+        "disk", "disk", "lock_program", "release", "uv", "cpp_runtime", "front_door", "register", "grant_read",
+        "lock_data", "secrets", "lock_secrets", "start",
     ]
     assert elevated[3] == ("release", r"C:\hiro\env4\hiroleague\hiroserver\hiroleague")
     # The service core's own uv, in the home: it installs a channel with it before any app is installed.
     assert elevated[4] == ("uv", HOME)
+    # Microsoft's C++ runtime before the service starts: the graph database can't load without it
+    assert elevated[5] == ("cpp_runtime", HOME / "cache")
+    assert result.cpp_runtime.startswith("installed now")
     # The front door's firewall rule for names follows the release's own Python; the core is given its address.
-    assert elevated[5] == ("front_door", HOME, HOME / "python" / "cpython-3.12" / "python.exe")
-    assert elevated[6][1].environment["HIRO_FRONT_DOOR"] == "127.0.0.1:18079"
+    assert elevated[6] == ("front_door", HOME, HOME / "python" / "cpython-3.12" / "python.exe")
+    assert elevated[7][1].environment["HIRO_FRONT_DOOR"] == "127.0.0.1:18079"
     # The account exists only once registered, so it is given the program and the data after, and it starts last.
-    assert elevated[7] == ("grant_read", HOME)
-    assert elevated[8] == ("lock_data", HOME / "data", "hiro", "M")
-    assert elevated[10] == ("lock_secrets", HOME / "hiro.env")
+    assert elevated[8] == ("grant_read", HOME)
+    assert elevated[9] == ("lock_data", HOME / "data", "hiro", "M")
+    assert elevated[11] == ("lock_secrets", HOME / "hiro.env")
     assert result.front_door == "hiro-caddy" and result.firewall == [door.RULE_CADDY, door.RULE_NAMES]
     assert result.manager == "winsw"
     assert result.user == r"NT SERVICE\hiro"

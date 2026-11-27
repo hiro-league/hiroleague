@@ -25,6 +25,7 @@ class ServiceInstallResult:
     front_door_account: str | None = None
     firewall: list[str] = field(default_factory=list)
     front_door_names: str | None = None  # what announces the names on the LAN, or what to do for it (Linux)
+    cpp_runtime: str | None = None  # Windows: Microsoft's C++ runtime, present, installed now, or what to do for it
 
 
 @dataclass

@@ -30,6 +30,7 @@ from hiro_commons.winsw_service import (
     stop_service,
 )
 
+from .. import cpp_runtime
 from .. import front_door_setup as door
 from .. import linux_service as ls
 from .. import windows_service as ws
@@ -100,6 +101,9 @@ def install(
     # The service core installs channels and apps' releases with uv, and has no PATH of the person's: without the
     # home's own copy, a channel installed before any app failed to find uv.
     ws.copy_uv_into(lay.home)
+    # The core's graph database needs Microsoft's C++ runtime, which a fresh Windows lacks: without it the service
+    # never starts (DLL load failed while importing _kuzu, the fresh-install test in Windows Sandbox).
+    runtime = cpp_runtime.install(lay.home / "cache")
     spec = ws.build_spec(exe=exe, lay=lay, workspace=workspace)
     if core_name:
         spec = dataclasses.replace(spec, environment={**spec.environment, ENV_CORE_NAME: core_name})
@@ -134,6 +138,7 @@ def install(
         front_door=front.service if front else None,
         front_door_account=front.account if front else None,
         firewall=front.firewall if front else [],
+        cpp_runtime=runtime,
     )
 
 
