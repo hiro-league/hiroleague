@@ -10,7 +10,7 @@ that it brings back its last configuration by itself (``--resume``, its autosave
 
 - **Linux:** account ``hiro-caddy``; admin API on ``/run/hiro-caddy/admin.sock``, which the core's account opens
   through the ``hiro-caddy`` group the setup adds it to; port 80 through ``CAP_NET_BIND_SERVICE`` in Caddy's unit
-  alone; no firewall rule.
+  alone; no firewall rule. avahi, which announces the names on the LAN, installed with apt when it's missing.
 - **Windows:** account ``NT SERVICE\\hiro-caddy`` under WinSW; admin API on ``127.0.0.1:18079`` (Caddy takes no
   socket on Windows); port 80 needs no right; firewall rules for TCP 80 (caddy.exe) and UDP 5353 (the core's Python).
 - **Mac (untried):** the core's account; admin API on an owner-only socket in the Hiro home; port 80 needs no root
@@ -20,6 +20,8 @@ that it brings back its last configuration by itself (``--resume``, its autosave
 from __future__ import annotations
 
 import dataclasses
+import os
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -47,6 +49,7 @@ class FrontDoorSetup:
     service: str
     account: str
     firewall: list[str] = dataclasses.field(default_factory=list)  # the rules added (Windows)
+    names: str = ""  # what announces the names on the LAN, or what the person must do for it (Linux)
 
 
 def _run(cmd: list[str], what: str, *, ok_codes: tuple[int, ...] = (0,)) -> subprocess.CompletedProcess[str]:
@@ -155,7 +158,52 @@ def install_linux(core_user: ServiceUser) -> FrontDoorSetup:
     _run(["systemctl", "enable", f"{SERVICE}.service"], f"Enabling {SERVICE}")
     _run(["systemctl", "restart", f"{SERVICE}.service"], f"Starting {SERVICE}")
     log.info("✅ Front door installed — HiroServer · service", service=SERVICE, version=CADDY_VERSION)
-    return FrontDoorSetup(admin=LINUX_ADMIN, program=str(program), service=f"{SERVICE}.service", account=SERVICE)
+    return FrontDoorSetup(admin=LINUX_ADMIN, program=str(program), service=f"{SERVICE}.service", account=SERVICE,
+                          names=ensure_avahi())
+
+
+# The names on the LAN: the core runs avahi-publish (avahi-utils: runtime/name_publisher.py), which needs avahi's daemon
+AVAHI_PACKAGES = ("avahi-daemon", "avahi-utils")
+_APT_TIMEOUT_S = 600  # the package lists and two packages, on a slow line
+
+
+def _apt(*args: str) -> str:
+    """One ``apt-get`` call, never a question; "" when it worked, else its last words."""
+    try:
+        result = subprocess.run(  # noqa: S603 — a fixed system program, no shell
+            ["apt-get", *args], capture_output=True, text=True, timeout=_APT_TIMEOUT_S, check=False,  # noqa: S607
+            encoding="utf-8", errors="replace", env={**os.environ, "DEBIAN_FRONTEND": "noninteractive"},
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"{type(exc).__name__}: {exc}"
+    if result.returncode == 0:
+        return ""
+    return " | ".join((result.stderr or result.stdout).strip().splitlines()[-3:]) or f"exit code {result.returncode}"
+
+
+def ensure_avahi() -> str:
+    """avahi installed with apt when it's missing: a fresh Ubuntu server has none, and then no name is announced.
+
+    Never fails the install: without avahi the core still serves every name, the LAN just doesn't hear them (and the
+    core warns at each start). Returns what to tell the person.
+    """
+    if shutil.which("avahi-publish"):
+        return "avahi (announces each name on the LAN)"
+    by_hand = (f"avahi isn't installed, so names aren't announced on the LAN: install {' and '.join(AVAHI_PACKAGES)}, "
+               "then restart the core")
+    if not shutil.which("apt-get"):
+        log.warning("⚠️ Front door — avahi isn't installed and this system has no apt-get: names aren't announced "
+                    "on the LAN — HiroServer · service")
+        return by_hand
+    updated = _apt("update")  # a fresh machine may have no package lists yet; if this fails, the install says why
+    failed = _apt("install", "-y", *AVAHI_PACKAGES)
+    if failed:
+        log.warning("⚠️ Front door — avahi couldn't be installed: names aren't announced on the LAN — HiroServer · "
+                    "service", error=failed, update=updated or "ok")
+        return by_hand
+    log.info("✅ Front door — avahi installed: names are announced on the LAN — HiroServer · service",
+             packages=" ".join(AVAHI_PACKAGES))
+    return "avahi (installed now; announces each name on the LAN)"
 
 
 def uninstall_linux() -> bool:

@@ -186,6 +186,8 @@ def register(service_app: typer.Typer, console: Console) -> None:
         if result.get("front_door"):
             console.print(f"  Front door: {result['front_door']} [dim](Caddy on port 80, runs as "
                           f"{result['front_door_account']}; the core loads every name into it)[/dim]")
+        if result.get("front_door_names"):
+            console.print(f"  Names:      {result['front_door_names']}")
         for rule in result.get("firewall") or []:
             console.print(f"  Firewall:   {rule}")
         port = _first_admin_port()

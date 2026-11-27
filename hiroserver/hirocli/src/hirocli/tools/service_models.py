@@ -24,6 +24,7 @@ class ServiceInstallResult:
     front_door: str | None = None
     front_door_account: str | None = None
     firewall: list[str] = field(default_factory=list)
+    front_door_names: str | None = None  # what announces the names on the LAN, or what to do for it (Linux)
 
 
 @dataclass

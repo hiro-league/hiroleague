@@ -72,6 +72,7 @@ def install(*, user: str | None = None, workspace: str | None = None, core_name:
         logs=_logs(unit),
         front_door=front.service if front else None,
         front_door_account=front.account if front else None,
+        front_door_names=front.names if front else None,
     )
 
 
