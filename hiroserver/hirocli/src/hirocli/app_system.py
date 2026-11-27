@@ -38,11 +38,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from hiro_commons.fetch import shared_downloads
 from hiro_commons.log import Logger
 from hiro_commons.systemd_service import ServiceError, ServiceSpec, render_unit
 
 from .domain.hiro_home import APPS
 from .domain.system_job import INSTALL, AppSystem, JobRefused
+from .windows_service import copy_uv_into
 
 log = Logger.get("CLI.APP_SYSTEM")
 
@@ -268,8 +270,10 @@ def install_windows(app: AppSystem) -> SystemDone:
     _run(["icacls", str(apps), "/grant", f"{account}:(OI)(CI)M"], f"Letting the core change {apps}")
     for path in (folder.root, folder.releases, folder.data):
         path.mkdir(parents=True, exist_ok=True)
-    _home_uv(folder.home)
-    install_service(windows_spec(app), folder.service_dir)  # the app's virtual account exists from here on
+    copy_uv_into(folder.home)
+    # The app's virtual account exists from here on. Its WinSW comes from the downloads folder: the core's service
+    # left one there, and each app downloaded its own (17 MB from GitHub, most of an app's install in the test)
+    install_service(windows_spec(app), folder.service_dir, downloads=shared_downloads(folder.home))
     lock_folder(folder.root, service_id=app.service, service_rights="RX")
     _run(["icacls", str(folder.root), "/grant", f"{account}:(OI)(CI)M"], f"Letting the core change {folder.root}")
     _run(["icacls", str(folder.data), "/grant", f"NT SERVICE\\{app.service}:(OI)(CI)M"],
@@ -279,20 +283,6 @@ def install_windows(app: AppSystem) -> SystemDone:
     log.info("✅ An app's service made — HiroServer · extension", key=app.key, service=app.service, core=account)
     return SystemDone(action=INSTALL, key=app.key, service=app.service, account=f"NT SERVICE\\{app.service}",
                       core_account=account, folder=str(folder.root))
-
-
-def _home_uv(home: Path) -> None:
-    """The core unpacks an app's release with uv: a service core has no PATH of the person's, so the Hiro home keeps
-    its own copy (``<home>/bin/uv.exe``), taken from this person's uv once."""
-    target = home / "bin" / "uv.exe"
-    if target.is_file():
-        return
-    found = shutil.which("uv")
-    if not found:
-        raise ServiceError("uv isn't on this PATH: install uv (https://docs.astral.sh/uv/), then install the app again.")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(found, target)
-    log.info("The Hiro home has its own uv now — HiroServer · extension", path=str(target))
 
 
 def _writable_then_again(func: Callable[..., object], path: str, exc: BaseException) -> None:

@@ -21,11 +21,13 @@ def test_every_system_has_a_pinned_archive_of_the_same_release() -> None:
         assert len(sha256) == 64 and int(sha256, 16) >= 0
 
 
-def _fake_fetch(monkeypatch, make) -> list[str]:
+def _fake_fetch(monkeypatch, make, folders: list | None = None) -> list[str]:
     asked: list[str] = []
 
-    def fetch(url: str, dest: Path, sha256: str) -> bool:
+    def fetch(url: str, dest: Path, sha256: str, *, shared: Path | None = None) -> bool:
         asked.append(url)
+        if folders is not None:
+            folders.append(shared)
         dest.parent.mkdir(parents=True, exist_ok=True)
         make(dest)
         return True
@@ -75,7 +77,7 @@ def test_an_archive_without_the_program_or_a_system_without_one_is_refused(tmp_p
 
 
 def test_a_download_that_is_not_the_pinned_file_is_a_service_error(tmp_path, monkeypatch) -> None:
-    def refuse(url: str, dest: Path, sha256: str) -> bool:
+    def refuse(url: str, dest: Path, sha256: str, *, shared: Path | None = None) -> bool:
         raise FetchError("caddy.zip is not the file this version of Hiro League expects")
 
     monkeypatch.setattr(cr, "fetch_checked", refuse)
@@ -98,3 +100,14 @@ def test_installing_again_keeps_the_same_program_the_running_front_door_uses(tmp
     monkeypatch.setattr(cr.os, "replace", locked)
     assert cr.fetch_caddy(tmp_path, "windows", "amd64") == program  # no replace tried
     assert program.read_bytes() == b"MZ caddy"
+
+
+def test_the_archive_goes_through_the_machines_downloads_folder(tmp_path, monkeypatch) -> None:
+    def make(dest: Path) -> None:
+        with zipfile.ZipFile(dest, "w") as zf:
+            zf.writestr("caddy.exe", b"MZ caddy")
+
+    folders: list = []
+    _fake_fetch(monkeypatch, make, folders)
+    cr.fetch_caddy(tmp_path / "caddy", "windows", "amd64", downloads=tmp_path / "cache" / "downloads")
+    assert folders == [tmp_path / "cache" / "downloads"]

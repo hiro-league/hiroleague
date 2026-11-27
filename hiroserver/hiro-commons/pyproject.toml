@@ -28,6 +28,9 @@ dependencies = [
     "colorama>=0.4.6",
     # A story's id and its timed steps (logging_foundation/story.py): OpenTelemetry's Stable tracing API only.
     "opentelemetry-api>=1.45.2",
+    # Pinned downloads (fetch.py) check certificates with the system's own store: a fresh Windows fetches a missing
+    # root only for the system's own checks, never for Python's.
+    "truststore>=0.10.5",
 ]
 
 [project.urls]
