@@ -105,7 +105,7 @@ def start_server(
     Returns the child PID on success (``None`` for foreground mode, which
     blocks until the server exits).
     """
-    load_or_create_master_key(workspace_path, filename=config.master_key_file)
+    load_or_create_master_key(workspace_path)
     ensure_mandatory_devices_channel(workspace_path, config)
 
     pid = read_running_pid(workspace_path, PID_FILENAME)
@@ -270,7 +270,7 @@ def ensure_mandatory_devices_channel(workspace_path: Path, config: Config) -> No
             **(existing.config if existing else {}),
             "gateway_url": config.gateway_connect_url(),
             "device_id": config.device_id,
-            "master_key_path": str(master_key_path(workspace_path, config)),
+            "master_key_path": str(master_key_path(workspace_path)),
             "ping_interval": (
                 existing.config.get("ping_interval", DEFAULT_PING_INTERVAL_SECONDS)
                 if existing

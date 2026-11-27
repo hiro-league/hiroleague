@@ -133,7 +133,7 @@ class ProviderAddApiKeyTool(Tool):
     name = "provider_add_api_key"
     description = (
         "Store an API key for a cloud catalog provider in the workspace credential store "
-        "(OS keyring + providers.json metadata). Validates provider_id against the bundled catalog."
+        "(OS keyring + credentials index metadata). Validates provider_id against the bundled catalog."
     )
     params = {
         "provider_id": ToolParam(str, "Catalog provider id, e.g. openai, google, anthropic"),

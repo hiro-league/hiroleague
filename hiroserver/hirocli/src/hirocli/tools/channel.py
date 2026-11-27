@@ -324,7 +324,7 @@ class ChannelSetupTool(Tool):
                 **channel_data,
                 "gateway_url": current.gateway_connect_url(),
                 "device_id": current.device_id,
-                "master_key_path": str(master_key_path(workspace_path, current)),
+                "master_key_path": str(master_key_path(workspace_path)),
                 "ping_interval": channel_data.get("ping_interval", 30),
             }
 

@@ -147,7 +147,6 @@ class SetupTool(Tool):
             # Carry the extension address forward so re-running setup keeps it.
             extension_host=existing.extension_host,
             extension_port=existing.extension_port,
-            master_key_file=existing.master_key_file,
             pairing_code_length=existing.pairing_code_length,
             pairing_code_ttl_seconds=existing.pairing_code_ttl_seconds,
             attestation_expires_days=existing.attestation_expires_days,
@@ -161,7 +160,7 @@ class SetupTool(Tool):
             core_name=name,
         )
         save_config(workspace_path, config)
-        private_key = load_or_create_master_key(workspace_path, filename=config.master_key_file)
+        private_key = load_or_create_master_key(workspace_path)
         public_key_b64 = public_key_to_b64(private_key.public_key())
         ctrl.ensure_mandatory_devices_channel(workspace_path, config)
         ctrl.ensure_default_preferences(workspace_path)
@@ -205,7 +204,7 @@ class SetupTool(Tool):
             device_id=config.device_id,
             gateway_url=config.gateway_url,
             http_port=config.http_port,
-            master_key=str(master_key_path(workspace_path, config)),
+            master_key=str(master_key_path(workspace_path)),
             desktop_pub=public_key_b64,
             server_started=start_server,
             providers_imported=providers_imported,

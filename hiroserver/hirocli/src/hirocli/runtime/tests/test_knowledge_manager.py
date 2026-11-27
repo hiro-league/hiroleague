@@ -25,7 +25,7 @@ def _build_ctx(tmp_path: Path) -> ServerContext:
         workspace_name="test",
         config=config,
         stop_event=stop_event,
-        desktop_private_key=load_or_create_master_key(workspace, filename=config.master_key_file),
+        desktop_private_key=load_or_create_master_key(workspace),
     )
 
 

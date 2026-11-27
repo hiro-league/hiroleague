@@ -107,14 +107,13 @@ def _load_converting(workspace_path: Path, text: str) -> WorkspacePreferences:
             extra={
                 "ai_profiles": summary_v4.ai_profiles,
                 "voice_profiles": summary_v4.voice_profiles,
-                "backup": summary_v4.backup,
                 "workspace_path": str(workspace_path.resolve()),
             },
         )
     logger.info(
         "✅ Preferences converted — workspace · v4 → v5 (embedding and reranker profiles) · %s",
         summary_v5.line(),
-        extra={"backup": summary_v5.backup, "workspace_path": str(workspace_path.resolve())},
+        extra={"workspace_path": str(workspace_path.resolve())},
     )
     return prefs
 

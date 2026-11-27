@@ -19,7 +19,8 @@ from hiro_commons.process import read_running_pid
 
 from ..constants import PID_FILENAME
 from ..domain.config import load_config, load_state
-from ..domain.crypto import load_or_create_master_key, MASTER_KEY_FILE
+from ..domain.crypto import load_or_create_master_key
+from ..domain.workspace_layout import master_key_path, move_credentials
 from ..domain.workspace import (
     WorkspaceError,
     admin_port_for,
@@ -342,14 +343,13 @@ class WorkspaceGetPublicKeyTool(Tool):
                 f"Workspace '{entry.name}' is not configured. "
                 f"Run setup first."
             )
-        key_filename = config.master_key_file or MASTER_KEY_FILE
-        key_path = ws_path / key_filename
-        if not key_path.exists():
+        move_credentials(ws_path)
+        if not master_key_path(ws_path).exists():
             raise WorkspaceError(
                 f"Master key file not found for workspace '{entry.name}'. "
                 f"Run setup to generate it."
             )
-        private_key = load_or_create_master_key(ws_path, filename=key_filename)
+        private_key = load_or_create_master_key(ws_path)
         public_key_b64 = public_key_to_b64(private_key.public_key())
         return WorkspacePublicKeyResult(
             id=entry.id,
@@ -381,8 +381,9 @@ class WorkspaceRegenerateKeyTool(Tool):
                 f"Workspace '{entry.name}' is not configured. "
                 f"Run setup first."
             )
-        key_filename = config.master_key_file or MASTER_KEY_FILE
-        key_path = ws_path / key_filename
+        move_credentials(ws_path)
+        key_path = master_key_path(ws_path)
+        key_path.parent.mkdir(parents=True, exist_ok=True)
 
         new_private_key = generate_private_key()
         key_path.write_bytes(private_key_to_pem(new_private_key))

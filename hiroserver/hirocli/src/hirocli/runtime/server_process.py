@@ -40,6 +40,7 @@ from hirocli.constants import (
 )
 from hirocli.domain.config import load_config, mark_disconnected, workspace_log_dir
 from hirocli.domain.crypto import load_or_create_master_key
+from hirocli.domain.workspace_layout import drop_old_copies
 from hirocli.domain.character import seed_default_characters
 from hirocli.domain.data_store import ensure_data_db
 from hirocli.domain.db import ensure_db
@@ -59,6 +60,7 @@ from hirocli.runtime.service_watch import watch_service_wrapper
 from hirocli.services.metrics import MetricsCollector
 from hirocli.tools import all_tools
 from hirocli.tools.registry import RuntimeContext, ToolRegistry
+from hirocli.tools.server_control import ensure_mandatory_devices_channel
 
 log = Logger.get("SERVER")
 
@@ -75,7 +77,11 @@ def _build_context(
 ) -> ServerContext:
     """Load config, keys, and build the shared ServerContext."""
     config = load_config(workspace_path)
-    desktop_private_key = load_or_create_master_key(workspace_path, filename=config.master_key_file)
+    desktop_private_key = load_or_create_master_key(workspace_path)
+    # The devices channel is told where the key is: a server started without `hiro start` (a self-restart into new
+    # code) still gives it the key's place in credentials/, where the line above may just have moved it.
+    ensure_mandatory_devices_channel(workspace_path, config)
+    drop_old_copies(workspace_path)
     return ServerContext(
         workspace_path=workspace_path,
         workspace_name=workspace_name,
