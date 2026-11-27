@@ -121,3 +121,57 @@ def test_the_certificate_is_checked_by_the_system_not_by_pythons_own_list(tmp_pa
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     assert fetch.fetch_checked("https://github.com/example/pinned.zip", tmp_path / "pinned.zip", GOOD) is True
     assert isinstance(seen["context"], truststore.SSLContext)
+
+
+# The machine's downloads folder: one copy of each pinned file, used by the next place that wants it
+
+
+def test_a_download_leaves_a_copy_the_next_service_takes_without_downloading(server, tmp_path: Path, logged) -> None:
+    # Each Windows service has its own WinSW: the fresh-install test downloaded it from GitHub once per service
+    shared = fetch.shared_downloads(tmp_path / "home")
+    url = f"{server}/winsw.exe"
+    assert fetch_checked(url, tmp_path / "core" / "hiro.exe", GOOD, shared=shared) is True
+    assert (shared / fetch.shared_name(url, GOOD)).read_bytes() == BODY
+
+    app = tmp_path / "app" / "hiro-example-hello.exe"
+    assert fetch_checked(url, app, GOOD, shared=shared) is False
+    assert app.read_bytes() == BODY
+    assert _Handler.hits == 1
+    assert list(app.parent.iterdir()) == [app]  # no temporary file left
+    assert any("taken from the downloads folder" in line["Body"] for line in logged())
+
+
+def test_a_copy_put_there_beforehand_is_used(server, tmp_path: Path) -> None:
+    # The fresh-install test fills the folder before the core installs, so a run downloads nothing
+    shared = tmp_path / "downloads"
+    shared.mkdir()
+    url = f"{server}/winsw.exe"
+    (shared / fetch.shared_name(url, GOOD)).write_bytes(BODY)
+    assert fetch_checked(url, tmp_path / "hiro.exe", GOOD.upper(), shared=shared) is False
+    assert _Handler.hits == 0
+
+
+def test_a_changed_copy_is_refused_and_the_file_downloaded(server, tmp_path: Path, logged) -> None:
+    shared = tmp_path / "downloads"
+    shared.mkdir()
+    url = f"{server}/winsw.exe"
+    kept = shared / fetch.shared_name(url, GOOD)
+    kept.write_bytes(b"someone changed this file")
+    dest = tmp_path / "hiro.exe"
+
+    assert fetch_checked(url, dest, GOOD, shared=shared) is True
+    assert dest.read_bytes() == BODY
+    assert kept.read_bytes() == BODY  # the download's checked copy replaces it
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["downloads", "hiro.exe", "logs"]
+    (warning,) = [line for line in logged() if line["SeverityText"] == "WARNING"]
+    assert "not the file pinned" in warning["Body"]
+
+
+def test_a_folder_it_cannot_write_costs_only_a_later_download(server, tmp_path: Path, logged) -> None:
+    shared = tmp_path / "downloads"
+    shared.write_text("a file where the folder should be", encoding="utf-8")
+    dest = tmp_path / "hiro.exe"
+    assert fetch_checked(f"{server}/winsw.exe", dest, GOOD, shared=shared) is True
+    assert dest.read_bytes() == BODY
+    (warning,) = [line for line in logged() if line["SeverityText"] == "WARNING"]
+    assert "Could not keep a copy" in warning["Body"]

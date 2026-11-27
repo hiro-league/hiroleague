@@ -32,6 +32,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from hiro_commons.fetch import shared_downloads
 from hiro_commons.log import Logger
 from hiro_commons.systemd_service import ServiceError, ServiceSpec, render_unit
 
@@ -263,7 +264,9 @@ def install_windows(app: AppSystem) -> SystemDone:
     for path in (folder.root, folder.releases, folder.data):
         path.mkdir(parents=True, exist_ok=True)
     copy_uv_into(folder.home)
-    install_service(windows_spec(app), folder.service_dir)  # the app's virtual account exists from here on
+    # The app's virtual account exists from here on. Its WinSW comes from the downloads folder: the core's service
+    # left one there, and each app downloaded its own (17 MB from GitHub, most of an app's install in the test)
+    install_service(windows_spec(app), folder.service_dir, downloads=shared_downloads(folder.home))
     lock_folder(folder.root, service_id=app.service, service_rights="RX")
     _run(["icacls", str(folder.root), "/grant", f"{account}:(OI)(CI)M"], f"Letting the core change {folder.root}")
     _run(["icacls", str(folder.data), "/grant", f"NT SERVICE\\{app.service}:(OI)(CI)M"],

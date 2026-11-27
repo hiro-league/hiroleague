@@ -11,6 +11,7 @@ import subprocess
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from hiro_commons.fetch import shared_downloads
 from hiro_commons.log import Logger
 from hiro_commons.systemd_service import ServiceError
 from hiro_commons.winsw_service import (
@@ -103,7 +104,7 @@ def install(
     ws.copy_uv_into(lay.home)
     # The core's graph database needs Microsoft's C++ runtime, which a fresh Windows lacks: without it the service
     # never starts (DLL load failed while importing _kuzu, the fresh-install test in Windows Sandbox).
-    runtime = cpp_runtime.install(lay.home / "cache")
+    runtime = cpp_runtime.install(lay.home / "cache", shared_downloads(lay.home))
     spec = ws.build_spec(exe=exe, lay=lay, workspace=workspace)
     if core_name:
         spec = dataclasses.replace(spec, environment={**spec.environment, ENV_CORE_NAME: core_name})
@@ -112,7 +113,7 @@ def install(
     front = door.install_windows(lay.home, door.which_python(exe.parent.parent)) if not workspace else None
     if front is not None:
         spec = dataclasses.replace(spec, environment={**spec.environment, ENV_FRONT_DOOR: front.admin})
-    install_service(spec, lay.service_dir)
+    install_service(spec, lay.service_dir, downloads=shared_downloads(lay.home))
     # The account exists from here on: it may read the program, and its data folder and secrets file are locked to it.
     grant_read(lay.home, service_id=name)
     lay.logs_dir.mkdir(parents=True, exist_ok=True)

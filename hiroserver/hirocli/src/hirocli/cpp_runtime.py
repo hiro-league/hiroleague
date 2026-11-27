@@ -5,11 +5,15 @@ Windows doesn't have and Python doesn't bring (it brings vcruntime140.dll only).
 installer, from Microsoft's link, run only when Microsoft signed it, without its window. The command says so on screen
 before it starts. When it can't (no network, a refused signature), the install goes on and says what to install, and
 the core says the same when it can't load the runtime.
+
+An installer in the machine's downloads folder (``fetch.shared_downloads``) is used instead of a download, checked by
+its signature like one: a test machine's run puts it there beforehand. A download isn't kept: it runs once a machine.
 """
 
 from __future__ import annotations
 
 import os
+import shutil
 import ssl
 import subprocess
 import urllib.error
@@ -59,13 +63,22 @@ def signer_of(path: Path) -> str:
     return result.stdout.strip()
 
 
-def install(cache: Path) -> str:
+INSTALLER = "vc_redist.x64.exe"
+
+
+def install(cache: Path, downloads: Path | None = None) -> str:
     """Install the runtime when it's missing. Returns what to tell the person; never raises for a failure."""
     if not missing():
         return "present"
-    installer = cache / "vc_redist.x64.exe"
+    installer = cache / INSTALLER
+    kept = downloads / INSTALLER if downloads is not None else None
     try:
-        _download(installer)
+        if kept is not None and kept.is_file():
+            installer.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(kept, installer)  # its signature is checked below, on the copy that runs
+            log.info("✅ Microsoft's C++ runtime installer taken from the downloads folder — HiroServer · service")
+        else:
+            _download(installer)
         signer = signer_of(installer)
         if SIGNER not in signer:
             log.warning("⚠️ The C++ runtime's installer isn't signed by Microsoft, so it wasn't run — HiroServer · service",

@@ -52,8 +52,8 @@ def elevated(monkeypatch, windows):
     monkeypatch.setattr(ws, "install_release", fake_release)
     monkeypatch.setattr(ws, "copy_uv_into", lambda home: calls.append(("uv", home)))
 
-    def fake_runtime(cache):
-        calls.append(("cpp_runtime", cache))
+    def fake_runtime(cache, downloads):
+        calls.append(("cpp_runtime", cache, downloads))
         return "installed now (Microsoft's Visual C++ Redistributable)"
 
     monkeypatch.setattr(cpp_runtime, "install", fake_runtime)
@@ -66,7 +66,10 @@ def elevated(monkeypatch, windows):
                                    firewall=[door.RULE_CADDY, door.RULE_NAMES])
 
     monkeypatch.setattr(door, "install_windows", fake_door)
-    monkeypatch.setattr(service_windows, "install_service", lambda spec, folder: calls.append(("register", spec, folder)))
+    monkeypatch.setattr(
+        service_windows, "install_service",
+        lambda spec, folder, *, downloads: calls.append(("register", spec, folder, downloads)),
+    )
     monkeypatch.setattr(service_windows, "grant_read", lambda path, *, service_id: calls.append(("grant_read", path)))
     monkeypatch.setattr(
         service_windows, "lock_folder",
@@ -177,11 +180,13 @@ def test_install_registers_then_locks_the_data_then_starts(elevated) -> None:
     # The service core's own uv, in the home: it installs a channel with it before any app is installed.
     assert elevated[4] == ("uv", HOME)
     # Microsoft's C++ runtime before the service starts: the graph database can't load without it
-    assert elevated[5] == ("cpp_runtime", HOME / "cache")
+    assert elevated[5] == ("cpp_runtime", HOME / "cache", HOME / "cache" / "downloads")
     assert result.cpp_runtime.startswith("installed now")
     # The front door's firewall rule for names follows the release's own Python; the core is given its address.
     assert elevated[6] == ("front_door", HOME, HOME / "python" / "cpython-3.12" / "python.exe")
     assert elevated[7][1].environment["HIRO_FRONT_DOOR"] == "127.0.0.1:18079"
+    # Its WinSW goes through the machine's downloads folder, where each app's service then finds it
+    assert elevated[7][3] == HOME / "cache" / "downloads"
     # The account exists only once registered, so it is given the program and the data after, and it starts last.
     assert elevated[8] == ("grant_read", HOME)
     assert elevated[9] == ("lock_data", HOME / "data", "hiro", "M")
@@ -333,7 +338,7 @@ def test_an_unexpected_error_in_the_elevated_run_still_reaches_the_asking_termin
 def test_a_failed_wrapper_download_is_a_service_error(monkeypatch, tmp_path) -> None:
     from hiro_commons.fetch import FetchError
 
-    def refuse(url, dest, sha256):
+    def refuse(url, dest, sha256, *, shared=None):
         raise FetchError("Could not download hiro.exe from https://github.com/...: name not resolved.")
 
     monkeypatch.setattr(w, "fetch_checked", refuse)

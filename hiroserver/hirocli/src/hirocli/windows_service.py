@@ -8,6 +8,7 @@ install names another), the way Simone's deploy uses ``/opt/hiroleague``:
     <home>\\python\\              the Python uv installs (UV_PYTHON_INSTALL_DIR)
     <home>\\releases\\<time>\\    one install of Hiro League (its tools and its bin\\hiro.exe)
     <home>\\service\\<name>.exe   the service's own copy of WinSW, and <name>.xml beside it
+    <home>\\cache\\downloads\\    one checked copy of each pinned download (WinSW, Caddy) for every service
     <home>\\<name>.env            the secrets file (provider keys), read by the server itself
     <data>\\                      the workspace registry and workspaces (HIRO_DATA_DIR); <home>\\data unless named
     <data>\\service-logs\\        WinSW's own log and what the server writes before its log file is open

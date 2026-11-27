@@ -26,6 +26,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from hiro_commons.fetch import shared_downloads
 from hiro_commons.log import Logger
 from hiro_commons.systemd_service import ServiceError, ServiceUser, quote_exec_arg
 
@@ -147,7 +148,7 @@ def install_linux(core_user: ServiceUser) -> FrontDoorSetup:
     if core_user.name not in grp.getgrnam(SERVICE).gr_mem:
         _run(["usermod", "--append", "--groups", SERVICE, core_user.name],
              f"Letting {core_user.name} reach the front door")
-    program = fetch_caddy(home)  # root's: only this step changes it
+    program = fetch_caddy(home, downloads=shared_downloads(home.parent))  # root's: only this step changes it
     _write(home / "initial.json", initial_config(parse_admin(LINUX_ADMIN)))
     for folder in (home / "config", home / "data"):
         folder.mkdir(parents=True, exist_ok=True)
@@ -242,7 +243,7 @@ def install_windows(home: Path, core_python: Path) -> FrontDoorSetup:
     from hiro_commons.winsw_service import WinswSpec, grant_read, install_service, lock_folder, start_service
 
     caddy_home = home / "caddy"
-    program = fetch_caddy(caddy_home)
+    program = fetch_caddy(caddy_home, downloads=shared_downloads(home))
     initial = caddy_home / "initial.json"
     _write(initial, initial_config(parse_admin(WINDOWS_ADMIN)))
     spec = WinswSpec(
@@ -256,7 +257,7 @@ def install_windows(home: Path, core_python: Path) -> FrontDoorSetup:
         environment={"XDG_CONFIG_HOME": str(caddy_home / "config"), "XDG_DATA_HOME": str(caddy_home / "data")},
         stop_timeout_s=15,
     )
-    install_service(spec, home / "service")
+    install_service(spec, home / "service", downloads=shared_downloads(home))
     # The account exists from here on: it reads its program and its WinSW (home\service), as the core's account does,
     # and only it (and administrators) touch its state. The data folder and secrets file keep their own permissions.
     grant_read(home, service_id=SERVICE)
@@ -303,7 +304,7 @@ def install_mac(core_user: ServiceUser, home: Path) -> FrontDoorSetup:
     from hiro_commons.launchd_service import LaunchdSpec, install_service
 
     caddy_home = home / "caddy"
-    program = fetch_caddy(caddy_home)
+    program = fetch_caddy(caddy_home, downloads=shared_downloads(home))
     admin = mac_admin(home)
     initial = caddy_home / "initial.json"
     _write(initial, initial_config(parse_admin(admin)))
