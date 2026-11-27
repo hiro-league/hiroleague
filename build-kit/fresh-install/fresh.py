@@ -28,6 +28,12 @@ Run from the root of a hiroleague checkout. Everything lands in ``C:\\hiro\\test
    removal, WhatsApp's install, upgrade and removal, the phones' channel refused, the core's LAN name, the service's
    log read for problems.
 
+**The package cache** (the default; ``--fresh`` skips it): every file uv downloads (PyPI's packages, its Pythons)
+comes through a cache on Simone (cache-start.sh: proxpi for PyPI, python_mirror.py for the Pythons, kept in
+``~/hiro-fresh/cache``), which downloads each file once and serves it from disk after. uv still picks every version
+(a list of versions older than 30 minutes is asked again), so a build that changes one package downloads that one.
+The only difference from a person's machine: uv's machine-wide settings file points at the cache.
+
 Nothing here touches this PC's or Simone's own Hiro League: no service, no uv tool, no workspace; the machine is
 thrown away.
 """
@@ -55,6 +61,11 @@ PERSON = "person"
 SANDBOX_BUNDLE = r"C:\fresh\bundle"
 SANDBOX_RESULTS = r"C:\fresh\results"
 _WAIT_S = 3 * 3600  # a first run downloads uv, Python, every package, WinSW and Caddy
+# The package cache on Simone (cache-start.sh): every machine reaches it at Simone's LAN address (the VMs too, through
+# their NAT network)
+CACHE_HOST = "192.168.1.10"
+CACHE_INDEX = f"http://{CACHE_HOST}:3141/index/"
+CACHE_PYTHONS = f"http://{CACHE_HOST}:3142"
 
 
 def say(text: str) -> None:
@@ -68,7 +79,14 @@ def run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
 # --- the bundle ----------------------------------------------------------------------------------------------------
 
 
-def build_bundle(out: Path, *, close: bool) -> str:
+def start_cache() -> None:
+    """Start the package cache on Simone when it isn't running (cache-start.sh): PyPI and uv's Pythons."""
+    run(["ssh", SIMONE, "mkdir -p hiro-fresh"])
+    run(["scp", "-q", str(HERE / "cache-start.sh"), str(HERE / "python_mirror.py"), f"{SIMONE}:hiro-fresh/"])
+    run(["ssh", SIMONE, "bash hiro-fresh/cache-start.sh"])
+
+
+def build_bundle(out: Path, *, close: bool, cache: bool) -> str:
     """The bundle as it ships; returns the commit it holds."""
     commit = run(["git", "-C", str(REPO), "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
     dirty = run(["git", "-C", str(REPO), "status", "--porcelain", "--untracked-files=no"], capture_output=True,
@@ -94,6 +112,8 @@ def build_bundle(out: Path, *, close: bool) -> str:
     (out / "COMMIT").write_text(commit + "\n", encoding="utf-8")
     if close:
         (out / "CLOSE").write_text("close the machine when the run ends\n", encoding="utf-8")
+    if cache:  # the run scripts point the machine's uv at the cache (--fresh: no file, the internet as a person's)
+        (out / "CACHE").write_text(f"{CACHE_INDEX} {CACHE_PYTHONS}\n", encoding="utf-8")
     return commit
 
 
@@ -248,11 +268,16 @@ def main(argv: list[str]) -> int:
                         help=f"simone: the distribution, or all of them one after another (default {DISTROS[0]})")
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT, help=f"where runs go (default {DEFAULT_ROOT})")
     parser.add_argument("--keep", action="store_true", help="keep the machine after the run, to look inside")
+    parser.add_argument("--fresh", action="store_true",
+                        help="download everything from the internet, as a person's first install (default: through "
+                             "the package cache on Simone, which downloads each file once)")
     args = parser.parse_args(argv)
     run_dir = args.root / "runs" / f"{datetime.now().astimezone():%Y%m%d-%H%M%S}-{args.system}"  # this PC's time
     bundle, results = run_dir / "bundle", run_dir / "results"
     results.mkdir(parents=True)
-    build_bundle(bundle, close=not args.keep)
+    if not args.fresh:
+        start_cache()
+    build_bundle(bundle, close=not args.keep, cache=not args.fresh)
     if args.system == "simone":
         distros = DISTROS if args.distro == "all" else (args.distro,)
         passed = {d: report(run_simone(run_dir, bundle, d, keep=args.keep)) for d in distros}

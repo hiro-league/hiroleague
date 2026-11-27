@@ -84,6 +84,16 @@ robocopy $Bundle C:\hiro-test /E /NFL /NDL /NJH /NJS /NP | Out-Null
 $hello = 'C:\hiro-test\hello'
 $core = 'C:\hiro-test\hiroleague\hiroserver\hiroleague'
 
+# The package cache (fresh.py, unless --fresh): uv's machine-wide settings, which every uv here obeys (the person's,
+# the service's, the core's own for apps), point at Simone's cache. The only difference from a person's machine.
+$cacheFile = Join-Path $Bundle 'CACHE'
+if (Test-Path $cacheFile) {
+    $index, $pythons = (Get-Content $cacheFile -TotalCount 1).Trim() -split '\s+'
+    New-Item -ItemType Directory -Force 'C:\ProgramData\uv' | Out-Null
+    $toml = "python-install-mirror = `"$pythons`"`n`n[[index]]`nurl = `"$index`"`ndefault = true`n"
+    [IO.File]::WriteAllText('C:\ProgramData\uv\uv.toml', $toml, (New-Object Text.UTF8Encoding($false)))
+    $env:UV_HTTP_TIMEOUT = '1800'  # the cache answers a file it fetches for the first time only once it has it all
+}
 Invoke-Step 'uv' ok '' 'powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"' | Out-Null
 $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 Invoke-Step 'core (uv tool install)' ok '' "uv tool install --python 3.12 $core" | Out-Null
@@ -124,9 +134,20 @@ $password = [Guid]::NewGuid().ToString('N') + 'Aa1!'
 net user freshperson $password /add | Out-Null
 $credential = New-Object Management.Automation.PSCredential('freshperson', (ConvertTo-SecureString $password -AsPlainText -Force))
 $userLine = "set HIRO_DATA_DIR=C:\ProgramData\HiroLeague\data&& `"$($release.FullName)\bin\hiro.exe`" extension list"
-Start-Process -FilePath $env:ComSpec -ArgumentList "/d /s /c `"$userLine`"" -Credential $credential -LoadUserProfile -Wait `
-    -WorkingDirectory C:\ -RedirectStandardOutput $userLog -RedirectStandardError "$userLog.err" -NoNewWindow
-Get-Content "$userLog.err" -ErrorAction SilentlyContinue | Add-Content $userLog
+# Its output goes to a folder the standard user may write (not the mapped results folder), then into the log; the
+# start's own failure and the exit code go in the log too: a run that said nothing left an empty log
+$userOut = 'C:\Users\Public\fresh-user.out'
+$userErr = 'C:\Users\Public\fresh-user.err'
+try {
+    $p = Start-Process -FilePath $env:ComSpec -ArgumentList "/d /s /c `"$userLine`"" -Credential $credential -LoadUserProfile `
+        -Wait -PassThru -WorkingDirectory C:\ -RedirectStandardOutput $userOut -RedirectStandardError $userErr -NoNewWindow `
+        -ErrorAction Stop
+    $started = "exit $($p.ExitCode)"
+} catch {
+    $started = "the start failed: $($_.Exception.Message)"
+}
+[IO.File]::WriteAllText($userLog, "> (as freshperson) $userLine`r`n$started`r`n")
+Get-Content $userOut, $userErr -ErrorAction SilentlyContinue | Add-Content $userLog
 $told = Select-String -Path $userLog -Pattern 'administrator terminal' -Quiet
 Add-Result 'a standard user is told to be an administrator' $told 0 $(if ($told) { 'as expected' } else { 'see its log' }) ('logs/' + (Split-Path $userLog -Leaf))
 

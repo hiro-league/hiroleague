@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
+import urllib.error
+import urllib.request
 import xml.etree.ElementTree as ET
-from pathlib import PureWindowsPath
+from pathlib import Path, PureWindowsPath
 
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
 
 import fresh
+import python_mirror
+import pytest
 import read_logs
 
 
@@ -48,3 +53,34 @@ def test_a_traceback_passes_only_when_the_run_caused_it() -> None:
     assert read_logs.service(expected) == []
     crash = "Traceback (most recent call last):\n  File x\nImportError: DLL load failed while importing _pydantic_core"
     assert len(read_logs.service(crash)) == 2  # the traceback and the failed load, each named
+
+
+def _mirror(tmp_path: Path, monkeypatch) -> tuple[str, list[str]]:
+    fetched: list[str] = []
+
+    def fake_fetch(url: str, target: Path) -> None:  # stands in for GitHub
+        fetched.append(url)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"python build")
+
+    monkeypatch.setattr(python_mirror.Mirror, "_fetch", staticmethod(fake_fetch))
+    python_mirror.Mirror.folder = tmp_path
+    server = python_mirror.ThreadingHTTPServer(("127.0.0.1", 0), python_mirror.Mirror)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return f"http://127.0.0.1:{server.server_address[1]}", fetched
+
+
+def test_the_python_mirror_downloads_a_build_once_then_serves_it_from_disk(tmp_path, monkeypatch) -> None:
+    base, fetched = _mirror(tmp_path, monkeypatch)
+    for _ in range(2):
+        with urllib.request.urlopen(f"{base}/20260211/cpython-3.12.12.tar.gz") as r:
+            assert r.read() == b"python build"
+    assert fetched == [f"{python_mirror.UPSTREAM}/20260211/cpython-3.12.12.tar.gz"]
+
+
+@pytest.mark.parametrize("path", ["/../secret/x", "/one-part", "/a/b/c", "/a/.."])
+def test_the_python_mirror_refuses_any_other_path(tmp_path, monkeypatch, path) -> None:
+    base, fetched = _mirror(tmp_path, monkeypatch)
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        urllib.request.urlopen(base + path)
+    assert refused.value.code == 404 and fetched == []
