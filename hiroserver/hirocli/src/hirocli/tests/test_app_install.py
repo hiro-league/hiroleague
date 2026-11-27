@@ -386,6 +386,35 @@ def test_the_admin_steps_job_and_report_sit_in_a_private_folder_not_in_tmp_itsel
     assert not seen["job"].parent.exists()
 
 
+@pytest.mark.parametrize(("action", "said", "not_said"), [
+    ("install", "This makes an account and a service:", "removes"),
+    ("remove", "This removes the app's account and service:", "makes"),
+])
+def test_the_admin_step_says_what_it_does_for_its_action(monkeypatch, action, said, not_said) -> None:
+    """A removal said "This makes an account and a service" before its prompt (Nov 27)."""
+    import json
+    import subprocess
+
+    from rich.console import Console
+
+    from hirocli.commands import extension_install as cli
+
+    def step(args, check=False):
+        Path(args[args.index("--report") + 1]).write_text(json.dumps({"ok": True, "result": {}}), encoding="utf-8")
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(cli.subprocess, "run", step)
+    monkeypatch.setattr("hirocli.linux_service.hiro_executable", lambda: "hiro")
+    if sys.platform == "win32":
+        monkeypatch.setattr("hiro_commons.winsw_service.is_admin", lambda: True)
+    else:
+        monkeypatch.setattr(cli.os, "geteuid", lambda: 0)
+    console = Console(record=True, width=200)
+    cli.run_system_step(console, {"action": action, "key": "example.hello"})
+    text = console.export_text()
+    assert said in text and not_said not in text
+
+
 def test_a_release_is_installed_with_uv_tool_install_as_the_core_is(tmp_path: Path) -> None:
     from hirocli.domain.packages import Package
 
