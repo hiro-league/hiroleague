@@ -75,13 +75,68 @@ def test_the_core_gets_start_and_stop_on_the_service_before_its_audit_part() -> 
         app_system.with_core_ace(sddl, "S-1-5;;;WD")
 
 
-def test_the_mac_daemon_sources_app_env_and_the_sudoers_line_names_one_daemon() -> None:
-    a = app()
-    plist = app_system.mac_plist(a)
-    assert "<key>UserName</key><string>hiro-example-hello</string>" in plist
-    assert ". &apos;/opt/hiroleague/apps/example.hello/app.env&apos;" in plist or "/apps/example.hello/app.env" in plist
-    sudoers = app_system.mac_sudoers(a, "michel")
-    assert sudoers.count("NOPASSWD") == 1 and "com.hiroleague.app.example-hello" in sudoers
+def test_the_mac_daemon_runs_as_the_app_and_sources_app_env() -> None:
+    import plistlib
+
+    a = check_job(SystemJob(action="install", key="example.hello", command="example-hello"),
+                  PurePosixPath("/Library/Application Support/HiroLeague"))  # type: ignore[arg-type]
+    plist = plistlib.loads(app_system.mac_plist(a))
+    assert plist["Label"] == "com.hiroleague.app.example-hello" and plist["UserName"] == "hiro-example-hello"
+    assert plist["KeepAlive"] == {"SuccessfulExit": False}  # as the core's own: a clean stop stays stopped
+    home = "/Library/Application Support/HiroLeague/apps/example.hello"
+    assert plist["ProgramArguments"] == [
+        "/bin/sh", "-c", f"set -a; . '{home}/app.env'; set +a; exec '{home}/current/bin/example-hello'"]
+    assert plist["WorkingDirectory"] == f"{home}/data"
+    assert plist["EnvironmentVariables"] == {"PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"}  # secrets: app.env
+
+
+def test_the_sudoers_line_names_one_daemon_and_two_exact_commands() -> None:
+    sudoers = app_system.mac_sudoers(app(), "michel")
+    assert sudoers.count("NOPASSWD") == 1
+    assert ("michel ALL=(root) NOPASSWD: /bin/launchctl bootstrap system "
+            "/Library/LaunchDaemons/com.hiroleague.app.example-hello.plist, "
+            "/bin/launchctl bootout system/com.hiroleague.app.example-hello") in sudoers
+    assert "." not in app_system.mac_sudoers_path("hiro-example-hello").name  # sudo skips a name with a dot
+    with pytest.raises(JobRefused):
+        app_system.mac_sudoers(app(), "michel ALL=(ALL) NOPASSWD: ALL")
+
+
+def test_a_mac_account_takes_the_first_id_free_for_both_accounts_and_groups() -> None:
+    assert app_system.free_mac_id({400, 401, 403}) == 402
+    with pytest.raises(app_system.ServiceError, match="No id is free"):
+        app_system.free_mac_id(set(app_system.MAC_IDS))
+    assert app_system.mac_ace("hiro-x", "list,search") == "user:hiro-x allow list,search,file_inherit,directory_inherit"
+
+
+def test_an_account_macos_wont_delete_is_kept_and_any_other_failure_raises(monkeypatch) -> None:
+    import subprocess
+
+    def dscl(stderr: str, code: int):
+        return lambda cmd, what, ok_codes=(0,): subprocess.CompletedProcess(cmd, code, "", stderr)
+
+    # What macOS answers a delete over SSH (its privacy control), seen on the Mac test VM, Nov 27
+    monkeypatch.setattr(app_system, "_run", dscl("<main> delete status: eDSPermissionError", 40))
+    assert app_system._mac_delete("Users", "hiro-example-hello") is False
+    monkeypatch.setattr(app_system, "_run", dscl("<main> delete status: eDSRecordNotFound", 40))
+    with pytest.raises(app_system.ServiceError, match="eDSRecordNotFound"):
+        app_system._mac_delete("Users", "hiro-example-hello")
+    monkeypatch.setattr(app_system, "_run", dscl("", 0))
+    assert app_system._mac_delete("Groups", "hiro-example-hello") is True
+
+
+def test_a_mac_stop_returns_once_the_app_has_exited(monkeypatch) -> None:
+    # launchctl bootout returned while the app was still stopping ("SIGTERMed"), seen on the Mac test VM, Nov 27
+    import hiro_commons.launchd_service as launchd
+
+    answers = iter([True, True, True, False])  # loaded, then two looks while it stops, then gone
+    monkeypatch.setattr(launchd, "service_state", lambda label: launchd.ServiceState(label, installed=next(answers)))
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(app_system, "_launchctl", lambda *args: calls.append(args))
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    app_system._mac_stop("hiro-example-hello")
+    assert calls == [("bootout", "system/com.hiroleague.app.example-hello")]
+    with pytest.raises(StopIteration):
+        next(answers)  # it asked until the daemon was gone
 
 
 def test_a_windows_purge_removes_read_only_files_too(tmp_path, monkeypatch) -> None:
