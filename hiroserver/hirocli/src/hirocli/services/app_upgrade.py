@@ -222,9 +222,13 @@ def _answered(client: httpx.Client, url: str) -> str | None:
 
 
 def _stop(service: str) -> None:
+    """Stop the service whenever the system knows it: every system's stop leaves a stopped one as it is.
+    Fix (Nov 28, the fresh-install test on Linux): stopping only a service that runs skipped a new version that
+    crashes at start, which systemd keeps restarting ("activating", "auto-restart"); a restart then ran it on the
+    data being put back, and the old version's start landed on a unit still restarting."""
     from .. import app_system
 
-    if app_system.is_running(service):
+    if app_system.is_running(service) is not None:
         app_system.stop(service)
 
 

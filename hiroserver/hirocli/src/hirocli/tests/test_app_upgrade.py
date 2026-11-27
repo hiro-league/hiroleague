@@ -38,8 +38,10 @@ def package(workspace: Path, m: Manifest) -> str:
 class Fake:
     """The faked system and app: the service's state, every predeploy step run (step, release, copy), health."""
 
-    def __init__(self, monkeypatch, *, trial_fails: bool = False, healthy: bool = True) -> None:
+    def __init__(self, monkeypatch, *, trial_fails: bool = False, healthy: bool = True,
+                 new_crash_loops: bool = False) -> None:
         self.running = True
+        self.new_crash_loops = new_crash_loops  # the new release crashes at start, and the system restarts it
         self.events: list[str] = []
         self.steps: list[tuple[str, str, str]] = []
         self.healthy = healthy
@@ -64,7 +66,8 @@ class Fake:
         monkeypatch.setattr(app_upgrade, "answers", lambda port, health, version, within_s: self.healthy)
 
     def _start(self, service: str) -> None:
-        self.running = True
+        # A version that crashes at start is known to the system but doesn't run: systemd's "activating"
+        self.running = not (self.new_crash_loops and not _current("0.1.0"))
         self.events.append("start")
 
     def _stop(self, service: str) -> None:
@@ -173,6 +176,31 @@ def test_no_answer_puts_back_the_data_copied_at_the_stop_and_the_version_before(
     assert fake.events == ["stop", "start", "stop", "start"] and _current("0.1.0")
     assert not app_folder(KEY).release("0.1.1").exists()
     assert installs.get_install(workspace, KEY).state == installs.RUNNING
+
+
+def test_going_back_stops_a_new_version_the_system_keeps_restarting(workspace: Path, monkeypatch) -> None:
+    # Seen on Linux (Nov 28): 0.1.3 crash-looped through the restore, as the going back never stopped it
+    fake = Fake(monkeypatch, healthy=False, new_crash_loops=True)
+    monkeypatch.setattr(app_upgrade, "run_predeploy", lambda release, m, folder, step, copy, allowed=None: (
+        fake.events.append(f"{step} with the service {'stopped' if fake.events[-1:] == ['stop'] else 'up'}"),
+        "migrations-seconds=2" if step == "trial" else "")[1])
+    done = app_upgrade.upgrade(workspace, KEY, package(workspace, manifest("0.1.1")))
+    assert done.outcome == "stayed" and _current("0.1.0") and fake.running
+    assert fake.events[-3:] == ["stop", "restore with the service stopped", "start"]
+
+
+def test_a_unit_systemd_restarts_is_known_but_not_running(monkeypatch) -> None:
+    import sys
+
+    from hiro_commons import systemd_service
+
+    states = {"active": ("active", "running"), "restarting": ("activating", "auto-restart"),
+              "stopped": ("inactive", "dead")}
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(systemd_service, "service_state", lambda name: systemd_service.ServiceState(
+        name, installed=name != "gone", active_state=states.get(name, ("", ""))[0],
+        sub_state=states.get(name, ("", ""))[1]))
+    assert [app_system.is_running(n) for n in ("active", "restarting", "stopped", "gone")] == [True, False, False, None]
 
 
 def test_the_upgrade_is_its_own_story_titled_by_where_it_ended(workspace: Path, monkeypatch, caplog) -> None:
