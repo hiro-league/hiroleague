@@ -365,3 +365,47 @@ def test_the_deploy_moves_plan_phases_live_with_what_it_read_and_what_runs_it(de
     monkeypatch.setattr(tr, "make_plan", lambda facts: tr.Plan(push=[], first=[], then=[], stops={}))
     run_here()  # nothing to ship: what ran already counts, so a phase merged earlier catches up
     assert calls[-1] == ({"codehiro": "h"}, {"codehiro"})
+
+
+# ------------------------------------------------------------------- a packaged app (CodeHiro: Installing apps, phase 6)
+
+
+def test_a_packaged_app_has_no_hook_and_says_what_runs_in_its_version():
+    assert tr.DEPLOY["codehiro"] == tr.PACKAGE and tr.DEPLOY["homehiro"] == tr.APP
+    assert tr.runs_commit(tr.PACKAGE, "0.1.523+g1a2b3c4d5") == "1a2b3c4d5"
+    assert tr.runs_commit(tr.PACKAGE, "0.1.0") is None  # installed by hand from a build that names no commit
+    assert tr.runs_commit(tr.PACKAGE, "none") is None
+
+
+def test_each_deploy_of_a_packaged_app_is_newer_and_names_its_commit():
+    assert tr.package_version("0.1.0", 523, "1a2b3c4d5e6f") == "0.1.523+g1a2b3c4d5"
+    assert tr.package_version("2.7.4", 9, "abcdef0123") == "2.7.9+gabcdef012"
+    with pytest.raises(hw.Stop):
+        tr.package_version("", 1, "abc")
+    text = '[project]\nname = "codehiro"\nversion = "0.1.0"\n\n[tool.ruff]\ntarget-version = "py312"\n'
+    assert 'version = "0.1.7+gabc"' in tr.stamped(text, "0.1.7+gabc")
+    assert 'target-version = "py312"' in tr.stamped(text, "0.1.7+gabc")  # only the project's version line
+    with pytest.raises(hw.Stop):
+        tr.stamped("[project]\nname = 'x'\n", "1.0.1")
+
+
+def test_a_packaged_deploy_counts_only_when_the_core_says_the_new_version_runs():
+    assert tr.handed_over("Upgrading: its data copied...\nCodeHiro runs 0.1.7+gabc.\n", "0.1.7+gabc")
+    assert not tr.handed_over("CodeHiro runs 0.1.6+gdef.\n", "0.1.7+gabc")  # it went back
+    assert not tr.handed_over("Can't upgrade: CodeHiro is 0.1.7+gabc already\n", "0.1.7+gabc")
+
+
+def test_a_packaged_app_runs_what_its_version_names_and_lacks_what_came_after(tmp_path, monkeypatch):
+    old, new = app_repo(tmp_path, monkeypatch, name="codehiro")
+    f = tr.read_facts("codehiro", {"codehiro-runs": f"0.1.1+g{old[:9]}"})
+    assert (f.live, f.server, f.uninstalled) == (old, None, False)
+    assert [c.split(" ", 1)[1] for c in f.live_lacks] == ["second"]
+    plan = tr.make_plan([f])
+    assert plan.then == ["codehiro"] and plan.again == []  # never a hook run again: each deploy builds and hands over
+
+
+def test_a_packaged_app_simones_core_hasnt_installed_is_left_out_of_the_deploy(tmp_path, monkeypatch):
+    app_repo(tmp_path, monkeypatch, name="codehiro")
+    f = tr.read_facts("codehiro", {"codehiro-runs": "none"})
+    assert f.uninstalled and not f.live_lacks
+    assert tr.make_plan([f]).deploys == []
