@@ -12,8 +12,12 @@ install makes, for the app ``hiro-<key, dashed>``:
 - **Windows:** the service under WinSW (its virtual account ``NT SERVICE\\hiro-<..>``) from ``apps\\<key>\\service``;
   the folder for the core (change) and the app (read; ``data\\`` change); the service's permissions let the core's
   account start and stop it. Not started.
-- **Mac (untried):** the account; a LaunchDaemon that sources app.env through ``/bin/sh`` (a plist is world-readable);
-  a sudoers line that lets the core's account load and unload that one daemon.
+- **Mac:** the account and its group (hidden, ids 400 to 499); ``<home>/apps/<key>`` (the core's), which the app may
+  read (an inherited ACL entry: it reads app.env itself); its ``data/`` (the app's), which both may change (inherited
+  ACL entries for both accounts: the core's account is a person's, in ``staff``, so no shared group); a LaunchDaemon,
+  not loaded, that sources app.env through ``/bin/sh`` (a plist is world-readable); a sudoers line that lets the
+  core's account load and unload that one daemon (``launchctl bootstrap`` / ``bootout``: a system daemon's start
+  and stop need root).
 
 On remove it takes all of that away again, and with ``purge`` the app's folder too.
 
@@ -59,6 +63,7 @@ class SystemDone:
     core_account: str
     folder: str
     purged: bool = False
+    kept: str = ""  # what the step left on purpose, in words for the person (a Mac account macOS won't let it remove)
 
 
 def _run(cmd: list[str], what: str, *, ok_codes: tuple[int, ...] = (0,)) -> subprocess.CompletedProcess[str]:
@@ -302,46 +307,299 @@ def remove_windows(app: AppSystem, purge: bool) -> SystemDone:
 
 
 # ---------------------------------------------------------------------------
-# Mac: a LaunchDaemon and a sudoers line (untried: no Mac yet)
+# Mac: a hidden account, ACL entries, a LaunchDaemon and a sudoers line
 # ---------------------------------------------------------------------------
 
 MAC_DAEMONS = PurePosixPath("/Library/LaunchDaemons")
 SUDOERS_DIR = PurePosixPath("/etc/sudoers.d")
+LAUNCHCTL = "/bin/launchctl"
+SUDO = "/usr/bin/sudo"
+DSCL = "/usr/bin/dscl"
+VISUDO = "/usr/sbin/visudo"
+# Hidden service accounts: below 500, so never in the sign-in window; macOS's own take most ids below 300
+MAC_IDS = range(400, 500)
+_MAC_STOP_WAIT_S = 75  # a daemon's ExitTimeOut (60 s: launchd's SIGKILL after it), and a margin
+_DS_REFUSED = 40  # dscl's exit code when Directory Services refuses (eDSPermissionError, and other errors)
+# What each account may do in a folder, and what everything made in it inherits (macOS's ACL names; a folder's list,
+# add_file, search and add_subdirectory are a file's read, write, execute and append)
+_READS = "list,search,readattr,readextattr,readsecurity"
+_CHANGES = ("list,add_file,search,add_subdirectory,delete,delete_child,readattr,writeattr,readextattr,writeextattr,"
+            "readsecurity")
+_INHERIT = "file_inherit,directory_inherit"
+_MAC_NAME = re.compile(r"[a-z_][a-z0-9_-]*")
 
 
-def mac_label(app: AppSystem) -> str:
-    return f"com.hiroleague.app.{app.service.removeprefix('hiro-')}"
+def mac_label(service: str) -> str:
+    """The app's LaunchDaemon: ``com.hiroleague.app.<key, dashed>`` (beside the core's ``com.hiroleague.hiro``)."""
+    return f"com.hiroleague.app.{service.removeprefix('hiro-')}"
 
 
-def mac_plist(app: AppSystem) -> str:
-    from xml.sax.saxutils import escape
+def mac_plist_path(service: str) -> PurePosixPath:
+    return MAC_DAEMONS / f"{mac_label(service)}.plist"
+
+
+def mac_sudoers_path(service: str) -> PurePosixPath:
+    return SUDOERS_DIR / service  # no dot in the name: sudo skips such files in sudoers.d
+
+
+def mac_plist(app: AppSystem) -> bytes:
+    """The app's LaunchDaemon, as the core's own (``launchd_service``: restarted after a crash, a clean exit stays
+    stopped), run as the app's account; it reads app.env itself, since a plist is world-readable."""
+    from hiro_commons.launchd_service import LaunchdSpec, render_plist
 
     folder = app.folder
     program = str(PurePosixPath(folder.current.as_posix()) / "bin" / app.command)
-    # The environment comes from app.env, which only the core and the app read: a plist is world-readable
+    # Paths are quoted for /bin/sh: a key has no quote (the key rule), the Hiro home has a space
     script = f"set -a; . '{folder.env_file.as_posix()}'; set +a; exec '{program}'"
-    return (
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
-        '<plist version="1.0"><dict>\n'
-        f"  <key>Label</key><string>{escape(mac_label(app))}</string>\n"
-        f"  <key>UserName</key><string>{escape(app.account)}</string>\n"
-        "  <key>ProgramArguments</key><array><string>/bin/sh</string><string>-c</string>"
-        f"<string>{escape(script)}</string></array>\n"
-        f"  <key>WorkingDirectory</key><string>{escape(folder.data.as_posix())}</string>\n"
-        "  <key>RunAtLoad</key><true/>\n  <key>KeepAlive</key><true/>\n"
-        f"  <key>StandardErrorPath</key><string>{escape((folder.data / 'service.log').as_posix())}</string>\n"
-        "</dict></plist>\n"
-    )
+    return render_plist(LaunchdSpec(
+        label=mac_label(app.service),
+        user=app.account,
+        program_args=["/bin/sh", "-c", script],
+        working_directory=Path(folder.data.as_posix()),
+        log_path=Path((folder.data / "service.log").as_posix()),
+        environment={"PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"},
+    ))
 
 
 def mac_sudoers(app: AppSystem, core_user: str) -> str:
-    plist = MAC_DAEMONS / f"{mac_label(app)}.plist"
+    """The core's account may load and unload this one app's daemon, with exactly these arguments, and nothing else."""
+    for value in (app.service, core_user):
+        if not _MAC_NAME.fullmatch(value):
+            raise JobRefused(f"{value!r} can't be named in a sudoers line.")
     return (
         f"# {app.service}: written by `hiro extension system` (Hiro League); the core loads and unloads this one app.\n"
-        f"{core_user} ALL=(root) NOPASSWD: /bin/launchctl bootstrap system {plist}, "
-        f"/bin/launchctl bootout system/{mac_label(app)}\n"
+        f"{core_user} ALL=(root) NOPASSWD: {LAUNCHCTL} bootstrap system {mac_plist_path(app.service)}, "
+        f"{LAUNCHCTL} bootout system/{mac_label(app.service)}\n"
     )
+
+
+def mac_ace(account: str, rights: str) -> str:
+    """One inherited ACL entry for ``chmod +a``."""
+    return f"user:{account} allow {rights},{_INHERIT}"
+
+
+def free_mac_id(used: set[int]) -> int:
+    """The first id in MAC_IDS that no account and no group has (the app's account and its group share it)."""
+    for n in MAC_IDS:
+        if n not in used:
+            return n
+    raise ServiceError(f"No id is free for the app's account ({MAC_IDS.start} to {MAC_IDS.stop - 1} are all taken).")
+
+
+def mac_core_user() -> str:
+    """The account the core's own LaunchDaemon runs as; JobRefused when the core isn't installed as a service."""
+    import plistlib
+
+    from hiro_commons.launchd_service import plist_path
+
+    from .mac_service import label
+
+    path = plist_path(label(None))
+    try:
+        with path.open("rb") as fh:
+            user = str(plistlib.load(fh).get("UserName", ""))
+    except FileNotFoundError:
+        user = ""
+    except (OSError, plistlib.InvalidFileException) as exc:
+        raise ServiceError(f"The core's service ({path}) can't be read: {exc}") from exc
+    if not user or user == "root":
+        raise JobRefused("The core isn't installed as a service here (hiro service install): an app has no core to "
+                         "start it.")
+    return user
+
+
+def _mac_used_ids() -> set[int]:
+    used: set[int] = set()
+    for kind, attribute in (("/Users", "UniqueID"), ("/Groups", "PrimaryGroupID")):
+        for line in _run([DSCL, ".", "-list", kind, attribute], "Reading the Mac's accounts").stdout.splitlines():
+            last = line.split()[-1] if line.split() else ""
+            if last.lstrip("-").isdigit():
+                used.add(int(last))
+    return used
+
+
+def _mac_account(app: AppSystem) -> None:
+    """The app's hidden account and its own group, with no password and no shell; kept when it exists."""
+    import grp
+    import pwd
+
+    try:
+        pwd.getpwnam(app.account)
+        return
+    except KeyError:
+        pass  # not made yet: made below
+    n = str(free_mac_id(_mac_used_ids()))
+    name, real = app.account, f"Hiro League app {app.key}"
+    try:
+        grp.getgrnam(name)
+    except KeyError:
+        group = f"/Groups/{name}"
+        for args in ([], ["PrimaryGroupID", n], ["RealName", real], ["Password", "*"]):
+            _run([DSCL, ".", "-create", group, *args], f"Creating the group {name}")
+    user = f"/Users/{name}"
+    gid = str(grp.getgrnam(name).gr_gid)
+    for args in ([], ["UniqueID", n], ["PrimaryGroupID", gid], ["UserShell", "/usr/bin/false"],
+                 ["NFSHomeDirectory", app.folder.data.as_posix()], ["RealName", real], ["IsHidden", "1"],
+                 ["Password", "*"]):
+        _run([DSCL, ".", "-create", user, *args], f"Creating the account {name}")
+
+
+def _mac_acl(path: Path, *entries: str, recursive: bool = False) -> None:
+    """``path``'s ACL is exactly these entries (an earlier install's, an old account's, are taken away first)."""
+    flag = ["-R"] if recursive else []
+    _run(["/bin/chmod", *flag, "-N", str(path)], f"Clearing the ACL of {path}")
+    for entry in entries:
+        _run(["/bin/chmod", *flag, "+a", entry, str(path)], f"Setting the ACL of {path}")
+
+
+def _write_sudoers(app: AppSystem, core_user: str) -> None:
+    """The sudoers line, checked by visudo before it is put in place: a broken file there would break sudo."""
+    path = Path(str(mac_sudoers_path(app.service)))
+    tmp = path.with_name(f".{path.name}.tmp")  # a dot in the name: sudo never reads it
+    try:
+        path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+        tmp.write_text(mac_sudoers(app, core_user), encoding="utf-8")
+        tmp.chmod(0o440)
+        _run([VISUDO, "-cf", str(tmp)], "Checking the sudoers line")
+        tmp.replace(path)
+    except OSError as exc:
+        raise ServiceError(f"Could not write {path}: {exc}") from exc
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def install_mac(app: AppSystem) -> SystemDone:
+    import pwd
+
+    core_user = mac_core_user()
+    core = pwd.getpwnam(core_user)
+    _mac_account(app)
+    account = pwd.getpwnam(app.account)
+    folder = app.folder
+    apps = folder.home / APPS
+    for path in (apps, folder.root, folder.releases):
+        path.mkdir(parents=True, exist_ok=True)
+        os.chown(path, core.pw_uid, core.pw_gid)
+        path.chmod(0o755)
+    # The app reads its folder: app.env, which the core writes 0600 (the pairing code) and the app's /bin/sh sources
+    _mac_acl(folder.root, mac_ace(app.account, _READS))
+    folder.data.mkdir(parents=True, exist_ok=True)
+    # Its data folder and, when an earlier install's data was kept (remove without --purge), everything in it: a new
+    # account has a new uid, and the files would stay the old one's
+    for path in (folder.data, *folder.data.rglob("*")):
+        os.chown(path, account.pw_uid, account.pw_gid, follow_symlinks=False)
+    folder.data.chmod(0o770)
+    # Both may change what either makes there: the core copies and puts back the data in an upgrade
+    _mac_acl(folder.data, mac_ace(app.account, _CHANGES), mac_ace(core_user, _CHANGES), recursive=True)
+    plist = Path(str(mac_plist_path(app.service)))
+    _write(plist, mac_plist(app).decode("utf-8"))  # by root, 0644: launchd refuses a daemon's plist anyone else owns
+    _write_sudoers(app, core_user)
+    log.info("✅ An app's account and service made — HiroServer · extension", key=app.key,
+             service=mac_label(app.service), core=core_user)
+    return SystemDone(action=INSTALL, key=app.key, service=mac_label(app.service), account=app.account,
+                      core_account=core_user, folder=str(folder.root))
+
+
+def remove_mac(app: AppSystem, purge: bool) -> SystemDone:
+    import grp
+    import pwd
+
+    from hiro_commons.launchd_service import service_state
+
+    label = mac_label(app.service)
+    if service_state(label).installed:
+        _run([LAUNCHCTL, "bootout", f"system/{label}"], f"Stopping {label}")
+        _mac_wait_gone(label)
+    Path(str(mac_plist_path(app.service))).unlink(missing_ok=True)
+    Path(str(mac_sudoers_path(app.service))).unlink(missing_ok=True)
+    if purge and app.folder.root.exists():
+        shutil.rmtree(app.folder.root)
+    refused = [kind for kind, exists in (("Users", pwd.getpwnam), ("Groups", grp.getgrnam))
+               if _has(exists, app.account) and not _mac_delete(kind, app.account)]
+    kept = ""
+    if refused:
+        # Fix (Nov 27, the Mac test VM): macOS lets only a program with its "administer files" right (Full Disk
+        # Access, or the person's yes to its prompt) delete an account; over SSH it refuses, where making one works.
+        # The account stays, hidden, with no password and no shell, and nothing runs as it; an install reuses it.
+        kept = (f"macOS didn't let it remove the account {app.account} (hidden, no password, nothing runs as it; an "
+                f"install uses it again). To remove it: give Terminal Full Disk Access (System Settings → Privacy & "
+                f"Security), then `sudo dscl . -delete /Users/{app.account}` and "
+                f"`sudo dscl . -delete /Groups/{app.account}`.")
+        log.warning("⚠️ An app's account kept — HiroServer · extension: macOS refused to delete it", key=app.key,
+                    account=app.account, records=",".join(refused))
+    log.info("✅ An app's account and service removed — HiroServer · extension", key=app.key, purged=purge)
+    return SystemDone(action="remove", key=app.key, service=label, account=app.account, core_account="",
+                      folder=str(app.folder.root), purged=purge, kept=kept)
+
+
+def _has(lookup: Callable[[str], object], name: str) -> bool:
+    try:
+        lookup(name)
+    except KeyError:
+        return False
+    return True
+
+
+def _mac_delete(kind: str, name: str) -> bool:
+    """Delete a user or group record; False when macOS's privacy control refuses it (eDSPermissionError)."""
+    done = _run([DSCL, ".", "-delete", f"/{kind}/{name}"], f"Removing the account {name}", ok_codes=(0, _DS_REFUSED))
+    if done.returncode == 0:
+        return True
+    if "eDSPermissionError" not in (done.stderr + done.stdout):
+        raise ServiceError(f"Removing the account {name} failed: {(done.stderr or done.stdout).strip()}")
+    return False
+
+
+def _launchctl(*args: str) -> None:
+    """launchctl as root: through the sudoers line for the core's account (``-n``: never a password prompt)."""
+    _run([LAUNCHCTL, *args] if os.geteuid() == 0 else [SUDO, "-n", LAUNCHCTL, *args], f"launchctl {args[0]}")
+
+
+def _mac_start(service: str) -> None:
+    from hiro_commons.launchd_service import service_state
+
+    label = mac_label(service)
+    state = service_state(label)
+    if state.installed and state.state == "running":
+        return
+    if state.installed:  # loaded but stopped (a clean exit, or waiting to restart): load it again
+        _launchctl("bootout", f"system/{label}")
+        _mac_wait_gone(label)
+    _launchctl("bootstrap", "system", str(mac_plist_path(service)))
+
+
+def _mac_stop(service: str) -> None:
+    from hiro_commons.launchd_service import service_state
+
+    label = mac_label(service)
+    if service_state(label).installed:
+        _launchctl("bootout", f"system/{label}")
+        _mac_wait_gone(label)
+
+
+def _mac_wait_gone(label: str) -> None:
+    """Until launchd no longer knows the daemon: its process has exited. Fix (Nov 27, the Mac test VM): bootout
+    returns while the app is still stopping ("SIGTERMed"), and an upgrade copies its data right after the stop."""
+    import time
+
+    from hiro_commons.launchd_service import service_state
+
+    deadline = time.monotonic() + _MAC_STOP_WAIT_S
+    while service_state(label).installed:
+        if time.monotonic() > deadline:
+            raise ServiceError(f"{label} didn't stop within {_MAC_STOP_WAIT_S} s.")
+        time.sleep(0.25)
+
+
+def _mac_running(service: str) -> bool | None:
+    """Made means its plist is there (launchd loads it at boot and at the core's start, and the core's stop unloads
+    it); running is launchd's word."""
+    from hiro_commons.launchd_service import service_state
+
+    if not Path(str(mac_plist_path(service))).exists():
+        return None
+    state = service_state(mac_label(service))
+    return state.installed and state.state == "running"
 
 
 # ---------------------------------------------------------------------------
@@ -354,7 +612,7 @@ def apply(app: AppSystem, action: str, *, purge: bool = False) -> SystemDone:
     if sys.platform == "win32":
         return install_windows(app) if action == INSTALL else remove_windows(app, purge)
     if sys.platform == "darwin":
-        raise ServiceError("Installing and removing an app on a Mac is built but not tried yet: no Mac to try it on.")
+        return install_mac(app) if action == INSTALL else remove_mac(app, purge)
     return install_linux(app) if action == INSTALL else remove_linux(app, purge)
 
 
@@ -371,6 +629,8 @@ def start(service: str) -> None:
         from hiro_commons.winsw_service import start_service
 
         start_service(service)
+    elif sys.platform == "darwin":
+        _mac_start(service)
     else:
         _run(["systemctl", "start", f"{service}.service"], f"Starting {service}")
 
@@ -380,6 +640,8 @@ def stop(service: str) -> None:
         from hiro_commons.winsw_service import stop_service
 
         stop_service(service)
+    elif sys.platform == "darwin":
+        _mac_stop(service)
     else:
         _run(["systemctl", "stop", f"{service}.service"], f"Stopping {service}")
 
@@ -391,6 +653,8 @@ def is_running(service: str) -> bool | None:
 
         state = service_state(service)
         return None if not state.installed else state.state == "RUNNING"
+    if sys.platform == "darwin":
+        return _mac_running(service)
     from hiro_commons.systemd_service import service_state as unit_state
 
     unit = unit_state(service)

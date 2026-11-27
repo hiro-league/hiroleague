@@ -4,6 +4,7 @@ of tools/extension_install.py). uv is faked: `uv tool` is the whole PC's, so a t
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -63,8 +64,9 @@ def workspace(tmp_path: Path, monkeypatch) -> Path:
     ws.mkdir()
     for module in (channel_tools, extension_tools, tools):
         monkeypatch.setattr(module, "_resolve_path", lambda _ws: ws)
-    # Not a source checkout: a new install comes from PyPI
+    # Not a source checkout, nor a core installed from a folder: a new install comes from PyPI
     monkeypatch.setattr(channel_install, "find_workspace_root", lambda: None)
+    monkeypatch.setattr(channel_install, "core_source_root", lambda: None)
     return ws
 
 
@@ -80,11 +82,33 @@ def test_only_a_catalog_channel_installs_and_the_phones_channel_comes_with_the_c
 def test_a_new_install_comes_from_pypi_or_this_checkouts_folder(tmp_path: Path, monkeypatch) -> None:
     entry = channel_install.catalog_entry("whatsapp")
     monkeypatch.setattr(channel_install, "find_workspace_root", lambda: None)
+    monkeypatch.setattr(channel_install, "core_source_root", lambda: None)
     assert channel_install.install_source(entry) == Source("hiro-channel-whatsapp")
     assert channel_install.install_source(entry, "0.2.1") == Source("hiro-channel-whatsapp==0.2.1")
     (tmp_path / "channels" / "hiro-channel-whatsapp").mkdir(parents=True)
     monkeypatch.setattr(channel_install, "find_workspace_root", lambda: tmp_path)
     assert channel_install.install_source(entry) == Source(str(tmp_path / "channels" / "hiro-channel-whatsapp"))
+
+
+def test_a_core_installed_from_a_folder_installs_the_channel_from_that_folder(tmp_path: Path, monkeypatch) -> None:
+    """A bundle's core (installed from its folder, not editable) takes the channel beside it, the one its lock tested,
+    not PyPI's release of the same version number."""
+    entry = channel_install.catalog_entry("whatsapp")
+    monkeypatch.setattr(channel_install, "find_workspace_root", lambda: None)
+    (tmp_path / "hiroserver" / "channels" / "hiro-channel-whatsapp").mkdir(parents=True)
+    monkeypatch.setattr(channel_install, "core_source_root", lambda: tmp_path / "hiroserver")
+    assert channel_install.install_source(entry) == Source(str(tmp_path / "hiroserver" / "channels" /
+                                                               "hiro-channel-whatsapp"))
+
+
+def test_the_core_s_folder_comes_from_hirocli_s_install_record(tmp_path: Path) -> None:
+    folder = tmp_path / "hiro test" / "hiroserver"
+    record = json.dumps({"url": (folder / "hirocli").as_uri(), "dir_info": {}})
+    assert channel_install.source_root(record) == folder
+    assert channel_install.source_root(json.dumps({"url": "https://files.pythonhosted.org/x.whl",
+                                                   "archive_info": {}})) is None
+    assert channel_install.source_root(None) is None  # from PyPI: no record
+    assert channel_install.source_root("not json") is None
 
 
 @pytest.mark.parametrize(

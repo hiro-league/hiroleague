@@ -16,6 +16,7 @@
 #   - ui-kit: the shared UI kit's own check (svelte-check, ESLint, vitest);
 #   - build-kit: the shared build, check and deploy scripts read by bash (`bash -n`: no syntax error reaches a deploy);
 #   - build-kit: hiro-work's tests (build-kit/work: the environments' commands);
+#   - hiroserver: the tested versions, uv.lock's, in the hiroleague package's pins (scripts/tested_versions.py);
 #   - hiroserver: ruff, the lint rules every Hiro League repo follows (build-kit/ruff-rules.toml), on every package;
 #   - hiroserver: the pytest suite, one part per area of the uv workspace, each with the packages it depends on (the
 #     kit needs the SDK, which needs commons), so a change runs only the areas it reaches. The extension kit, the memory
@@ -59,6 +60,9 @@ part "build-kit: fresh install" "build-kit/fresh-install" \
     bash -c "cd '${REPO_ROOT}/hiroserver' && uv run ruff check ../build-kit/fresh-install && bash -n ../build-kit/fresh-install/run-linux.sh && bash -n ../build-kit/fresh-install/simone-vm.sh && bash -n ../build-kit/fresh-install/cache-start.sh && uv run python -m pytest ../build-kit/fresh-install -q -p no:cacheprovider"
 # What every area reads: the workspace's own settings and lock, and the runner
 ws="hiroserver/pyproject.toml hiroserver/uv.lock scripts/run-tests.sh"
+# The tested versions (scripts/tested_versions.py): the hiroleague package's pins say what uv.lock says, and the lock
+# is current with every pyproject
+part "hiroserver: tested versions" "hiroserver/uv.lock hiroserver/pyproject.toml hiroserver/hiroleague hiroserver/hirocli/pyproject.toml scripts/tested_versions.py scripts/test_tested_versions.py"     bash -c "cd '${REPO_ROOT}/hiroserver' && uv run python ../scripts/tested_versions.py && uv run ruff check ../scripts/tested_versions.py ../scripts/test_tested_versions.py && uv run python -m pytest ../scripts/test_tested_versions.py -q -p no:cacheprovider"
 # The lint every Hiro League repo follows (build-kit/ruff-rules.toml, which each app's pyproject extends too), over
 # every package of the core
 part "hiroserver: ruff" "hiroserver build-kit/ruff-rules.toml"     bash -c "cd '${REPO_ROOT}/hiroserver' && uv run ruff check"

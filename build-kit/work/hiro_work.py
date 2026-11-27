@@ -2203,7 +2203,7 @@ def cmd_review(a) -> None:
 # ---------------------------------------------------------------------------------------------------------- main
 
 # Commands that run checks or deploys for minutes in a console
-LONG_COMMANDS = ("merge", "deploy")
+LONG_COMMANDS = ("merge", "deploy", "lock-refresh")
 
 
 def ignore_console_interrupt() -> None:
@@ -2329,6 +2329,8 @@ def main(argv: list[str] | None = None) -> int:
     plan.add_parser(sub)
     import docs
     docs.add_parser(sub)
+    import lock_refresh
+    lock_refresh.add_parser(sub)
     a = p.parse_args(argv)
     if a.cmd in LONG_COMMANDS:
         ignore_console_interrupt()

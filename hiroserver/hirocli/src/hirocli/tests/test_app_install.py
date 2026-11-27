@@ -283,6 +283,19 @@ def test_an_install_stopped_after_its_service_was_made_stays_failed_to_remove(wo
     stored_package(workspace, package_id)  # kept with the row until it is removed
 
 
+def test_a_cancel_the_system_cant_answer_keeps_the_row_to_remove(workspace: Path, monkeypatch) -> None:
+    # The Mac's first test (Nov 27): asking systemd on a Mac raised, and the cancel answered a 500
+    def unknown(service: str) -> bool | None:
+        raise app_system.ServiceError("systemd services are Linux's")
+
+    (row, _), _ = _prepared(workspace)
+    monkeypatch.setattr(app_system, "is_running", unknown)
+    assert app_install.drop_stale(workspace, row.key) is False
+    assert app_install.cancel(workspace, row.key) is False
+    kept = installs.get_install(workspace, row.key)
+    assert kept.state == installs.FAILED and "remove it" in kept.step
+
+
 # ---------------------------------------------------------------------------
 # Its stories and lines (logs.md: a named story is tested with its title; a failure's line with its level)
 # ---------------------------------------------------------------------------
