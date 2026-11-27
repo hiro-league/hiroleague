@@ -16,6 +16,7 @@
 #   - ui-kit: the shared UI kit's own check (svelte-check, ESLint, vitest);
 #   - build-kit: the shared build, check and deploy scripts read by bash (`bash -n`: no syntax error reaches a deploy);
 #   - build-kit: hiro-work's tests (build-kit/work: the environments' commands);
+#   - hiroserver: the tested versions, uv.lock's, where an install reads them (scripts/tested_versions.py);
 #   - hiroserver: ruff, the lint rules every Hiro League repo follows (build-kit/ruff-rules.toml), on every package;
 #   - hiroserver: the pytest suite, one part per area of the uv workspace, each with the packages it depends on (the
 #     kit needs the SDK, which needs commons), so a change runs only the areas it reaches. The extension kit, the memory
@@ -57,6 +58,9 @@ part "build-kit: package" "build-kit/package.py build-kit/test_package.py build-
 ws="hiroserver/pyproject.toml hiroserver/uv.lock scripts/run-tests.sh"
 # The lint every Hiro League repo follows (build-kit/ruff-rules.toml, which each app's pyproject extends too), over
 # every package of the core
+# The tested versions (scripts/tested_versions.py): the hiroleague package's pins and the core's constraints file say
+# what uv.lock says, and the lock is current with every pyproject
+part "hiroserver: tested versions" "hiroserver/uv.lock hiroserver/pyproject.toml hiroserver/hiroleague hiroserver/hirocli/pyproject.toml hiroserver/hirocli/src/hirocli/hiro-constraints.txt scripts/tested_versions.py scripts/test_tested_versions.py"     bash -c "cd '${REPO_ROOT}/hiroserver' && uv run python ../scripts/tested_versions.py && uv run ruff check ../scripts/tested_versions.py ../scripts/test_tested_versions.py && uv run python -m pytest ../scripts/test_tested_versions.py -q -p no:cacheprovider"
 part "hiroserver: ruff" "hiroserver build-kit/ruff-rules.toml"     bash -c "cd '${REPO_ROOT}/hiroserver' && uv run ruff check"
 part "hiroserver: commons and SDK tests" "hiroserver/hiro-commons hiroserver/hiro-channel-sdk ${ws}" \
     "${REPO_ROOT}/scripts/run-tests.sh" -q hiro-commons hiro-channel-sdk

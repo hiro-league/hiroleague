@@ -119,7 +119,9 @@ WA_TOOLS="$(uv tool dir 2>/dev/null || true)"
 WA_RECEIPT="${WA_TOOLS}/hiro-channel-whatsapp/uv-receipt.toml"
 if [ -n "$WA_TOOLS" ] && [ -f "$WA_RECEIPT" ] && grep -qF "editable = \"${WA_SRC}\"" "$WA_RECEIPT"; then
   say "installing the WhatsApp plugin's tool again (its packages follow this commit)"
-  if ! uv tool install --python "$HIRO_PYTHON" --reinstall "${REFRESH[@]}" --editable "$WA_SRC"; then
+  # On the versions the check tested, as a channel the core installs is (tools/channel.py): the core's constraints
+  # file holds the whole workspace's, neonize's included, where the core's own export above doesn't
+  if ! uv tool install --python "$HIRO_PYTHON" --reinstall "${REFRESH[@]}"        --constraints "${REPO_ROOT}/hiroserver/hirocli/src/hirocli/hiro-constraints.txt" --editable "$WA_SRC"; then
     cleanup_release
     die "the WhatsApp plugin's tool could not be installed: the core is untouched (the running release goes on). The tool may be half installed: run 'uv tool install --reinstall --editable ${WA_SRC}' and deploy again."
   fi

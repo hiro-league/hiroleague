@@ -218,3 +218,22 @@ def test_the_phones_channel_is_never_stopped_nor_removed_here(workspace: Path, t
     done = asyncio.run(_runtime(tools.ExtensionChannelRemoveTool(), manager).execute_async(MANDATORY_CHANNEL_NAME))
     assert done.refused == "mandatory" and manager.events == [] and uv.uninstalls == []
     assert load_channel_config(workspace, MANDATORY_CHANNEL_NAME) is not None
+
+
+def test_a_channel_installs_on_the_versions_the_core_was_tested_with(monkeypatch) -> None:
+    """uv resolves a tool afresh: the channel's install passes the core's tested versions (its lock's) as
+    constraints, the file inside the core's package."""
+    from types import SimpleNamespace
+
+    from hirocli.domain.packages import core_constraints, pins
+
+    ran: list[list[str]] = []
+    monkeypatch.setattr(channel_install, "find_uv", lambda: "uv")
+    monkeypatch.setattr(channel_tools.subprocess, "run",
+                        lambda cmd, **_: ran.append(cmd) or SimpleNamespace(returncode=0, stdout="", stderr=""))
+    channel_tools.ChannelInstallTool().execute("whatsapp", "hiro-channel-whatsapp==0.2.0", reinstall=True)
+    cmd = ran[-1]
+    assert cmd[:3] == ["uv", "tool", "install"] and cmd[-1] == "hiro-channel-whatsapp==0.2.0"
+    assert cmd[cmd.index("--constraints") + 1] == str(core_constraints())
+    # The file holds the channel's own packages, not only the core's: WhatsApp's neonize is in it
+    assert "neonize" in pins(core_constraints().read_text(encoding="utf-8"))
