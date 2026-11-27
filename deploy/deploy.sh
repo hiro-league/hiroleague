@@ -20,6 +20,7 @@
 #   HIRO_HEALTH_URL     [http://127.0.0.1:18080/status] the server's /status (first workspace's port)
 #   HIRO_HEALTH_TIMEOUT [240] seconds to wait for it after a start
 #   HIRO_PYTHON         [3.12] Python version uv installs into
+#   HIRO_TORCH_BACKEND  [cpu] torch's build (uv's --torch-backend): cpu, or a GPU one (auto, cu130...)
 #   HIRO_KEEP_RELEASES  [3] releases kept on disk (the current one included)
 #
 # Needs: uv, node + npm, curl; the sudoers line and the root helper from the deploy guide
@@ -32,6 +33,7 @@ HIRO_SERVICE="${HIRO_SERVICE:-hiro}"
 HIRO_HEALTH_URL="${HIRO_HEALTH_URL:-http://127.0.0.1:18080/status}"
 HIRO_HEALTH_TIMEOUT="${HIRO_HEALTH_TIMEOUT:-240}"
 HIRO_PYTHON="${HIRO_PYTHON:-3.12}"
+HIRO_TORCH_BACKEND="${HIRO_TORCH_BACKEND:-cpu}"
 HIRO_KEEP_RELEASES="${HIRO_KEEP_RELEASES:-3}"
 
 UNIT="${HIRO_SERVICE}.service"
@@ -86,6 +88,9 @@ if ! (cd hiroserver && uv export --frozen --no-emit-workspace --no-dev --no-hash
         --package hiroleague -o "$CONSTRAINTS" >/dev/null); then
   cleanup_release; die "could not export uv.lock: nothing was changed."
 fi
+# A pin names a version, never its build (torch==2.12.0+cpu → 2.12.0): the build is HIRO_TORCH_BACKEND's, so a GPU one
+# isn't refused by the lock's processor-only build.
+sed -i -E 's/^([^ ;=]+==[^ ;+]+)\+[A-Za-z0-9.]+/\1/' "$CONSTRAINTS"
 # Rebuild HiroLeague's own packages from this checkout every time. uv caches a build of a local
 # package by its version and pyproject.toml, so without this a release whose code changed but whose
 # version didn't (0.2.0) would install the OLD cached code, and checks pass on the checkout regardless
@@ -98,10 +103,12 @@ for member in hiroserver/hiroleague hiroserver/hirocli hiroserver/gateway hirose
 done
 # Each release gets its own tool and command folders, so the previous one stays installed and
 # going back is moving a link. Python goes in a folder under HIRO_HOME too: anything uv puts in
-# the deploy user's home would not be readable by a dedicated service user.
+# the deploy user's home would not be readable by a dedicated service user. torch is the processor-only build unless
+# HIRO_TORCH_BACKEND names a GPU one: PyPI's Linux torch brings NVIDIA's ~2 GB, which the local reranker doesn't need.
 if ! UV_TOOL_DIR="${RELEASE_DIR}/tools" UV_TOOL_BIN_DIR="${RELEASE_DIR}/bin" \
      UV_PYTHON_INSTALL_DIR="${HIRO_HOME}/python" \
-     uv tool install --python "$HIRO_PYTHON" --constraints "$CONSTRAINTS" "${REFRESH[@]}" ./hiroserver/hiroleague; then
+     uv tool install --python "$HIRO_PYTHON" --torch-backend "$HIRO_TORCH_BACKEND" --constraints "$CONSTRAINTS" \
+       "${REFRESH[@]}" ./hiroserver/hiroleague; then
   cleanup_release; die "install failed: nothing was changed."
 fi
 "${RELEASE_DIR}/bin/hiro" --help >/dev/null 2>&1 \

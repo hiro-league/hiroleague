@@ -128,8 +128,19 @@ Invoke-Step 'Hello remove --purge' ok 'Removed' 'hiro extension remove example.h
 Test-Check 'Hello gone' { Test-Hello 'gone' }
 
 Invoke-Step 'WhatsApp install' ok 'Installed' 'hiro extension install whatsapp' | Out-Null
+# The service's channels live in the Hiro home, never in its account's profile (ServiceProfiles), on its own Python
+$channels = 'C:\ProgramData\HiroLeague\channels'
+$profileTool = 'C:\Windows\ServiceProfiles\hiro\AppData\Roaming\uv\tools\hiro-channel-whatsapp'
+Test-Check 'WhatsApp is in the Hiro home' {
+    Get-ChildItem (Join-Path $channels 'bin') -ErrorAction SilentlyContinue | Select-Object Name | Out-String
+    $cfg = Get-Content (Join-Path $channels 'tools\hiro-channel-whatsapp\pyvenv.cfg') -ErrorAction SilentlyContinue | Out-String
+    $cfg
+    (Test-Path (Join-Path $channels 'bin\hiro-channel-whatsapp.exe')) -and -not (Test-Path $profileTool) -and
+        ($cfg -match [regex]::Escape('home = C:\ProgramData\HiroLeague\python'))
+}
 Invoke-Step 'WhatsApp upgrade' ok 'Upgraded' 'hiro extension upgrade whatsapp' | Out-Null
 Invoke-Step 'WhatsApp remove' ok 'Removed' 'hiro extension remove whatsapp' | Out-Null
+Test-Check 'WhatsApp left the Hiro home' { -not (Test-Path (Join-Path $channels 'tools\hiro-channel-whatsapp')) }
 Invoke-Step 'devices refused' fails 'comes with the core' 'hiro extension install devices' | Out-Null
 
 # A standard user's terminal on the service's data: told to run as an administrator (a test account of this

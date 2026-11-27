@@ -1,6 +1,13 @@
 [tool.uv.workspace]
 members = ["hiroleague", "hirocli", "gateway", "hiro-channel-sdk", "hiro-commons", "hiro-memory", "hiro-extension-kit", "channels/*"]
 
+# PyTorch's processor-only builds, for torch alone on Linux (hirocli's [tool.uv.sources]); explicit: nothing else is
+# taken from it.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
 [dependency-groups]
 dev = ["debugpy>=1.8,<2", "pytest-xdist>=3.8.0", "ruff>=0.17.6"]
 

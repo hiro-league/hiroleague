@@ -73,7 +73,9 @@ if [ -d "$BUNDLE/downloads" ]; then
   sudo cp "$BUNDLE"/downloads/* /opt/hiroleague/cache/downloads/
 fi
 run "uv" ok "" sh -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'
-run "core (uv tool install)" ok "" uv tool install --python 3.12 "$BUNDLE/hiroleague/hiroserver/hiroleague"
+# The documented Linux install: the processor-only torch (uv's torch backend), never PyPI's with NVIDIA's ~2 GB
+run "core (uv tool install)" ok "" uv tool install --python 3.12 --torch-backend cpu "$BUNDLE/hiroleague/hiroserver/hiroleague"
+check "torch is the processor-only build" sh -c '"$(uv tool dir)/hiroleague/bin/python" -c "import torch, sys; sys.exit(not torch.__version__.endswith(\"+cpu\"))" && ! ls -d "$(uv tool dir)"/hiroleague/lib/python3.12/site-packages/nvidia* >/dev/null 2>&1'
 # As a person does: `hiro service install` says to run it again through sudo, with its full path
 run "service install (asks for sudo)" fails "needs root" hiro service install --name "$NAME"
 run "service install" ok "" sudo "$(command -v hiro)" service install --name "$NAME"
@@ -92,8 +94,11 @@ run "Hello remove --purge" ok "Removed" hiro extension remove example.hello --pu
 check "Hello gone" hello_is gone
 
 run "WhatsApp install" ok "Installed" hiro extension install whatsapp
+# The service's channels live in the Hiro home, never as the service account's own uv tools
+check "WhatsApp is in the Hiro home" sh -c 'test -x /opt/hiroleague/channels/bin/hiro-channel-whatsapp && ! test -e "$(uv tool dir)/hiro-channel-whatsapp"'
 run "WhatsApp upgrade" ok "Upgraded" hiro extension upgrade whatsapp
 run "WhatsApp remove" ok "Removed" hiro extension remove whatsapp
+check "WhatsApp left the Hiro home" sh -c '! test -e /opt/hiroleague/channels/tools/hiro-channel-whatsapp'
 run "devices refused" fails "comes with the core" hiro extension install devices
 
 check "core announces its address" sh -c 'hiro logs search "announcing on" --json | grep -m1 "announcing on"'

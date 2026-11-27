@@ -43,9 +43,15 @@ class Refused(Exception):
     """What the script won't do, in words."""
 
 
+# A local version (``torch==2.12.0+cpu``): which build of a version, from PyTorch's own index. A pin names the version
+# only, which matches every build: the install chooses the build (uv's ``--torch-backend``), and ``+cpu`` isn't on
+# PyPI, so a pin that held it would fail every install from there.
+_LOCAL_VERSION = re.compile(r"^([^\s;=]+==[^\s;+]+)\+[A-Za-z0-9.]+")
+
+
 def requirements(exported: str) -> list[str]:
-    """The ``name==version [; marker]`` lines of a ``uv export``, comments and options left out."""
-    return [line.strip() for line in exported.splitlines()
+    """The ``name==version [; marker]`` lines of a ``uv export``, comments, options and builds (``+cpu``) left out."""
+    return [_LOCAL_VERSION.sub(r"\1", line.strip()) for line in exported.splitlines()
             if line.strip() and not line.lstrip().startswith(("#", "-"))]
 
 

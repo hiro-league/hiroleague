@@ -19,8 +19,8 @@ Run from the root of a hiroleague checkout. Everything lands in ``C:\\hiro\\test
      on once (an administrator, then a restart).
    - ``simone``: a new virtual machine on Simone per distribution (simone-vm.sh: libvirt, the distribution's official
      cloud image, a person with sudo, 2 CPUs and 4 GB on libvirt's NAT network), deleted after the run; Simone then
-     asks for the core's name, as another machine. Ubuntu 24.04 and 22.04, Debian 13, Fedora 45, Rocky 10 (``--distro
-     all``: one after another). Needs Michel's account's libvirt group, no sudo; it touches only machines and volumes
+     asks for the core's name, as another machine. Ubuntu 24.04 and Debian 13 (``--distro all``: one after
+     the other). Needs Michel's account's libvirt group, no sudo; it touches only machines and volumes
      named ``hiro-fresh-*``.
 3. **The result:** ``runs/<time>/results/result.md`` (simone: ``runs/<time>/<distro>/results``; one table: each
    step, PASS or FAIL, its time, its log) and ``result.json``. The run script inside the machine walks the path:
@@ -262,7 +262,8 @@ def run_linux(root: Path, run_dir: Path, bundle: Path, results: Path, *, keep: b
 # --- Simone: a throwaway virtual machine per distribution ---------------------------------------------------------
 
 SIMONE = "simone"  # the server, as ssh names it
-DISTROS = ("ubuntu-24.04", "ubuntu-22.04", "debian-13", "fedora-45", "rocky-10")
+# The distributions the core is tried on (Michel, Nov 27, 2026: no others for now)
+DISTROS = ("ubuntu-24.04", "debian-13")
 
 
 def run_simone(run_dir: Path, bundle: Path, distro: str, *, keep: bool) -> Path:

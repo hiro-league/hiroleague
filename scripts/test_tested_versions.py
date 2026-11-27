@@ -31,6 +31,14 @@ def test_an_export_gives_its_pins_with_their_markers_and_nothing_else() -> None:
                                          "cryptography==47.0.0", "numpy==2.4.4"]
 
 
+def test_a_pin_names_the_version_never_the_build() -> None:
+    # torch from PyTorch's processor-only index is 2.12.0+cpu: the install chooses the build (uv's torch backend), and
+    # PyPI has no +cpu, so a pin holding it would fail there (Nov 27, 2026)
+    exported = "torch==2.12.0 ; sys_platform != 'linux'\ntorch==2.12.0+cpu ; sys_platform == 'linux'\nnumpy==2.4.4\n"
+    assert tv.requirements(exported) == ["torch==2.12.0 ; sys_platform != 'linux'",
+                                         "torch==2.12.0 ; sys_platform == 'linux'", "numpy==2.4.4"]
+
+
 def test_the_pins_block_is_replaced_and_the_rest_kept() -> None:
     text = tv.with_pins(PYPROJECT, ["a==1", "b==2 ; sys_platform == 'linux'"], "2026-11-27")
     assert '"hirocli~=0.2.0",' in text and "old==1.0" not in text

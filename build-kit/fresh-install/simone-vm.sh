@@ -31,13 +31,8 @@ v() { virsh -q -c "$CONN" "$@"; }
 image_url() {
   case "$1" in
     ubuntu-24.04) echo https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img ;;
-    ubuntu-22.04) echo https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img ;;
     debian-13) echo https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2 ;;
-    fedora-45)
-      local base=https://download.fedoraproject.org/pub/fedora/linux/releases/45/Cloud/x86_64/images/
-      echo "$base$(curl -fsL "$base" | grep -oE 'Fedora-Cloud-Base-Generic-[^"]+\.qcow2' | head -1)" ;;
-    rocky-10) echo https://dl.rockylinux.org/pub/rocky/10/images/x86_64/Rocky-10-GenericCloud-Base.latest.x86_64.qcow2 ;;
-    *) echo "unknown distribution: $1 (ubuntu-24.04, ubuntu-22.04, debian-13, fedora-45, rocky-10)" >&2; return 1 ;;
+    *) echo "unknown distribution: $1 (ubuntu-24.04, debian-13)" >&2; return 1 ;;
   esac
 }
 
