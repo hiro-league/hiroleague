@@ -93,6 +93,13 @@ if (Test-Path $cacheFile) {
     $toml = "python-install-mirror = `"$pythons`"`n`n[[index]]`nurl = `"$index`"`ndefault = true`n"
     [IO.File]::WriteAllText('C:\ProgramData\uv\uv.toml', $toml, (New-Object Text.UTF8Encoding($false)))
 }
+# The pinned downloads (fresh.py, unless --fresh): WinSW, Caddy and Microsoft's C++ runtime installer, in the machine's
+# downloads folder, where the core looks first (each still checked there: the hash it pins, Microsoft's signature)
+$downloads = Join-Path $Bundle 'downloads'
+if (Test-Path $downloads) {
+    New-Item -ItemType Directory -Force 'C:\ProgramData\HiroLeague\cache\downloads' | Out-Null
+    Copy-Item (Join-Path $downloads '*') 'C:\ProgramData\HiroLeague\cache\downloads'
+}
 Invoke-Step 'uv' ok '' 'powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"' | Out-Null
 $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 Invoke-Step 'core (uv tool install)' ok '' "uv tool install --python 3.12 $core" | Out-Null

@@ -67,6 +67,11 @@ if [ -f "$BUNDLE/CACHE" ]; then
   printf 'python-install-mirror = "%s"\n\n[[index]]\nurl = "%s"\ndefault = true\n' "$CACHE_PYTHONS" "$CACHE_INDEX" \
     | sudo tee /etc/uv/uv.toml >/dev/null
 fi
+# The pinned downloads (fresh.py, unless --fresh): Caddy, in the machine's downloads folder, where the core looks first
+if [ -d "$BUNDLE/downloads" ]; then
+  sudo mkdir -p /opt/hiroleague/cache/downloads
+  sudo cp "$BUNDLE"/downloads/* /opt/hiroleague/cache/downloads/
+fi
 run "uv" ok "" sh -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'
 run "core (uv tool install)" ok "" uv tool install --python 3.12 "$BUNDLE/hiroleague/hiroserver/hiroleague"
 # As a person does: `hiro service install` says to run it again through sudo, with its full path

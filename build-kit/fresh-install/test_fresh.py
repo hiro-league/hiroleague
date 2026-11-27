@@ -84,3 +84,43 @@ def test_the_python_mirror_refuses_any_other_path(tmp_path, monkeypatch, path) -
     with pytest.raises(urllib.error.HTTPError) as refused:
         urllib.request.urlopen(base + path)
     assert refused.value.code == 404 and fetched == []
+
+
+# The pinned downloads: what the core downloads on a fresh machine, preloaded where it looks first
+
+
+def test_the_preloaded_files_are_the_ones_the_core_pins() -> None:
+    from hiro_commons.winsw_service import WINSW_SHA256, WINSW_URL
+
+    from hirocli import caddy_release
+
+    windows = dict(fresh.pinned_downloads("windows"))
+    assert windows[WINSW_URL] == WINSW_SHA256
+    archive, sha256 = caddy_release.ARCHIVES[("windows", "amd64")]
+    assert windows[f"{caddy_release.RELEASE_URL}/{archive}"] == sha256
+    (linux,) = fresh.pinned_downloads("linux")
+    assert linux[0].endswith("_linux_amd64.tar.gz")
+
+
+def test_the_bundle_gets_each_file_under_the_name_the_core_looks_for(tmp_path, monkeypatch) -> None:
+    from hiro_commons import fetch
+
+    from hirocli import cpp_runtime
+
+    fetched = []
+
+    def fake_fetch(url, dest, sha256):
+        fetched.append(url)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"pinned")
+        return True
+
+    monkeypatch.setattr(fetch, "fetch_checked", fake_fetch)
+    kept = tmp_path / "downloads"
+    kept.mkdir()
+    (kept / cpp_runtime.INSTALLER).write_bytes(b"kept from an earlier run")  # never downloaded again
+    fresh.fill_downloads(kept, tmp_path / "bundle" / "downloads", "windows")
+    names = sorted(p.name for p in (tmp_path / "bundle" / "downloads").iterdir())
+    assert names == sorted([fetch.shared_name(url, sha) for url, sha in fresh.pinned_downloads("windows")]
+                           + [cpp_runtime.INSTALLER])
+    assert len(fetched) == 2

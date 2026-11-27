@@ -34,6 +34,11 @@ comes through a cache on Simone (cache-start.sh: proxpi for PyPI, python_mirror.
 (a list of versions older than 30 minutes is asked again), so a build that changes one package downloads that one.
 The only difference from a person's machine: uv's machine-wide settings file points at the cache.
 
+**The pinned downloads** (the same default; ``--fresh`` skips them too): WinSW and Caddy from GitHub, Microsoft's C++
+runtime installer. Kept once in ``<root>/downloads`` (each checked: WinSW and Caddy by the hash the core pins, the
+installer by Microsoft's signature; WinSW or Caddy downloaded again only when the core pins a new one), and put in
+the machine's downloads folder (``<Hiro home>/cache/downloads``) before the core installs, where the core looks first.
+
 Nothing here touches this PC's or Simone's own Hiro League: no service, no uv tool, no workspace; the machine is
 thrown away.
 """
@@ -48,6 +53,7 @@ import subprocess
 import sys
 import tarfile
 import time
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -84,6 +90,44 @@ def start_cache() -> None:
     run(["ssh", SIMONE, "mkdir -p hiro-fresh"])
     run(["scp", "-q", str(HERE / "cache-start.sh"), str(HERE / "python_mirror.py"), f"{SIMONE}:hiro-fresh/"])
     run(["ssh", SIMONE, "bash hiro-fresh/cache-start.sh"])
+
+
+def pinned_downloads(system: str) -> list[tuple[str, str]]:
+    """What the core downloads on a fresh machine of that system, as (address, SHA-256): what the run preloads."""
+    from hiro_commons.winsw_service import WINSW_SHA256, WINSW_URL
+    from hirocli import caddy_release
+
+    archive, sha256 = caddy_release.ARCHIVES[(system, "amd64")]
+    files = [(f"{caddy_release.RELEASE_URL}/{archive}", sha256)]
+    if system == "windows":
+        files.append((WINSW_URL, WINSW_SHA256))
+    return files
+
+
+def fill_downloads(kept: Path, out: Path, system: str) -> None:
+    """Put the pinned downloads of that system in ``out``, downloaded into ``kept`` only when it lacks them."""
+    from hiro_commons.fetch import fetch_checked, shared_name
+
+    from hirocli import cpp_runtime
+
+    out.mkdir(parents=True)
+    for url, sha256 in pinned_downloads(system):
+        name = shared_name(url, sha256)
+        if fetch_checked(url, kept / name, sha256):
+            say(f"Downloaded once, kept in {kept}: {name}")
+        shutil.copy2(kept / name, out / name)
+    if system == "windows":
+        installer = kept / cpp_runtime.INSTALLER
+        if not installer.is_file():
+            part = installer.with_name(installer.name + ".part")
+            with urllib.request.urlopen(cpp_runtime.INSTALLER_URL, timeout=600) as response, part.open("wb") as fh:  # noqa: S310 — Microsoft's fixed link
+                shutil.copyfileobj(response, fh)
+            if cpp_runtime.SIGNER not in cpp_runtime.signer_of(part):
+                part.unlink()
+                raise SystemExit(f"{cpp_runtime.INSTALLER_URL} isn't signed by Microsoft: nothing kept")
+            part.replace(installer)
+            say(f"Downloaded once, kept in {kept}: {installer.name}")
+        shutil.copy2(installer, out / installer.name)
 
 
 def build_bundle(out: Path, *, close: bool, cache: bool) -> str:
@@ -279,6 +323,8 @@ def main(argv: list[str]) -> int:
     if not args.fresh:
         start_cache()
     build_bundle(bundle, close=not args.keep, cache=not args.fresh)
+    if not args.fresh:  # the run copies these into the machine's downloads folder before the core installs
+        fill_downloads(args.root / "downloads", bundle / "downloads", "windows" if args.system == "windows" else "linux")
     if args.system == "simone":
         distros = DISTROS if args.distro == "all" else (args.distro,)
         passed = {d: report(run_simone(run_dir, bundle, d, keep=args.keep)) for d in distros}
