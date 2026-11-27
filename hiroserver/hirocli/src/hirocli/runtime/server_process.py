@@ -36,6 +36,7 @@ from hirocli.constants import (
     ENV_WORKSPACE_PATH,
     PID_FILENAME,
     SERVICE_RESTART_EXIT_CODE,
+    TERMINAL_MANAGER,
 )
 from hirocli.domain.config import load_config, mark_disconnected, workspace_log_dir
 from hirocli.domain.crypto import load_or_create_master_key
@@ -197,7 +198,9 @@ async def _main(
     workspace_name: str | None = None,
     admin: bool = False,
     metrics: bool = False,
-) -> None:
+) -> bool:
+    """Run the server until it stops. True when a terminal run (foreground, no service manager) asked to restart: its
+    command then starts the next server in the same terminal."""
     if workspace_path is None:
         ws_str = os.environ.get(ENV_WORKSPACE_PATH)
         if not ws_str:
@@ -384,13 +387,21 @@ async def _main(
         get_domain_event_bus().detach_loop()
         log_store.stop()
 
+    restart_in_terminal = False
     if ctx.restart_requested:
         _exit_for_service_restart(workspace_path)
-        log.info("Restart requested — spawning new server process")
-        _spawn_server(workspace_path, admin=ctx.restart_admin)
+        if foreground:
+            # A restart keeps the way the server was started: a terminal run comes back in its terminal (Michel,
+            # Nov 27), not as a hidden background successor.
+            log.info("Restart requested — this terminal starts a fresh server")
+            restart_in_terminal = True
+        else:
+            log.info("Restart requested — spawning new server process")
+            _spawn_server(workspace_path, admin=ctx.restart_admin)
 
     mark_disconnected(workspace_path)
     log.info("hiro server exited")
+    return restart_in_terminal
 
 
 def _exit_for_service_restart(workspace_path: Path) -> None:
@@ -439,4 +450,6 @@ if __name__ == "__main__":
     _admin = os.environ.get(ENV_ADMIN_UI) == "1"
     _metrics = os.environ.get(ENV_METRICS) == "1"
     _ws_name = os.environ.get(ENV_WORKSPACE) or None
-    asyncio.run(_main(workspace_name=_ws_name, admin=_admin, metrics=_metrics))
+    # A terminal run's next server shows its output in the terminal, as the first one did.
+    _foreground = os.environ.get(ENV_SERVICE_MANAGER) == TERMINAL_MANAGER
+    asyncio.run(_main(foreground=_foreground, workspace_name=_ws_name, admin=_admin, metrics=_metrics))

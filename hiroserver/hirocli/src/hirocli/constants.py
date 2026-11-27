@@ -21,6 +21,9 @@ ENV_HIRO_ENV: str = "HIRO_ENV"
 # "launchd" (Mac). Under any of them the server must not spawn its own successor on restart: the manager would not
 # hold it (systemd and WinSW would even kill it with the old process).
 ENV_SERVICE_MANAGER: str = "HIRO_SERVICE_MANAGER"
+# A terminal run's restarts (`hiro start --foreground`): the server runs as the terminal command's child, which starts it
+# again in the same terminal when it exits with SERVICE_RESTART_EXIT_CODE (tools/server_control.py, restart_in_terminal).
+TERMINAL_MANAGER: str = "terminal"
 # Exit status meaning "start me again" (EX_TEMPFAIL): systemd's RestartForceExitStatus= matches it; WinSW and launchd
 # restart on any exit but 0.
 SERVICE_RESTART_EXIT_CODE: int = 75

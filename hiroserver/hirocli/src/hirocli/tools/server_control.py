@@ -8,6 +8,8 @@ layers decide how to present results to the user.
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +18,7 @@ from hiro_commons.constants.timing import DEFAULT_PING_INTERVAL_SECONDS
 from hiro_commons.process import (
     find_workspace_root,
     is_running,
+    kill_process,
     read_running_pid,
     remove_pid,
     spawn_detached,
@@ -24,7 +27,16 @@ from hiro_commons.process import (
     wait_for_pid,
 )
 
-from ..constants import ENV_ADMIN_UI, ENV_METRICS, ENV_WORKSPACE, ENV_WORKSPACE_PATH, PID_FILENAME
+from ..constants import (
+    ENV_ADMIN_UI,
+    ENV_METRICS,
+    ENV_SERVICE_MANAGER,
+    ENV_WORKSPACE,
+    ENV_WORKSPACE_PATH,
+    PID_FILENAME,
+    SERVICE_RESTART_EXIT_CODE,
+    TERMINAL_MANAGER,
+)
 from ..domain.channel_config import ChannelConfig, load_channel_config, save_channel_config
 from ..domain.config import Config, load_config, master_key_path, workspace_log_dir
 from ..domain.features import feature_active
@@ -106,7 +118,7 @@ def start_server(
         from hirocli.runtime.server_process import _main
 
         try:
-            _asyncio.run(
+            restart = _asyncio.run(
                 _main(
                     foreground=True,
                     workspace_path=workspace_path,
@@ -116,7 +128,9 @@ def start_server(
                 )
             )
         except KeyboardInterrupt:
-            pass
+            return None
+        if restart:
+            restart_in_terminal(workspace_path, workspace_name=workspace_name, admin=admin, metrics=metrics)
         return None
 
     # Background mode — clear stale PID so wait_for_pid starts clean.
@@ -137,6 +151,44 @@ def start_server(
     spawn_detached([*uv_python_cmd(), script], env=env, stderr_log=stderr_log)
 
     return wait_for_pid(workspace_path, PID_FILENAME, stderr_log=stderr_log)
+
+
+def restart_in_terminal(workspace_path: Path, *, workspace_name: str, admin: bool, metrics: bool) -> None:
+    """A terminal run's restart: the next server runs as this command's child, in this terminal (its output here,
+    Ctrl-C reaching it). It ends with SERVICE_RESTART_EXIT_CODE when it restarts, and is started again; any other end
+    ends this command. It starts with the flags the terminal run was started with, as a service's server does.
+
+    ``sys.executable`` is the interpreter running ``hiro``, which has the core (a debugger attaches to it too).
+    """
+    script = str(Path(__file__).parents[1] / "runtime" / "server_process.py")
+    env = {
+        **os.environ,
+        ENV_WORKSPACE_PATH: str(workspace_path),
+        ENV_WORKSPACE: workspace_name,
+        ENV_SERVICE_MANAGER: TERMINAL_MANAGER,
+    }
+    for name, on in ((ENV_ADMIN_UI, admin), (ENV_METRICS, metrics)):
+        if on:
+            env[name] = "1"
+        else:
+            env.pop(name, None)
+    while True:
+        child = subprocess.Popen([sys.executable, script], env=env)
+        if _wait_through_ctrl_c(child) != SERVICE_RESTART_EXIT_CODE:
+            return
+        log.info("Restart — starting the server again in this terminal", workspace=workspace_name)
+
+
+def _wait_through_ctrl_c(child: subprocess.Popen[bytes]) -> int:
+    """Wait for the server; Ctrl-C reaches it too (one console) and it stops by itself. A second Ctrl-C ends it."""
+    interrupted = False
+    while True:
+        try:
+            return child.wait()
+        except KeyboardInterrupt:
+            if interrupted:
+                kill_process(child.pid, include_tree=True)
+            interrupted = True
 
 
 def stop_server(workspace_path: Path) -> tuple[bool, int | None]:
