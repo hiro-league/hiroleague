@@ -14,6 +14,7 @@ from typer.testing import CliRunner
 from hiro_commons import winsw_service as w
 from hiro_commons.env_file import parse_env_text
 from hiro_commons.systemd_service import ServiceError
+from hirocli import cpp_runtime
 from hirocli import front_door_setup as door
 from hirocli import linux_service as ls
 from hirocli import windows_service as ws
@@ -49,6 +50,13 @@ def elevated(monkeypatch, windows):
         return exe
 
     monkeypatch.setattr(ws, "install_release", fake_release)
+    monkeypatch.setattr(ws, "copy_uv_into", lambda home: calls.append(("uv", home)))
+
+    def fake_runtime(cache, downloads):
+        calls.append(("cpp_runtime", cache, downloads))
+        return "installed now (Microsoft's Visual C++ Redistributable)"
+
+    monkeypatch.setattr(cpp_runtime, "install", fake_runtime)
     monkeypatch.setattr(door, "which_python", lambda release: HOME / "python" / "cpython-3.12" / "python.exe")
 
     def fake_door(home, core_python):
@@ -58,7 +66,10 @@ def elevated(monkeypatch, windows):
                                    firewall=[door.RULE_CADDY, door.RULE_NAMES])
 
     monkeypatch.setattr(door, "install_windows", fake_door)
-    monkeypatch.setattr(service_windows, "install_service", lambda spec, folder: calls.append(("register", spec, folder)))
+    monkeypatch.setattr(
+        service_windows, "install_service",
+        lambda spec, folder, *, downloads: calls.append(("register", spec, folder, downloads)),
+    )
     monkeypatch.setattr(service_windows, "grant_read", lambda path, *, service_id: calls.append(("grant_read", path)))
     monkeypatch.setattr(
         service_windows, "lock_folder",
@@ -162,17 +173,24 @@ def test_install_registers_then_locks_the_data_then_starts(elevated) -> None:
 
     steps = [c[0] for c in elevated]
     assert steps == [
-        "disk", "disk", "lock_program", "release", "front_door", "register", "grant_read", "lock_data", "secrets",
-        "lock_secrets", "start",
+        "disk", "disk", "lock_program", "release", "uv", "cpp_runtime", "front_door", "register", "grant_read",
+        "lock_data", "secrets", "lock_secrets", "start",
     ]
     assert elevated[3] == ("release", r"C:\hiro\env4\hiroleague\hiroserver\hiroleague")
+    # The service core's own uv, in the home: it installs a channel with it before any app is installed.
+    assert elevated[4] == ("uv", HOME)
+    # Microsoft's C++ runtime before the service starts: the graph database can't load without it
+    assert elevated[5] == ("cpp_runtime", HOME / "cache", HOME / "cache" / "downloads")
+    assert result.cpp_runtime.startswith("installed now")
     # The front door's firewall rule for names follows the release's own Python; the core is given its address.
-    assert elevated[4] == ("front_door", HOME, HOME / "python" / "cpython-3.12" / "python.exe")
-    assert elevated[5][1].environment["HIRO_FRONT_DOOR"] == "127.0.0.1:18079"
+    assert elevated[6] == ("front_door", HOME, HOME / "python" / "cpython-3.12" / "python.exe")
+    assert elevated[7][1].environment["HIRO_FRONT_DOOR"] == "127.0.0.1:18079"
+    # Its WinSW goes through the machine's downloads folder, where each app's service then finds it
+    assert elevated[7][3] == HOME / "cache" / "downloads"
     # The account exists only once registered, so it is given the program and the data after, and it starts last.
-    assert elevated[6] == ("grant_read", HOME)
-    assert elevated[7] == ("lock_data", HOME / "data", "hiro", "M")
-    assert elevated[9] == ("lock_secrets", HOME / "hiro.env")
+    assert elevated[8] == ("grant_read", HOME)
+    assert elevated[9] == ("lock_data", HOME / "data", "hiro", "M")
+    assert elevated[11] == ("lock_secrets", HOME / "hiro.env")
     assert result.front_door == "hiro-caddy" and result.firewall == [door.RULE_CADDY, door.RULE_NAMES]
     assert result.manager == "winsw"
     assert result.user == r"NT SERVICE\hiro"
@@ -320,7 +338,7 @@ def test_an_unexpected_error_in_the_elevated_run_still_reaches_the_asking_termin
 def test_a_failed_wrapper_download_is_a_service_error(monkeypatch, tmp_path) -> None:
     from hiro_commons.fetch import FetchError
 
-    def refuse(url, dest, sha256):
+    def refuse(url, dest, sha256, *, shared=None):
         raise FetchError("Could not download hiro.exe from https://github.com/...: name not resolved.")
 
     monkeypatch.setattr(w, "fetch_checked", refuse)
@@ -381,6 +399,43 @@ def test_a_release_on_a_python_in_someones_profile_is_refused(tmp_path, monkeypa
     with pytest.raises(ServiceError, match="could not start it"):
         ws.install_release(lay, "hiroleague==0.2.0")
     assert list(lay.releases_dir.iterdir()) == []
+
+
+def test_a_release_copies_its_libraries_never_links_them_to_the_persons_uv_cache(tmp_path, monkeypatch) -> None:
+    # A hard link shares its permissions with the person's cache: the service's account couldn't load
+    # _pydantic_core from it, and every start failed (a clean laptop, Nov 26, 2026).
+    lay = ws.Layout(home=tmp_path / "HiroLeague", data_dir=tmp_path / "HiroLeague" / "data")
+    monkeypatch.setattr(ws.shutil, "which", lambda name: r"C:\uv\uv.exe")
+    fake = _fake_uv(str(lay.python_dir / "cpython-3.12.10-windows-x86_64-none"))
+    envs: list[dict] = []
+
+    def run(cmd, **kw):
+        if "tool" in cmd:
+            envs.append(kw["env"])
+        return fake(cmd, **kw)
+
+    monkeypatch.setattr(ws.subprocess, "run", run)
+    ws.install_release(lay, "hiroleague==0.2.0")
+    assert [env.get("UV_LINK_MODE") for env in envs] == ["copy"]
+
+
+def test_the_home_gets_its_own_uv_once(tmp_path, monkeypatch) -> None:
+    person_uv = tmp_path / "person" / "uv.exe"
+    person_uv.parent.mkdir()
+    person_uv.write_bytes(b"uv")
+    monkeypatch.setattr(ws.shutil, "which", lambda name: str(person_uv))
+
+    ws.copy_uv_into(tmp_path / "HiroLeague")
+    assert (tmp_path / "HiroLeague" / "bin" / "uv.exe").read_bytes() == b"uv"
+    person_uv.write_bytes(b"newer")
+    ws.copy_uv_into(tmp_path / "HiroLeague")  # kept: every app's admin step calls it again
+    assert (tmp_path / "HiroLeague" / "bin" / "uv.exe").read_bytes() == b"uv"
+
+
+def test_the_home_without_uv_anywhere_says_to_install_it(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(ws.shutil, "which", lambda name: None)
+    with pytest.raises(ServiceError, match="install uv"):
+        ws.copy_uv_into(tmp_path / "HiroLeague")
 
 
 def test_a_release_on_the_homes_own_python_is_kept(tmp_path, monkeypatch) -> None:

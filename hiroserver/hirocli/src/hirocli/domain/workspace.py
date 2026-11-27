@@ -134,11 +134,29 @@ def next_free_slot(registry: WorkspaceRegistry, is_free: Callable[[int], bool] =
 # Registry I/O
 # ---------------------------------------------------------------------------
 
+def _read_registry(rp: Path) -> str | None:
+    """The registry's text, None when there is none yet. stat, not exists(): from Python 3.14 exists() answers False
+    for a file this account may not see."""
+    try:
+        rp.stat()
+        return rp.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except PermissionError as exc:
+        # Not an empty registry: read as one, a person in a normal terminal was told "No workspaces configured" about
+        # the service's data folder, which admits only administrators and the service (a clean laptop, Nov 26, 2026).
+        raise WorkspaceError(
+            f"This account may not read {rp.parent}. The service's data admits only administrators: run the command "
+            "again from an administrator terminal."
+        ) from exc
+
+
 def load_registry() -> WorkspaceRegistry:
     rp = registry_path()
-    if rp.exists():
+    text = _read_registry(rp)
+    if text is not None:
         try:
-            return WorkspaceRegistry.model_validate_json(rp.read_text(encoding="utf-8"))
+            return WorkspaceRegistry.model_validate_json(text)
         except Exception as exc:
             log.warning("Could not read the workspace registry — using an empty one", path=str(rp), error=str(exc), exc_info=True)
     return WorkspaceRegistry()

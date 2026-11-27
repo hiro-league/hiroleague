@@ -243,3 +243,34 @@ def test_the_phones_channel_is_never_stopped_nor_removed_here(workspace: Path, t
     assert done.refused == "mandatory" and manager.events == [] and uv.uninstalls == []
     assert load_channel_config(workspace, MANDATORY_CHANNEL_NAME) is not None
 
+
+def test_the_installed_program_is_found_with_the_uv_the_install_used(tmp_path: Path, monkeypatch) -> None:
+    # A Windows service core has no uv on its PATH, only the Hiro home's copy: a bare "uv" there failed, and the
+    # channel was set up with a bare command that didn't start (a clean laptop, Nov 26, 2026).
+    import subprocess
+
+    home_uv = str(tmp_path / "HiroLeague" / "bin" / "uv.exe")
+    bin_dir = tmp_path / "service-profile" / "bin"
+    bin_dir.mkdir(parents=True)
+    exe = bin_dir / ("hiro-channel-whatsapp" + (".exe" if channel_tools.os.name == "nt" else ""))
+    exe.write_bytes(b"")
+    ran: list[list[str]] = []
+
+    def run(cmd, **kw):
+        ran.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout=f"{bin_dir}\n", stderr="")
+
+    monkeypatch.setattr(channel_install, "find_uv", lambda: home_uv)
+    monkeypatch.setattr(channel_tools.subprocess, "run", run)
+    assert channel_tools.installed_channel_command("whatsapp") == str(exe)
+    assert ran == [[home_uv, "tool", "dir", "--bin"]]
+
+
+def test_no_uv_anywhere_leaves_the_bare_command_with_a_warning(monkeypatch, caplog) -> None:
+    def no_uv() -> str:
+        raise RuntimeError("uv isn't on this machine")
+
+    monkeypatch.setattr(channel_install, "find_uv", no_uv)
+    with caplog.at_level("WARNING"):
+        assert channel_tools.installed_channel_command("whatsapp") is None
+    assert any("Could not resolve uv tool bin dir" in r.getMessage() for r in caplog.records)

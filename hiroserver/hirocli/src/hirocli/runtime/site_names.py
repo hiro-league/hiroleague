@@ -5,7 +5,8 @@ sites (``hiro sites``); the core serves its own two (``<core name>.local``, the 
 (a claim, a removed app, ``hiro sites``), the core:
 
 - announces each served name on the LAN (runtime/name_publisher.py: avahi on Linux, zeroconf on Windows and Mac), on
-  a machine set up for it (``site_names_ip``, ``hiro extension names``);
+  the address set for it (``site_names_ip``, ``hiro extension names``), or else, on the core that runs the machine's
+  front door, on the address the machine has now (runtime/lan_address.py), asked again each round;
 - loads the front door's whole configuration through Caddy's admin API (runtime/front_door.py), when this core runs
   the machine's front door (``HIRO_FRONT_DOOR``, set by ``hiro service install``). A load Caddy refuses leaves it
   serving what it had; the core tries again until it takes one.
@@ -34,6 +35,7 @@ from ..domain.site_names import (
     served,
     taken_by_core,
 )
+from . import lan_address
 from .front_door import FrontDoor, FrontDoorError, from_environment
 from .name_publisher import NamePublisher, make_publisher
 from .request_handler import EXTENSIONS_ONLY, RequestContext, RequestRefused
@@ -61,6 +63,7 @@ class SiteNames:
         self._loaded = ""  # the configuration Caddy took last
         self._door_failed = ""  # why the last load failed (said once, and once more when it works again)
         self._clashes: frozenset[str] = frozenset()
+        self._found = ""  # the machine's address as last found (only when none is set and this core runs the door)
 
     # -- the machine's setup -------------------------------------------------------------------
 
@@ -68,8 +71,30 @@ class SiteNames:
     def _cfg(self) -> Any:
         return self._ctx.config
 
-    def _ip(self) -> str:
+    def _set_ip(self) -> str:
         return (self._cfg.site_names_ip or "").strip()
+
+    def _ip(self) -> str:
+        """The address the names are announced on: the one set, else the machine's own (a new core, Nov 27, 2026:
+        a fresh install announced nothing until someone ran `hiro extension names --ip`)."""
+        return self._set_ip() or self._found
+
+    async def _follow_address(self) -> bool:
+        """Find the machine's address again; True when it changed. Only the core that runs the machine's front door
+        finds it: a dev core (env1..env5, its address left empty on purpose) or a second workspace stays quiet, so
+        two cores never announce the same name."""
+        if self._set_ip() or self._door is None:
+            return False
+        found = await asyncio.to_thread(lan_address.find)
+        if found == self._found:
+            return False
+        if found:
+            log.info(f"Site names — announcing on {found}, this machine's address now", before=self._found or "none")
+        else:
+            log.warning("⚠️ Site names — this machine has no LAN address now: names aren't announced until it has one",
+                        before=self._found)
+        self._found = found
+        return True
 
     def _core_names(self) -> list[Any]:
         return core_names_of(self._cfg)
@@ -94,6 +119,7 @@ class SiteNames:
         bus.subscribe(DomainEventType.EXTENSION_REMOVED, self._on_change)
         bus.subscribe(DomainEventType.SITES_CHANGED, self._on_change)
         try:
+            await self._follow_address()
             async with self._lock:
                 sites, _ = await self._apply()
             names = ", ".join(s.name for s in sites)
@@ -105,7 +131,7 @@ class SiteNames:
                          "hiro service install)", names=names)
             while True:
                 await asyncio.sleep(RETRY_LOAD_S)
-                if self._door_failed:
+                if await self._follow_address() or self._door_failed:
                     await self._retry()
         finally:
             bus.unsubscribe(DomainEventType.EXTENSION_REMOVED, self._on_change)
@@ -158,7 +184,13 @@ class SiteNames:
         others = await asyncio.to_thread(list_other_sites, workspace)
         plan = served(claims, self._core_names(), others)
         self._say_clashes(plan.clashes)
+        old = self._publisher
         publisher = self._publisher_for_ip()
+        if old is not None and old is not publisher:
+            # The address changed or went: the names stop being announced on the old one
+            await old.close()
+            if publisher is None:
+                self._publisher = None
         if publisher is not None:
             await publisher.sync({s.name for s in plan.sites if s.announce})
         return plan.sites, await self._load(plan.sites)

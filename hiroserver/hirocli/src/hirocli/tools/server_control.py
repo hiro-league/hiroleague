@@ -117,7 +117,17 @@ def start_server(
     if foreground:
         import asyncio as _asyncio
 
-        from hirocli.runtime.server_process import _main
+        try:
+            from hirocli.runtime.server_process import _main
+        except ImportError as exc:
+            # A fresh Windows lacks Microsoft's C++ runtime, which the graph database needs: say what to install,
+            # not a traceback about _kuzu
+            from .. import cpp_runtime
+
+            if sys.platform == "win32" and cpp_runtime.missing():
+                # ValueError: `hiro start` prints it as words (commands/root.py)
+                raise ValueError(f"Microsoft's Visual C++ runtime is missing here: {cpp_runtime.BY_HAND}.") from exc
+            raise
 
         try:
             restart = _asyncio.run(

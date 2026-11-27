@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 from dataclasses import asdict
 from datetime import datetime
@@ -168,6 +169,12 @@ def register(service_app: typer.Typer, console: Console) -> None:
             except SiteNameError as exc:  # said before anything is installed or an admin is asked
                 console.print(f"[red]{exc}[/red]")
                 raise typer.Exit(1) from exc
+        if sys.platform == "win32" and not report:
+            from .. import cpp_runtime
+
+            if cpp_runtime.missing():  # said before anything runs, and before Windows asks for an administrator
+                console.print("[yellow]Microsoft's Visual C++ runtime isn't on this PC, and the core's graph database "
+                              "needs it:[/yellow] the install brings it from Microsoft (its signed installer, no window).")
         result = _run(
             console, "install", report,
             lambda: install_and_find_admin(
@@ -195,6 +202,10 @@ def register(service_app: typer.Typer, console: Console) -> None:
         if result.get("front_door"):
             console.print(f"  Front door: {result['front_door']} [dim](Caddy on port 80, runs as "
                           f"{result['front_door_account']}; the core loads every name into it)[/dim]")
+        if result.get("cpp_runtime"):
+            console.print(f"  C++ runtime: {result['cpp_runtime']}")
+        if result.get("front_door_names"):
+            console.print(f"  Names:      {result['front_door_names']}")
         for rule in result.get("firewall") or []:
             console.print(f"  Firewall:   {rule}")
         port = result.get("admin_port")

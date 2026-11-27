@@ -59,11 +59,15 @@ def installed_channel_command(name: str) -> str | None:
     registers channels the same way; 2026-11-06). None when uv can't say, the binary isn't
     there, or the path has spaces (ChannelSetupTool splits the command on whitespace).
     """
+    from ..services.channel_install import find_uv
+
     try:
+        # uv as the install found it: a Windows service core has no uv on its PATH, only the Hiro home's copy, so a
+        # bare "uv" failed there and the channel was set up with a bare command that doesn't start (Nov 26, 2026).
         out = subprocess.run(  # noqa: S603
-            ["uv", "tool", "dir", "--bin"], capture_output=True, text=True, timeout=15
+            [find_uv(), "tool", "dir", "--bin"], capture_output=True, text=True, timeout=15
         )
-    except (OSError, subprocess.SubprocessError) as exc:
+    except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
         log.warning(
             f"⚠️ Could not resolve uv tool bin dir — channel {name} · using the bare command",
             error=str(exc),

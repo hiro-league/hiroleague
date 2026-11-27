@@ -43,6 +43,7 @@ from hirocli.domain.site_names import (
     served,
     taken_by_core,
 )
+from hirocli.runtime import lan_address
 from hirocli.runtime import site_names as runtime
 from hirocli.runtime.front_door import FrontDoor
 from hirocli.runtime.request_handler import RequestRefused
@@ -344,7 +345,7 @@ class _Names(runtime.SiteNames):
     def _publisher_for_ip(self) -> Any:
         if not self._ip():
             return None
-        if self._publisher is None:
+        if self._publisher is None or self._publisher.ip != self._ip():
             self._publisher = _Publisher(self._ip())
         return self._publisher
 
@@ -429,6 +430,65 @@ def test_a_front_door_away_is_said_in_words(tmp_path: Path) -> None:
 
     answer = asyncio.run(go())
     assert answer["proxied"] is False and "isn't answering" in answer["note"]
+
+
+def test_the_machines_own_address_is_usable_only_when_others_could_reach_it() -> None:
+    assert lan_address.usable("192.168.1.23") == "192.168.1.23"
+    assert lan_address.usable("10.0.0.5") == "10.0.0.5"
+    for address in ("127.0.0.1", "169.254.10.2", "0.0.0.0", "224.0.0.251", "fe80::1", "", "not an address"):
+        assert lan_address.usable(address) == ""
+
+
+def test_a_new_core_announces_its_names_on_the_machines_address_and_follows_it(
+    tmp_path: Path, caddy, monkeypatch, caplog
+) -> None:
+    # A fresh install announced nothing until someone ran `hiro extension names --ip` (a clean laptop, Nov 26, 2026):
+    # the core that runs the machine's front door finds the machine's address itself, and asks again each round.
+    caplog.set_level(logging.INFO)
+    found = ["192.168.1.23"]
+    monkeypatch.setattr(lan_address, "find", lambda: found[0])
+
+    async def go() -> None:
+        names = _names(tmp_path, caddy, ip="")
+        assert await names._follow_address() is True
+        await names._apply()
+        first = names._publisher
+        assert first.ip == "192.168.1.23" and "hiro.local" in first.names
+        assert await names._follow_address() is False  # the same address: nothing to do
+
+        found[0] = "192.168.1.40"  # DHCP gave the laptop another
+        assert await names._follow_address() is True
+        await names._apply()
+        assert first.names == set() and names._publisher.ip == "192.168.1.40" and "hiro.local" in names._publisher.names
+
+        found[0] = ""  # Wi-Fi off
+        assert await names._follow_address() is True
+        await names._apply()
+        assert names._publisher is None
+        answer = await names.claim("ext-home", "home.hiro.local", 8100)
+        assert answer["published"] is False and answer["proxied"] is True
+
+    asyncio.run(go())
+    said = [(r.levelno, r.getMessage()) for r in caplog.records if r.name.endswith("SITE_NAMES")]
+    assert (logging.INFO, "Site names — announcing on 192.168.1.40, this machine's address now") in said
+    assert sum(1 for level, m in said if level == logging.WARNING and "no LAN address now" in m) == 1
+
+
+def test_a_set_address_wins_and_a_core_without_the_front_door_never_looks(tmp_path: Path, caddy, monkeypatch) -> None:
+    # A dev core (env1..env5: hiro-work leaves its address empty) or a second workspace must stay quiet: two cores
+    # would announce the same name.
+    def looked() -> str:
+        raise AssertionError("the machine's address was looked up")
+
+    monkeypatch.setattr(lan_address, "find", looked)
+
+    async def go() -> None:
+        dev = _names(tmp_path, None, ip="")
+        assert await dev._follow_address() is False and dev._ip() == ""
+        simone = _names(tmp_path, caddy, ip="192.168.1.10")
+        assert await simone._follow_address() is False and simone._ip() == "192.168.1.10"
+
+    asyncio.run(go())
 
 
 def test_a_machine_not_set_up_keeps_the_claim_and_says_so(tmp_path: Path) -> None:
