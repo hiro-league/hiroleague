@@ -57,7 +57,7 @@ def world(tmp_path, monkeypatch):
             hook()
         return list(World.failing)
 
-    monkeypatch.setattr(hw, "init_env", lambda env, task=None: None)
+    monkeypatch.setattr(hw, "init_env", lambda env, task=None, install=True: None)
     monkeypatch.setattr(hw, "fetch_all", lambda repos, task, env: None)
     monkeypatch.setattr(hw, "install_all", lambda env, repos, task=None: None)
     monkeypatch.setattr(hw, "install", lambda env, repo, task=None, force=False, spare_servers=False:

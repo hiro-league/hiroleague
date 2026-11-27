@@ -9,10 +9,13 @@ LOGS_DIR: str = "logs"
 # under <workspace>/run/ rather than scattered across the workspace root.
 RUN_DIR: str = "run"
 PAIRING_SESSION_FILENAME: str = "pairing_session.json"
+# The workspace's credentials, together in <workspace>/credentials/: the master key and the providers' index (the
+# providers' keys themselves are in the OS keyring).
+CREDENTIALS_DIR: str = "credentials"
 MASTER_KEY_FILENAME: str = "master_key.pem"
+CREDENTIALS_INDEX_FILENAME: str = "credentials_index.json"
 WORKSPACE_DB_FILENAME: str = "workspace.db"
 PREFERENCES_FILENAME: str = "preferences.json"
-PROVIDERS_FILENAME: str = "providers.json"
 
 # All databases live together under <workspace>/db/ to keep the workspace root clean:
 # workspace.db, data.db, knowledge.db, the Kuzu graph (graphiti_kuzu.db)

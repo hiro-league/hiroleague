@@ -7,7 +7,6 @@ internals directly.
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -23,12 +22,6 @@ from hiro_commons.process import (
     wait_for_pid,
 )
 
-from .autostart import (
-    register_autostart,
-    register_autostart_elevated,
-    unregister_autostart,
-    unregister_autostart_elevated,
-)
 from .config import GatewayConfig, load_config, load_state, save_config
 from .constants import PID_FILENAME
 from .instance import (
@@ -54,8 +47,6 @@ class GatewaySetupResult:
     instance_path: str
     host: str
     port: int
-    autostart_registered: bool
-    autostart_method: str
 
 
 @dataclass
@@ -83,7 +74,6 @@ class GatewayInstanceStatusEntry:
     host: str
     port: int
     path: str
-    autostart_method: str | None = None
     desktop_connected: bool = False
     last_auth_error: str | None = None
 
@@ -98,7 +88,6 @@ class GatewayTeardownResult:
     instance_name: str
     instance_path: str
     stopped: bool
-    autostart_removed: bool
     purged: bool
 
 
@@ -119,48 +108,6 @@ def _validate_desktop_public_key(key_b64: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Autostart helpers
-# ---------------------------------------------------------------------------
-
-
-def _do_register_autostart(instance_name: str, *, elevated: bool) -> tuple[bool, str]:
-    """Attempt autostart registration. Returns (success, method_label)."""
-    if elevated and sys.platform == "win32":
-        try:
-            accepted = register_autostart_elevated(instance_name)
-        except RuntimeError:
-            accepted = False
-        if accepted:
-            return True, "elevated"
-    try:
-        method = register_autostart(instance_name)
-        return True, str(method)
-    except (NotImplementedError, Exception) as exc:
-        log.warning("Could not register the gateway's autostart", instance=instance_name, error=str(exc), exc_info=True)
-        return False, "failed"
-
-
-def _do_unregister_autostart(instance_name: str, stored_method: str | None) -> bool:
-    """Remove autostart registration using the stored method label."""
-    if stored_method in (None, "skipped", "failed"):
-        return False
-    if stored_method == "elevated" and sys.platform == "win32":
-        try:
-            accepted = unregister_autostart_elevated(instance_name)
-        except RuntimeError:
-            accepted = False
-        if accepted:
-            return True
-        # UAC declined — fall through to standard removal
-    try:
-        unregister_autostart(instance_name)
-        return True
-    except (NotImplementedError, Exception) as exc:
-        log.warning("Could not remove the gateway's autostart", instance=instance_name, error=str(exc), exc_info=True)
-        return False
-
-
-# ---------------------------------------------------------------------------
 # Service functions
 # ---------------------------------------------------------------------------
 
@@ -174,26 +121,16 @@ def setup_instance(
     path: Path | None = None,
     log_dir: str = "",
     make_default: bool = False,
-    skip_autostart: bool = False,
-    elevated_task: bool = False,
 ) -> GatewaySetupResult:
-    """Create a new gateway instance, save its config, and optionally register autostart."""
+    """Create a new gateway instance and save its config."""
     # Validate before allocating the instance so a bad key leaves no partial state.
     _validate_desktop_public_key(desktop_public_key)
 
     entry, _ = create_instance(name, host=host, port=port, path=path)
 
-    autostart_registered = False
-    autostart_method = "skipped"
-    if not skip_autostart:
-        autostart_registered, autostart_method = _do_register_autostart(
-            name, elevated=elevated_task
-        )
-
     config = GatewayConfig(
         desktop_public_key=desktop_public_key,
         log_dir=log_dir,
-        autostart_method=autostart_method,
     )
     save_config(Path(entry.path), config)
 
@@ -205,8 +142,6 @@ def setup_instance(
         instance_path=entry.path,
         host=entry.host,
         port=entry.port,
-        autostart_registered=autostart_registered,
-        autostart_method=autostart_method,
     )
 
 
@@ -297,7 +232,6 @@ def get_status(instance: str | None = None) -> GatewayStatusResult:
         inst_path = Path(reg_entry.path)
         pid = read_pid(inst_path, PID_FILENAME)
         running = is_running(pid)
-        config = load_config(inst_path)
         state = load_state(inst_path)
         # If the process is no longer running, desktop_connected must be false
         # regardless of what state.json says (stale file from a crash).
@@ -311,7 +245,6 @@ def get_status(instance: str | None = None) -> GatewayStatusResult:
                 host=reg_entry.host,
                 port=reg_entry.port,
                 path=reg_entry.path,
-                autostart_method=config.autostart_method,
                 desktop_connected=desktop_connected,
                 last_auth_error=state.last_auth_error if not desktop_connected else None,
             )
@@ -324,28 +257,14 @@ def teardown_instance(
     instance: str | None = None,
     *,
     purge: bool = False,
-    elevated_task: bool = False,
 ) -> GatewayTeardownResult:
-    """Stop a gateway instance, remove its autostart registration, and optionally purge files."""
+    """Stop a gateway instance, and optionally purge its files."""
     entry, _ = resolve_instance(instance)
     instance_path = Path(entry.path)
 
     pid = read_pid(instance_path, PID_FILENAME)
     was_running = pid is not None and is_running(pid)
     stop_process(instance_path, PID_FILENAME)
-
-    # Prefer the method stored in config; fall back to the elevated_task flag
-    # for instances created before autostart_method was persisted.
-    try:
-        config = load_config(instance_path)
-        stored_method: str | None = config.autostart_method
-        if stored_method == "skipped" and elevated_task:
-            stored_method = "elevated"
-    except Exception as exc:
-        log.debug("Could not read the instance's config; guessing its autostart method", error=str(exc))
-        stored_method = "elevated" if elevated_task else None
-
-    autostart_removed = _do_unregister_autostart(entry.name, stored_method)
 
     if purge:
         remove_instance(entry.name, purge=True)
@@ -354,6 +273,5 @@ def teardown_instance(
         instance_name=entry.name,
         instance_path=entry.path,
         stopped=was_running,
-        autostart_removed=autostart_removed,
         purged=purge,
     )

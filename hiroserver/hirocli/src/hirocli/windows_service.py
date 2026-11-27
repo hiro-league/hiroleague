@@ -193,9 +193,11 @@ def install_release(lay: Layout, source: str) -> Path:
         "UV_TOOL_DIR": str(release / "tools"),
         "UV_TOOL_BIN_DIR": str(release / "bin"),
         "UV_PYTHON_INSTALL_DIR": str(lay.python_dir),
-        # Copies, never hard links: a hard link shares the file's permissions with its copy in this person's uv
-        # cache, which the service's account can't read (a clean laptop, Nov 26, 2026: "DLL load failed while
-        # importing _pydantic_core: Access is denied" at every start). The app install does the same.
+        # Copies, never hard links: Windows keeps one set of permissions per file, shared by every link. The person's
+        # uv cache's are ones the service's account can't read (a clean laptop, Nov 26, 2026: "DLL load failed while
+        # importing _pydantic_core: Access is denied" at every start); and once the Hiro home's were set on the links,
+        # the person could no longer replace those files in their own environments (`uv sync`: "Access is denied",
+        # this PC, Nov 27, 2026, with protobuf). The app install does the same.
         "UV_LINK_MODE": "copy",
     }
     log.info("Installing Hiro League for the service", source=source, release=str(release))

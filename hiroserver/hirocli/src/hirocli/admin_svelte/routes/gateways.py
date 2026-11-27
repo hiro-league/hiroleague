@@ -32,8 +32,6 @@ async def create_gateway(body: GatewayCreateRequest) -> Any:
             host=body.host,
             log_dir=body.log_dir,
             make_default=body.make_default,
-            skip_autostart=body.skip_autostart,
-            elevated_task=body.elevated_task,
         )
     )
     return _api_data(result)
@@ -63,7 +61,6 @@ async def remove_gateway(instance_name: str, body: GatewayRemoveRequest) -> Any:
             GatewayService().teardown_instance,
             instance_name,
             purge=body.purge,
-            elevated_task=body.elevated_task,
         )
     )
     return _api_data(result)

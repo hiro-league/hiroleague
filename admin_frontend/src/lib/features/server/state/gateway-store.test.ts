@@ -22,7 +22,6 @@ const gwRow = (over: Partial<GatewayRow> = {}): GatewayRow =>
     running: false,
     is_default: false,
     pid: null,
-    autostart_method: null,
     stderr_log_exists: false,
     stderr_log_recent: false,
     stderr_log_mtime: null,
@@ -106,9 +105,7 @@ describe('submit flows', () => {
       desktop_public_key: 'KEY==',
       port: 8765,
       host: '0.0.0.0',
-      make_default: false,
-      skip_autostart: false,
-      elevated_task: false
+      make_default: false
     });
     expect(notify).toHaveBeenCalledWith('success', 'created');
     expect(store.dialog).toBeNull();

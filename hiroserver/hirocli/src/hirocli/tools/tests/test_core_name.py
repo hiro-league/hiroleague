@@ -27,7 +27,7 @@ def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _setup(**kw: object) -> object:
-    return SetupTool().execute(gateway_url="ws://localhost:8765", skip_autostart=True, skip_env_import=True, **kw)
+    return SetupTool().execute(gateway_url="ws://localhost:8765", skip_env_import=True, **kw)
 
 
 def _config() -> Config:

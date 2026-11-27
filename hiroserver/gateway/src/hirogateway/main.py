@@ -25,6 +25,7 @@ from rich.table import Table
 from .auth import GatewayAuthManager
 from .config import load_config, resolve_log_dir
 from .constants import APP_NAME, PID_FILENAME
+from .http_answers import answer_plain_http, install_quiet_handshakes
 from .instance import (
     GatewayInstanceError,
     GatewayRegistry,
@@ -138,7 +139,8 @@ async def _serve(host: str, port: int) -> None:
         signal.signal(signal.SIGTERM, lambda *_: loop.call_soon_threadsafe(stop_event.set))
         signal.signal(signal.SIGINT, lambda *_: loop.call_soon_threadsafe(stop_event.set))
 
-    async with websockets.serve(handle_connection, host, port, reuse_address=True):
+    install_quiet_handshakes()
+    async with websockets.serve(handle_connection, host, port, reuse_address=True, process_request=answer_plain_http):
         log.info(f"✅ Gateway listening at ws://{host}:{port}")
         await stop_event.wait()
         log.info("🛑 Shutting down", connected_devices=get_connected_devices())
@@ -284,13 +286,10 @@ def teardown(
     purge: bool = typer.Option(
         False, "--purge", help="Also remove instance from registry and delete files."
     ),
-    elevated_task: bool = typer.Option(
-        False, "--elevated-task", help="(Windows) Request UAC for high-privilege task removal."
-    ),
 ) -> None:
-    """Stop gateway and remove auto-start registration for an instance."""
+    """Stop the gateway; with --purge, also remove the instance."""
     try:
-        result = teardown_instance(instance, purge=purge, elevated_task=elevated_task)
+        result = teardown_instance(instance, purge=purge)
     except GatewayInstanceError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
@@ -343,12 +342,6 @@ def instance_create(
     path: Optional[str] = typer.Option(None, "--path", help="Custom instance folder path."),
     log_dir: str = typer.Option("", "--log-dir", help="Custom log directory."),
     make_default: bool = typer.Option(False, "--set-default", help="Set as default instance."),
-    skip_autostart: bool = typer.Option(
-        False, "--skip-autostart", help="Do not register auto-start during create."
-    ),
-    elevated_task: bool = typer.Option(
-        False, "--elevated-task", help="(Windows) Request UAC for high-privilege task creation."
-    ),
 ) -> None:
     """Create a new gateway instance with mandatory values."""
     try:
@@ -360,8 +353,6 @@ def instance_create(
             path=Path(path) if path else None,
             log_dir=log_dir,
             make_default=make_default,
-            skip_autostart=skip_autostart,
-            elevated_task=elevated_task,
         )
     except GatewayInstanceError as exc:
         console.print(f"[red]{exc}[/red]")
@@ -372,10 +363,6 @@ def instance_create(
     console.print(f"  bind : [bold]{result.host}:{result.port}[/bold]")
     if make_default:
         console.print("  [cyan]Set as default instance.[/cyan]")
-    if result.autostart_registered:
-        console.print(f"  [green]Auto-start registered[/green] (method: {result.autostart_method}).")
-    elif not skip_autostart:
-        console.print(f"  [yellow]Auto-start registration failed[/yellow] ({result.autostart_method}).")
     console.print(f"\nNext: [bold]hirogate start --instance {result.instance_name}[/bold]")
 
 
@@ -420,9 +407,6 @@ def instance_remove(
         False, "--purge", help="Also delete instance files from disk."
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
-    elevated_task: bool = typer.Option(
-        False, "--elevated-task", help="(Windows) Request UAC for high-privilege task removal."
-    ),
 ) -> None:
     """Remove a gateway instance."""
     if not yes:
@@ -430,9 +414,8 @@ def instance_remove(
         typer.confirm(f"Are you sure you want to {action} instance '{name}'?", abort=True)
 
     try:
-        # teardown handles stop + autostart removal; remove_instance handles
-        # registry cleanup (and optional file deletion when purge=True).
-        teardown_instance(name, elevated_task=elevated_task)
+        # teardown stops it; remove_instance handles registry cleanup (and optional file deletion when purge=True).
+        teardown_instance(name)
         remove_instance(name, purge=purge)
     except GatewayInstanceError as exc:
         console.print(f"[red]{exc}[/red]")

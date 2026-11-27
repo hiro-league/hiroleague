@@ -88,8 +88,6 @@ def test_setup_success_message() -> None:
     out = MagicMock()
     out.instance_name = "g1"
     out.port = 8765
-    out.autostart_registered = True
-    out.autostart_method = "registry"
     with patch("hirocli.admin.features.gateways.service.GatewaySetupTool") as T:
         T.return_value.execute.return_value = out
         r = GatewayService().setup_instance(
@@ -111,7 +109,6 @@ def test_teardown_success_message() -> None:
     out = MagicMock()
     out.instance_name = "g1"
     out.stopped = True
-    out.autostart_removed = True
     out.purged = False
     with patch("hirocli.admin.features.gateways.service.GatewayTeardownTool") as T:
         T.return_value.execute.return_value = out

@@ -51,7 +51,7 @@ def create_image_gen_service(
 
     Resolves the default model from ``preferences.llm.default_image_gen`` through the
     catalog and credential store — same pattern as ``create_tts_service``. Cloudflare
-    needs both the API token (keyring) and the account id (providers.json metadata).
+    needs both the API token (keyring) and the account id (credentials index metadata).
     """
     from hirocli.domain.credential_store import CredentialStore
     from hirocli.domain.model_catalog import get_model_catalog

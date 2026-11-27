@@ -6,22 +6,20 @@ AI profile, characters at ordered lists of AI and voice profiles, and Hiro's spo
 profile (``voice.hiro_profile``). Runs from ``load_preferences`` on the RAW JSON, before validation,
 when ``version < 4``; a v4 file is never touched (idempotent).
 
-What it does:
+What it does (no copy of the old file is kept: nothing would read it):
 
-1. Copies ``preferences.json`` to ``preferences.v3.json`` (only when that copy doesn't exist yet).
-2. Each job (``jobs.JOB_PRESETS``): the model the old resolver would have used (the job's own model
+1. Each job (``jobs.JOB_PRESETS``): the model the old resolver would have used (the job's own model
    field, else the old fallback chain) and the tuning of the old referenced tuning profile (the raw
    ``tuning_profiles`` entry, else the old preset's values) become AI profile ``hiro-<job>`` with
    ``preset=<job>``, and the job's field points at it. No model anywhere → no profile, field null.
    Reading pictures: ``IMAGE_VISION_MODEL`` from the environment when set, else ``openai:gpt-4o-mini``
    when an OpenAI key is configured, else null.
-3. Characters: each ``characters/<id>/character.json`` still holding the old keys is copied to
-   ``character.v3.json`` once; each ``llm_models`` entry becomes AI profile ``<id>-<n>``, each
+2. Characters: in each ``characters/<id>/character.json`` still holding the old keys, each ``llm_models`` entry becomes AI profile ``<id>-<n>``, each
    ``voice_models`` entry voice profile ``<id>-voice-<n>``; the new ``ai_profiles`` /
    ``voice_profiles`` lists replace the old keys.
-4. Hiro's voice: ``voice.hiro_profile`` = voice profile ``hiro-voice`` made from ``llm.default_tts``
+3. Hiro's voice: ``voice.hiro_profile`` = voice profile ``hiro-voice`` made from ``llm.default_tts``
    and the default character's voice for that provider + its TTS instructions (as the style).
-5. A model the catalog doesn't know (the profile would be refused) is skipped with a WARNING naming
+4. A model the catalog doesn't know (the profile would be refused) is skipped with a WARNING naming
    the job and model — the load never fails because of it.
 
 The caller validates the result, saves it as version 4 and logs one summary line.
@@ -32,20 +30,17 @@ from __future__ import annotations
 import json
 import logging
 import os
-import shutil
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from hiro_commons.constants.storage import CHARACTERS_DIR, DEFAULT_CHARACTER_ID, PREFERENCES_FILENAME
+from hiro_commons.constants.storage import CHARACTERS_DIR, DEFAULT_CHARACTER_ID
 
 from .jobs import JOB_PRESETS, job_preset, unique_profile_id
 
 logger = logging.getLogger(__name__)
 
-PREFERENCES_V3_BACKUP = "preferences.v3.json"
-CHARACTER_V3_BACKUP = "character.v3.json"
 CHARACTER_JSON = "character.json"
 V4 = 4
 
@@ -110,7 +105,6 @@ class ConversionSummary:
     ai_profiles: int = 0
     voice_profiles: int = 0
     hiro_voice: str | None = None
-    backup: str | None = None
     # Character files to write once the converted preferences validated: path → new JSON.
     pending_characters: dict[Path, dict[str, Any]] = field(default_factory=dict)
 
@@ -143,7 +137,6 @@ def convert_preferences_v3_to_v4(workspace_path: Path, data: dict[str, Any]) -> 
     :func:`write_converted_characters` after the converted preferences validated.
     """
     summary = ConversionSummary()
-    summary.backup = _backup_preferences(workspace_path)
     out: dict[str, Any] = json.loads(json.dumps(data))  # deep copy of plain JSON
     raw_tuning = out.get("tuning_profiles") if isinstance(out.get("tuning_profiles"), dict) else {}
     ai = out.setdefault("ai", {})
@@ -169,7 +162,7 @@ def convert_preferences_v3_to_v4(workspace_path: Path, data: dict[str, Any]) -> 
 
 
 def write_converted_characters(summary: ConversionSummary) -> None:
-    """Write the converted character files (backups were made during the conversion)."""
+    """Write the converted character files."""
     for path, payload in summary.pending_characters.items():
         try:
             path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -454,14 +447,6 @@ def _convert_characters(
         raw = _read_json(path)
         if raw is None or not any(k in raw for k in OLD_CHARACTER_KEYS):
             continue
-        backup = path.with_name(CHARACTER_V3_BACKUP)
-        if not backup.exists():
-            try:
-                shutil.copy2(path, backup)
-            except OSError as exc:
-                logger.error("❌ Character not converted — %s · backup failed", path.parent.name,
-                             extra={"error": str(exc)})
-                continue
         cid = str(raw.get("id") or path.parent.name)
         name = str(raw.get("name") or cid)
         ai_ids = _character_ai_profiles(cid, name, raw, raw_tuning, profiles, summary)
@@ -529,19 +514,6 @@ def _character_voice_profiles(
 # ---------------------------------------------------------------------------
 
 
-def _backup_preferences(workspace_path: Path) -> str | None:
-    src = workspace_path / PREFERENCES_FILENAME
-    dest = workspace_path / PREFERENCES_V3_BACKUP
-    if dest.exists() or not src.is_file():
-        return str(dest) if dest.exists() else None
-    try:
-        shutil.copy2(src, dest)
-    except OSError as exc:
-        # The conversion still runs (the old file is about to be replaced): say so loudly.
-        logger.error("❌ preferences.v3.json backup failed — workspace · preferences v4 conversion",
-                     extra={"error": str(exc), "workspace_path": str(workspace_path)})
-        return None
-    return str(dest)
 
 
 def _get_path(data: dict[str, Any], path: str) -> Any:
@@ -583,9 +555,7 @@ def _pop_path(data: dict[str, Any], path: str) -> None:
 
 
 __all__ = [
-    "CHARACTER_V3_BACKUP",
     "ConversionSummary",
-    "PREFERENCES_V3_BACKUP",
     "convert_preferences_v3_to_v4",
     "needs_conversion",
     "write_converted_characters",

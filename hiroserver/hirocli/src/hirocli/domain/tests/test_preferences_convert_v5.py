@@ -19,7 +19,7 @@ from hirocli.domain.preferences import (
     resolve_knowledge_reranker_model,
     resolve_knowledge_reranker_profile,
 )
-from hirocli.domain.preferences.convert_v5 import PREFERENCES_V4_BACKUP, convert_preferences_v4_to_v5
+from hirocli.domain.preferences.convert_v5 import convert_preferences_v4_to_v5
 
 
 def _write(ws: Path, data: dict) -> None:
@@ -64,7 +64,7 @@ def test_defaults_only_become_one_profile_per_family_used_by_both_legs(tmp_path:
     assert set(saved["graph"]["reranker"]) == {"profile", "min_relevance"}
     assert "default_embedding_model" not in saved["knowledge"]
     assert set(saved["knowledge"]["retrieval"]["reranker"]) == {"enabled", "profile", "top_n"}
-    assert json.loads((ws / PREFERENCES_V4_BACKUP).read_text(encoding="utf-8")) == v4
+    assert not (ws / "preferences.v4.json").exists()  # no copy is kept
 
     # A v5 file is never converted again.
     again = load_preferences(ws)

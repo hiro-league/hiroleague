@@ -13,7 +13,6 @@ import pytest
 from hirocli.domain.character import load_character_from_disk
 from hirocli.domain.model_catalog import clear_model_catalog_cache
 from hirocli.domain.preferences import load_preferences, preferences_file
-from hirocli.domain.preferences.convert_v4 import CHARACTER_V3_BACKUP, PREFERENCES_V3_BACKUP
 
 V3_PREFS = {
     "version": 3,
@@ -115,9 +114,8 @@ def test_v3_preferences_and_character_convert_to_profiles(tmp_path: Path) -> Non
     raw_char = json.loads((char_dir / "character.json").read_text(encoding="utf-8"))
     assert not {"llm_models", "tuning_profile", "voice_models", "tts_instructions", "tts_voice_by_provider"} & set(raw_char)
 
-    # Backups, and the saved file is clean (and v5: the v4 → v5 conversion runs right after).
-    assert json.loads((ws / PREFERENCES_V3_BACKUP).read_text(encoding="utf-8")) == V3_PREFS
-    assert json.loads((char_dir / CHARACTER_V3_BACKUP).read_text(encoding="utf-8")) == V3_CHARACTER
+    # No copies are kept, and the saved file is clean (and v5: the v4 → v5 conversion runs right after).
+    assert not (ws / "preferences.v3.json").exists() and not (char_dir / "character.v3.json").exists()
     saved = json.loads(preferences_file(ws).read_text(encoding="utf-8"))
     assert saved["version"] == 5
     assert "tuning_profiles" not in saved
@@ -130,15 +128,12 @@ def test_conversion_is_idempotent(tmp_path: Path) -> None:
     first = load_preferences(ws)
     saved = preferences_file(ws).read_text(encoding="utf-8")
     character = (char_dir / "character.json").read_text(encoding="utf-8")
-    # A changed backup must not be overwritten by a later load either.
-    (ws / PREFERENCES_V3_BACKUP).write_text("{}", encoding="utf-8")
 
     second = load_preferences(ws)
 
     assert second.model_dump() == first.model_dump()
     assert preferences_file(ws).read_text(encoding="utf-8") == saved
     assert (char_dir / "character.json").read_text(encoding="utf-8") == character
-    assert (ws / PREFERENCES_V3_BACKUP).read_text(encoding="utf-8") == "{}"
 
 
 def test_vision_from_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

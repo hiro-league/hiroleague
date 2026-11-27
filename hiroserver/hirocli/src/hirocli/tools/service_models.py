@@ -26,6 +26,11 @@ class ServiceInstallResult:
     firewall: list[str] = field(default_factory=list)
     front_door_names: str | None = None  # what announces the names on the LAN, or what to do for it (Linux)
     cpp_runtime: str | None = None  # Windows: Microsoft's C++ runtime, present, installed now, or what to do for it
+    # The admin's port on this machine: from the service's own workspace once its first start made it (None: not
+    # readable or not made in time); and whether this install put the service there for the first time.
+    admin_port: int | None = None
+    site_domain: str | None = None  # the core's LAN name (hiro.local), which the front door serves when it runs
+    first_install: bool = False
 
 
 @dataclass
@@ -56,6 +61,9 @@ class ServiceStatusResult:
     secrets_file: str | None
     install_command: str  # what to run when it is not installed
     logs: str
+    # Windows: the service's own data folder (its HIRO_DATA_DIR), whose registry holds the workspace it runs; Linux
+    # and Mac: None, the service account's own data folder.
+    data_dir: str | None = None
 
 
 @dataclass

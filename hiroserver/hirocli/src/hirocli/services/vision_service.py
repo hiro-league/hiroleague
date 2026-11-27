@@ -44,7 +44,7 @@ class VisionService:
         self._off_logged = False
 
     def invalidate_workspace_credentials(self) -> None:
-        """Drop cached credential store and vision model after ``providers.json`` / keyring changes."""
+        """Drop cached credential store and vision model after the credentials index / keyring changes."""
         self._credential_store = None
         self._model = None
         self._model_key = None

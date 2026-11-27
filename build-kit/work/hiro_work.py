@@ -546,8 +546,9 @@ def memory_link(env: int, repo: str) -> None:
     run(["cmd", "/c", "mklink", "/J", str(dst_dir / "memory"), str(src)])
 
 
-def init_env(env: int, task: str | None = None) -> None:
-    """Make (or repair) envN: a detached worktree of each repo at env0's dev/main, its installs, its settings."""
+def init_env(env: int, task: str | None = None, install: bool = True) -> None:
+    """Make (or repair) envN: a detached worktree of each repo at env0's dev/main, its installs, its settings.
+    ``install=False`` when the caller moves the repos first and installs after (start)."""
     if env == 0:
         raise Stop("env0 is Michel's dev: its checkouts already exist.")
     env_dir(env).mkdir(parents=True, exist_ok=True)
@@ -562,7 +563,8 @@ def init_env(env: int, task: str | None = None) -> None:
             (dst / ".claude").mkdir(exist_ok=True)
             shutil.copy2(local, dst / ".claude" / "settings.local.json")
         memory_link(env, repo)
-    install_all(env, REPOS, task)
+    if install:
+        install_all(env, REPOS, task)
     # The git hooks (pre-commit check, post-checkout warning): every repo's core.hooksPath points at env0's core.
     # Worktrees share their repo's config, so this only matters for a repo env0 didn't have before.
     with step(task, env, "git hooks"):
@@ -1023,6 +1025,23 @@ def plan_base(env: int, repo: str, task: Task) -> str:
     return branch_tip(repo, task.target)
 
 
+def undo_branches(env: int, task: Task, before: dict[str, tuple[str, bool]]) -> None:
+    """A start that stopped leaves no task branch in the environment it gave up on: each reserved repo it moved goes
+    back, detached, to the commit it sat on, and a branch the start made goes (it holds no commit of its own yet).
+    ``before``: each repo's commit before the start moved it, and whether the branch was there already."""
+    for repo, (was, existed) in before.items():
+        d = repo_dir(env, repo)
+        if git(d, "branch", "--show-current", check=False) == task.branch:
+            git(d, "switch", "-q", "--detach", was, check=False)
+        if git(d, "branch", "--show-current", check=False) == task.branch:
+            say(f"  ! env{env}'s {repo} is still on {task.branch}: switch it to --detach {main_of(repo)} by hand")
+            continue
+        if not existed:
+            git(d, "branch", "-q", "-D", task.branch, check=False)
+            if git(d, "rev-parse", "--verify", "-q", f"refs/heads/{task.branch}", check=False):
+                say(f"  ! {repo}'s {task.branch} couldn't be removed: remove it by hand")
+
+
 def cmd_start(a) -> None:
     with locked():
         tasks = load_tasks()
@@ -1056,16 +1075,24 @@ def cmd_start(a) -> None:
     event(task=task.id, env=env, step="task", phase="start", repos=repos, title=task.title,
           **({"part_of": task.part_of} if task.part_of else {}), **({"about": task.about} if task.about else {}),
           **({"lands": task.lands} if task.lands else {}))
+    before: dict[str, tuple[str, bool]] = {}  # each reserved repo moved: its commit before, and whether the branch was
     try:
-        init_env(env, task.id)
+        # Why the installs wait for the switch: a repo on an old commit has another layout (env5's codehiro sat before
+        # CodeHiro's backend/ on Nov 27, and `uv sync` in a backend/ that wasn't there stopped the start)
+        init_env(env, task.id, install=False)
         fetch_all(REPOS, task.id, env)
+        # Every repo is checked before any moves, so a refusal leaves the environment as it was (on Nov 27 env1's
+        # codehiro refused after its hiroleague was already on the task's branch)
+        for repo in REPOS:
+            if dirty(repo_dir(env, repo)):
+                raise Stop(f"env{env}'s {repo} has uncommitted files: it isn't free (hiro-work sweep).")
         for repo in REPOS:
             base = fresh_base(repo, task.id, fetch=False)
             d = repo_dir(env, repo)
-            if dirty(d):
-                raise Stop(f"env{env}'s {repo} has uncommitted files: it isn't free (hiro-work sweep).")
             with step(task.id, env, "switch", repo):
                 if repo in repos:
+                    before[repo] = (git(d, "rev-parse", "HEAD"), bool(git(
+                        d, "rev-parse", "--verify", "-q", f"refs/heads/{task.branch}", check=False)))
                     if task.target:  # the task's branch starts from its plan's, brought up to main when it can be
                         base = plan_base(env, repo, task)
                     git(d, "switch", "-q", "-C", task.branch, base)
@@ -1076,6 +1103,7 @@ def cmd_start(a) -> None:
         refresh_data(env, task.id, task.data)
         save(task)
     except BaseException:
+        undo_branches(env, task, before)
         with locked():
             task_path(task.id).unlink(missing_ok=True)  # no half-made reservation
         raise
@@ -1796,7 +1824,9 @@ def cmd_resume(a) -> None:
             raise Stop("Every environment is busy.")
         task.state, task.env = "working", env
         save(task)
-    init_env(env, task.id)
+    # Why the installs wait for the switch, as in start: a repo on an old commit has another layout, and installing it
+    # there fails (env5's codehiro before CodeHiro's backend/, Nov 27)
+    init_env(env, task.id, install=False)
     for repo in REPOS:
         d = repo_dir(env, repo)
         if repo in task.repos:

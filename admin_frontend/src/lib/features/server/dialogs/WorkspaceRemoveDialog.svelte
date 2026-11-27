@@ -19,6 +19,9 @@
   onConfirm={workspace.submitRemove}
 >
   {#snippet children()}
+    {#if workspace.selected?.running}
+      <p class="font-sans text-sm text-muted-foreground">Its server is running: it is stopped first.</p>
+    {/if}
     <label class="flex items-center gap-2 font-sans text-sm">
       <Checkbox bind:checked={workspace.removeForm.purge} />
       Also delete workspace folder from disk

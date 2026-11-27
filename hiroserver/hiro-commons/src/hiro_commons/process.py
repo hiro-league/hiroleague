@@ -90,14 +90,14 @@ def spawn_detached(
     effective_env.setdefault("PYTHONIOENCODING", "utf-8")
     stderr_target = open(stderr_log, "a") if stderr_log else subprocess.DEVNULL  # noqa: SIM115
     if sys.platform == "win32":
+        # A hidden console, not none: the child is a launcher (``uv run``, a venv's python.exe) that starts the
+        # real Python. With DETACHED_PROCESS that Python has no console, so Windows opens a new window for it;
+        # with CREATE_NO_WINDOW it inherits the launcher's hidden one. The new group keeps it out of the parent's
+        # Ctrl-C, and it outlives the process that started it.
         subprocess.Popen(
             cmd,
             env=effective_env,
-            creationflags=(
-                subprocess.DETACHED_PROCESS
-                | subprocess.CREATE_NEW_PROCESS_GROUP
-                | subprocess.CREATE_NO_WINDOW
-            ),
+            creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW),
             close_fds=True,
             stdout=subprocess.DEVNULL,
             stderr=stderr_target,

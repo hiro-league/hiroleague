@@ -89,10 +89,11 @@ def test_the_core_without_the_runtime_says_what_to_install_not_a_traceback(tmp_p
     monkeypatch.setattr(server_control, "load_or_create_master_key", lambda *a, **kw: None)
     monkeypatch.setattr(server_control, "ensure_mandatory_devices_channel", lambda *a, **kw: None)
     monkeypatch.setattr(server_control, "read_running_pid", lambda *a, **kw: None)
+    monkeypatch.setattr(server_control, "check_ports", lambda *a, **kw: None)  # this test is the runtime's, not ports'
     monkeypatch.setitem(sys.modules, "hirocli.runtime.server_process", None)  # its import fails, as _kuzu's did
     monkeypatch.setattr(server_control.sys, "platform", "win32")
     monkeypatch.setattr(cpp_runtime, "missing", lambda: True)
-    config = type("Config", (), {"master_key_file": "master.key"})()
+    config = type("Config", (), {})()
     with pytest.raises(ValueError, match="Visual C\\+\\+ runtime is missing"):
         server_control.start_server(tmp_path, config, workspace_name="default", foreground=True)
 

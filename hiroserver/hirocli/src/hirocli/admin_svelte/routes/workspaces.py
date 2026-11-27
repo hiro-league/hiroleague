@@ -101,9 +101,7 @@ async def setup_workspace(workspace_id: str, body: WorkspaceSetupRequest) -> Any
             workspace_id,
             gateway_url=body.gateway_url,
             http_port=body.http_port,
-            skip_autostart=body.skip_autostart,
             start_server=body.start_server,
-            elevated_task=body.elevated_task,
         )
     )
     if not result.ok or result.data is None:

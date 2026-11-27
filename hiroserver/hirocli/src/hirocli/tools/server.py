@@ -8,7 +8,6 @@ from ``server_models``.
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 from importlib import metadata
@@ -23,23 +22,23 @@ from ..domain.crypto import load_or_create_master_key
 from ..domain.site_names import SiteNameError, check_core_name
 from ..domain.workspace import (
     admin_port_for,
+    gateway_port_for,
     http_port_for,
     load_registry,
-    remove_workspace,
     resolve_workspace,
     WorkspaceError,
 )
 from ..constants import ENV_CORE_NAME, PID_FILENAME
 from .base import Tool, ToolParam
 from . import server_control as ctrl
+from . import teardown
+from .teardown import TeardownPlan, WorkspaceTeardown
 from .server_models import (
     RestartResult,
     SetupResult,
     StartResult,
     StatusResult,
     StopResult,
-    TeardownResult,
-    UninstallResult,
     UpgradeResult,
     WorkspaceStatusEntry,
 )
@@ -97,21 +96,15 @@ class SetupTool(Tool):
     name = "setup"
     description = (
         "One-time setup: save gateway config, generate device key, "
-        "and optionally register auto-start and start the server"
+        "and optionally start the server"
     )
     params = {
         "gateway_url": ToolParam(str, "WebSocket gateway URL, e.g. ws://myhost:8765"),
         "workspace": ToolParam(str, "Workspace name or id to configure", required=False),
         "http_port": ToolParam(int, "Local HTTP server port override", required=False),
-        "skip_autostart": ToolParam(bool, "Do not register auto-start", required=False),
         "start_server": ToolParam(
             bool,
             "Start the server after setup completes (default: false)",
-            required=False,
-        ),
-        "elevated_task": ToolParam(
-            bool,
-            "(Windows) Request UAC elevation for Task Scheduler entry",
             required=False,
         ),
         "metrics_enabled": ToolParam(bool, "Enable system metrics collection", required=False),
@@ -133,9 +126,7 @@ class SetupTool(Tool):
         gateway_url: str,
         workspace: str | None = None,
         http_port: int | None = None,
-        skip_autostart: bool = False,
         start_server: bool = False,
-        elevated_task: bool = False,
         metrics_enabled: bool | None = None,
         metrics_interval: float | None = None,
         skip_env_import: bool = False,
@@ -146,16 +137,22 @@ class SetupTool(Tool):
         existing = load_config(workspace_path)
         name = core_name_for(existing, is_new=is_new, asked=core_name)
 
+        # A new workspace's own gateway takes its slot's port, so two workspaces with Devices on don't collide; a
+        # workspace made before keeps its own (a phone paired by address and port reaches it there).
+        gateway_port = gateway_port_for(registry, entry.port_slot) if is_new else existing.gateway_port
+        if is_new and gateway_url == Config.model_fields["gateway_url"].default:
+            gateway_url = f"ws://localhost:{gateway_port}"
         config = Config(
             device_id=existing.device_id,
             gateway_url=gateway_url,
+            gateway_builtin=existing.gateway_builtin,
+            gateway_port=gateway_port,
             http_host=existing.http_host,
             http_port=http_port or http_port_for(registry, entry.port_slot),
             admin_port=admin_port_for(registry, entry.port_slot),
             # Carry the extension address forward so re-running setup keeps it.
             extension_host=existing.extension_host,
             extension_port=existing.extension_port,
-            master_key_file=existing.master_key_file,
             pairing_code_length=existing.pairing_code_length,
             pairing_code_ttl_seconds=existing.pairing_code_ttl_seconds,
             attestation_expires_days=existing.attestation_expires_days,
@@ -169,7 +166,7 @@ class SetupTool(Tool):
             core_name=name,
         )
         save_config(workspace_path, config)
-        private_key = load_or_create_master_key(workspace_path, filename=config.master_key_file)
+        private_key = load_or_create_master_key(workspace_path)
         public_key_b64 = public_key_to_b64(private_key.public_key())
         ctrl.ensure_mandatory_devices_channel(workspace_path, config)
         ctrl.ensure_default_preferences(workspace_path)
@@ -203,16 +200,6 @@ class SetupTool(Tool):
                     workspace=entry.name,
                 )
 
-        autostart_registered = False
-        autostart_method = "skipped"
-        if not skip_autostart:
-            autostart_registered, autostart_method = ctrl.register_autostart_for_workspace(
-                entry.id, elevated_task,
-            )
-
-        config.autostart_method = autostart_method
-        save_config(workspace_path, config)
-
         if start_server:
             ctrl.start_server(workspace_path, config, workspace_name=entry.name, foreground=False)
 
@@ -223,10 +210,8 @@ class SetupTool(Tool):
             device_id=config.device_id,
             gateway_url=config.gateway_url,
             http_port=config.http_port,
-            master_key=str(master_key_path(workspace_path, config)),
+            master_key=str(master_key_path(workspace_path)),
             desktop_pub=public_key_b64,
-            autostart_registered=autostart_registered,
-            autostart_method=autostart_method,
             server_started=start_server,
             providers_imported=providers_imported,
             core_name=config.core_name,
@@ -270,7 +255,7 @@ class StartTool(Tool):
         # Zero-config first run: a truly fresh workspace (no config.json yet) is
         # auto-provisioned with a minimal setup instead of forcing the user to
         # run `hiro workspaces setup` first. Reuses SetupTool (Tool composition)
-        # with env-key scanning and auto-start registration disabled — writes
+        # with env-key scanning disabled — writes
         # only the mandatory skeleton (config + default preferences; master key
         # and devices channel are ensured by start_server below). A missing
         # config.json only ever happens pre-first-setup, so this is scoped to
@@ -283,7 +268,6 @@ class StartTool(Tool):
             SetupTool().execute(
                 gateway_url=Config.model_fields["gateway_url"].default,
                 workspace=entry.name,
-                skip_autostart=True,
                 skip_env_import=True,
                 core_name=asked_name,
             )
@@ -476,10 +460,20 @@ class StatusTool(Tool):
         return StatusResult(workspaces=entries)
 
 
+def plan_teardown(workspace: str | None, *, purge: bool) -> WorkspaceTeardown:
+    """What tearing one workspace down does (tools/teardown.py): read before it is done. A workspace that isn't in
+    the registry is a WorkspaceError: none is made to be taken down."""
+    entry, registry = resolve_workspace(workspace)
+    return teardown.plan_workspace(entry, registry, purge=purge, leaves_list=purge)
+
+
 class TeardownTool(Tool):
     surfaces = frozenset({"cli", "http"})
     name = "teardown"
-    description = "Stop server and remove all auto-start registrations for a workspace"
+    description = (
+        "Take a workspace down: remove the OS service that runs it, stop its server; with purge, also delete its "
+        "folder and drop it from the list"
+    )
     params = {
         "workspace": ToolParam(str, "Workspace name or id to tear down", required=False),
         "purge": ToolParam(
@@ -493,47 +487,25 @@ class TeardownTool(Tool):
         self,
         workspace: str | None = None,
         purge: bool = False,
-    ) -> TeardownResult:
-        entry, registry, workspace_path = ctrl.resolve_or_create(workspace)
-
-        ctrl.stop_server(workspace_path)
-
-        stored_config = load_config(workspace_path)
-        autostart_removed = ctrl.unregister_autostart_for_workspace(entry.id, stored_config.autostart_method)
-
-        if purge:
-            if workspace_path.exists():
-                shutil.rmtree(workspace_path, ignore_errors=True)
-            try:
-                remove_workspace(entry.id, purge=False)
-            except WorkspaceError:
-                pass
-
-        return TeardownResult(
-            workspace=entry.name,
-            workspace_path=str(workspace_path),
-            server_stopped=True,
-            autostart_removed=autostart_removed,
-            purged=purge,
-        )
+    ) -> WorkspaceTeardown:
+        step = plan_teardown(workspace, purge=purge)
+        teardown.carry_out_workspace(step)
+        return step
 
 
 class UninstallTool(Tool):
     surfaces = frozenset({"cli", "http"})
     name = "uninstall"
-    description = "Stop server, remove auto-start, and return package uninstall instructions"
+    description = (
+        "Take every workspace and standalone gateway down (their services, servers; with purge their folders), "
+        "before the package is removed"
+    )
     params = {
-        "workspace": ToolParam(str, "Workspace name or id to uninstall", required=False),
-        "purge": ToolParam(bool, "Also delete the workspace folder", required=False),
+        "purge": ToolParam(bool, "Also delete every workspace's folder and every gateway's files", required=False),
     }
 
-    def execute(
-        self,
-        workspace: str | None = None,
-        purge: bool = False,
-    ) -> UninstallResult:
-        teardown_result = TeardownTool().execute(workspace=workspace, purge=purge)
-        return UninstallResult(teardown=teardown_result)
+    def execute(self, purge: bool = False) -> TeardownPlan:
+        return teardown.carry_out(teardown.plan_uninstall(purge=purge))
 
 
 # ---------------------------------------------------------------------------

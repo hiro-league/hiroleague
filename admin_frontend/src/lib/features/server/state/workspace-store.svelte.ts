@@ -64,9 +64,7 @@ export function createWorkspaceStore(notify: Notify) {
   let setupForm = $state({
     gatewayUrl: '',
     httpPort: '',
-    skipAutostart: false,
-    startServer: false,
-    elevatedTask: false
+    startServer: false
   });
   let publicKey = $state('');
   let setupPublicKey = $state('');
@@ -146,9 +144,7 @@ export function createWorkspaceStore(notify: Notify) {
     setupForm = {
       gatewayUrl: row.gateway_url ?? '',
       httpPort: '',
-      skipAutostart: false,
-      startServer: false,
-      elevatedTask: false
+      startServer: false
     };
     setupPublicKey = '';
     dialog = 'setup';
@@ -224,9 +220,7 @@ export function createWorkspaceStore(notify: Notify) {
       const result = await setupWorkspace(row.id, {
         gateway_url: setupForm.gatewayUrl,
         http_port: setupForm.httpPort.trim() ? Number(setupForm.httpPort) : null,
-        skip_autostart: setupForm.skipAutostart,
-        start_server: setupForm.startServer,
-        elevated_task: setupForm.elevatedTask
+        start_server: setupForm.startServer
       });
       setupPublicKey = result.desktop_pub;
       dialog = 'setup-key';

@@ -493,6 +493,9 @@ class ExtensionManager:
         log.info(f"🔌 Extension stopped — {channel_name}")
 
     async def _start_enabled(self) -> None:
+        # A plugin an earlier server left running (it crashed, or was killed before it stopped them) would be a
+        # second WhatsApp or devices client: end it before starting this run's.
+        await asyncio.to_thread(self._starter.end_leftovers)
         channels = await asyncio.to_thread(list_enabled_channels, self._ctx.workspace_path)
         if not channels:
             log.warning("No enabled channel plugins configured")

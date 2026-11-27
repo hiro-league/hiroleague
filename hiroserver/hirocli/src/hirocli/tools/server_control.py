@@ -8,15 +8,19 @@ layers decide how to present results to the user.
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
 from hiro_commons.constants.timing import DEFAULT_PING_INTERVAL_SECONDS
+from hiro_commons.log import Logger
+from hiro_commons.ports import port_free
 from hiro_commons.process import (
     find_workspace_root,
     is_running,
+    kill_process,
     read_running_pid,
     remove_pid,
     spawn_detached,
@@ -25,19 +29,21 @@ from hiro_commons.process import (
     wait_for_pid,
 )
 
-from ..autostart import (
-    register_autostart,
-    register_autostart_elevated,
-    unregister_autostart,
-    unregister_autostart_elevated,
+from ..constants import (
+    ENV_ADMIN_UI,
+    ENV_METRICS,
+    ENV_SERVICE_MANAGER,
+    ENV_WORKSPACE,
+    ENV_WORKSPACE_PATH,
+    PID_FILENAME,
+    SERVICE_RESTART_EXIT_CODE,
+    TERMINAL_MANAGER,
 )
-from ..constants import ENV_ADMIN_UI, ENV_METRICS, ENV_WORKSPACE, ENV_WORKSPACE_PATH, PID_FILENAME
 from ..domain.channel_config import ChannelConfig, load_channel_config, save_channel_config
 from ..domain.config import Config, load_config, master_key_path, workspace_log_dir
-from ..domain.features import feature_active
 from ..domain.crypto import load_or_create_master_key
+from ..domain.features import feature_active
 from ..domain.workspace import WorkspaceError, WorkspaceRegistry, create_workspace, resolve_workspace
-from hiro_commons.log import Logger
 
 log = Logger.get("TOOLS.SERVER")
 
@@ -100,12 +106,13 @@ def start_server(
     Returns the child PID on success (``None`` for foreground mode, which
     blocks until the server exits).
     """
-    load_or_create_master_key(workspace_path, filename=config.master_key_file)
+    load_or_create_master_key(workspace_path)
     ensure_mandatory_devices_channel(workspace_path, config)
 
     pid = read_running_pid(workspace_path, PID_FILENAME)
     if pid:
         return pid  # already running — caller decides what to tell the user
+    check_ports(config, admin=admin)
 
     if foreground:
         import asyncio as _asyncio
@@ -123,7 +130,7 @@ def start_server(
             raise
 
         try:
-            _asyncio.run(
+            restart = _asyncio.run(
                 _main(
                     foreground=True,
                     workspace_path=workspace_path,
@@ -133,7 +140,9 @@ def start_server(
                 )
             )
         except KeyboardInterrupt:
-            pass
+            return None
+        if restart:
+            restart_in_terminal(workspace_path, workspace_name=workspace_name, admin=admin, metrics=metrics)
         return None
 
     # Background mode — clear stale PID so wait_for_pid starts clean.
@@ -154,6 +163,67 @@ def start_server(
     spawn_detached([*uv_python_cmd(), script], env=env, stderr_log=stderr_log)
 
     return wait_for_pid(workspace_path, PID_FILENAME, stderr_log=stderr_log)
+
+
+def ports_to_open(config: Config, *, admin: bool) -> list[tuple[int, str]]:
+    """The ports a start opens, each with what opens it."""
+    ports = [(config.http_port, "the HTTP status API"), (config.effective_extension_port(), "the extension socket")]
+    if admin:
+        ports.append((config.admin_port, "the admin"))
+    if feature_active(MANDATORY_CHANNEL_NAME) and config.gateway_builtin:
+        ports.append((config.gateway_port, "the core's gateway"))
+    return ports
+
+
+def check_ports(config: Config, *, admin: bool) -> None:
+    """Before a start: a port another program holds is named now, not found later as a part that failed to listen
+    (issue 455)."""
+    taken = [(port, what) for port, what in ports_to_open(config, admin=admin) if not port_free(port)]
+    if taken:
+        named = ", ".join(f"{port} ({what})" for port, what in taken)
+        which = f"port {named} is" if len(taken) == 1 else f"ports {named} are"
+        raise ValueError(
+            f"The server can't start: {which} in use on this machine (another program listens there, or Windows "
+            "reserves it). Stop that program, or give this workspace other ports in its config.json."
+        )
+
+
+def restart_in_terminal(workspace_path: Path, *, workspace_name: str, admin: bool, metrics: bool) -> None:
+    """A terminal run's restart: the next server runs as this command's child, in this terminal (its output here,
+    Ctrl-C reaching it). It ends with SERVICE_RESTART_EXIT_CODE when it restarts, and is started again; any other end
+    ends this command. It starts with the flags the terminal run was started with, as a service's server does.
+
+    ``sys.executable`` is the interpreter running ``hiro``, which has the core (a debugger attaches to it too).
+    """
+    script = str(Path(__file__).parents[1] / "runtime" / "server_process.py")
+    env = {
+        **os.environ,
+        ENV_WORKSPACE_PATH: str(workspace_path),
+        ENV_WORKSPACE: workspace_name,
+        ENV_SERVICE_MANAGER: TERMINAL_MANAGER,
+    }
+    for name, on in ((ENV_ADMIN_UI, admin), (ENV_METRICS, metrics)):
+        if on:
+            env[name] = "1"
+        else:
+            env.pop(name, None)
+    while True:
+        child = subprocess.Popen([sys.executable, script], env=env)
+        if _wait_through_ctrl_c(child) != SERVICE_RESTART_EXIT_CODE:
+            return
+        log.info("Restart — starting the server again in this terminal", workspace=workspace_name)
+
+
+def _wait_through_ctrl_c(child: subprocess.Popen[bytes]) -> int:
+    """Wait for the server; Ctrl-C reaches it too (one console) and it stops by itself. A second Ctrl-C ends it."""
+    interrupted = False
+    while True:
+        try:
+            return child.wait()
+        except KeyboardInterrupt:
+            if interrupted:
+                kill_process(child.pid, include_tree=True)
+            interrupted = True
 
 
 def stop_server(workspace_path: Path) -> tuple[bool, int | None]:
@@ -235,7 +305,7 @@ def ensure_mandatory_devices_channel(workspace_path: Path, config: Config) -> No
             **(existing.config if existing else {}),
             "gateway_url": config.gateway_connect_url(),
             "device_id": config.device_id,
-            "master_key_path": str(master_key_path(workspace_path, config)),
+            "master_key_path": str(master_key_path(workspace_path)),
             "ping_interval": (
                 existing.config.get("ping_interval", DEFAULT_PING_INTERVAL_SECONDS)
                 if existing
@@ -272,44 +342,3 @@ def resolve_or_create(workspace: str | None) -> tuple[Any, WorkspaceRegistry, Pa
             raise
         entry, registry = create_workspace("default")
         return entry, registry, Path(entry.path)
-
-
-# ---------------------------------------------------------------------------
-# Autostart helpers
-# ---------------------------------------------------------------------------
-
-
-def register_autostart_for_workspace(workspace_id: str, elevated: bool) -> tuple[bool, str]:
-    """Register auto-start using workspace id and return ``(success, method_label)``."""
-    if elevated and sys.platform == "win32":
-        try:
-            accepted = register_autostart_elevated(workspace_id)
-        except RuntimeError:
-            accepted = False
-        if accepted:
-            return True, "elevated"
-    try:
-        method = register_autostart(workspace_id)
-        return True, str(method)
-    except (NotImplementedError, Exception) as exc:
-        log.warning("Could not register auto-start for the workspace", workspace_id=workspace_id, error=str(exc), exc_info=True)
-        return False, "failed"
-
-
-def unregister_autostart_for_workspace(workspace_id: str, stored_method: str | None) -> bool:
-    """Unregister auto-start previously set up for a workspace."""
-    if stored_method in (None, "skipped", "failed"):
-        return False
-    if stored_method == "elevated" and sys.platform == "win32":
-        try:
-            accepted = unregister_autostart_elevated(workspace_id)
-        except RuntimeError:
-            accepted = False
-        if accepted:
-            return True
-    try:
-        unregister_autostart(workspace_id)
-        return True
-    except (NotImplementedError, Exception) as exc:
-        log.warning("Could not unregister auto-start for the workspace", workspace_id=workspace_id, error=str(exc), exc_info=True)
-        return False

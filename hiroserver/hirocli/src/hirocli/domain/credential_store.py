@@ -1,4 +1,4 @@
-"""Per-workspace provider credentials: OS keyring for secrets, providers.json for metadata."""
+"""Per-workspace provider credentials: OS keyring for secrets, ``credentials/credentials_index.json`` for metadata."""
 
 from __future__ import annotations
 
@@ -9,12 +9,12 @@ from pathlib import Path
 from typing import Literal
 
 import keyring
-from hiro_commons.constants.storage import PROVIDERS_FILENAME
 from hiro_commons.log import Logger
 from keyring.errors import PasswordDeleteError
 from pydantic import BaseModel, Field
 
 from .model_catalog import get_model_catalog
+from .workspace_layout import credentials_index_path, move_credentials
 
 # The structured logger: the calls below pass fields (provider_id=, error=) that the stdlib logger
 # rejects with a TypeError, which turned a locked keyring (SSH, no login session) into a crash.
@@ -42,7 +42,7 @@ def _service_name(workspace_id: str, provider_id: str) -> str:
 
 
 def _publish_providers_changed(workspace_path: Path, *, reason: str) -> None:
-    """Notify runtime that ``providers.json`` was written (secrets metadata changed).
+    """Notify runtime that the credentials index was written (secrets metadata changed).
 
     Handlers clear compiled-graph caches and rebuild STT/Vision bindings so the
     agent picks up new keys without restart. Safe from any thread when the domain
@@ -60,7 +60,7 @@ def _publish_providers_changed(workspace_path: Path, *, reason: str) -> None:
 
 
 class ProviderMetadata(BaseModel):
-    """Non-secret metadata for one configured provider (stored in providers.json)."""
+    """Non-secret metadata for one configured provider (stored in the credentials index)."""
 
     provider_id: str
     auth_method: AuthMethod
@@ -91,7 +91,7 @@ class ProviderCredential:
 
 
 class CredentialStore:
-    """Secrets in OS keyring; non-secret state in ``<workspace>/providers.json``."""
+    """Secrets in OS keyring; non-secret state in ``<workspace>/credentials/credentials_index.json``."""
 
     def __init__(
         self,
@@ -103,6 +103,7 @@ class CredentialStore:
         self._workspace_path = workspace_path
         self._workspace_id = workspace_id
         self._test_secrets = _test_secrets
+        move_credentials(workspace_path)  # an older workspace's providers.json, on its root
         self._doc = self._load_doc()
         self._providers_mtime_ns = _providers_file_mtime_ns(self.providers_file())
         if _test_secrets is None:
@@ -115,7 +116,7 @@ class CredentialStore:
             )
 
     def providers_file(self) -> Path:
-        return self._workspace_path / PROVIDERS_FILENAME
+        return credentials_index_path(self._workspace_path)
 
     def _load_doc(self) -> ProvidersDocument:
         path = self.providers_file()
@@ -125,13 +126,13 @@ class CredentialStore:
             return ProvidersDocument.model_validate_json(path.read_text(encoding="utf-8"))
         except Exception:
             logger.exception(
-                "❌ Failed to load providers.json — workspace · resetting empty document",
+                "❌ Failed to load the credentials index — workspace · resetting empty document",
             )
             return ProvidersDocument()
 
     def _save_doc(self) -> None:
-        self._workspace_path.mkdir(parents=True, exist_ok=True)
         path = self.providers_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             self._doc.model_dump_json(indent=2),
             encoding="utf-8",
@@ -140,7 +141,7 @@ class CredentialStore:
         _publish_providers_changed(self._workspace_path, reason="credential_store_save")
 
     def _ensure_doc_current(self) -> None:
-        """Reload ``providers.json`` when another process/store instance wrote it."""
+        """Reload the credentials index when another process/store instance wrote it."""
         path = self.providers_file()
         cur = _providers_file_mtime_ns(path)
         if cur == self._providers_mtime_ns:
@@ -385,7 +386,7 @@ class CredentialStore:
         return self._api_key_from_env(provider_id)
 
     def get_account_id(self, provider_id: str) -> str | None:
-        """Non-secret vendor account id: providers.json metadata, else catalog env fallback."""
+        """Non-secret vendor account id: credentials index metadata, else catalog env fallback."""
         meta = self._meta_for(provider_id)
         if meta is not None and meta.account_id:
             return meta.account_id

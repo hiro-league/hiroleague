@@ -2,7 +2,7 @@
 
 ``preferences.json`` holds model default selections (canonical catalog ids), the AI profiles Hiro's
 own jobs use (``jobs.JOB_PRESETS``), voice/audio, and memory settings. Provider secrets live in the credential
-store (``providers.json`` + OS keyring), not here.
+store (the credentials index + OS keyring), not here.
 
 Storage: ``<workspace>/preferences.json`` — Pydantic model serialised to JSON.
 

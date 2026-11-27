@@ -15,7 +15,6 @@
   import { Button } from '$kit/components/ui/button/index.js';
   import { TABLE_GRID_ROW } from '$kit/ui/table-grid';
   import type { WorkspaceRow } from '$lib/api/server';
-  import AutostartBadge from '../shared/AutostartBadge.svelte';
   import StderrLogButton from '../shared/StderrLogButton.svelte';
   import { adminUrl, gatewayHttpUrl, statusUrl } from '../shared/server-format';
   import type { createWorkspaceStore } from '../state/workspace-store.svelte';
@@ -113,9 +112,6 @@
         <span>Admin {row.admin_port}</span>
       {/if}
     </span>
-  </span>
-  <span class="self-center">
-    <AutostartBadge method={row.autostart_method} />
   </span>
   <span class="flex flex-wrap items-center gap-1.5 self-center">
     {#if !row.is_configured}

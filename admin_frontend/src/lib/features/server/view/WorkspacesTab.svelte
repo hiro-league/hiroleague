@@ -21,7 +21,7 @@
   let { notify }: { notify: Notify } = $props();
 
   const WORKSPACE_GATEWAY_DOCS_PATH = '/hiro/cli/server-operations';
-  const WORKSPACE_GRID = '220px 110px 125px 1.25fr 105px 445px';
+  const WORKSPACE_GRID = '220px 110px 125px 1.25fr 445px';
 
   let adminConfig = $state<AdminConfig>(DEFAULT_ADMIN_CONFIG);
   const workspaceGatewayDocsUrl = $derived(docsUrl(adminConfig, WORKSPACE_GATEWAY_DOCS_PATH));
@@ -82,13 +82,12 @@
     quiet
   >
     {#snippet children()}
-      <TableShell layout="grid" minWidth={1180} gridColumns={WORKSPACE_GRID}>
+      <TableShell layout="grid" minWidth={1075} gridColumns={WORKSPACE_GRID}>
         {#snippet headRow()}
           <span>Name</span>
           <span>Setup</span>
           <span>Status</span>
           <span>Gateway</span>
-          <span>Autostart</span>
           <span>Actions</span>
         {/snippet}
         {#snippet body()}

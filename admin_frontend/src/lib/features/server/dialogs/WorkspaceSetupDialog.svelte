@@ -37,22 +37,9 @@
           />
         </Field>
         <label class="flex items-center gap-2 font-sans text-sm">
-          <Checkbox bind:checked={workspace.setupForm.skipAutostart} />
-          Skip auto-start registration
-          <CircleHelp size={14} title="By default, the server is registered to start automatically on login." />
-        </label>
-        <label class="flex items-center gap-2 font-sans text-sm">
           <Checkbox bind:checked={workspace.setupForm.startServer} />
           Start server immediately after setup
           <CircleHelp size={14} title="Start this workspace as soon as setup saves the gateway URL and keys." />
-        </label>
-        <label class="flex items-center gap-2 font-sans text-sm">
-          <Checkbox bind:checked={workspace.setupForm.elevatedTask} />
-          Request elevated Task Scheduler entry
-          <CircleHelp
-            size={14}
-            title="Windows only. Triggers a UAC prompt on the server machine and registers the startup task with highest privileges."
-          />
         </label>
       </details>
     </div>

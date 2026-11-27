@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import socket
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -32,6 +31,7 @@ from pathlib import Path
 from hiro_channel_sdk.constants import ENV_CORE_URL, ENV_PAIRING_CODE
 from hiro_channel_sdk.manifest import KIND_APP, MANIFEST_FILE, Manifest, render_manifest
 from hiro_commons.log import Logger
+from hiro_commons.ports import port_free
 
 from .. import __version__
 from ..domain import installs
@@ -101,11 +101,8 @@ def port_problem(workspace_path: Path, port: int, config: Config) -> str | None:
         return f"The port {port} is another site's on this machine."
     if port in core_ports(config):
         return f"The port {port} is the core's own."
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        try:
-            probe.bind(("127.0.0.1", port))
-        except OSError:
-            return f"Something on this machine already listens on the port {port}."
+    if not port_free(port):
+        return f"Something on this machine already listens on the port {port}."
     return None
 
 
