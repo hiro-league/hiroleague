@@ -21,6 +21,8 @@ EXPECTED = {
     "Memory service disabled": "a fresh machine has no AI keys yet",
     "no extraction model available": "a fresh machine has no AI keys yet",
     "No STT providers": "a fresh machine has no AI keys yet",
+    "macOS refused to delete it": "a Mac keeps a removed app's account unless the terminal has Full Disk Access (the "
+                                  "removal says how to delete it)",
 }
 _TRACEBACK_SPAN = 60  # a traceback's own lines: the expected phrase is the exception's message at its end
 

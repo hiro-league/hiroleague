@@ -3,6 +3,7 @@
     uv run --project hiroserver python build-kit/fresh-install/fresh.py linux [--keep]
     uv run --project hiroserver python build-kit/fresh-install/fresh.py windows [--keep]
     uv run --project hiroserver python build-kit/fresh-install/fresh.py simone [--distro <name>|all] [--keep]
+    uv run --project hiroserver python build-kit/fresh-install/fresh.py mac [--keep]
 
 Run from the root of a hiroleague checkout. Everything lands in ``C:\\hiro\\test-packages\\fresh`` (``--root``):
 
@@ -22,6 +23,10 @@ Run from the root of a hiroleague checkout. Everything lands in ``C:\\hiro\\test
      asks for the core's name, as another machine. Ubuntu 24.04 and Debian 13 (``--distro all``: one after
      the other). Needs Michel's account's libvirt group, no sudo; it touches only machines and volumes
      named ``hiro-fresh-*``.
+   - ``mac``: the macOS test VM on Simone (aicam's ``docs/macos-test-vm.md``: Sequoia, Intel), put back to its
+     snapshot ``ready`` before the run and after it (``--keep`` leaves it running as the run left it). Its path ends
+     with a restart of the Mac, then checks the core came back by itself (launchd, as a new process) and answers at
+     its name. Needs ``ssh mac-test`` (the PC's ``~/.ssh/config``, through Simone).
 3. **The result:** ``runs/<time>/results/result.md`` (simone: ``runs/<time>/<distro>/results``; one table: each
    step, PASS or FAIL, its time, its log) and ``result.json``. The run script inside the machine walks the path:
    uv, the core, ``hiro service install``, Hello's install, 0.1.3 (goes back), 0.1.2 (stays), 0.1.1 (upgrades), its
@@ -151,7 +156,7 @@ def build_bundle(out: Path, *, close: bool, cache: bool) -> str:
     run([python, str(REPO / "build-kit" / "package.py"), str(REPO / "build-kit" / "test-app"), "--out", str(hello),
          "--ui-built"], cwd=REPO)
     run([python, str(REPO / "build-kit" / "test-app" / "variants.py"), "--out", str(hello)], cwd=REPO)
-    for script in ("run-linux.sh", "run-windows.ps1", "read_logs.py"):
+    for script in ("run-linux.sh", "run-windows.ps1", "run-mac.sh", "read_logs.py"):
         shutil.copy2(HERE / script, out / script)
     (out / "COMMIT").write_text(commit + "\n", encoding="utf-8")
     if close:
@@ -272,10 +277,7 @@ def run_simone(run_dir: Path, bundle: Path, distro: str, *, keep: bool) -> Path:
     remote = f"hiro-fresh/runs/{name}"
     local = run_dir / distro
     local.mkdir(parents=True)
-    tar = run_dir / "bundle.tar"
-    if not tar.is_file():
-        with tarfile.open(tar, "w") as out:
-            out.add(bundle, arcname=".")
+    tar = bundle_tar(run_dir, bundle)
     run(["ssh", SIMONE, f"mkdir -p {remote}"])
     run(["scp", "-q", str(tar), str(HERE / "simone-vm.sh"), f"{SIMONE}:{remote}/"])
     say(f"Simone: {distro} in a throwaway machine (its output below)")
@@ -283,6 +285,91 @@ def run_simone(run_dir: Path, bundle: Path, distro: str, *, keep: bool) -> Path:
                    check=False)
     subprocess.run(["scp", "-q", "-r", f"{SIMONE}:{remote}/results", str(local)], check=False)
     return local / "results"
+
+
+def bundle_tar(run_dir: Path, bundle: Path) -> Path:
+    """The bundle as one file, made once per run: what is copied to a machine on Simone."""
+    tar = run_dir / "bundle.tar"
+    if not tar.is_file():
+        with tarfile.open(tar, "w") as out:
+            out.add(bundle, arcname=".")
+    return tar
+
+
+# --- the macOS test VM on Simone (aicam's docs/macos-test-vm.md) ---------------------------------------------------
+
+MAC = "mac-test"  # the VM, as ssh names it (the PC's ~/.ssh/config: through Simone)
+MAC_VM = "macos-test"  # its libvirt name
+MAC_DISK = "/srv/bulk/vms/macos-test/macos.qcow2"
+MAC_READY = "ready"  # its snapshot: macOS signed out, SSH with the PC's key, sudo without a password
+VIRSH = "virsh -c qemu:///system"
+MAC_HOME = "hiro-test"  # the bundle and the results, in the person's home on the Mac
+_MAC_BOOT_S = 300  # it boots in about 20 s
+
+
+def mac_state() -> str:
+    return run(["ssh", SIMONE, f"{VIRSH} domstate {MAC_VM}"], capture_output=True, text=True).stdout.strip()
+
+
+def mac_answers() -> bool:
+    return subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", MAC, "true"],
+                          capture_output=True, check=False).returncode == 0
+
+
+def wait_mac_up() -> None:
+    deadline = time.monotonic() + _MAC_BOOT_S
+    while not mac_answers():
+        if time.monotonic() > deadline:
+            raise SystemExit(f"The Mac VM has no SSH after {_MAC_BOOT_S // 60} min: look at its screen (aicam's "
+                             "tools/macos-test/macos-test.sh shot)")
+        time.sleep(5)
+
+
+def stop_mac() -> None:
+    """Shut macOS down, then put its disk back to the snapshot ``ready``."""
+    if mac_state() != "shut off":
+        # macOS doesn't answer libvirt's ACPI shutdown at its sign-in screen, so it is asked over SSH
+        subprocess.run(["ssh", "-o", "BatchMode=yes", MAC, "sudo shutdown -h now"], capture_output=True, check=False)
+        deadline = time.monotonic() + 120
+        while mac_state() != "shut off":
+            if time.monotonic() > deadline:
+                # A shutdown right after a boot now and then hangs on the Apple logo (aicam's docs): forced off
+                say("The Mac didn't shut down in 2 minutes: forced off")
+                run(["ssh", SIMONE, f"{VIRSH} destroy {MAC_VM}"], capture_output=True)
+                break
+            time.sleep(3)
+    run(["ssh", SIMONE, f"qemu-img snapshot -a {MAC_READY} {MAC_DISK}"])
+
+
+def run_mac(run_dir: Path, bundle: Path, results: Path, *, keep: bool) -> None:
+    """The macOS test VM from its snapshot ``ready``: the person's path, a restart of the Mac, then the core is back."""
+    stop_mac()
+    run(["ssh", SIMONE, f"{VIRSH} start {MAC_VM}"], capture_output=True)
+    try:
+        wait_mac_up()
+        run(["scp", "-q", str(bundle_tar(run_dir, bundle)), f"{MAC}:bundle.tar"])
+        run(["ssh", MAC, f"mkdir {MAC_HOME} && tar -xf bundle.tar -C {MAC_HOME}"])
+        script = f"bash {MAC_HOME}/run-mac.sh {MAC_HOME} {MAC_HOME}/results"
+        say("Mac: the person's path (its output below)")
+        subprocess.run(["ssh", MAC, script], check=False)
+        say("Mac: restarting it")
+        # ssh ends with the connection the restart drops
+        subprocess.run(["ssh", MAC, "sudo shutdown -r now"], capture_output=True, check=False)
+        time.sleep(20)  # it still answers SSH as it goes down
+        wait_mac_up()
+        subprocess.run(["ssh", MAC, f"{script} restart"], check=False)
+        archive = subprocess.run(["ssh", MAC, f"tar -cf - -C {MAC_HOME}/results ."], capture_output=True, check=False)
+        if archive.returncode == 0:
+            with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tar:
+                tar.extractall(results, filter="data")
+    finally:
+        if keep:
+            say(f"Kept running: ssh {MAC}   (put it back: aicam's tools/macos-test/macos-test.sh stop, then revert "
+                f"{MAC_READY})")
+        else:
+            stop_mac()
+    if not (results / "finished").is_file():
+        raise SystemExit(f"The run script stopped before its result: see its output above and {results / 'logs'}")
 
 
 # --- the result ----------------------------------------------------------------------------------------------------
@@ -309,7 +396,7 @@ def report(results: Path) -> bool:
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Install Hiro League fresh on a throwaway machine.")
-    parser.add_argument("system", choices=("linux", "windows", "simone"))
+    parser.add_argument("system", choices=("linux", "windows", "simone", "mac"))
     parser.add_argument("--distro", choices=(*DISTROS, "all"), default=DISTROS[0],
                         help=f"simone: the distribution, or all of them one after another (default {DISTROS[0]})")
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT, help=f"where runs go (default {DEFAULT_ROOT})")
@@ -325,7 +412,8 @@ def main(argv: list[str]) -> int:
         start_cache()
     build_bundle(bundle, close=not args.keep, cache=not args.fresh)
     if not args.fresh:  # the run copies these into the machine's downloads folder before the core installs
-        fill_downloads(args.root / "downloads", bundle / "downloads", "windows" if args.system == "windows" else "linux")
+        fill_downloads(args.root / "downloads", bundle / "downloads",
+                       args.system if args.system in ("windows", "mac") else "linux")
     if args.system == "simone":
         distros = DISTROS if args.distro == "all" else (args.distro,)
         passed = {d: report(run_simone(run_dir, bundle, d, keep=args.keep)) for d in distros}
@@ -334,6 +422,8 @@ def main(argv: list[str]) -> int:
         return 0 if all(passed.values()) else 1
     if args.system == "windows":
         run_windows(run_dir, bundle, results)
+    elif args.system == "mac":
+        run_mac(run_dir, bundle, results, keep=args.keep)
     else:
         run_linux(args.root, run_dir, bundle, results, keep=args.keep)
     return 0 if report(results) else 1
