@@ -283,26 +283,23 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
         ),
         yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
     ) -> None:
-        """Remove a workspace from the registry."""
-        if not yes:
-            action = "remove and DELETE the folder of" if purge else "remove"
-            typer.confirm(
-                f"Are you sure you want to {action} workspace '{workspace}'?", abort=True
-            )
-
+        """Remove a workspace: its service and server first, then its entry (and its folder with --purge)."""
         log.info("hiro workspaces remove", workspace_arg=workspace, purge=purge)
 
-        from ..tools.workspace import WorkspaceRemoveTool
+        from ..tools.teardown import TeardownPlan
+        from ..tools.workspace import WorkspaceRemoveTool, plan_remove
+        from .teardown_view import confirm_plan, print_outcome
 
         try:
+            entry, registry = resolve_workspace(workspace)
+            confirm_plan(console, TeardownPlan(workspaces=[plan_remove(entry, registry, purge=purge)]), yes=yes)
             result = WorkspaceRemoveTool().execute(workspace=workspace, purge=purge)
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1) from exc
-
+        if result.teardown is not None:
+            print_outcome(console, TeardownPlan(workspaces=[result.teardown]))
         console.print(f"[green]Workspace '[bold]{result.name}[/bold]' removed.[/green]")
-        if result.purged:
-            console.print("  Workspace folder deleted from disk.")
 
     @workspace_app.command("update")
     def workspace_update(
@@ -412,28 +409,23 @@ def register(workspace_app: typer.Typer, console: Console) -> None:
         ),
         purge: bool = typer.Option(
             False, "--purge",
-            help="Also delete the workspace folder (config, state, keys, logsâ€¦).",
+            help="Also delete the workspace folder (config, state, keys, logs…).",
         ),
+        yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask before going on."),
     ) -> None:
-        """Stop the server; with --purge, also delete the workspace."""
-        from ..tools.server import TeardownTool
+        """Take a workspace down: its service, its server; with --purge, also its folder and its entry."""
+        from ..tools.server import TeardownTool, plan_teardown
+        from ..tools.teardown import TeardownPlan
+        from .teardown_view import confirm_plan, print_outcome
 
         console.print("[bold cyan]hiro workspaces teardown[/bold cyan]")
         log.info("hiro workspaces teardown", purge=purge)
 
         try:
-            result = TeardownTool().execute(
-                workspace=workspace,
-                purge=purge,
-            )
+            confirm_plan(console, TeardownPlan(workspaces=[plan_teardown(workspace, purge=purge)]), yes=yes)
+            result = TeardownTool().execute(workspace=workspace, purge=purge)
         except WorkspaceError as exc:
             console.print(f"[red]{exc}[/red]")
-            return
-
-        console.print("[green]Server stopped.[/green]")
-
-        if purge:
-            console.print(f"[green]Workspace folder removed:[/green] {result.workspace_path}")
-            console.print(f"[green]Workspace '{result.workspace}' removed from registry.[/green]")
-
-        console.print("\n[green]Teardown complete.[/green]")
+            raise typer.Exit(1) from exc
+        if not print_outcome(console, TeardownPlan(workspaces=[result])):
+            raise typer.Exit(1)

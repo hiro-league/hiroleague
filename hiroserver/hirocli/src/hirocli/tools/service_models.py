@@ -59,6 +59,9 @@ class ServiceStatusResult:
     secrets_file: str | None
     install_command: str  # what to run when it is not installed
     logs: str
+    # Windows: the service's own data folder (its HIRO_DATA_DIR), whose registry holds the workspace it runs; Linux
+    # and Mac: None, the service account's own data folder.
+    data_dir: str | None = None
 
 
 @dataclass

@@ -8,7 +8,6 @@ from ``server_models``.
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 from importlib import metadata
@@ -25,21 +24,20 @@ from ..domain.workspace import (
     admin_port_for,
     http_port_for,
     load_registry,
-    remove_workspace,
     resolve_workspace,
     WorkspaceError,
 )
 from ..constants import ENV_CORE_NAME, PID_FILENAME
 from .base import Tool, ToolParam
 from . import server_control as ctrl
+from . import teardown
+from .teardown import TeardownPlan, WorkspaceTeardown
 from .server_models import (
     RestartResult,
     SetupResult,
     StartResult,
     StatusResult,
     StopResult,
-    TeardownResult,
-    UninstallResult,
     UpgradeResult,
     WorkspaceStatusEntry,
 )
@@ -454,10 +452,20 @@ class StatusTool(Tool):
         return StatusResult(workspaces=entries)
 
 
+def plan_teardown(workspace: str | None, *, purge: bool) -> WorkspaceTeardown:
+    """What tearing one workspace down does (tools/teardown.py): read before it is done. A workspace that isn't in
+    the registry is a WorkspaceError: none is made to be taken down."""
+    entry, registry = resolve_workspace(workspace)
+    return teardown.plan_workspace(entry, registry, purge=purge, leaves_list=purge)
+
+
 class TeardownTool(Tool):
     surfaces = frozenset({"cli", "http"})
     name = "teardown"
-    description = "Stop the server for a workspace; with purge, also delete the workspace"
+    description = (
+        "Take a workspace down: remove the OS service that runs it, stop its server; with purge, also delete its "
+        "folder and drop it from the list"
+    )
     params = {
         "workspace": ToolParam(str, "Workspace name or id to tear down", required=False),
         "purge": ToolParam(
@@ -471,43 +479,25 @@ class TeardownTool(Tool):
         self,
         workspace: str | None = None,
         purge: bool = False,
-    ) -> TeardownResult:
-        entry, registry, workspace_path = ctrl.resolve_or_create(workspace)
-
-        ctrl.stop_server(workspace_path)
-
-        if purge:
-            if workspace_path.exists():
-                shutil.rmtree(workspace_path, ignore_errors=True)
-            try:
-                remove_workspace(entry.id, purge=False)
-            except WorkspaceError:
-                pass
-
-        return TeardownResult(
-            workspace=entry.name,
-            workspace_path=str(workspace_path),
-            server_stopped=True,
-            purged=purge,
-        )
+    ) -> WorkspaceTeardown:
+        step = plan_teardown(workspace, purge=purge)
+        teardown.carry_out_workspace(step)
+        return step
 
 
 class UninstallTool(Tool):
     surfaces = frozenset({"cli", "http"})
     name = "uninstall"
-    description = "Stop the server and return package uninstall instructions"
+    description = (
+        "Take every workspace and standalone gateway down (their services, servers; with purge their folders), "
+        "before the package is removed"
+    )
     params = {
-        "workspace": ToolParam(str, "Workspace name or id to uninstall", required=False),
-        "purge": ToolParam(bool, "Also delete the workspace folder", required=False),
+        "purge": ToolParam(bool, "Also delete every workspace's folder and every gateway's files", required=False),
     }
 
-    def execute(
-        self,
-        workspace: str | None = None,
-        purge: bool = False,
-    ) -> UninstallResult:
-        teardown_result = TeardownTool().execute(workspace=workspace, purge=purge)
-        return UninstallResult(teardown=teardown_result)
+    def execute(self, purge: bool = False) -> TeardownPlan:
+        return teardown.carry_out(teardown.plan_uninstall(purge=purge))
 
 
 # ---------------------------------------------------------------------------

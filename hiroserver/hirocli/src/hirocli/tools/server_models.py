@@ -77,19 +77,6 @@ class StatusResult:
 
 
 @dataclass
-class TeardownResult:
-    workspace: str
-    workspace_path: str
-    server_stopped: bool
-    purged: bool
-
-
-@dataclass
-class UninstallResult:
-    teardown: TeardownResult
-
-
-@dataclass
 class UpgradeResult:
     """Result of inspecting how Hiro is installed and what to do to upgrade.
 

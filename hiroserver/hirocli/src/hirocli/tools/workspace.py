@@ -10,6 +10,7 @@ a workspace UUID id for resolution.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -22,18 +23,20 @@ from ..domain.config import load_config, load_state
 from ..domain.crypto import load_or_create_master_key
 from ..domain.workspace_layout import master_key_path, move_credentials
 from ..domain.workspace import (
+    WorkspaceEntry,
     WorkspaceError,
+    WorkspaceRegistry,
     admin_port_for,
     create_workspace,
     http_port_for,
     load_registry,
     extension_port_for,
-    remove_workspace,
     rename_workspace,
     resolve_workspace,
     set_default_workspace,
 )
 from .base import Tool, ToolParam
+from .teardown import WorkspaceTeardown, carry_out_workspace, plan_workspace
 from .rights import ToolRight
 from hiro_commons.log import Logger
 
@@ -67,6 +70,7 @@ class WorkspaceRemoveResult:
     id: str
     name: str
     purged: bool
+    teardown: WorkspaceTeardown | None = None  # what was done to it first (its service, its server)
 
 
 @dataclass
@@ -206,23 +210,27 @@ class WorkspaceRemoveTool(Tool):
 
     def execute(self, workspace: str, purge: bool = False) -> WorkspaceRemoveResult:
         entry, registry = resolve_workspace(workspace)
-        ws_path = Path(entry.path)
+        step = plan_remove(entry, registry, purge=purge)
+        # The same teardown as `hiro workspaces teardown`: its service first (else it would start the server again),
+        # then its server, then the entry (and its folder with purge).
+        carry_out_workspace(step)
+        if step.problem:
+            raise WorkspaceError(f"Workspace '{entry.name}' wasn't removed: {step.problem}.")
+        return WorkspaceRemoveResult(id=entry.id, name=entry.name, purged=purge, teardown=step)
 
-        pid = read_running_pid(ws_path, PID_FILENAME)
-        if pid:
-            raise WorkspaceError(
-                f"Workspace '{entry.name}' is currently running (PID {pid}). "
-                "Stop it before removing."
-            )
 
-        if registry.default_workspace == entry.id and len(registry.workspaces) > 1:
-            raise WorkspaceError(
-                f"Workspace '{entry.name}' is the default workspace. "
-                "Set another workspace as the default before removing this one."
-            )
-
-        remove_workspace(entry.id, purge=purge)
-        return WorkspaceRemoveResult(id=entry.id, name=entry.name, purged=purge)
+def plan_remove(entry: WorkspaceEntry, registry: WorkspaceRegistry, *, purge: bool) -> WorkspaceTeardown:
+    """What removing a workspace does, read before it is done. Refused: the default while others are left, and the
+    workspace whose server is the one asking (it can't take itself down)."""
+    pid = read_running_pid(Path(entry.path), PID_FILENAME)
+    if pid == os.getpid():
+        raise WorkspaceError(f"Workspace '{entry.name}' is the one this server runs: it can't remove itself.")
+    if registry.default_workspace == entry.id and len(registry.workspaces) > 1:
+        raise WorkspaceError(
+            f"Workspace '{entry.name}' is the default workspace. "
+            "Set another workspace as the default before removing this one."
+        )
+    return plan_workspace(entry, registry, purge=purge, leaves_list=True)
 
 
 class WorkspaceUpdateTool(Tool):

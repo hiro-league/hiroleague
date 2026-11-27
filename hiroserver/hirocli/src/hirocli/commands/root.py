@@ -321,33 +321,28 @@ def register(app: typer.Typer, console: Console) -> None:
 
     @app.command()
     def uninstall(
-        workspace: Optional[str] = typer.Option(
-            None, "--workspace", "-W",
-            help="Workspace to uninstall (default: registry default).",
+        purge: bool = typer.Option(
+            False, "--purge", help="Also delete every workspace's folder and every gateway's files.",
         ),
-        purge: bool = typer.Option(False, "--purge", help="Also delete the workspace folder."),
+        yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask before going on."),
     ) -> None:
-        """Stop the server, then print package uninstall commands."""
+        """Take every workspace and gateway down (services, servers; folders with --purge), then say how to remove
+        the package."""
         console.print("[bold cyan]hiro uninstall[/bold cyan]")
         log.info("hiro uninstall", purge=purge)
 
-        from ..tools.server import UninstallTool
+        from ..tools import teardown
+        from .teardown_view import confirm_plan, print_outcome
 
-        try:
-            result = UninstallTool().execute(
-                workspace=workspace,
-                purge=purge,
-            )
-        except WorkspaceError as exc:
-            console.print(f"[red]{exc}[/red]")
-            return
-
-        td = result.teardown
-        console.print("[green]Server stopped.[/green]")
-
-        if purge:
-            console.print(f"[green]Workspace folder removed:[/green] {td.workspace_path}")
-            console.print(f"[green]Workspace '{td.workspace}' removed from registry.[/green]")
+        plan = teardown.plan_uninstall(purge=purge)
+        if not plan.workspaces and not plan.gateways:
+            console.print("No workspace or gateway to take down.")
+        else:
+            confirm_plan(console, plan, yes=yes)
+            if not print_outcome(console, teardown.carry_out(plan)):
+                console.print("[yellow]Some were left: do what each line says, then run hiro uninstall again, "
+                              "before removing the package.[/yellow]")
+                raise typer.Exit(1)
 
         # End users install the `hiroleague` umbrella package; workspace devs
         # use `uv tool install --editable hirocli` directly. Show both flows so
