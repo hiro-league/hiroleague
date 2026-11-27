@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import hashlib
 import os
+import ssl
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+import truststore
 
 from .log import Logger
 
@@ -46,8 +49,11 @@ def fetch_checked(url: str, dest: Path, sha256: str, *, timeout: float = _TIMEOU
     tmp = dest.with_name(f".{dest.name}.download")
     started = time.monotonic()
     try:
-        # A pinned https address from the code, never from a person or a page.
-        with urllib.request.urlopen(url, timeout=timeout) as response, tmp.open("wb") as out:  # noqa: S310
+        # A pinned https address from the code, never from a person or a page. The system checks the certificate
+        # (truststore): a fresh Windows holds few roots and fetches a missing one only for its own checks, so Python's
+        # check refused GitHub's (CERTIFICATE_VERIFY_FAILED, the fresh-install test in Windows Sandbox).
+        context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        with urllib.request.urlopen(url, timeout=timeout, context=context) as response, tmp.open("wb") as out:  # noqa: S310
             while chunk := response.read(_CHUNK):
                 out.write(chunk)
     except (urllib.error.URLError, OSError) as exc:

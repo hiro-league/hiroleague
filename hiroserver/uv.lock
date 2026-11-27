@@ -940,6 +940,7 @@ dependencies = [
     { name = "cryptography" },
     { name = "opentelemetry-api" },
     { name = "structlog" },
+    { name = "truststore" },
 ]
 
 [package.metadata]
@@ -948,6 +949,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=43" },
     { name = "opentelemetry-api", specifier = ">=1.45.2" },
     { name = "structlog", specifier = ">=25" },
+    { name = "truststore", specifier = ">=0.10.5" },
 ]
 
 [[package]]

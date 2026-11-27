@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import threading
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
+import truststore
 
+from hiro_commons import fetch
 from hiro_commons import log as core_log
 from hiro_commons import logging_foundation as foundation
 from hiro_commons.log import Logger
@@ -104,3 +108,16 @@ def test_a_failed_download_says_which_file_and_leaves_nothing(server, tmp_path: 
     assert list(folder.iterdir()) == []
     (warning,) = [line for line in logged() if line["SeverityText"] == "WARNING"]
     assert "Could not download" in warning["Body"]
+
+
+def test_the_certificate_is_checked_by_the_system_not_by_pythons_own_list(tmp_path, monkeypatch) -> None:
+    # A fresh Windows fetches a missing root only for the system's own checks: Python's refused GitHub's in Sandbox
+    seen = {}
+
+    def fake_urlopen(url, *, timeout, context=None):
+        seen["context"] = context
+        return io.BytesIO(BODY)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    assert fetch.fetch_checked("https://github.com/example/pinned.zip", tmp_path / "pinned.zip", GOOD) is True
+    assert isinstance(seen["context"], truststore.SSLContext)
