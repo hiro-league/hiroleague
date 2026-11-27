@@ -22,6 +22,7 @@ from ..domain.crypto import load_or_create_master_key
 from ..domain.site_names import SiteNameError, check_core_name
 from ..domain.workspace import (
     admin_port_for,
+    gateway_port_for,
     http_port_for,
     load_registry,
     resolve_workspace,
@@ -136,9 +137,16 @@ class SetupTool(Tool):
         existing = load_config(workspace_path)
         name = core_name_for(existing, is_new=is_new, asked=core_name)
 
+        # A new workspace's own gateway takes its slot's port, so two workspaces with Devices on don't collide; a
+        # workspace made before keeps its own (a phone paired by address and port reaches it there).
+        gateway_port = gateway_port_for(registry, entry.port_slot) if is_new else existing.gateway_port
+        if is_new and gateway_url == Config.model_fields["gateway_url"].default:
+            gateway_url = f"ws://localhost:{gateway_port}"
         config = Config(
             device_id=existing.device_id,
             gateway_url=gateway_url,
+            gateway_builtin=existing.gateway_builtin,
+            gateway_port=gateway_port,
             http_host=existing.http_host,
             http_port=http_port or http_port_for(registry, entry.port_slot),
             admin_port=admin_port_for(registry, entry.port_slot),

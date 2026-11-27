@@ -15,6 +15,8 @@ from typing import Any
 
 from hiro_commons.constants.domain import MANDATORY_CHANNEL_NAME
 from hiro_commons.constants.timing import DEFAULT_PING_INTERVAL_SECONDS
+from hiro_commons.log import Logger
+from hiro_commons.ports import port_free
 from hiro_commons.process import (
     find_workspace_root,
     is_running,
@@ -39,10 +41,9 @@ from ..constants import (
 )
 from ..domain.channel_config import ChannelConfig, load_channel_config, save_channel_config
 from ..domain.config import Config, load_config, master_key_path, workspace_log_dir
-from ..domain.features import feature_active
 from ..domain.crypto import load_or_create_master_key
+from ..domain.features import feature_active
 from ..domain.workspace import WorkspaceError, WorkspaceRegistry, create_workspace, resolve_workspace
-from hiro_commons.log import Logger
 
 log = Logger.get("TOOLS.SERVER")
 
@@ -111,6 +112,7 @@ def start_server(
     pid = read_running_pid(workspace_path, PID_FILENAME)
     if pid:
         return pid  # already running — caller decides what to tell the user
+    check_ports(config, admin=admin)
 
     if foreground:
         import asyncio as _asyncio
@@ -151,6 +153,29 @@ def start_server(
     spawn_detached([*uv_python_cmd(), script], env=env, stderr_log=stderr_log)
 
     return wait_for_pid(workspace_path, PID_FILENAME, stderr_log=stderr_log)
+
+
+def ports_to_open(config: Config, *, admin: bool) -> list[tuple[int, str]]:
+    """The ports a start opens, each with what opens it."""
+    ports = [(config.http_port, "the HTTP status API"), (config.effective_extension_port(), "the extension socket")]
+    if admin:
+        ports.append((config.admin_port, "the admin"))
+    if feature_active(MANDATORY_CHANNEL_NAME) and config.gateway_builtin:
+        ports.append((config.gateway_port, "the core's gateway"))
+    return ports
+
+
+def check_ports(config: Config, *, admin: bool) -> None:
+    """Before a start: a port another program holds is named now, not found later as a part that failed to listen
+    (issue 455)."""
+    taken = [(port, what) for port, what in ports_to_open(config, admin=admin) if not port_free(port)]
+    if taken:
+        named = ", ".join(f"{port} ({what})" for port, what in taken)
+        which = f"port {named} is" if len(taken) == 1 else f"ports {named} are"
+        raise ValueError(
+            f"The server can't start: {which} in use on this machine (another program listens there, or Windows "
+            "reserves it). Stop that program, or give this workspace other ports in its config.json."
+        )
 
 
 def restart_in_terminal(workspace_path: Path, *, workspace_name: str, admin: bool, metrics: bool) -> None:

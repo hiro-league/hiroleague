@@ -29,12 +29,20 @@ from __future__ import annotations
 import os
 import shutil
 import uuid as _uuid
+from collections.abc import Callable
 from pathlib import Path
 
 from platformdirs import user_data_dir
 from pydantic import BaseModel, Field
 
-from hiro_commons.constants.network import PORT_OFFSET_ADMIN, PORT_OFFSET_EXTENSION, PORT_RANGE_START, PORTS_PER_SLOT
+from hiro_commons.constants.network import (
+    PORT_OFFSET_ADMIN,
+    PORT_OFFSET_EXTENSION,
+    PORT_OFFSET_GATEWAY,
+    PORT_RANGE_START,
+    PORTS_PER_SLOT,
+)
+from hiro_commons.ports import port_free
 from hiro_commons.constants.storage import REGISTRY_FILENAME
 
 from ..constants import APP_NAME, ENV_DATA_DIR, ENV_WORKSPACE
@@ -97,12 +105,29 @@ def admin_port_for(registry: WorkspaceRegistry, slot: int) -> int:
     return registry.port_range_start + slot * PORTS_PER_SLOT + PORT_OFFSET_ADMIN
 
 
-def next_free_slot(registry: WorkspaceRegistry) -> int:
+def gateway_port_for(registry: WorkspaceRegistry, slot: int) -> int:
+    return registry.port_range_start + slot * PORTS_PER_SLOT + PORT_OFFSET_GATEWAY
+
+
+def slot_ports(registry: WorkspaceRegistry, slot: int) -> list[int]:
+    start = registry.port_range_start + slot * PORTS_PER_SLOT
+    return list(range(start, start + PORTS_PER_SLOT))
+
+
+_MAX_SLOTS = 1000
+
+
+def next_free_slot(registry: WorkspaceRegistry, is_free: Callable[[int], bool] = port_free) -> int:
+    """The first slot no workspace holds whose ports are all free on this machine (a program listening on one, or a
+    range Windows reserves, skips the slot)."""
     used = {e.port_slot for e in registry.workspaces.values()}
-    slot = 0
-    while slot in used:
-        slot += 1
-    return slot
+    for slot in range(_MAX_SLOTS):
+        if slot not in used and all(is_free(p) for p in slot_ports(registry, slot)):
+            return slot
+    raise WorkspaceError(
+        f"No free ports for a new workspace from {registry.port_range_start}: every one of {_MAX_SLOTS} slots has a "
+        "port in use."
+    )
 
 
 # ---------------------------------------------------------------------------
