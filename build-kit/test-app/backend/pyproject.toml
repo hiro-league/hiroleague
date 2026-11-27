@@ -18,6 +18,12 @@ dependencies = [
 # The program its service runs (the manifest's command)
 example-hello = "hello.main:serve"
 
+[tool.uv]
+# The Mac the fresh-install test has (the test VM on Simone) is an Intel Mac, and cryptography 49 and later ship no
+# Intel build: an app installs wheels only, at the versions its lock pins, so Hello pins the last one with an Intel
+# build, to install there too. Hello alone: no real app takes this.
+constraint-dependencies = ["cryptography<49"]
+
 [tool.uv.sources]
 hiro-channel-sdk = { path = "../../../hiroserver/hiro-channel-sdk", editable = true }
 hiro-extension-kit = { path = "../../../hiroserver/hiro-extension-kit", editable = true }
