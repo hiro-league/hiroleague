@@ -84,9 +84,10 @@ v vol-create-as "$POOL" "$VM.qcow2" "${DISK_GB}G" --format qcow2 --backing-vol "
 
 say "Starting $VM ($DISTRO, $CPUS CPUs, $((MEMORY_MB / 1024)) GB, UEFI, libvirt's NAT network)"
 # UEFI, as a machine bought today boots: Debian 13's cloud image restarts as its kernel starts under libvirt's default
-# BIOS (a loop at GRUB's "Booting", Nov 28, 2026) and boots under UEFI; Ubuntu's boots under both.
+# BIOS (a loop at GRUB's "Booting", Nov 28, 2026) and boots under UEFI; Ubuntu's boots under both. The seed is a
+# read-only virtio disk: under UEFI neither image reads it as an IDE CD-ROM, so cloud-init never set the network up.
 virt-install -q --connect "$CONN" --name "$VM" --memory "$MEMORY_MB" --vcpus "$CPUS" --boot uefi \
-  --disk "vol=$POOL/$VM.qcow2,bus=virtio" --disk "vol=$POOL/$VM-seed.iso,device=cdrom" \
+  --disk "vol=$POOL/$VM.qcow2,bus=virtio" --disk "vol=$POOL/$VM-seed.iso,device=disk,bus=virtio,readonly=on" \
   --import --osinfo detect=on,require=off --network network=default,model=virtio \
   --graphics none --noautoconsole
 
