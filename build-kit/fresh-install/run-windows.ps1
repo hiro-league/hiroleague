@@ -150,7 +150,8 @@ try {
 }
 [IO.File]::WriteAllText($userLog, "> (as freshperson) $userLine`r`n$started`r`n")
 Get-Content $userOut, $userErr -ErrorAction SilentlyContinue | Add-Content $userLog
-$told = Select-String -Path $userLog -Pattern 'administrator terminal' -Quiet
+# Its words wrap at the console's width ("administrator" and "terminal" on two lines): matched with the lines joined
+$told = ((Get-Content $userLog -Raw) -replace '\s+', ' ') -match 'administrator terminal'
 Add-Result 'a standard user is told to be an administrator' $told 0 $(if ($told) { 'as expected' } else { 'see its log' }) ('logs/' + (Split-Path $userLog -Leaf))
 
 Test-Check 'core announces its address' { $out = & hiro logs search 'announcing on' --json | Out-String; $out; $out -match 'announcing on' }
