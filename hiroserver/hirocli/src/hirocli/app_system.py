@@ -27,8 +27,10 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -278,12 +280,22 @@ def install_windows(app: AppSystem) -> SystemDone:
                       core_account=account, folder=str(folder.root))
 
 
+def _writable_then_again(func: Callable[..., object], path: str, exc: BaseException) -> None:
+    """rmtree's retry for a read-only file, which Windows won't delete."""
+    if isinstance(exc, FileNotFoundError):
+        return
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+
 def remove_windows(app: AppSystem, purge: bool) -> SystemDone:
     from hiro_commons.winsw_service import remove_service
 
     remove_service(app.service)
     if purge and app.folder.root.exists():
-        shutil.rmtree(app.folder.root)
+        # Fix (Installing apps phase 6, Nov 27): an app's read-only files (git writes its packs so: CodeHiro's
+        # mirrors) refused the purge with "Access is denied" on Windows. They are made writable and removed.
+        shutil.rmtree(app.folder.root, onexc=_writable_then_again)
     log.info("✅ An app's service removed — HiroServer · extension", key=app.key, purged=purge)
     return SystemDone(action="remove", key=app.key, service=app.service, account=f"NT SERVICE\\{app.service}",
                       core_account="", folder=str(app.folder.root), purged=purge)

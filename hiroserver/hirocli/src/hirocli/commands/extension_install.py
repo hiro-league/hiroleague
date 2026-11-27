@@ -110,6 +110,13 @@ def work_folder() -> Path:
     return Path(tempfile.mkdtemp(prefix="hiro-app-"))
 
 
+def _does(job: dict[str, Any]) -> str:
+    """What the administrator step does, said before it asks. Fix: a removal said it makes them too (Nov 27)."""
+    if job.get("action") == "remove":
+        return "This removes the app's account and service:"
+    return "This makes an account and a service:"
+
+
 def run_system_step(console: Console, job: dict[str, Any]) -> dict[str, Any]:
     """The one administrator step, `hiro extension system <job>`: sudo on Linux and Mac (the terminal asks for the
     password), Windows' prompt otherwise. Returns what it did; _Stop when it was declined or failed."""
@@ -125,7 +132,7 @@ def run_system_step(console: Console, job: dict[str, Any]) -> dict[str, Any]:
         if sys.platform == "win32":
             from hiro_commons.winsw_service import ElevationRefused, is_admin, run_elevated
 
-            console.print("[yellow]This makes an account and a service:[/yellow] Windows will ask (one prompt).")
+            console.print(f"[yellow]{_does(job)}[/yellow] Windows will ask (one prompt).")
             try:
                 code = subprocess.run(args, check=False).returncode if is_admin() else run_elevated(args)  # noqa: S603
             except ElevationRefused as exc:
@@ -133,7 +140,7 @@ def run_system_step(console: Console, job: dict[str, Any]) -> dict[str, Any]:
             except ServiceError as exc:
                 raise _Stop(str(exc)) from exc
         else:
-            console.print("[yellow]This makes an account and a service:[/yellow] sudo asks for your password.")
+            console.print(f"[yellow]{_does(job)}[/yellow] sudo asks for your password.")
             command = args if os.geteuid() == 0 else ["sudo", *args]
             code = subprocess.run(command, check=False).returncode  # noqa: S603 — this program, a fixed job file
         try:

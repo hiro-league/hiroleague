@@ -82,3 +82,19 @@ def test_the_mac_daemon_sources_app_env_and_the_sudoers_line_names_one_daemon() 
     assert ". &apos;/opt/hiroleague/apps/example.hello/app.env&apos;" in plist or "/apps/example.hello/app.env" in plist
     sudoers = app_system.mac_sudoers(a, "michel")
     assert sudoers.count("NOPASSWD") == 1 and "com.hiroleague.app.example-hello" in sudoers
+
+
+def test_a_windows_purge_removes_read_only_files_too(tmp_path, monkeypatch) -> None:
+    # git writes its packs read-only (CodeHiro's mirrors), and Windows refused the purge on them ("Access is denied")
+    import stat
+
+    import hiro_commons.winsw_service as winsw
+
+    monkeypatch.setattr(winsw, "remove_service", lambda name: True)
+    a = check_job(SystemJob(action="remove", key="code", purge=True), tmp_path)  # type: ignore[arg-type]
+    pack = a.folder.root / "data" / "mirrors" / "x.git" / "objects" / "pack" / "pack-1.idx"
+    pack.parent.mkdir(parents=True)
+    pack.write_bytes(b"idx")
+    pack.chmod(stat.S_IREAD)
+    done = app_system.remove_windows(a, purge=True)
+    assert done.purged and not a.folder.root.exists()

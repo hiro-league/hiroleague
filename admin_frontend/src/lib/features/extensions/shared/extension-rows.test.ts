@@ -36,14 +36,14 @@ function row(over: Partial<ExtensionRow>): ExtensionRow {
 const whatsapp = row({ name: 'whatsapp', label: 'WhatsApp', kind: 'channel', started_by_core: true, enabled: true, has_settings: true, pairing: 'qr', linked: true });
 const devices = row({ name: 'devices', label: 'Devices', kind: 'channel', started_by_core: true, enabled: true });
 const home = row({ name: 'home', label: 'Home' });
-const codehiro = row({ name: 'reports', label: 'CodeHiro' });
+const codehiro = row({ name: 'code', label: 'CodeHiro' });
 
 describe('sortExtensions', () => {
   it('puts channels first, then apps, each by label', () => {
     expect(sortExtensions([home, whatsapp, codehiro, devices]).map((r) => r.name)).toEqual([
       'devices',
       'whatsapp',
-      'reports',
+      'code',
       'home'
     ]);
   });

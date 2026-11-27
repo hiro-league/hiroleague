@@ -31,20 +31,20 @@ def _ctx(workspace: Path, manager: Any = None) -> SimpleNamespace:
         workspace_name="default",
         config=SimpleNamespace(admin_port=18083),
     )
-    return SimpleNamespace(server_ctx=server_ctx, msg=SimpleNamespace(routing=SimpleNamespace(sender_id="ext-reports")))
+    return SimpleNamespace(server_ctx=server_ctx, msg=SimpleNamespace(routing=SimpleNamespace(sender_id="ext-code")))
 
 
 def test_every_paired_extension_with_its_repo(tmp_path: Path) -> None:
     home = add_paired_extension(
         tmp_path, name="home", public_key="k1", info=ExtensionInfo(name="home", version="0.1.0", repo="homehiro").model_dump()
     )
-    reports = add_paired_extension(tmp_path, name="reports", public_key="k2", info={"name": "reports", "version": "0.1.0"})
+    reports = add_paired_extension(tmp_path, name="code", public_key="k2", info={"name": "code", "version": "0.1.0"})
     # HomeHiro is connected and now says a newer version; the reports are not connected and said no repo.
     live = {home.extension_id: {"name": "home", "info": {"name": "home", "version": "0.2.0", "repo": "homehiro"}}}
     answer = asyncio.run(handle_extensions_list({}, _ctx(tmp_path, FakeExtensions(live))))
     assert answer["extensions"] == [
         {"extension_id": home.extension_id, "name": "home", "version": "0.2.0", "description": "", "repo": "homehiro", "connected": True},
-        {"extension_id": reports.extension_id, "name": "reports", "version": "0.1.0", "description": "", "repo": "", "connected": False},
+        {"extension_id": reports.extension_id, "name": "code", "version": "0.1.0", "description": "", "repo": "", "connected": False},
     ]
 
 

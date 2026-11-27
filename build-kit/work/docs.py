@@ -34,7 +34,7 @@ INDEX = "standards/docs.toml"  # the documents CodeHiro's Workflow Docs page sho
 # A publish's commit says so in its message: the next publish tells its own unshipped commits from another task's
 TRAILER = "Docs-Desk: publish"
 STEP = "docs"
-PAGE = "http://reports.local/workflow-docs"
+PAGE = "http://code.hiro.local/workflow-docs"
 
 
 def main_dir() -> Path:

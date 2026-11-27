@@ -35,6 +35,9 @@ class App:
     live_port: int
     copy_data: bool
     api_env: dict[str, str] = field(default_factory=dict)
+    # How the deploy puts it live: "image" (its push builds its container on Simone) or "package" (the deploy builds
+    # its wheel on the PC and Simone's core upgrades it: Installing apps, phase 6)
+    deploy: str = "image"
 
 
 def load(path: Path = FILE) -> list[App]:
@@ -45,6 +48,8 @@ def load(path: Path = FILE) -> list[App]:
     for a in apps:
         if a.data not in ("env", "repo"):
             raise ValueError(f"{path.name}: {a.repo}'s data is 'env' or 'repo', not {a.data!r}")
+        if a.deploy not in ("image", "package"):
+            raise ValueError(f"{path.name}: {a.repo}'s deploy is 'image' or 'package', not {a.deploy!r}")
         for side, offset in (("api", a.api_port), ("ui", a.ui_port)):
             if not 0 <= offset < BLOCK:
                 raise ValueError(f"{path.name}: {a.repo}'s {side}_port {offset} is outside 00-{BLOCK - 1}")

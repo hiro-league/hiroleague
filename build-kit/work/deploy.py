@@ -20,7 +20,9 @@ One run, started when Michel says, ships everything committed since the last one
    repo that runs its latest but whose last deploy failed (aicam's pull went in, then its check said no) is deployed
    again too, so its check runs again: the deploys' own events say how each repo's last deploy ended. Each deploy's
    own safety (database copies, migration trials, going back by itself) is the hook's, untouched here. A failed core
-   deploy stops the apps.
+   deploy stops the apps. A packaged app (apps.toml's deploy = "package": CodeHiro) has no hook: the deploy builds its
+   wheel on the PC from the commit, runs its checks there, and hands it to Simone's core (`hiro extension upgrade`),
+   whose upgrade copies its data, tries it on a copy, checks its health and goes back by itself.
 5. Verify each (it answers; no new errors in its log since its deploy started), then one report.
 6. Each plan phase Merged whose every merged task's work now runs live moves to Live in CodeHiro (plan.went_live).
 
@@ -58,8 +60,9 @@ from stages import Stages
 # How each repo goes live (the standard's table). hiro-docs goes to Simone's ~/hiro-docs.git (its dev as that repo's
 # main), which CodeHiro reads for its Workflow Docs; publishing its site (dev merged into main, then the mintdocs
 # policy script) stays a step of its own.
-CORE, APP, AICAM, DOCS = "core", "app", "aicam", "docs"
-DEPLOY = {"hiroleague": CORE, **{a.repo: APP for a in appfile.APPS}, "aicam": AICAM, "hiro-docs": DOCS}
+CORE, APP, PACKAGE, AICAM, DOCS = "core", "app", "package", "aicam", "docs"
+DEPLOY = {"hiroleague": CORE, **{a.repo: PACKAGE if a.deploy == "package" else APP for a in appfile.APPS},
+          "aicam": AICAM, "hiro-docs": DOCS}
 # Kinds whose push has no deploy hook: a push git took is the deploy
 NO_HOOK = (AICAM, DOCS)
 # Where each deploy is checked on Simone (127.0.0.1 there): the core's /status, each app's /api/health
@@ -68,9 +71,13 @@ CORE_HEALTH = "http://127.0.0.1:18080/status"
 # as its repo, compose.yaml) runs an image labelled with its commit (the build kit's and CodeHiro's Dockerfile)
 CORE_CURRENT = "/opt/hiroleague/current"
 REVISION_LABEL = "org.opencontainers.image.revision"
-# Kinds whose deploy is a hook that builds and starts something, so what runs can lag the bare repo
-BUILT = (CORE, APP)
+# Kinds whose deploy builds and starts something, so what runs can lag what was sent
+BUILT = (CORE, APP, PACKAGE)
 APP_PORT = {a.repo: a.live_port for a in appfile.APPS}  # apps.toml
+APP_KEY = {a.repo: a.name for a in appfile.APPS}  # its key in the core
+# A packaged app: its version says its commit (package_version), and the core's install row says its version
+CORE_HIRO = f"{CORE_CURRENT}/bin/hiro"
+HANDED = "~/.cache/hiro-deploy"  # where its wheels wait on Simone for the core's upgrade, removed after it
 SERVER = "simone"
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", SERVER]
 # Log lines that count as an error after a deploy
@@ -111,6 +118,8 @@ class Facts:
     server_ahead: bool = False                  # aicam: Simone's bare repo has commits dev/main lacks
     live_dirty: int = 0                         # aicam: uncommitted files in ~/aicam
     last_failed: bool = False                   # it runs dev/main, but its last deploy failed: deployed again
+    uninstalled: bool = False                   # a packaged app Simone's core hasn't installed: its first install is
+                                                # by hand (it moves its data in), never a deploy
     error: str = ""                             # couldn't be read
 
 
@@ -163,21 +172,49 @@ def make_plan(facts: list[Facts]) -> Plan:
     then the other deploys side by side."""
     stops = {f.repo: p for f in facts if (p := problems(f))}
     push = [f.repo for f in facts if f.github_lacks]
-    moves = [f for f in facts if (f.live_lacks or f.live_unknown or f.last_failed) and f.repo in DEPLOY]
+    moves = [f for f in facts if (f.live_lacks or f.live_unknown or f.last_failed) and f.repo in DEPLOY
+             and not f.uninstalled]
     live = [f.repo for f in moves]
-    again = [f.repo for f in moves if DEPLOY[f.repo] in BUILT and f.server == f.head]
+    again = [f.repo for f in moves if DEPLOY[f.repo] in (CORE, APP) and f.server == f.head]
     return Plan(push=push, first=[r for r in live if DEPLOY[r] == CORE],
                 then=[r for r in live if DEPLOY[r] != CORE], stops=stops, again=again)
 
 
 def runs_commit(kind: str, raw: str) -> str | None:
     """The commit (maybe abbreviated) in what Simone says runs: the core's current release folder
-    (/opt/hiroleague/releases/<time>-<commit>), an app's container label. None when it names none."""
+    (/opt/hiroleague/releases/<time>-<commit>), an app's container label, a packaged app's version (0.1.523+g<commit>).
+    None when it names none."""
     raw = raw.strip()
     if kind == CORE:
         m = re.search(r"-([0-9a-f]{7,40})/?$", raw)
         return m.group(1) if m else None
+    if kind == PACKAGE:
+        m = re.search(r"\+g([0-9a-f]{7,40})$", raw)
+        return m.group(1) if m else None
     return raw if re.fullmatch(r"[0-9a-f]{7,40}", raw) else None
+
+
+def package_version(declared: str, count: int, commit: str) -> str:
+    """A packaged app's version for one deploy: its pyproject's major.minor, then how many commits its main has (so
+    each deploy is newer, which the core's upgrade needs), then its commit (so what runs says it): 0.1.523+g1a2b3c4d5.
+    pyproject.toml itself keeps its version."""
+    m = re.match(r"(\d+)\.(\d+)", declared)
+    if not m:
+        raise hw.Stop(f"its version {declared!r} isn't major.minor.patch")
+    return f"{m.group(1)}.{m.group(2)}.{count}+g{commit[:9]}"
+
+
+def stamped(pyproject: str, version: str) -> str:
+    """pyproject.toml's text with its [project] version set to ``version``."""
+    out, n = re.subn(r'(?m)^version\s*=\s*"[^"]*"', f'version = "{version}"', pyproject, count=1)
+    if not n:
+        raise hw.Stop("its pyproject.toml has no version line")
+    return out
+
+
+def handed_over(output: str, version: str) -> bool:
+    """The core's upgrade said the new version runs ("CodeHiro runs 0.1.523+g1a2b3c4d5.")."""
+    return re.search(r"\sruns " + re.escape(version) + r"\.?\s*$", output, re.M) is not None
 
 
 def deployed(repo: str, output: str) -> bool:
@@ -268,6 +305,13 @@ def read_server(repos: list[str]) -> dict[str, str]:
     label; "none" when there is none), and ~/aicam's commit and uncommitted files."""
     lines = []
     for repo in repos:
+        if DEPLOY.get(repo) == PACKAGE:
+            # No bare repo: its version as the core's install row says it ("none": not installed by the core)
+            pick = (f"import json,sys; d=json.load(sys.stdin); print(next((r['version'] for r in d['installs'] "
+                    f"if r['key']=='{APP_KEY[repo]}'), 'none'))")
+            lines.append(f'echo "{repo}-runs $({CORE_HIRO} extension list --json 2>/dev/null | python3 -c "{pick}" '
+                         '2>/dev/null || echo none)"')
+            continue
         name = bare_name(repo) if repo in DEPLOY else None
         if name:
             lines.append(f'echo "{repo} $(git --git-dir="$HOME/{name}.git" rev-parse -q --verify refs/heads/main '
@@ -339,6 +383,9 @@ def read_facts(repo: str, server: dict[str, str], failed: bool = False) -> Facts
         f.server_ahead = bool(f.server) and not (has(d, f.server) and ancestor(d, f.server, head))
     if kind in BUILT:
         raw = server.get(f"{repo}-runs", "none").strip()
+        if kind == PACKAGE and raw == "none":
+            f.uninstalled = True
+            return f
         short = runs_commit(kind, raw)
         if short:
             # The PC knows every commit that ever ran (the deploy pushes from here); one it doesn't know is left to
@@ -417,6 +464,9 @@ def show(out: Out, facts: list[Facts], plan: Plan) -> None:
             out("\n".join(f"    {c}" for c in f.live_lacks[:15]))
         if len(f.live_lacks) > 15 or len(f.github_lacks) > 15:
             out("    ...")
+        if f.uninstalled:
+            out("  ! Simone's core hasn't installed it: its first install is by hand (it moves its data in), "
+                "then deploys upgrade it")
         if not (f.github_lacks or f.live_lacks or f.live_unknown or f.last_failed or plan.stops.get(f.repo)):
             out("  up to date")
         for line in copy_list_changes(f):
@@ -534,6 +584,81 @@ def again_script(f: Facts) -> str:
             f"printf '%s %s refs/heads/main\\n' {f.server} {f.server} | hooks/post-receive")
 
 
+def _writable_then_again(func: Callable[..., object], path: str, exc: BaseException) -> None:
+    """rmtree's retry for a read-only file (git's and npm's), which Windows won't delete."""
+    if isinstance(exc, FileNotFoundError):
+        return
+    os.chmod(path, 0o700)
+    func(path)
+
+
+def core_python() -> Path:
+    """env0's core Python: build-kit/package.py needs the SDK's manifest model."""
+    venv = hw.repo_dir(0, "hiroleague") / "hiroserver" / ".venv"
+    return venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+
+def build_package(out: Out, f: Facts, log: Path) -> tuple[list[Path], str]:
+    """A packaged app's wheels, built on the PC from the commit the deploy ships, its checks run on that same tree
+    first (as its image build ran them): the dashboard's check, ruff and the tests. Returns the wheels (the app's
+    first) and its version. The tree is a copy beside env0's repos, so its paths to ../../hiroleague (the kits, the
+    UI kit, the shared ruff rules) find env0's core, the one this deploy ships."""
+    import tarfile
+
+    work = hw.env_dir(0) / f".deploy-{f.repo}"
+    if work.exists():
+        shutil.rmtree(work, onexc=_writable_then_again)
+    work.mkdir(parents=True)
+    d = hw.repo_dir(0, f.repo)
+    archive = subprocess.run(["git", "-C", str(d), "archive", "--format=tar", f.head], capture_output=True, check=True)
+    with tarfile.open(fileobj=__import__("io").BytesIO(archive.stdout)) as tar:
+        tar.extractall(work, filter="data")
+    pyproject = work / "backend" / "pyproject.toml"
+    project = pyproject.read_text(encoding="utf-8")
+    declared = re.search(r'(?m)^version\s*=\s*"([^"]*)"', project)
+    count = int(hw.git(d, "rev-list", "--count", f.head))
+    version = package_version(declared.group(1) if declared else "", count, f.head)
+    dist = work / "dist"
+
+    def run(what: str, args: list[str], cwd: Path | None) -> None:
+        out(f"  {f.repo:10} | {what}")
+        code, said = stream(out, args, cwd, f.repo, log.with_name(f"{log.stem}-{what.split()[-1]}.log"))
+        if code != 0:
+            raise hw.Stop(f"{what} failed: nothing was sent to Simone ({said[-300:]})")
+
+    # The commit as it is: its tests pin the version pyproject.toml says, so they run before the stamp
+    run("ruff", ["uv", "run", "--frozen", "ruff", "check", "src", "tests"], work / "backend")
+    run("the tests", ["uv", "run", "--frozen", "python", "-m", "unittest", "discover", "-s", "tests"], work / "backend")
+    pyproject.write_text(stamped(project, version), encoding="utf-8", newline="")
+    run("the package", [str(core_python()), str(hw.repo_dir(0, "hiroleague") / "build-kit" / "package.py"),
+                        str(work), "--out", str(dist)], None)
+    run("the dashboard's check", [shutil.which("npm") or "npm", "run", "check"], work / "frontend")  # after npm ci
+    wheels = sorted(dist.glob("*.whl"), key=lambda w: not w.name.startswith(f"{f.repo}-"))
+    return wheels, version
+
+
+def hand_over(out: Out, task: str, f: Facts, log: Path) -> str:
+    """Build the packaged app's wheels on the PC, copy them to Simone, and have Simone's core upgrade it to them; its
+    upgrade copies the data, tries it on a copy, checks the new version answers and goes back by itself. Returns the
+    core's words."""
+    wheels, version = build_package(out, f, log)
+    there = f"{HANDED}/{task}"
+    code, text = stream(out, [*SSH, f"mkdir -p {there}"], None, f.repo, log)
+    if code == 0:
+        code, text = stream(out, ["scp", "-q", "-o", "BatchMode=yes", *map(str, wheels), f"{SERVER}:{there[2:]}/"],
+                            None, f.repo, log)
+    if code != 0:
+        raise hw.Stop(f"its wheels couldn't be copied to Simone: {text[-300:]}")
+    upgrade = (f"{CORE_HIRO} extension upgrade {APP_KEY[f.repo]} {there}/{wheels[0].name}; rc=$?; "
+               f"rm -rf {there}; exit $rc")
+    code, text = stream(out, [*SSH, upgrade], None, f.repo, log)
+    shutil.rmtree(hw.env_dir(0) / f".deploy-{f.repo}", onexc=_writable_then_again)
+    if code != 0 or not handed_over(text, version):
+        raise hw.Stop(f"Simone's core didn't upgrade it to {version} (its upgrade goes back by itself): {text[-300:]}")
+    out(f"  {f.repo:10} | {f.repo}: deployed {version}")
+    return text
+
+
 def deploy(out: Out, task: str, f: Facts, r: Result, again: bool = False) -> None:
     """The repo's own deploy (its hook on Simone, run by the push, or by hand when the push would carry nothing),
     then the checks that it went live."""
@@ -545,24 +670,32 @@ def deploy(out: Out, task: str, f: Facts, r: Result, again: bool = False) -> Non
     stages = Stages(f.repo, lambda at, **e: hw.event(task=task, env=0, repo=f.repo, parent="deploy", at=iso(at), **e))
     try:
         with timed(out, task, "deploy", f.repo, log):
-            went = False
-            try:
-                if again:
-                    out(f"{f.repo} | Simone's repo has {f.server[:8]} already: running its hook again")
-                cmd = [*SSH, again_script(f)] if again else ["git", "-C", str(d), "push", "server", f"{main}:main"]
-                code, text = stream(out, cmd, None, f.repo, log, stages.line)
-                went = code == 0 and (DEPLOY[f.repo] in NO_HOOK or deployed(f.repo, text))
-            finally:
-                stages.close(went)
-            if code != 0 and not again:
-                raise hw.Stop(f"git refused the push to Simone (never forced): {text[-300:]}")
+            if DEPLOY[f.repo] == PACKAGE:  # no hook: built here, handed to Simone's core
+                went = False
+                try:
+                    text = hand_over(out, task, f, log)
+                    went = True
+                finally:
+                    stages.close(went)
+            else:
+                went = False
+                try:
+                    if again:
+                        out(f"{f.repo} | Simone's repo has {f.server[:8]} already: running its hook again")
+                    cmd = [*SSH, again_script(f)] if again else ["git", "-C", str(d), "push", "server", f"{main}:main"]
+                    code, text = stream(out, cmd, None, f.repo, log, stages.line)
+                    went = code == 0 and (DEPLOY[f.repo] in NO_HOOK or deployed(f.repo, text))
+                finally:
+                    stages.close(went)
+                if code != 0 and not again:
+                    raise hw.Stop(f"git refused the push to Simone (never forced): {text[-300:]}")
             if DEPLOY[f.repo] == AICAM:
                 code, text = stream(out, [*SSH, "git -C ~/aicam pull --ff-only"], None, f.repo, log)
                 if code != 0:
                     raise hw.Stop(f"~/aicam's pull failed: {text[-300:]}")
                 changed = hw.git(d, "diff", "--name-only", f"{f.live}..{f.head}").splitlines() if f.live else []
                 r.notes += [f"may need: {h}" for h in restart_hints(changed)]
-            elif DEPLOY[f.repo] != DOCS and not deployed(f.repo, text):
+            elif DEPLOY[f.repo] not in (DOCS, PACKAGE) and not deployed(f.repo, text):
                 raise hw.Stop(f"its deploy didn't finish (log: {log}); its own way back ran if it got that far")
         r.deployed = True
         # What went live, from what ran before (CodeHiro names its tasks); when that couldn't be told, from what was
@@ -585,8 +718,11 @@ def verify(out: Out, task: str, f: Facts, r: Result, since: int) -> None:
         script = (f"curl -fsS --max-time 5 {CORE_HEALTH} | grep -q '\"running\": *true' && echo ANSWERS || echo SILENT;"
                   f" journalctl -u hiro --since @{since} --no-pager -o cat 2>/dev/null | tail -n 2000")
     else:
+        # An app's own log: its container's, or a packaged app's service's (hiro-<key>, the core names it so)
+        logs = (f"journalctl -u hiro-{APP_KEY[f.repo].replace('.', '-')} --since @{since} --no-pager -o cat"
+                if kind == PACKAGE else f"docker logs --since {since} {f.repo}")
         script = (f"curl -fsS --max-time 5 http://127.0.0.1:{APP_PORT[f.repo]}/api/health >/dev/null && echo ANSWERS "
-                  f"|| echo SILENT; docker logs --since {since} {f.repo} 2>&1 | tail -n 2000")
+                  f"|| echo SILENT; {logs} 2>&1 | tail -n 2000")
     with timed(out, task, "verify", f.repo):
         res = subprocess.run([*SSH, script], capture_output=True, text=True, encoding="utf-8", errors="replace",
                              timeout=120)
