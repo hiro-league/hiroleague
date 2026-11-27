@@ -8,6 +8,7 @@ install names another), the way Simone's deploy uses ``/opt/hiroleague``:
     <home>\\python\\              the Python uv installs (UV_PYTHON_INSTALL_DIR)
     <home>\\releases\\<time>\\    one install of Hiro League (its tools and its bin\\hiro.exe)
     <home>\\service\\<name>.exe   the service's own copy of WinSW, and <name>.xml beside it
+    <home>\\cache\\downloads\\    one checked copy of each pinned download (WinSW, Caddy) for every service
     <home>\\<name>.env            the secrets file (provider keys), read by the server itself
     <data>\\                      the workspace registry and workspaces (HIRO_DATA_DIR); <home>\\data unless named
     <data>\\service-logs\\        WinSW's own log and what the server writes before its log file is open
@@ -192,9 +193,11 @@ def install_release(lay: Layout, source: str) -> Path:
         "UV_TOOL_DIR": str(release / "tools"),
         "UV_TOOL_BIN_DIR": str(release / "bin"),
         "UV_PYTHON_INSTALL_DIR": str(lay.python_dir),
-        # Copies, never hard links into the installer's uv cache: Windows keeps one set of permissions per file, so the
-        # Hiro home's (locked by lock_program_folder) became every link's, and the person could no longer replace those
-        # files in their own environments (`uv sync`: "Access is denied", seen Nov 27, 2026 with protobuf).
+        # Copies, never hard links: Windows keeps one set of permissions per file, shared by every link. The person's
+        # uv cache's are ones the service's account can't read (a clean laptop, Nov 26, 2026: "DLL load failed while
+        # importing _pydantic_core: Access is denied" at every start); and once the Hiro home's were set on the links,
+        # the person could no longer replace those files in their own environments (`uv sync`: "Access is denied",
+        # this PC, Nov 27, 2026, with protobuf). The app install does the same.
         "UV_LINK_MODE": "copy",
     }
     log.info("Installing Hiro League for the service", source=source, release=str(release))
@@ -231,6 +234,21 @@ def install_release(lay: Layout, source: str) -> Path:
             raise
         raise ServiceError(f"Installing Hiro League for the service failed: {exc}") from exc
     return exe
+
+
+def copy_uv_into(home: Path) -> None:
+    """A service core has no PATH of the person's, yet installs an app's release and a channel's program with uv: the
+    Hiro home keeps its own copy (``<home>/bin/uv.exe``), taken from this person's uv once. Run as an administrator
+    (the home admits no one else's writes)."""
+    target = home / "bin" / "uv.exe"
+    if target.is_file():
+        return
+    found = shutil.which("uv")
+    if not found:
+        raise ServiceError("uv isn't on this PATH: install uv (https://docs.astral.sh/uv/), then run this again.")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(found, target)
+    log.info("The Hiro home has its own uv now — HiroServer · service", path=str(target))
 
 
 def build_spec(*, exe: Path, lay: Layout, workspace: str | None) -> WinswSpec:

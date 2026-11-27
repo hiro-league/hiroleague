@@ -22,7 +22,7 @@ from hiro_commons.fetch import FetchError, fetch_checked
 from hiro_commons.systemd_service import ServiceError
 
 CADDY_VERSION = "2.11.9"
-_BASE = f"https://github.com/caddyserver/caddy/releases/download/v{CADDY_VERSION}"
+RELEASE_URL = f"https://github.com/caddyserver/caddy/releases/download/v{CADDY_VERSION}"
 # (system, machine) → (archive, its SHA-256)
 ARCHIVES: dict[tuple[str, str], tuple[str, str]] = {
     ("linux", "amd64"): (f"caddy_{CADDY_VERSION}_linux_amd64.tar.gz",
@@ -50,8 +50,13 @@ def program_name(system: str) -> str:
     return "caddy.exe" if system == "windows" else "caddy"
 
 
-def fetch_caddy(caddy_home: Path, system: str | None = None, machine: str | None = None) -> Path:
-    """Put the pinned Caddy at ``<caddy_home>/<version>/caddy[.exe]``; return its path. Raises ServiceError."""
+def fetch_caddy(
+    caddy_home: Path, system: str | None = None, machine: str | None = None, *, downloads: Path | None = None,
+) -> Path:
+    """Put the pinned Caddy at ``<caddy_home>/<version>/caddy[.exe]``; return its path. Raises ServiceError.
+
+    ``downloads`` is the machine's downloads folder (``fetch.shared_downloads``): its checked copy is used first.
+    """
     if system is None or machine is None:
         system, machine = this_system()
     pinned = ARCHIVES.get((system, machine))
@@ -61,7 +66,7 @@ def fetch_caddy(caddy_home: Path, system: str | None = None, machine: str | None
     folder = caddy_home / CADDY_VERSION
     archive = folder / archive_name
     try:
-        fetch_checked(f"{_BASE}/{archive_name}", archive, sha256)
+        fetch_checked(f"{RELEASE_URL}/{archive_name}", archive, sha256, shared=downloads)
     except FetchError as exc:
         raise ServiceError(str(exc)) from exc
     program = folder / program_name(system)

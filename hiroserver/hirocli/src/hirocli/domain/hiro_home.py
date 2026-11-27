@@ -8,6 +8,9 @@ and each app its data (the design's §7). Pure: paths only, nothing made here.
 ``HIRO_HOME`` in the environment names another (a test environment's scratch home, a Windows service installed with
 ``--home``). The elevated system part reads it the same way and never from a job, so a job can't point it elsewhere.
 
+``<home>/cache/downloads/`` keeps one checked copy of each pinned download (WinSW, Caddy), named by its hash, for
+every service on the machine (``hiro_commons.fetch``).
+
 One app's folder, ``<home>/apps/<key>/``:
 
     releases/<version>/   the app's environment for that version (three kept)

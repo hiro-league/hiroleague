@@ -330,10 +330,13 @@ def lock_file(path: Path, *, service_id: str) -> None:
     )
 
 
-def fetch_wrapper(dest: Path) -> bool:
-    """Put the pinned WinSW at ``dest`` (checked against its SHA-256); True when it was downloaded."""
+def fetch_wrapper(dest: Path, shared: Path | None = None) -> bool:
+    """Put the pinned WinSW at ``dest`` (checked against its SHA-256); True when it was downloaded.
+
+    ``shared`` is the machine's downloads folder: every service has its own WinSW, downloaded once per machine.
+    """
     try:
-        return fetch_checked(WINSW_URL, dest, WINSW_SHA256)
+        return fetch_checked(WINSW_URL, dest, WINSW_SHA256, shared=shared)
     except FetchError as exc:
         # Already logged where it failed; the caller shows a service error's words to the person.
         raise ServiceError(str(exc)) from exc
@@ -369,19 +372,19 @@ def _wrapper(wrapper: Path, command: str, what: str) -> None:
     _run_ok([str(wrapper), command], what)
 
 
-def install_service(spec: WinswSpec, service_dir: Path) -> None:
+def install_service(spec: WinswSpec, service_dir: Path, *, downloads: Path | None = None) -> None:
     """Write the service's WinSW and configuration, register the service, and leave it stopped.
 
     A service already registered under this name is stopped and removed first, so installing again picks up the new
     configuration. The caller starts it once the folders it needs have their permissions (the account exists only
-    from here on).
+    from here on). ``downloads`` is the machine's downloads folder (``fetch.shared_downloads``).
     """
     require_windows()
     if not is_admin():
         raise ServiceError("Installing a Windows service must run as an administrator.")
     service_dir.mkdir(parents=True, exist_ok=True)
     wrapper = wrapper_path(service_dir, spec.id)
-    fetch_wrapper(wrapper)
+    fetch_wrapper(wrapper, downloads)
     if service_state(spec.id).installed:
         remove_service(spec.id)
     xml = config_path(service_dir, spec.id)
