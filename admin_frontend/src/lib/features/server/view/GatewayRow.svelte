@@ -4,7 +4,6 @@
   import { Button } from '$kit/components/ui/button/index.js';
   import { TABLE_GRID_ROW } from '$kit/ui/table-grid';
   import type { GatewayRow } from '$lib/api/server';
-  import AutostartBadge from '../shared/AutostartBadge.svelte';
   import StderrLogButton from '../shared/StderrLogButton.svelte';
   import type { createGatewayStore } from '../state/gateway-store.svelte';
 
@@ -49,9 +48,6 @@
     {/if}
   </span>
   <span class="truncate text-xs text-muted-foreground">{row.host}:{row.port}</span>
-  <span>
-    <AutostartBadge method={row.autostart_method} />
-  </span>
   <span class="flex flex-wrap gap-1.5">
     {#if !row.running}
       <Button size="sm" variant="outline" disabled={gateway.busy} onclick={() => gateway.start(row)}><Play size={13} /> Start</Button>

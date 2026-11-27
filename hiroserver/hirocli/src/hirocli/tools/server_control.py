@@ -8,7 +8,6 @@ layers decide how to present results to the user.
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -25,12 +24,6 @@ from hiro_commons.process import (
     wait_for_pid,
 )
 
-from ..autostart import (
-    register_autostart,
-    register_autostart_elevated,
-    unregister_autostart,
-    unregister_autostart_elevated,
-)
 from ..constants import ENV_ADMIN_UI, ENV_METRICS, ENV_WORKSPACE, ENV_WORKSPACE_PATH, PID_FILENAME
 from ..domain.channel_config import ChannelConfig, load_channel_config, save_channel_config
 from ..domain.config import Config, load_config, master_key_path, workspace_log_dir
@@ -262,44 +255,3 @@ def resolve_or_create(workspace: str | None) -> tuple[Any, WorkspaceRegistry, Pa
             raise
         entry, registry = create_workspace("default")
         return entry, registry, Path(entry.path)
-
-
-# ---------------------------------------------------------------------------
-# Autostart helpers
-# ---------------------------------------------------------------------------
-
-
-def register_autostart_for_workspace(workspace_id: str, elevated: bool) -> tuple[bool, str]:
-    """Register auto-start using workspace id and return ``(success, method_label)``."""
-    if elevated and sys.platform == "win32":
-        try:
-            accepted = register_autostart_elevated(workspace_id)
-        except RuntimeError:
-            accepted = False
-        if accepted:
-            return True, "elevated"
-    try:
-        method = register_autostart(workspace_id)
-        return True, str(method)
-    except (NotImplementedError, Exception) as exc:
-        log.warning("Could not register auto-start for the workspace", workspace_id=workspace_id, error=str(exc), exc_info=True)
-        return False, "failed"
-
-
-def unregister_autostart_for_workspace(workspace_id: str, stored_method: str | None) -> bool:
-    """Unregister auto-start previously set up for a workspace."""
-    if stored_method in (None, "skipped", "failed"):
-        return False
-    if stored_method == "elevated" and sys.platform == "win32":
-        try:
-            accepted = unregister_autostart_elevated(workspace_id)
-        except RuntimeError:
-            accepted = False
-        if accepted:
-            return True
-    try:
-        unregister_autostart(workspace_id)
-        return True
-    except (NotImplementedError, Exception) as exc:
-        log.warning("Could not unregister auto-start for the workspace", workspace_id=workspace_id, error=str(exc), exc_info=True)
-        return False

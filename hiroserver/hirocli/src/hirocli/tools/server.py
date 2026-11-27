@@ -97,21 +97,15 @@ class SetupTool(Tool):
     name = "setup"
     description = (
         "One-time setup: save gateway config, generate device key, "
-        "and optionally register auto-start and start the server"
+        "and optionally start the server"
     )
     params = {
         "gateway_url": ToolParam(str, "WebSocket gateway URL, e.g. ws://myhost:8765"),
         "workspace": ToolParam(str, "Workspace name or id to configure", required=False),
         "http_port": ToolParam(int, "Local HTTP server port override", required=False),
-        "skip_autostart": ToolParam(bool, "Do not register auto-start", required=False),
         "start_server": ToolParam(
             bool,
             "Start the server after setup completes (default: false)",
-            required=False,
-        ),
-        "elevated_task": ToolParam(
-            bool,
-            "(Windows) Request UAC elevation for Task Scheduler entry",
             required=False,
         ),
         "metrics_enabled": ToolParam(bool, "Enable system metrics collection", required=False),
@@ -133,9 +127,7 @@ class SetupTool(Tool):
         gateway_url: str,
         workspace: str | None = None,
         http_port: int | None = None,
-        skip_autostart: bool = False,
         start_server: bool = False,
-        elevated_task: bool = False,
         metrics_enabled: bool | None = None,
         metrics_interval: float | None = None,
         skip_env_import: bool = False,
@@ -203,16 +195,6 @@ class SetupTool(Tool):
                     workspace=entry.name,
                 )
 
-        autostart_registered = False
-        autostart_method = "skipped"
-        if not skip_autostart:
-            autostart_registered, autostart_method = ctrl.register_autostart_for_workspace(
-                entry.id, elevated_task,
-            )
-
-        config.autostart_method = autostart_method
-        save_config(workspace_path, config)
-
         if start_server:
             ctrl.start_server(workspace_path, config, workspace_name=entry.name, foreground=False)
 
@@ -225,8 +207,6 @@ class SetupTool(Tool):
             http_port=config.http_port,
             master_key=str(master_key_path(workspace_path, config)),
             desktop_pub=public_key_b64,
-            autostart_registered=autostart_registered,
-            autostart_method=autostart_method,
             server_started=start_server,
             providers_imported=providers_imported,
             core_name=config.core_name,
@@ -270,7 +250,7 @@ class StartTool(Tool):
         # Zero-config first run: a truly fresh workspace (no config.json yet) is
         # auto-provisioned with a minimal setup instead of forcing the user to
         # run `hiro workspaces setup` first. Reuses SetupTool (Tool composition)
-        # with env-key scanning and auto-start registration disabled — writes
+        # with env-key scanning disabled — writes
         # only the mandatory skeleton (config + default preferences; master key
         # and devices channel are ensured by start_server below). A missing
         # config.json only ever happens pre-first-setup, so this is scoped to
@@ -283,7 +263,6 @@ class StartTool(Tool):
             SetupTool().execute(
                 gateway_url=Config.model_fields["gateway_url"].default,
                 workspace=entry.name,
-                skip_autostart=True,
                 skip_env_import=True,
                 core_name=asked_name,
             )
@@ -479,7 +458,7 @@ class StatusTool(Tool):
 class TeardownTool(Tool):
     surfaces = frozenset({"cli", "http"})
     name = "teardown"
-    description = "Stop server and remove all auto-start registrations for a workspace"
+    description = "Stop the server for a workspace; with purge, also delete the workspace"
     params = {
         "workspace": ToolParam(str, "Workspace name or id to tear down", required=False),
         "purge": ToolParam(
@@ -498,9 +477,6 @@ class TeardownTool(Tool):
 
         ctrl.stop_server(workspace_path)
 
-        stored_config = load_config(workspace_path)
-        autostart_removed = ctrl.unregister_autostart_for_workspace(entry.id, stored_config.autostart_method)
-
         if purge:
             if workspace_path.exists():
                 shutil.rmtree(workspace_path, ignore_errors=True)
@@ -513,7 +489,6 @@ class TeardownTool(Tool):
             workspace=entry.name,
             workspace_path=str(workspace_path),
             server_stopped=True,
-            autostart_removed=autostart_removed,
             purged=purge,
         )
 
@@ -521,7 +496,7 @@ class TeardownTool(Tool):
 class UninstallTool(Tool):
     surfaces = frozenset({"cli", "http"})
     name = "uninstall"
-    description = "Stop server, remove auto-start, and return package uninstall instructions"
+    description = "Stop the server and return package uninstall instructions"
     params = {
         "workspace": ToolParam(str, "Workspace name or id to uninstall", required=False),
         "purge": ToolParam(bool, "Also delete the workspace folder", required=False),

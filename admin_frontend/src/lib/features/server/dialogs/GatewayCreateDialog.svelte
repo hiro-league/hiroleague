@@ -38,14 +38,6 @@
           <Checkbox bind:checked={gateway.createForm.makeDefault} />
           Set as default gateway instance
         </label>
-        <label class="flex items-center gap-2 font-sans text-sm">
-          <Checkbox bind:checked={gateway.createForm.skipAutostart} />
-          Skip auto-start registration
-        </label>
-        <label class="flex items-center gap-2 font-sans text-sm">
-          <Checkbox bind:checked={gateway.createForm.elevatedTask} />
-          Request elevated Task Scheduler entry
-        </label>
       </details>
     </div>
     <Dialog.Footer>

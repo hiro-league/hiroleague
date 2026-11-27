@@ -94,9 +94,7 @@ def test_setup_requires_gateway() -> None:
         "w1",
         gateway_url="  ",
         http_port=None,
-        skip_autostart=False,
         start_server=False,
-        elevated_task=False,
     )
     assert not r.ok
 
@@ -111,8 +109,6 @@ def test_setup_success_returns_setup_result() -> None:
         http_port=1,
         master_key="/k",
         desktop_pub="pubb64",
-        autostart_registered=True,
-        autostart_method="skipped",
         server_started=False,
         providers_imported=0,
     )
@@ -122,9 +118,7 @@ def test_setup_success_returns_setup_result() -> None:
             "w1",
             gateway_url="ws://h:1",
             http_port=None,
-            skip_autostart=True,
             start_server=False,
-            elevated_task=False,
         )
     assert r.ok and r.data is setup
 

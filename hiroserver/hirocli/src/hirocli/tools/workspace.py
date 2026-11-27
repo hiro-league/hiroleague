@@ -93,7 +93,6 @@ class WorkspaceShowResult:
     device_id: str | None
     ws_connected: bool
     last_connected: str | None
-    autostart_method: str | None
 
 
 # ---------------------------------------------------------------------------
@@ -154,7 +153,6 @@ class WorkspaceListTool(Tool):
                 "admin_port": admin_port_for(registry, entry.port_slot),
                 "port_slot": entry.port_slot,
                 "gateway_url": config.gateway_url if config else None,
-                "autostart_method": config.autostart_method if config else None,
             })
         return WorkspaceListResult(
             workspaces=workspaces,
@@ -231,7 +229,7 @@ class WorkspaceUpdateTool(Tool):
     name = "workspace_update"
     description = (
         "Update mutable workspace properties: display name, default flag, and/or gateway URL. "
-        "Only supplied fields are changed. For full reconfiguration (keys, autostart) use setup."
+        "Only supplied fields are changed. For full reconfiguration (keys) use setup."
     )
     params = {
         "workspace": ToolParam(str, "Workspace name or id to update"),
@@ -318,7 +316,6 @@ class WorkspaceShowTool(Tool):
             device_id=config.device_id if config else None,
             ws_connected=state.ws_connected if state else False,
             last_connected=state.last_connected if state else None,
-            autostart_method=config.autostart_method if config else None,
         )
 
 

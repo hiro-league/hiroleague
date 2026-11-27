@@ -68,8 +68,6 @@ class GatewayService:
         host: str = "0.0.0.0",
         log_dir: str = "",
         make_default: bool = False,
-        skip_autostart: bool = False,
-        elevated_task: bool = False,
     ) -> Result[str]:
         """Success data is a notify-ready summary string."""
         if not name.strip():
@@ -84,18 +82,11 @@ class GatewayService:
                 host=host,
                 log_dir=log_dir,
                 make_default=make_default,
-                skip_autostart=skip_autostart,
-                elevated_task=elevated_task,
             )
         except Exception as exc:
             log.warning("⚠️ Gateway setup failed — HiroAdmin · gateways", name=name, error=str(exc), exc_info=True)
             return Result.failure(str(exc))
-        msg_parts = [f"Port: {result.port}"]
-        if result.autostart_registered:
-            msg_parts.append(f"Autostart: {result.autostart_method}")
-        summary = (
-            f"Gateway '{result.instance_name}' created.  •  " + "  •  ".join(msg_parts)
-        )
+        summary = f"Gateway '{result.instance_name}' created.  •  Port: {result.port}"
         return Result.success(summary)
 
     def teardown_instance(
@@ -103,7 +94,6 @@ class GatewayService:
         instance_name: str,
         *,
         purge: bool,
-        elevated_task: bool = False,
     ) -> Result[str]:
         if not instance_name:
             return Result.failure("Instance name is required.")
@@ -111,7 +101,6 @@ class GatewayService:
             result = GatewayTeardownTool().execute(
                 instance=instance_name,
                 purge=purge,
-                elevated_task=elevated_task,
             )
         except Exception as exc:
             log.warning("⚠️ Gateway teardown failed — HiroAdmin · gateways", instance_name=instance_name, error=str(exc), exc_info=True)
@@ -119,8 +108,6 @@ class GatewayService:
         parts: list[str] = []
         if result.stopped:
             parts.append("stopped")
-        if result.autostart_removed:
-            parts.append("autostart removed")
         if result.purged:
             parts.append("files deleted")
         suffix = f": {', '.join(parts)}" if parts else ""

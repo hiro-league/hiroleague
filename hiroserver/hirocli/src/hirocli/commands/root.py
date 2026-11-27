@@ -82,7 +82,7 @@ def register(app: typer.Typer, console: Console) -> None:
             if result.provisioned:
                 console.print(
                     f"[cyan]Auto-provisioned fresh workspace '[bold]{result.workspace}[/bold]' "
-                    f"(minimal setup — no provider keys, no auto-start).[/cyan]"
+                    f"(minimal setup — no provider keys).[/cyan]"
                 )
             console.print(
                 f"[green]Server started[/green] (PID {result.pid}). "
@@ -328,7 +328,7 @@ def register(app: typer.Typer, console: Console) -> None:
         ),
         purge: bool = typer.Option(False, "--purge", help="Also delete the workspace folder."),
     ) -> None:
-        """Stop server, remove auto-start, then print package uninstall commands."""
+        """Stop the server, then print package uninstall commands."""
         console.print("[bold cyan]hiro uninstall[/bold cyan]")
         log.info("hiro uninstall", purge=purge)
 
@@ -344,10 +344,7 @@ def register(app: typer.Typer, console: Console) -> None:
             return
 
         td = result.teardown
-        if td.autostart_removed:
-            console.print("[green]Auto-start removed[/green] (Task Scheduler + Registry).")
-        else:
-            console.print("[yellow]Auto-start removal failed or skipped.[/yellow]")
+        console.print("[green]Server stopped.[/green]")
 
         if purge:
             console.print(f"[green]Workspace folder removed:[/green] {td.workspace_path}")

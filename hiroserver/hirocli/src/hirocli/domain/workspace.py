@@ -9,8 +9,8 @@ Each workspace is a self-contained directory holding config, keys, channels,
 logs, and PID files.
 
 Identity model:
-  Each workspace has an immutable UUID ``id`` (registry dict key, autostart
-  task suffix) and a mutable ``name`` (display label, CLI convenience).
+  Each workspace has an immutable UUID ``id`` (registry dict key) and a
+  mutable ``name`` (display label, CLI convenience).
   Renaming only touches the ``name`` field — no cascading side-effects.
 
 Port allocation — 4 ports per slot, starting at port_range_start (default 18080):

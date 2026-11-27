@@ -168,9 +168,7 @@ class WorkspaceService:
         *,
         gateway_url: str,
         http_port: int | None,
-        skip_autostart: bool,
         start_server: bool,
-        elevated_task: bool,
     ) -> Result[Any]:
         if not gateway_url.strip():
             return Result.failure("Gateway WebSocket URL is required.")
@@ -180,9 +178,7 @@ class WorkspaceService:
                     gateway_url=gateway_url.strip(),
                     workspace=workspace_id,
                     http_port=http_port,
-                    skip_autostart=skip_autostart,
                     start_server=start_server,
-                    elevated_task=elevated_task,
                 )
             )
         except Exception as exc:

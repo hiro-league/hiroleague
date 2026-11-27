@@ -15,8 +15,6 @@ class SetupResult:
     http_port: int
     master_key: str
     desktop_pub: str
-    autostart_registered: bool
-    autostart_method: str  # "schtasks" | "registry" | "elevated" | "skipped" | "failed"
     server_started: bool
     providers_imported: int = 0
     core_name: str = "hiro"  # its admin at <core_name>.local
@@ -83,7 +81,6 @@ class TeardownResult:
     workspace: str
     workspace_path: str
     server_stopped: bool
-    autostart_removed: bool
     purged: bool
 
 

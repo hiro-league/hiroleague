@@ -93,10 +93,6 @@ class Config(BaseModel):
     metrics_interval: float = 2.0
     metrics_history_size: int = 1800
 
-    # Set by setup; used by teardown to pick the correct removal path without user input.
-    # Values: "elevated" | "schtasks" | "registry" | "skipped" | "failed" | None
-    autostart_method: str | None = None
-
     @field_validator("core_name")
     @classmethod
     def _one_word(cls, value: str) -> str:

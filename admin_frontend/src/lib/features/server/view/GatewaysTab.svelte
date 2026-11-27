@@ -15,7 +15,7 @@
 
   let { notify }: { notify: Notify } = $props();
 
-  const GATEWAY_GRID = '220px 130px 140px 110px 260px';
+  const GATEWAY_GRID = '220px 130px 140px 260px';
 
   const gateway = createGatewayStore((kind, message) => notify(kind, message));
 
@@ -56,12 +56,11 @@
     quiet
   >
     {#snippet children()}
-      <TableShell layout="grid" minWidth={880} gridColumns={GATEWAY_GRID}>
+      <TableShell layout="grid" minWidth={770} gridColumns={GATEWAY_GRID}>
         {#snippet headRow()}
           <span>Name</span>
           <span>Status</span>
           <span>Host : Port</span>
-          <span>Autostart</span>
           <span>Actions</span>
         {/snippet}
         {#snippet body()}
