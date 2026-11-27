@@ -22,7 +22,7 @@ import signal
 import sys
 from pathlib import Path
 
-from hiro_commons import logging_foundation
+from hiro_commons import logging_foundation, tasks
 from hiro_commons.env_file import EnvFileError, load_env_file
 from hiro_commons.log import Logger
 from hiro_commons.process import remove_pid, spawn_detached, uv_python_cmd, write_pid
@@ -276,6 +276,10 @@ async def _main(
         admin_task = asyncio.create_task(
             run_admin_ui_logged(ctx), name="admin_ui"
         )
+        if foreground and os.environ.get(ENV_SERVICE_MANAGER) in (None, "", TERMINAL_MANAGER):
+            # A terminal run says where its admin is, as a background start does (issue 448); a service has no one to
+            # tell.
+            tasks.keep(_announce_admin(ctx), name="announce_admin")
 
     from hirocli.domain.credential_store import CredentialStore
     from hirocli.domain.workspace import workspace_id_for_path
@@ -408,6 +412,25 @@ async def _main(
     mark_disconnected(workspace_path)
     log.info("hiro server exited")
     return restart_in_terminal
+
+
+async def _announce_admin(ctx: ServerContext) -> None:
+    """Print the "Hiro is running" panel once the admin answers (up to a minute), above the logs that follow."""
+    from rich.console import Console
+
+    from hirocli.admin_address import lan_url, print_ready_panel
+    from hirocli.tools.server_control import admin_ui_ready
+
+    port = ctx.config.admin_port
+    deadline = asyncio.get_running_loop().time() + 60.0
+    while not ctx.stop_event.is_set():
+        if await asyncio.to_thread(admin_ui_ready, port):
+            print_ready_panel(Console(), port, lan_url(ctx.config.site_domain()))
+            return
+        if asyncio.get_running_loop().time() > deadline:
+            log.warning("⚠️ The admin didn't answer within a minute: its address isn't shown", admin_port=port)
+            return
+        await asyncio.sleep(0.5)
 
 
 def _exit_for_service_restart(workspace_path: Path) -> None:

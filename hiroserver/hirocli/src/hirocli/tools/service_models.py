@@ -24,6 +24,11 @@ class ServiceInstallResult:
     front_door: str | None = None
     front_door_account: str | None = None
     firewall: list[str] = field(default_factory=list)
+    # The admin's port on this machine: from the service's own workspace once its first start made it (None: not
+    # readable or not made in time); and whether this install put the service there for the first time.
+    admin_port: int | None = None
+    site_domain: str | None = None  # the core's LAN name (hiro.local), which the front door serves when it runs
+    first_install: bool = False
 
 
 @dataclass

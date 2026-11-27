@@ -93,10 +93,9 @@ def register(app: typer.Typer, console: Console) -> None:
                     "[yellow]No providers configured[/yellow] — run "
                     "[bold]hiro provider add <provider>[/bold] to enable the assistant."
                 )
-            # Background mode only: wait for the admin UI to bind its port before
-            # printing a clickable URL, so we never advertise a dead link. On
-            # timeout we surface a clear error instead (foreground blocks until
-            # exit, so there is nothing to advertise there).
+            # Background mode: wait for the admin UI to bind its port before printing a clickable URL, so we never
+            # advertise a dead link; on timeout a clear error instead. A foreground run prints the same panel itself,
+            # above its logs, once its admin answers (runtime/server_process.py, _announce_admin).
             if result.admin_port and not foreground:
                 _announce_admin_ui(console, result.admin_port)
                 _hint_owner_sign_in(console, result.workspace)
@@ -381,17 +380,9 @@ def _hint_owner_sign_in(console: Console, workspace: str | None) -> None:
 
 def _print_admin_ready_panel(console: Console, admin_port: int) -> None:
     """Render the friendly, clickable admin-dashboard panel."""
-    from rich.panel import Panel
+    from ..admin_address import print_ready_panel
 
-    url = f"http://localhost:{admin_port}"
-    console.print(
-        Panel(
-            f"🌐  Admin dashboard:  [bold cyan]{url}[/bold cyan]",
-            title="[green]Hiro is running[/green]",
-            border_style="green",
-            expand=False,
-        )
-    )
+    print_ready_panel(console, admin_port)
 
 
 def _announce_admin_ui(console: Console, admin_port: int) -> None:
