@@ -26,6 +26,9 @@ from hiro_commons.log import Logger
 
 from .audio import compute_waveform
 
+# Before neonize: on a Mac it brings the libmagic that neonize's python-magic needs (mac_libmagic.py says why).
+from . import mac_libmagic  # noqa: F401
+
 # neonize async client + event types. These load the bundled Go shared library
 # (whatsmeow) at import time; that is expected and only happens in this module.
 from neonize.aioze.client import NewAClient

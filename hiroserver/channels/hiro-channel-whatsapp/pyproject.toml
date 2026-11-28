@@ -43,6 +43,10 @@ dependencies = [
     # a personal account and delivers it nowhere. The core starts the plugin with it (hirocli domain/channel_catalog.py).
     # Later neonize has the tag off by default.
     "neonize==0.5.2",
+    # pylibmagic: libmagic for neonize's python-magic on a Mac, which has none of its own (Linux ships it; Windows
+    # takes python-magic-bin, a neonize dependency). Wheels for Apple's chips and Intel; mac_libmagic.py loads it
+    # before neonize.
+    "pylibmagic>=0.5.0; sys_platform == 'darwin'",
     # qrcode: render the pairing QR as ASCII into the plugin log (P1 has no UI yet).
     "qrcode>=7",
     # static-ffmpeg: bundles BOTH ffmpeg and ffprobe (downloaded+cached on first

@@ -41,7 +41,12 @@ function Invoke-Step([string]$StepName, [string]$Expect, [string]$Pattern, [stri
     $log = New-LogPath $StepName
     [IO.File]::WriteAllText($log, "> $Line`r`n")
     $clock = [Diagnostics.Stopwatch]::StartNew()
-    $p = Start-Process -FilePath $env:ComSpec -ArgumentList "/d /s /c `"$Line >> `"$log`" 2>&1`"" -Wait -PassThru -NoNewWindow
+    # Waits for cmd itself, never -Wait: in PowerShell 5.1 -Wait waits for every process the step started, and the
+    # service's first install opens the admin in a browser, which stays open (the step hung on it). The handle is read
+    # at once so the exit code is kept.
+    $p = Start-Process -FilePath $env:ComSpec -ArgumentList "/d /s /c `"$Line >> `"$log`" 2>&1`"" -PassThru -NoNewWindow
+    $null = $p.Handle
+    $p.WaitForExit()
     $code = $p.ExitCode
     $ok = if ($Expect -eq 'ok') { $code -eq 0 } else { $code -ne 0 }
     $detail = "exit $code"
